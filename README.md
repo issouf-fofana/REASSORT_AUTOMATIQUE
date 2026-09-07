@@ -1,25 +1,31 @@
-# 📦 Stock Auto-Réappro
+# 📦 Réassort automatique intelligent — Prosuma
 
-Plateforme intelligente de gestion des stocks et de réassort automatique.
+Système intelligent de proposition de commandes de réassort pour les magasins Prosuma, intégré à
+l'ERP/POS RPOS. Analyse les ventes historiques (classement Pareto 80/20), calcule les quantités à
+commander (stock, colisage, saisonnalité, prévision par lissage exponentiel ou par IA), et permet
+de valider puis d'envoyer les commandes directement à RPOS, rayon par rayon.
 
-## 🚀 Fonctionnalités
+## 🚀 Fonctionnalités principales
 
-- ✅ Gestion des produits (SKU, catégories, prix, seuils)
-- ✅ Suivi du stock en temps réel
-- ✅ Alertes de stock basse
-- ✅ Moteur de réassort automatique
-- ✅ Gestion des fournisseurs
-- ✅ Commandes automatiques
-- ✅ Tableau de bord avec KPIs
-- ✅ Traçabilité des mouvements de stock
+- ✅ Génération automatique de propositions de commande (nocturne + à la demande)
+- ✅ Navigation par secteur → rayon → article, alignée sur la hiérarchie RPOS réelle
+- ✅ Calcul de quantité tenant compte du stock, du colisage fournisseur et des commandes déjà en cours
+- ✅ Prévision de vente par lissage exponentiel, avec option d'analyse par IA (Gemini/OpenAI/Anthropic)
+- ✅ Synchronisation locale des ventes (jobs planifiés) pour ne plus dépendre de RPOS à chaque consultation
+- ✅ Récupération d'historique par tranches avec pause/reprise/annulation
+- ✅ Import de fichiers CSV d'export de ventes, avec bascule automatique sur l'API RPOS si absent
+- ✅ Gestion multi-magasins / multi-serveurs RPOS (18 serveurs, 52+ magasins)
+- ✅ Rôles ADMIN / SUPERVISOR / STORE avec périmètre de magasins supervisés
 
-## 🛠️ Stack Technique
+## 🛠️ Stack technique
 
-- **Backend**: Node.js + Express
-- **Base de données**: PostgreSQL
-- **ORM**: Prisma
-- **Frontend**: HTML5 + Bootstrap 5
-- **Déploiement**: Docker + Dokploy
+- **Backend** : Node.js + Express, jobs planifiés via `node-cron`
+- **Base de données** : PostgreSQL, ORM Prisma
+- **Frontend** : HTML5 + Bootstrap 5 (template Larkon), JavaScript natif, graphiques ApexCharts
+- **Intégration** : API RPOS (Prosuma), API LLM (Gemini/OpenAI/Anthropic) pour l'analyse IA optionnelle
+- **Déploiement** : Docker Compose
+
+Détail complet langage par langage, fichier par fichier : voir **[TECH_STACK.md](TECH_STACK.md)**.
 
 ## 📦 Installation
 
@@ -27,106 +33,58 @@ Plateforme intelligente de gestion des stocks et de réassort automatique.
 
 - Node.js >= 18
 - PostgreSQL
-- Docker (optionnel)
+- Docker (recommandé)
 
-### Setup local
+### Avec Docker (recommandé)
 
 ```bash
-# Cloner le projet
-git clone <repository-url>
-cd stock-auto-reappro
-
-# Installer les dépendances
-npm install
-
-# Configurer l'environnement
+# Copier et personnaliser les variables d'environnement
 cp .env.example .env
-# Éditer .env avec vos paramètres
+cp backend/.env.example backend/.env
+# Éditer .env (mot de passe Postgres) et backend/.env (JWT_SECRET, identifiants RPOS)
 
-# Générer le client Prisma
-npm run db:generate
-
-# Créer les tables
-npm run db:push
-
-# Peupler la base avec des données de test
-npm run db:seed
-
-# Démarrer le serveur
-npm run dev
+docker compose up -d --build
 ```
 
-L'application sera accessible sur `http://localhost:3000`
+- Backend : `http://localhost:3001`
+- Frontend : `http://localhost:8080`
 
-### Avec Docker
+### Setup local sans Docker (backend seul)
 
 ```bash
-# Démarrer avec Docker Compose
-docker-compose up -d
+cd backend
+npm install
+cp .env.example .env
+# Éditer .env
 
-# ou pour Dokploy, utiliser dokploy.yaml
-docker compose -f dokploy.yaml up -d
+npm run db:generate
+npm run db:push
+npm run dev
 ```
 
 ## 🗄️ Base de données
 
-### Schéma principal
+Schéma complet dans [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma). Modèles
+principaux : `User`, `RposServer`, `Shop`, `ReassortConfig`, `Proposal` / `ProposalLine` /
+`ProposalOrder`, `SalesLine`, `SalesBackfillRun`, `AiProviderKey` / `AiForecastRun`, `SystemConfig`.
 
-- **products**: Produits avec seuils et stock
-- **categories**: Catégories de produits
-- **suppliers**: Fournisseurs
-- **orders**: Commandes fournisseurs
-- **order_items**: Éléments de commande
-- **stock_movements**: Historique des mouvements
-- **users**: Utilisateurs
-
-### Formule de réassort
+### Formule de calcul de la quantité proposée
 
 ```
-Quantité à commander = Stock cible - Stock actuel - Commandes en cours
+besoin = (vente moyenne hebdomadaire / 7 × jours de couverture) + stock de sécurité
+       − stock actuel − quantité déjà en commande
+
+quantité proposée = besoin arrondi au multiple de colisage supérieur (jamais de sous-livraison)
 ```
 
-Où:
-- Stock cible = max(Stock maximum, Stock minimum × 2)
-- Arrondi au multiple de la quantité par carton
+Détail dans `backend/src/services/proposalService.js`, fonction `computeQuantityToOrder`.
 
-## 🐳 Déploiement Dokploy
+## 📚 Documentation
 
-1. Créer un nouveau projet dans Dokploy
-2. Sélectionner "Docker Compose"
-3. Importer le fichier `dokploy.yaml`
-4. Configurer les variables d'environnement:
-   - `POSTGRES_PASSWORD`: Mot de passe PostgreSQL
-   - `JWT_SECRET`: Secret pour les tokens JWT
-   - `CORS_ORIGIN`: URL du frontend (ou `*`)
-5. Déployer
-
-## 📡 API Endpoints
-
-### Produits
-- `GET /api/products` - Liste des produits
-- `GET /api/products/:id` - Détail d'un produit
-- `POST /api/products` - Créer un produit
-- `PUT /api/products/:id` - Modifier un produit
-- `DELETE /api/products/:id` - Supprimer un produit
-
-### Stock
-- `GET /api/stock/movements` - Mouvements de stock
-- `POST /api/stock/movement` - Enregistrer un mouvement
-- `GET /api/stock/alerts` - Alertes de stock
-- `GET /api/stock/restock-recommendations` - Recommandations
-
-### Commandes
-- `GET /api/orders` - Liste des commandes
-- `POST /api/orders` - Créer une commande
-- `POST /api/orders/auto-generate` - Générer commandes auto
-- `PUT /api/orders/:id/status` - Changer statut
-
-### Dashboard
-- `GET /api/dashboard/stats` - Statistiques
-- `GET /api/dashboard/alerts` - Alertes
-- `GET /api/dashboard/chart` - Données graphiques
+- **[readme.md](readme.md)** — cahier des charges fonctionnel complet (contexte métier, sections détaillées)
+- **[TECH_STACK.md](TECH_STACK.md)** — langages utilisés, où et pour quel calcul
+- **[THEME_SYSTEM.md](THEME_SYSTEM.md)** — système de thème CSS/JS du frontend
 
 ## 📝 Licence
 
-MIT
+Usage interne Prosuma.

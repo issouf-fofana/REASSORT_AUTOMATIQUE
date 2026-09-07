@@ -30,6 +30,7 @@ const { findSalesFiles } = require('../services/salesFileService');
 const aiForecastService = require('../services/aiForecastService');
 const cryptoService = require('../services/cryptoService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const jobHealthService = require('../services/jobHealthService');
 const multer = require('multer');
 const path = require('path');
 const fsPromises = require('fs/promises');
@@ -980,6 +981,18 @@ router.get('/system-config', requireAdmin, async (req, res) => {
   try {
     const config = await systemConfig.getAll();
     res.json({ success: true, data: config });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/system-config/jobs-health - état des 4 jobs planifiés (dernier statut, nombre
+// d'échecs consécutifs) : les échecs de cron n'étaient auparavant visibles que dans les logs
+// serveur, sans aucun moyen de les consulter depuis l'UI.
+router.get('/system-config/jobs-health', requireAdmin, async (req, res) => {
+  try {
+    const jobsHealth = await jobHealthService.getJobsHealth();
+    res.json({ success: true, data: jobsHealth });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

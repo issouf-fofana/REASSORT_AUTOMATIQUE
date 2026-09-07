@@ -5,6 +5,7 @@ const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { createJobLock } = require('../utils/concurrency');
+const { trackJobRun } = require('../services/jobHealthService');
 
 let currentTask = null;
 let currentReceptionSyncTask = null;
@@ -36,7 +37,7 @@ async function startOrRestartNightlyJob() {
   currentTask = cron.schedule(cronSchedule, () => {
     nightlyLock(async () => {
       console.log('[cron] Démarrage de la génération nocturne des propositions...');
-      await runNightlyProposalGeneration();
+      await trackJobRun('nightlyProposal', runNightlyProposalGeneration);
     }).catch((err) => console.error('[cron] Erreur:', err));
   });
 
@@ -60,7 +61,7 @@ async function startOrRestartReceptionSyncJob() {
   currentReceptionSyncTask = cron.schedule(cronSchedule, () => {
     receptionSyncLock(async () => {
       console.log('[cron] Démarrage de la synchronisation des statuts de réception...');
-      await runReceptionSync();
+      await trackJobRun('receptionSync', runReceptionSync);
     }).catch((err) => console.error('[cron] Erreur:', err));
   });
 
@@ -84,7 +85,7 @@ async function startOrRestartSalesSyncJob() {
   currentSalesSyncTask = cron.schedule(cronSchedule, () => {
     salesSyncLock(async () => {
       console.log('[cron] Démarrage de la synchronisation des ventes...');
-      await runSalesSync();
+      await trackJobRun('salesSync', runSalesSync);
     }).catch((err) => console.error('[cron] Erreur:', err));
   });
 
@@ -108,7 +109,7 @@ async function startOrRestartShopsSyncJob() {
   currentShopsSyncTask = cron.schedule(cronSchedule, () => {
     shopsSyncLock(async () => {
       console.log('[cron] Démarrage de la synchronisation des magasins...');
-      await runShopsSync();
+      await trackJobRun('shopsSync', runShopsSync);
     }).catch((err) => console.error('[cron] Erreur:', err));
   });
 

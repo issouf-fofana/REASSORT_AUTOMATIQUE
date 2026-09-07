@@ -170,12 +170,26 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
     const forecast = forecastConfig?.enabled
       ? forecastAvgWeeklySales(art.lines, periodDays, forecastConfig.alpha)
       : { avgWeeklySales: (art.quantity / periodDays) * 7, method: 'flat', alpha: null };
+
+    // Agrège les ventes par jour (pas juste la moyenne) : sert à donner à l'analyse IA la vraie
+    // évolution de l'article sur la période plutôt qu'un seul chiffre plat, pour qu'elle puisse
+    // elle-même repérer une tendance (accélération/ralentissement) ou un pic ponctuel à ignorer.
+    const dailyMap = new Map();
+    for (const line of art.lines) {
+      const day = new Date(line.date).toISOString().slice(0, 10);
+      dailyMap.set(day, (dailyMap.get(day) || 0) + line.quantity);
+    }
+    const dailyHistory = Array.from(dailyMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, quantity]) => ({ date, quantity: Math.round(quantity * 100) / 100 }));
+
     priorityArticles.push({
       code: art.ean,
       label: art.label,
       avg_weekly_quantity: forecast.avgWeeklySales,
       forecast_method: forecast.method,
       cumulative_pct: cumulativePct * 100,
+      daily_history: dailyHistory,
     });
     if (cumulativePct >= paretoThreshold) break;
   }
@@ -478,6 +492,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         seasonalityAdjusted: !!art.seasonality_adjusted,
         seasonalityDeviationPct: art.seasonality_deviation_pct ?? null,
         forecastMethod: art.forecast_method || 'flat',
+        dailyHistory: art.daily_history || [],
         excludedAsAlreadyOrdered,
         excludedAsAlreadyOrderedRpos,
         quantityInTransit,
@@ -596,6 +611,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           department: p.department,
           sector: p.sector,
           forecastMethod: p.forecastMethod,
+          dailyHistory: p.dailyHistory && p.dailyHistory.length ? JSON.stringify(p.dailyHistory) : null,
           seasonalityAdjusted: p.seasonalityAdjusted,
           seasonalityDeviationPct: p.seasonalityDeviationPct,
           currentOrderedQuantity: p.currentOrderedQuantity,

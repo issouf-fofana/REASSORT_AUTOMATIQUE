@@ -34,6 +34,19 @@ const DEFAULT_MODEL_BY_PROVIDER = {
  * cours), pour que le LLM raisonne sur des données déjà normalisées plutôt que du texte brut.
  */
 function buildArticleSummary(line) {
+  // dailyHistory est stocké en JSON string sur ProposalLine (cf. generateAndSaveProposal) : donne
+  // à l'IA la vraie évolution jour par jour sur la période d'analyse, plutôt qu'un seul chiffre
+  // moyen (avgWeeklySales) qui masque une tendance ou un pic ponctuel — elle peut ainsi juger
+  // elle-même si la vente moyenne reflète bien un rythme stable ou doit être pondérée.
+  let dailyHistory = [];
+  if (line.dailyHistory) {
+    try {
+      dailyHistory = JSON.parse(line.dailyHistory);
+    } catch {
+      dailyHistory = [];
+    }
+  }
+
   return {
     ean: line.ean,
     label: line.label,
@@ -49,13 +62,15 @@ function buildArticleSummary(line) {
       : null,
     seasonalityAdjusted: !!line.seasonalityAdjusted,
     hadNegativeStock: !!line.hadNegativeStock,
+    dailyHistory,
   };
 }
 
 function buildPrompt(shopReference, shopName, articles) {
   return `Tu es un assistant d'approvisionnement pour un magasin de grande distribution (${shopReference} ${shopName || ''}).
 Pour chaque article ci-dessous, propose la quantité à commander pour la période à venir, en te basant sur :
-- la vente moyenne hebdomadaire (avgWeeklySales)
+- la vente moyenne hebdomadaire (avgWeeklySales) : une moyenne plate sur toute la période analysée, qui peut masquer une tendance ou un pic ponctuel
+- l'historique jour par jour (dailyHistory, [{date, quantity}]) : utilise-le pour juger si avgWeeklySales reflète bien un rythme stable, ou s'il faut l'ajuster — par exemple une seule grosse journée exceptionnelle (promotion, revente ponctuelle) ne doit pas être extrapolée comme un rythme hebdomadaire normal, alors qu'une tendance régulière à la hausse ou à la baisse sur plusieurs jours mérite d'être prise en compte
 - le stock actuel (currentStock) et le nombre de jours avant rupture (daysUntilStockout)
 - la quantité déjà en commande non reçue (currentOrderedQuantity), à ne pas recommander en double
 - l'unité de commande (orderingUnit) : la quantité proposée doit être un multiple de cette unité

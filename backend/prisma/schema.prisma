@@ -515,6 +515,13 @@ model ProposalLine {
   // suffisant — cf. forecastService.js). Affiché en badge sur la proposition.
   forecastMethod String @default("flat") @map("forecast_method")
 
+  // Ventes agrégées par jour sur la période d'analyse (JSON: [{date, quantity}]), pour donner à
+  // l'analyse IA (aiForecastService.js) la vraie évolution de l'article plutôt qu'une seule
+  // moyenne plate — lui permet de repérer elle-même une tendance ou un pic ponctuel avant de
+  // proposer une quantité. Non affiché tel quel côté UI (le graphique d'évolution de l'article
+  // interroge RPOS/la base séparément, cf. productAnalyticsService.js).
+  dailyHistory String? @map("daily_history")
+
   @@map("proposal_lines")
 }
 

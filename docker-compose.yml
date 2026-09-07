@@ -3,15 +3,18 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: stock_auto_reappro
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # Valeur par défaut "postgres" fournie UNIQUEMENT pour un premier démarrage en dev local sans
+      # rien configurer : à changer obligatoirement en prod via un fichier .env à la racine
+      # (POSTGRES_PASSWORD=..., voir .env.example) — jamais commiter le vrai mot de passe de prod.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-stock_auto_reappro}
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,7 +27,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/stock_auto_reappro?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public
       PORT: 3001
     depends_on:
       postgres:
