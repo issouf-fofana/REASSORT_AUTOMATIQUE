@@ -1,0 +1,196 @@
+/*
+ * Système de thème — tokens CSS réutilisables (voir THEME_SYSTEM.md).
+ * Surcharge Bootstrap/Larkon déjà en place : ne remplace rien, ajoute une couche de variables
+ * personnalisables (accent, fond, bordures, rayon, police) au-dessus du thème existant, inspirée
+ * du style de dashboard demandé (sidebar sombre, cartes blanches, badges colorés, accent vert/orange).
+ */
+:root {
+    --font-ui: system-ui, -apple-system, sans-serif;
+
+    --bg:       #f5f6f8;
+    --surface:  #ffffff;
+    --surface2: #f0f1f4;
+
+    --border:   #e5e7eb;
+    --border2:  #eef0f3;
+
+    --tx-1: #1f2430;
+    --tx-2: #4b5468;
+    --tx-3: #8a92a3;
+
+    --accent:      #22c55e;
+    --accent-rgb:  34,197,94;
+    --accent-lt:   #dcfce7;
+    --accent-text: #14532d;
+
+    --accent2:      #f59e0b;
+    --accent2-rgb:  245,158,11;
+    --accent2-lt:   #fef3c7;
+    --accent2-text: #78350f;
+
+    --c-green: #16a34a;   --c-green-lt: #dcfce7;
+    --c-red:   #dc2626;   --c-red-lt:   #fee2e2;
+    --c-amber: #d97706;   --c-amber-lt: #fef3c7;
+    --c-blue:  #2563eb;   --c-blue-lt:  #dbeafe;
+
+    --r:    8px;
+    --r-lg: 14px;
+    --sh:    0 1px 3px rgba(15,17,21,.06);
+    --sh-md: 0 6px 20px rgba(15,17,21,.08);
+
+    --sidebar-bg: #1c2129;
+    --sidebar-w:  240px;
+    --header-h:   70px;
+}
+
+[data-theme="dark"] {
+    --bg:       #14161b;
+    --surface:  #1c1f26;
+    --surface2: #20232b;
+    --border:   #2b2f38;
+    --border2:  #262a32;
+    --tx-1:     #eef1f6;
+    --tx-2:     #b6bdcc;
+    --tx-3:     #7d8494;
+    --sh-md:    0 8px 24px rgba(0,0,0,.45);
+    --sidebar-bg: #101318;
+}
+
+/* Composants génériques réutilisables : rien d'autre à faire pour qu'un élément suive le thème. */
+.panel, .kpi-card, .card {
+    background: var(--surface);
+    border-color: var(--border) !important;
+    border-radius: var(--r-lg) !important;
+    box-shadow: var(--sh);
+}
+
+/* Sidebar teintée selon --sidebar-bg (logo/carte de style à l'écran de référence). */
+.main-nav {
+    background: var(--sidebar-bg) !important;
+}
+.main-nav .navbar-nav .nav-link {
+    color: rgba(255,255,255,.65);
+}
+.main-nav .navbar-nav .nav-link.active,
+.main-nav .navbar-nav .nav-link:hover {
+    color: var(--accent);
+}
+.main-nav .menu-title {
+    color: rgba(255,255,255,.35);
+}
+
+/* Badges de compteur façon "2" verts dans la sidebar du template de référence. */
+.main-nav .badge.bg-accent,
+.badge-accent {
+    background: var(--accent) !important;
+    color: #fff !important;
+}
+
+/* Boutons et éléments actifs suivent l'accent configurable. */
+.btn-primary {
+    background-color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent-text) !important;
+}
+.btn-outline-primary {
+    color: var(--accent) !important;
+    border-color: var(--accent) !important;
+}
+.btn-outline-primary:hover {
+    background-color: var(--accent) !important;
+    color: #fff !important;
+}
+.text-primary { color: var(--accent) !important; }
+.bg-primary-subtle { background-color: var(--accent-lt) !important; }
+.bg-primary { background-color: var(--accent) !important; }
+
+.nav-tabs .nav-link.active {
+    border-color: var(--accent) !important;
+    color: var(--accent-text) !important;
+}
+
+body {
+    background: var(--bg);
+    font-family: var(--font-ui);
+    color: var(--tx-1);
+}
+button, input, select, textarea {
+    font-family: inherit;
+}
+
+/* -------------------------------------------------------------- */
+/* Panel de personnalisation (voir THEME_SYSTEM.md section 9)      */
+/* -------------------------------------------------------------- */
+.theme-panel {
+    position: fixed; top: 0; right: -340px; width: 320px; height: 100vh;
+    background: var(--surface); border-left: 1px solid var(--border);
+    z-index: 9000; overflow-y: auto; transition: right .25s ease;
+    padding: 1rem; font-family: var(--font-ui);
+}
+.theme-panel.open { right: 0; }
+.theme-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 700; margin-bottom: 1rem; color: var(--tx-1);
+}
+.theme-panel-header button {
+    background: none; border: none; font-size: 1.2rem; color: var(--tx-3); cursor: pointer;
+}
+.theme-overlay {
+    display: none; position: fixed; inset: 0; z-index: 8999;
+    background: rgba(0,0,0,.2);
+}
+.theme-overlay.open { display: block; }
+.theme-trigger-btn {
+    position: fixed; bottom: 1.5rem; right: 1.5rem;
+    width: 46px; height: 46px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    border: none; cursor: pointer; z-index: 8998;
+    box-shadow: 0 2px 12px rgba(0,0,0,.25);
+    font-size: 1.2rem;
+}
+.theme-section { margin-bottom: 1.25rem; }
+.theme-section-label {
+    font-size: .68rem; font-weight: 700; color: var(--tx-3);
+    letter-spacing: .08em; text-transform: uppercase; margin-bottom: .5rem;
+}
+.theme-mode-btns, .radius-row {
+    display: flex; gap: .4rem;
+}
+.theme-mode-btns button, .radius-btn {
+    flex: 1; padding: .45rem; border: 1px solid var(--border); background: var(--surface2);
+    color: var(--tx-2); border-radius: var(--r); cursor: pointer; font-size: .78rem;
+}
+.theme-mode-btns button.active, .radius-btn.active {
+    border-color: var(--accent); background: var(--accent-lt); color: var(--accent-text); font-weight: 600;
+}
+.accent-swatches {
+    display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem;
+}
+.accent-swatch {
+    width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent;
+}
+.accent-swatch.active {
+    border-color: var(--tx-1);
+}
+.color-picker-wrap, .color-hex-wrap {
+    display: inline-flex; align-items: center; gap: .3rem;
+}
+.color-picker-wrap input[type="color"] {
+    opacity: 0; width: 26px; height: 26px; position: absolute; cursor: pointer;
+}
+.color-picker-thumb {
+    width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border);
+}
+.color-hex-wrap input {
+    width: 70px; border: 1px solid var(--border); border-radius: var(--r);
+    padding: .2rem .4rem; font-size: .78rem; background: var(--surface2); color: var(--tx-1);
+}
+.color-hex-wrap button {
+    border: 1px solid var(--border); background: var(--surface2); border-radius: var(--r);
+    padding: .2rem .5rem; cursor: pointer; color: var(--tx-2);
+}
+.theme-reset-btn {
+    width: 100%; padding: .55rem; border: 1px solid var(--border); background: var(--surface2);
+    color: var(--tx-2); border-radius: var(--r); cursor: pointer; margin-top: .5rem;
+}

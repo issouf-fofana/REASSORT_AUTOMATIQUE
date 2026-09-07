@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: stock_auto_reappro
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/stock_auto_reappro?schema=public
+      PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/pareto_050.csv:/app/pareto_050.csv:ro
+    # Le DNS interne Docker (127.0.0.11) ne résout pas pos1-prod-prosuma.prosuma.pos, contrairement
+    # au réseau Wi-Fi d'entreprise PROSUMADSI (DNS interne au domaine PROSUMA) : sans cette entrée,
+    # le conteneur backend ne peut jamais joindre RPOS même quand la machine hôte le peut très bien.
+    # ATTENTION : 172.26.50.1 a été résolue depuis le poste de dev un jour donné — si RPOS change
+    # d'adresse IP côté réseau Prosuma, cette entrée doit être mise à jour (revalider avec
+    # `getent hosts pos1-prod-prosuma.prosuma.pos` sur la machine hôte connectée au bon réseau).
+    extra_hosts:
+      - "pos1-prod-prosuma.prosuma.pos:172.26.50.1"
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

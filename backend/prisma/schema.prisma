@@ -1,0 +1,758 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// UTILISATEURS
+// =============================================
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  // ADMIN (tous les magasins), SUPERVISOR (un sous-ensemble de magasins choisi, cf.
+  // SupervisedShop, readme §29), STORE (un seul magasin assigné)
+  role      String   @default("STORE")
+
+  // Rattachement au magasin RPOS (uuid, référence et nom mis en cache pour l'affichage), et au
+  // serveur RPOS qui l'héberge (chaque magasin n'est joignable que via son propre serveur).
+  // Utilisé uniquement pour un compte STORE ; null pour ADMIN/SUPERVISOR.
+  rposShopId        String? @map("rpos_shop_id")
+  rposShopReference String? @map("rpos_shop_reference")
+  rposShopName      String? @map("rpos_shop_name")
+  rposPosId         String? @map("rpos_pos_id") // ex: "pos1"
+
+  isActive  Boolean  @default(true) @map("is_active")
+
+  supervisedShops SupervisedShop[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// =============================================
+// MAGASINS SUPERVISÉS (readme §29 : profil superviseur intermédiaire, suit plusieurs magasins
+// choisis sans avoir l'accès complet d'un ADMIN à tous les magasins)
+// =============================================
+model SupervisedShop {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  rposShopId        String @map("rpos_shop_id")
+  rposShopReference String @map("rpos_shop_reference")
+  rposShopName      String @map("rpos_shop_name")
+  rposPosId         String @map("rpos_pos_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, rposShopId])
+  @@map("supervised_shops")
+}
+
+// =============================================
+// SERVEURS RPOS (un magasin RPOS ne peut être joint que via son propre serveur/instance ;
+// chaque serveur a ses propres identifiants de connexion, cf. readme section 24)
+// =============================================
+model RposServer {
+  id       String @id @default(cuid())
+  posId    String @unique @map("pos_id") // identifiant technique, ex: "pos1"
+  label    String // ex: "Serveur Prosuma Prod1"
+  baseUrl  String @map("base_url") // ex: https://pos1-prod-prosuma.prosuma.pos
+
+  rposUser     String? @map("rpos_user")
+  rposPassword String? @map("rpos_password") // jamais renvoyé en clair par l'API, cf. systemConfigService
+
+  isActive Boolean @default(true) @map("is_active") // false tant qu'aucun identifiant n'a été configuré
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("rpos_servers")
+}
+
+// Copie locale de la liste des magasins par serveur RPOS (readme évolution : le menu déroulant
+// "Magasin" interrogeait RPOS en direct sur les 18 serveurs à chaque premier chargement de page,
+// jusqu'à 15-20s de latence). Synchronisée périodiquement en tâche de fond (shopsSyncJob.js) : les
+// pages consultent cette table plutôt que RPOS, la liste des magasins changeant très rarement.
+model Shop {
+  id String @id @default(cuid()) // clé locale, différente de rposShopId
+
+  rposShopId String @unique @map("rpos_shop_id") // UUID RPOS du magasin
+  rposPosId  String @map("rpos_pos_id")
+  reference  String // code magasin, ex: "110"
+  name       String // ex: "SUPER U VALLON"
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@index([rposPosId])
+  @@map("shops")
+}
+
+// Cache local des infos produit RPOS (/api/product/ par EAN), pour éviter un appel RPOS par
+// article à chaque génération de proposition (jusqu'à 700+ appels séquentiels/parallèles sur un
+// gros magasin, dominant largement le temps total malgré les ventes déjà locales). Peuplé "à la
+// demande" (cache-aside) : un article est mis en cache la première fois qu'il est vu dans une
+// génération, puis relu depuis cette table tant qu'il n'a pas expiré (TTL court car le stock change
+// en continu), sans job de synchro séparé à gérer — pas besoin de précharger tout un catalogue.
+model ProductCache {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+  ean        String
+
+  productId    String  @map("rpos_product_id")
+  orderable    Boolean
+  sellingPrice Float   @map("selling_price")
+  buyingPrice  Float   @map("buying_price")
+  orderingUnit Float   @map("ordering_unit")
+  stock        Float
+  departmentId String? @map("department_id")
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@unique([rposShopId, ean])
+  @@map("product_cache")
+}
+
+// Cache du résultat de getRecentUndeliveredOrderedQuantity (commandes RPOS récentes ≤7j non
+// livrées par article, hors plateforme) : second appel RPOS par article, aussi coûteux que
+// ProductCache et jusqu'ici non caché, restait le vrai goulot après l'ajout de ProductCache
+// (mesuré : ~30% de gain avec ProductCache seul, ce second appel domine ensuite). Même principe
+// cache-aside, même TTL — un reliquat de commande évolue lentement (délai de 7 jours de marge),
+// donc pas besoin d'une fraîcheur plus fine que celle du stock.
+model RecentOrderCache {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+  productId  String @map("rpos_product_id")
+
+  quantity           Float
+  orderCount         Int    @default(0) @map("order_count")
+  mostRecentDate     DateTime? @map("most_recent_date")
+  mostRecentReference String?  @map("most_recent_reference")
+  ordersJson         String?  @map("orders_json") // détail des commandes (JSON), pour le badge "commandé le X" — sérialisé faute de type JSON portable simple ici
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@unique([rposShopId, productId])
+  @@map("recent_order_cache")
+}
+
+// =============================================
+// CONFIGURATION DU RÉASSORT (paramétrable par magasin, cf. page Paramètres)
+// =============================================
+model ReassortConfig {
+  id String @id @default(cuid())
+
+  rposShopId String @unique @map("rpos_shop_id")
+
+  // Seuil de contribution cumulée au CA retenu pour l'analyse Pareto (0.80 = 80%)
+  paretoThreshold Float @default(0.80) @map("pareto_threshold")
+
+  // Ratio de stock de sécurité appliqué sur la vente moyenne de la période (0.5 = 50%)
+  safetyStockRatio Float @default(0.5) @map("safety_stock_ratio")
+
+  // Mode de période d'analyse des ventes : YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, CUSTOM
+  // Toujours calculé relativement à la dernière vente connue du magasin (pas à "aujourd'hui"),
+  // pour rester pertinent même sur un magasin fermé ou dont les ventes RPOS ont du retard.
+  periodMode  String    @default("LAST_30_DAYS") @map("period_mode")
+  customStart DateTime? @map("custom_start")
+  customEnd   DateTime? @map("custom_end")
+
+  // Si vrai (comportement historique), un stock négatif (anomalie de suivi RPOS) est ramené à 0
+  // avant calcul du besoin. Si faux, la valeur négative réelle est conservée et affichée telle quelle.
+  treatNegativeStockAsZero Boolean @default(true) @map("treat_negative_stock_as_zero")
+
+  // Nombre de jours de la période de référence utilisée pour calculer la part de CA de chaque
+  // article proposé par rapport au CA total du magasin (ex: 1 = hier, 7 = 7 derniers jours).
+  revenueSharePeriodDays Int @default(1) @map("revenue_share_period_days")
+
+  // Multiplicateur appliqué au besoin théorique (vente moyenne + stock de sécurité) au-delà duquel
+  // une quantité commandée est considérée en surstock pour le calcul du KPI "Taux de surstock"
+  // (ex: 1.5 = commander 50% de plus que le besoin théorique est considéré comme du surstock).
+  overstockThresholdMultiplier Float @default(1.5) @map("overstock_threshold_multiplier")
+
+  // Si vrai, la validation crée une commande fournisseur RPOS distincte par rayon (readme §11).
+  // Si faux, tous les articles sélectionnés partent dans une seule commande globale (comportement
+  // historique), utile pour les magasins/fournisseurs qui ne séparent pas leurs commandes par rayon.
+  splitOrdersByDepartment Boolean @default(true) @map("split_orders_by_department")
+
+  // Précision des prévisions (readme §17) : une ligne validée n'est évaluable qu'une fois cette
+  // fenêtre de temps écoulée depuis la validation, le temps que les ventes réelles se produisent.
+  forecastAccuracyWindowDays Int @default(7) @map("forecast_accuracy_window_days")
+
+  // Écart toléré (en %) entre la vente moyenne prévue et la vente réelle constatée sur la fenêtre
+  // ci-dessus pour qu'une ligne soit comptée comme "prévision précise" (ex: 20 = ±20% toléré).
+  forecastAccuracyThresholdPct Float @default(20) @map("forecast_accuracy_threshold_pct")
+
+  // Saisonnalité (readme §8) : si vrai, la génération de proposition compare en plus la période
+  // d'analyse actuelle à la même période N années en arrière (ex: décembre N vs décembre N-1),
+  // pour ajuster la vente moyenne prévue si une tendance saisonnière significative est détectée.
+  // Fonctionne sur la période de référence du magasin (dernière vente connue, jamais la date
+  // système), donc valable aussi bien en test sur des données anciennes qu'en production.
+  seasonalityComparisonEnabled Boolean @default(false) @map("seasonality_comparison_enabled")
+
+  // Nombre d'années en arrière pour la comparaison saisonnière (1 = l'année dernière).
+  seasonalityLookbackYears Int @default(1) @map("seasonality_lookback_years")
+
+  // Si l'écart de vente entre la période actuelle et la période N-1 dépasse ce seuil (en %), la
+  // vente moyenne prévue est ajustée à la hausse ou à la baisse en conséquence (cf. readme §8 :
+  // éviter de sous-estimer une période de forte demande comme Pâques ou Noël).
+  seasonalityAdjustmentThresholdPct Float @default(15) @map("seasonality_adjustment_threshold_pct")
+
+  // Délai moyen de réception des commandes pour ce magasin, en jours (0 = réception le jour même).
+  // Sert à préremplir la date de livraison proposée à la validation, et à couvrir le besoin sur
+  // cette durée plutôt que sur une semaine fixe implicite : plus le délai est long, plus il faut
+  // commander en avance pour ne pas tomber en rupture avant l'arrivée de la marchandise.
+  receptionLeadTimeDays Int @default(1) @map("reception_lead_time_days")
+
+  // Si vrai, le besoin est calculé pour couvrir le délai de réception (ventes/jour × délai) au
+  // lieu d'une semaine fixe implicite. Désactivé par défaut : change le résultat du calcul pour
+  // tous les articles du magasin, à activer explicitement après validation sur un magasin pilote.
+  useReceptionLeadTimeInCalculation Boolean @default(false) @map("use_reception_lead_time_in_calculation")
+
+  // Exclut du calcul de proposition tout article dont le prix de vente est strictement inférieur
+  // à ce seuil (en CFA) : sert à écarter les articles génériques/poids libre agrégés au niveau
+  // d'un rayon entier (ex: "FRUITS & LEGUMES" à 1 CFA/unité, qui n'est pas un vrai produit
+  // individuel et fausse totalement le calcul avec des quantités proposées énormes). 0 = désactivé.
+  excludeGenericArticlesBelowPrice Float @default(2) @map("exclude_generic_articles_below_price")
+
+  // Au-delà de ce délai, une commande fournisseur RPOS jamais marquée "livrée" n'est plus prise en
+  // compte comme "déjà commandé" dans le calcul du besoin : sur les commandes centrales, RPOS ne
+  // reflète jamais la réception réelle, donc des commandes très anciennes (parfois plusieurs mois)
+  // restaient indéfiniment "en attente" et bloquaient à tort le réassort d'un article pourtant
+  // épuisé depuis longtemps (bug identifié : commandes de 3+ mois bloquant encore l'article).
+  recentOrderMaxAgeDays Int @default(3) @map("recent_order_max_age_days")
+
+  // Prévision de vente moyenne par lissage exponentiel (readme évolution "intégration IA"), en
+  // remplacement de la moyenne plate sur toute la période — cf. forecastService.js. Désactivé par
+  // défaut pour ne pas changer le comportement des magasins déjà actifs sans validation explicite.
+  forecastEnabled Boolean @default(false) @map("forecast_enabled")
+  // Poids donné à la journée la plus récente (0 à 1) : plus proche de 1 = réagit plus vite aux
+  // ventes récentes, plus proche de 0 = lisse davantage. Retombe automatiquement sur la moyenne
+  // plate si l'historique dispo est trop court (cf. forecastService.MIN_DAYS_FOR_SMOOTHING).
+  forecastAlpha Float @default(0.3) @map("forecast_alpha")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("reassort_configs")
+}
+
+// =============================================
+// PROPOSITIONS DE RÉASSORT (historisation, cf. readme section 16)
+// =============================================
+model Proposal {
+  id        String   @id @default(cuid())
+
+  // Magasin RPOS concerné (uuid, référence et nom mis en cache pour l'affichage), et serveur RPOS
+  rposShopId        String  @map("rpos_shop_id")
+  rposShopReference String  @map("rpos_shop_reference")
+  rposShopName      String  @map("rpos_shop_name")
+  rposPosId         String? @map("rpos_pos_id")
+
+  // Statut du cycle de vie : GENERATED (calculée, en attente) -> VALIDATING (envoi en cours vers
+  // RPOS, en tâche de fond) -> VALIDATED (terminé) ou VALIDATION_FAILED -> REJECTED (écrasée par
+  // une nouvelle génération sans avoir été traitée)
+  status    String   @default("GENERATED")
+
+  generatedAt DateTime @default(now()) @map("generated_at")
+  validatedAt DateTime? @map("validated_at")
+  validatedBy String?   @map("validated_by") // email de l'utilisateur ayant validé
+
+  // Progression de l'envoi en tâche de fond vers RPOS (nombre de lignes traitées / total)
+  linesTotal     Int? @map("lines_total")
+  linesProcessed Int? @map("lines_processed")
+  linesFailed    Int? @map("lines_failed")
+  validationError String? @map("validation_error")
+
+  // Référence de la première commande RPOS créée lors de la validation (conservé pour compat avec
+  // les lookups existants) ; le détail complet par rayon (readme §11) est dans ProposalOrder.
+  rposOrderId        String? @map("rpos_order_id")
+  rposOrderReference String? @map("rpos_order_reference")
+
+  // Si vrai, la commande a en plus été validée sur RPOS (transmise à l'entrepôt) après sa création,
+  // en fonction du choix fait par l'utilisateur au moment de la validation (voir readme §9-10).
+  // null si non applicable (validation non demandée) ; false si demandée mais échouée.
+  rposOrderValidated Boolean? @map("rpos_order_validated")
+
+  // CA total du magasin sur la période de référence utilisée pour la colonne "% CA magasin"
+  // (ReassortConfig.revenueSharePeriodDays), pour donner un contexte au pourcentage affiché
+  // par ligne (ex: "71% de quoi ?").
+  revenueShareStart   DateTime? @map("revenue_share_start")
+  revenueShareEnd     DateTime? @map("revenue_share_end")
+  shopTotalRevenue    Float?    @map("shop_total_revenue")
+
+  // Période d'analyse des ventes utilisée pour le classement Pareto et le calcul de la vente
+  // moyenne (distincte de revenueShareStart/End ci-dessus, qui sert uniquement à la colonne "% CA
+  // magasin"). Persistée pour pouvoir expliquer a posteriori "sur quelles ventes cette proposition
+  // se base" (évolution : période de référence des commandes).
+  analysisPeriodStart DateTime? @map("analysis_period_start")
+  analysisPeriodEnd   DateTime? @map("analysis_period_end")
+  analysisPeriodMode  String?   @map("analysis_period_mode")
+
+  // Paramètres de calcul effectivement appliqués à cette génération (peuvent différer de la
+  // configuration actuelle du magasin si elle a changé depuis) : nécessaires pour reconstruire
+  // l'explication du calcul d'une proposition ancienne de façon fiable.
+  paretoThresholdUsed         Float? @map("pareto_threshold_used")
+  safetyStockRatioUsed        Float? @map("safety_stock_ratio_used")
+  receptionLeadTimeDaysUsed   Int?   @map("reception_lead_time_days_used")
+
+  // Détail du nombre d'articles écartés par raison (readme évolution "vue par secteur/rayon" :
+  // affiche pourquoi le "Reste du CA magasin" non proposé n'est pas à 0%, sans faire varier son
+  // calcul — qui reste 100% − somme des % CA affichés par carte). Persisté à la génération car ces
+  // compteurs ne sont sinon disponibles qu'en mémoire le temps du calcul (result.stats).
+  totalArticlesWithSales   Int? @map("total_articles_with_sales")
+  skippedNotFound          Int? @map("skipped_not_found")
+  skippedNotOrderable      Int? @map("skipped_not_orderable")
+  skippedNegativeStock     Int? @map("skipped_negative_stock")
+  skippedAlreadyOrdered    Int? @map("skipped_already_ordered")
+  skippedGenericArticle    Int? @map("skipped_generic_article")
+
+  lines  ProposalLine[]
+  orders ProposalOrder[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([rposShopId, generatedAt])
+  // getAdminDashboard/getConformityRate/getStockoutRate/getOverstockRate/getForecastAccuracy
+  // filtrent tous sur (rposShopId, status) avant de trier par validatedAt (audit performance :
+  // aucun index dédié n'existait, ces requêtes reposaient sur un scan complet de la table).
+  @@index([rposShopId, status, validatedAt])
+  @@map("proposals")
+}
+
+// =============================================
+// COMMANDES PAR RAYON (readme §11)
+// =============================================
+// Une proposition validée génère une commande fournisseur RPOS distincte par rayon (au lieu
+// d'une seule commande globale), pour respecter le processus métier existant qui sépare les
+// commandes par rayon (Épicerie, Boissons, Produits frais, etc.).
+model ProposalOrder {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  department String // rayon principal (ex: "PRODUITS FRAIS")
+
+  rposOrderId        String? @map("rpos_order_id")
+  rposOrderReference String? @map("rpos_order_reference")
+  rposOrderValidated Boolean? @map("rpos_order_validated")
+
+  linesTotal    Int @default(0) @map("lines_total")
+  linesFailed   Int @default(0) @map("lines_failed")
+  status        String @default("PENDING") // statut d'envoi technique : PENDING -> DONE -> FAILED -> CANCELLED
+  errorMessage  String? @map("error_message")
+
+  // Statut métier de réception (distinct du statut d'envoi ci-dessus) : COMMANDEE (créée sur RPOS,
+  // pas encore transmise) -> EN_ATTENTE_RECEPTION (transmise à l'entrepôt) -> RECUE_ESTIMEE ou
+  // ANNULEE. IMPORTANT : le statut RPOS de supplier_order N'EST PAS un indicateur fiable de
+  // réception réelle (une commande peut rester "en attente de livraison" alors que la marchandise
+  // est déjà livrée) ; la vraie confirmation viendrait de l'intégration de facture magasin
+  // (/api/delivery/), mais les commandes de cette plateforme passent par le fournisseur central,
+  // qui ne génère jamais de réception dans RPOS. RECUE_ESTIMEE est donc une ESTIMATION basée sur
+  // le délai de réception configuré du magasin, jamais une confirmation certaine — à toujours
+  // présenter comme telle côté UI. Seule ANNULEE reste vérifiée de façon fiable (statut RPOS 6).
+  receptionStatus String @default("COMMANDEE") @map("reception_status")
+
+  // Date de réception prévue = date de validation + ReassortConfig.receptionLeadTimeDays du
+  // magasin au moment de la création (figée, ne bouge pas si le délai magasin change ensuite).
+  expectedReceptionDate DateTime? @map("expected_reception_date")
+
+  // Renseignée dès que receptionStatus atteint RECUE_ESTIMEE (date du passage en estimé, pas une
+  // date de réception réelle confirmée) ou ANNULEE.
+  actualReceptionDate DateTime? @map("actual_reception_date")
+
+  // Dernier statut RPOS numérique observé (1-6) et horodatage de la dernière synchronisation,
+  // pour savoir si une commande n'a pas été revérifiée depuis longtemps.
+  lastRposStatus    Int?      @map("last_rpos_status")
+  lastSyncedAt      DateTime? @map("last_synced_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  receptionEvents ReceptionEvent[]
+
+  @@map("proposal_orders")
+}
+
+// =============================================
+// ÉVÉNEMENTS DE RÉCEPTION (historique des changements de statut de réception observés)
+// =============================================
+// Trace chaque passage à ANNULEE (fiable, statut RPOS 6) ou à RECUE_ESTIMEE (estimation basée sur
+// le délai de réception configuré, PAS une confirmation réelle — cf. commentaire sur
+// ProposalOrder.receptionStatus). rposStatus vaut -1 quand la transition vient du délai plutôt
+// que d'une lecture RPOS.
+model ReceptionEvent {
+  id              String        @id @default(cuid())
+  proposalOrderId String
+  proposalOrder   ProposalOrder @relation(fields: [proposalOrderId], references: [id], onDelete: Cascade)
+
+  rposStatus      Int      // statut RPOS observé (1-6), ou -1 si la transition vient du délai configuré
+  receptionStatus String   // statut métier correspondant, pour lecture directe sans re-mapper
+  observedAt      DateTime @default(now()) @map("observed_at")
+
+  @@map("reception_events")
+}
+
+// =============================================
+// LIGNES DE PROPOSITION
+// =============================================
+model ProposalLine {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  ean       String
+  label     String
+  productId String @map("rpos_product_id") // uuid produit RPOS
+
+  // Quantité initialement calculée par le système, puis quantité finalement validée par l'humain
+  // (== quantitySuggested si l'utilisateur n'a rien modifié : sert au calcul du taux de conformité)
+  quantitySuggested Float @map("quantity_suggested")
+  quantityValidated Float? @map("quantity_validated")
+
+  // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
+  // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).
+  stockAtGeneration      Float? @map("stock_at_generation")
+  avgWeeklySales         Float? @map("avg_weekly_sales")
+  daysUntilStockout      Float? @map("days_until_stockout")
+  sellingPrice           Float? @map("selling_price")
+  buyingPrice            Float? @map("buying_price")
+
+  // Part du CA de l'article dans le CA total du magasin, sur la période de référence configurée
+  // (ReassortConfig.revenueSharePeriodDays), en pourcentage (ex: 3.5 = 3.5%).
+  revenueSharePct Float? @map("revenue_share_pct")
+
+  // Le stock RPOS était négatif au moment de la génération (anomalie de suivi : l'article
+  // continue de se vendre alors que le stock système indique qu'il n'y en a plus). Ne se corrige
+  // que via une intégration de facture (réception de commande) ou un inventaire physique côté
+  // RPOS. La quantité proposée est alors basée uniquement sur la vente moyenne, sans stock déduit.
+  hadNegativeStock Boolean @default(false) @map("had_negative_stock")
+
+  // Stock brut RPOS avant écrasement à 0 (quand hadNegativeStock=true et que la config ramène le
+  // stock à 0 pour le calcul) : conservé pour affichage réel de l'anomalie, même si stockAtGeneration
+  // vaut 0 dans ce cas.
+  actualStock Float? @map("actual_stock")
+
+  // Rayon (2e niveau de la hiérarchie department RPOS, ex: "LIQUIDES", "SAC A LA VENTE"), utilisé
+  // pour créer une commande fournisseur distincte par rayon à la validation (readme §11).
+  department String? @map("department")
+
+  // Secteur (1er niveau de la hiérarchie department RPOS, ex: "PRODUITS SECS", "BAZAR") :
+  // uniquement pour la navigation UI à deux niveaux (secteur > rayon > articles), n'a pas d'effet
+  // sur le découpage des commandes fournisseur (toujours par department/rayon, cf. ci-dessus).
+  sector String? @map("sector")
+
+  // L'article a-t-il été décoché (exclu) par l'utilisateur lors de la validation ?
+  wasExcluded Boolean @default(false) @map("was_excluded")
+
+  // Précision des prévisions (readme §17) : quantité réellement vendue sur la fenêtre de mesure
+  // (ReassortConfig.forecastAccuracyWindowDays) après la validation, calculée une seule fois à la
+  // demande puis mise en cache ici (la période mesurée est figée dans le passé, jamais recalculée).
+  actualSalesQuantity  Float?    @map("actual_sales_quantity")
+  actualSalesFetchedAt DateTime? @map("actual_sales_fetched_at")
+
+  // Intrants du calcul de quantité proposée, persistés pour reconstruire l'explication détaillée
+  // (évolution : "pourquoi cette quantité ?") sans dépendre d'un recalcul a posteriori qui pourrait
+  // donner un résultat différent si le stock ou la config a changé depuis.
+  currentOrderedQuantity Float? @map("current_ordered_quantity")
+  orderingUnit           Float? @map("ordering_unit")
+  cumulativePct          Float? @map("cumulative_pct")
+
+  // Si vrai, cet article a été exclu de cette proposition car déjà présent dans une commande de
+  // cette plateforme non encore reçue (cf. ProposalOrder.receptionStatus). Contrairement à
+  // l'exclusion binaire historique (l'article n'apparaît alors pas du tout), ce champ permet de
+  // documenter pourquoi un article attendu manque de la liste plutôt que de laisser un silence.
+  excludedAsAlreadyOrdered Boolean @default(false) @map("excluded_as_already_ordered")
+
+  // Référence et date de la commande créée par cette plateforme responsable de quantityInTransit,
+  // affichées à côté du badge "Déjà commandé" pour indiquer où retrouver cette commande dans RPOS.
+  platformOrderReference String? @map("platform_order_reference")
+  platformOrderDate      DateTime? @map("platform_order_date")
+
+  // Comme excludedAsAlreadyOrdered, mais pour une commande déjà en cours côté RPOS indépendante
+  // de cette plateforme (current_ordered_quantity brut, ex: commande manuelle ou fournisseur
+  // classique) : sans ce champ, un article à fort CA pouvait disparaître silencieusement de la
+  // proposition, ce qui a déjà été pris à tort pour une erreur du calcul de part de CA.
+  excludedAsAlreadyOrderedRpos Boolean @default(false) @map("excluded_as_already_ordered_rpos")
+
+  // Référence, date et nombre de commandes RPOS récentes (≤ 7 jours, hors plateforme) non encore
+  // livrées pour cet article, affichées à côté du badge "Déjà en commande (RPOS)" quand
+  // excludedAsAlreadyOrderedRpos=true, pour indiquer où et quand cette commande a été passée.
+  rposOrderReference String? @map("rpos_order_reference")
+  rposOrderDate      DateTime? @map("rpos_order_date")
+  rposOrderCount     Int? @map("rpos_order_count")
+
+  // Quantité qui aurait été proposée si on ignorait la commande RPOS récente ci-dessus, pour
+  // préremplir la saisie côté magasin s'il choisit de débloquer l'article et de commander quand
+  // même (readme évolution : "donner la possibilité de débloquer l'article").
+  quantityIfUnblocked Float? @map("quantity_if_unblocked")
+
+  // Quantité déjà en commande (en transit, pas encore reçue) pour cet article au moment de la
+  // génération, affichée à côté du badge "Déjà en commande" quand excludedAsAlreadyOrdered=true.
+  quantityInTransit Float? @map("quantity_in_transit")
+
+  // Saisonnalité (readme §8) : la vente moyenne prévue a-t-elle été ajustée par rapport à la
+  // même période N années en arrière, et de quel écart (en %, positif = tendance à la hausse).
+  seasonalityAdjusted     Boolean @default(false) @map("seasonality_adjusted")
+  seasonalityDeviationPct Float?  @map("seasonality_deviation_pct")
+
+  // Méthode utilisée pour prévoir avgWeeklySales : "flat" (moyenne plate sur la période, par
+  // défaut) ou "smoothed" (lissage exponentiel, si config.forecastEnabled=true et historique
+  // suffisant — cf. forecastService.js). Affiché en badge sur la proposition.
+  forecastMethod String @default("flat") @map("forecast_method")
+
+  @@map("proposal_lines")
+}
+
+// =============================================
+// CONFIGURATION SYSTÈME
+// =============================================
+model SystemConfig {
+  id          String @id @default(cuid())
+  key         String @unique
+  value       String
+  description String?
+
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
+}
+
+// =============================================
+// CACHE DERNIER ACHAT / DERNIÈRE VENTE PAR PRODUIT
+// =============================================
+// Évite de re-solliciter RPOS à chaque affichage de la page de proposition : la première
+// consultation du jour interroge RPOS et stocke le résultat ici, les rechargements suivants
+// (même jour) lisent le cache. Durée de vie configurable dans les Paramètres.
+model ProductInsightCache {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+  productId  String @map("rpos_product_id")
+
+  lastPurchaseDate     DateTime? @map("last_purchase_date")
+  lastPurchaseQuantity Float?    @map("last_purchase_quantity")
+  lastPurchaseOrderRef String?   @map("last_purchase_order_ref")
+
+  lastSaleDate     DateTime? @map("last_sale_date")
+  lastSaleQuantity Float?    @map("last_sale_quantity")
+
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+
+  @@unique([rposPosId, rposShopId, productId])
+  @@map("product_insight_cache")
+}
+
+// =============================================
+// VENTES SYNCHRONISÉES LOCALEMENT
+// =============================================
+// Copie locale des lignes de vente RPOS (/api/product_line/), pour ne plus jamais attendre
+// plusieurs minutes de pagination RPOS à chaque génération de proposition ou consultation du
+// graphique d'évolution d'un article. Alimentée en tâche de fond par salesSyncJob.js
+// (synchronisation incrémentale : ne récupère que les ventes depuis la dernière synchro de
+// chaque magasin, jamais tout l'historique à chaque fois). Le calcul métier (Pareto, CA de
+// référence, historique par article) lit cette table au lieu d'appeler RPOS en direct.
+model SalesLine {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+
+  ean   String
+  label String?
+  date  DateTime // date réelle de la vente côté RPOS (pas la date de synchronisation)
+
+  quantity       Float
+  revenueExclTax Float @map("revenue_excl_tax")
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  // Clé de déduplication approximative : RPOS ne renvoie aucun identifiant unique par ligne de
+  // vente dans /api/product_line/, donc on compose une clé à partir des champs disponibles. Risque
+  // résiduel très faible mais non nul : deux ventes du même article, même quantité, même CA, à la
+  // même seconde exacte, seraient confondues et l'une des deux ignorée (skipDuplicates) — accepté
+  // en connaissance de cause plutôt que d'accumuler de vrais doublons à chaque re-synchronisation.
+  dedupKey String @unique @map("dedup_key")
+
+  // Les deux filtres systématiquement utilisés côté métier : période seule (Pareto, CA de
+  // référence) et période + article (historique/évolution d'un article donné).
+  @@index([rposShopId, date])
+  @@index([rposShopId, ean, date])
+  @@map("sales_lines")
+}
+
+// Dernière date synchronisée par magasin (pas par ligne : une seule marque d'avancement par
+// magasin), pour que salesSyncJob sache à partir d'où reprendre sans tout retélécharger.
+model SalesSyncState {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @unique @map("rpos_shop_id")
+
+  lastSyncedUntil DateTime? @map("last_synced_until")
+  lastSyncStatus  String?   @map("last_sync_status") // 'ok' | 'error'
+  lastSyncError   String?   @map("last_sync_error")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("sales_sync_state")
+}
+
+// =============================================
+// RÉCUPÉRATION PAR TRANCHES AVEC REPRISE (backfill volumineux)
+// =============================================
+// Persiste la progression d'une récupération historique volumineuse (des millions de lignes sur
+// plusieurs mois), découpée en tranches temporelles pour rester sous la limite RPOS par appel.
+// Contrairement à SalesSyncState (une seule marque d'avancement par magasin, pour la synchro
+// incrémentale courante), ce modèle trace CHAQUE tranche d'UN run de récupération donné, pour
+// pouvoir reprendre exactement là où une interruption (crash, redéploiement, coupure réseau) a
+// arrêté le travail, sans jamais retélécharger une tranche déjà terminée ni perdre la progression
+// d'une tranche partiellement récupérée.
+model SalesBackfillRun {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  // Estimé une seule fois au lancement du run (comptage RPOS sur la période complète), sert à
+  // dimensionner le nombre et la taille des tranches — pas mis à jour ensuite même si le total
+  // réel diverge légèrement une fois toutes les tranches récupérées (cf. totalFetchedLines).
+  estimatedTotalLines Int @map("estimated_total_lines")
+  totalChunks         Int @map("total_chunks")
+
+  status String @default("IN_PROGRESS") @map("status") // IN_PROGRESS | PAUSED | DONE | ERROR
+
+  // Drapeau coopératif : posé par l'action "Mettre en pause" côté UI, lu par la boucle de
+  // traitement entre deux pages RPOS pour s'arrêter proprement dès que possible (pas au milieu
+  // d'une page en cours) plutôt que de tuer le process — la progression déjà persistée (pages et
+  // tranches terminées) reste intacte, une reprise ultérieure repart exactement de là.
+  pauseRequested Boolean @default(false) @map("pause_requested")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  chunks SalesBackfillChunk[]
+
+  // Un seul run actif à la fois par magasin : une reprise doit retrouver ce run existant plutôt
+  // que d'en créer un nouveau en parallèle qui retéléchargerait les mêmes tranches.
+  @@index([rposShopId, status])
+  @@map("sales_backfill_runs")
+}
+
+model SalesBackfillChunk {
+  id String @id @default(cuid())
+
+  runId String @map("run_id")
+  run   SalesBackfillRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  chunkIndex  Int      @map("chunk_index") // 1-based, ordre de traitement
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  expectedLines Int @default(0) @map("expected_lines") // count() RPOS réel sur la période de CETTE tranche
+  fetchedLines  Int @default(0) @map("fetched_lines")  // cumul des lignes effectivement insérées
+
+  // Curseur de reprise intra-tranche : dernière page RPOS insérée avec succès. Si le process est
+  // interrompu à la page 15/35, la reprise redemande la page 16, pas la tranche entière.
+  lastPageCompleted Int? @map("last_page_completed")
+
+  status String @default("PENDING") @map("status") // PENDING | IN_PROGRESS | DONE | ERROR
+  errorMessage String? @map("error_message")
+
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([runId, chunkIndex])
+  @@map("sales_backfill_chunks")
+}
+
+// =============================================
+// Prévision par IA (LLM) — readme évolution "intégration IA"
+// =============================================
+
+// Clé API d'un fournisseur IA (Gemini, OpenAI, Anthropic...), configurée entièrement depuis l'UI
+// (Paramètres > IA) plutôt que via une variable d'environnement, pour que l'utilisateur puisse
+// ajouter/changer de fournisseur ou de clé sans redéploiement. Plusieurs clés peuvent coexister
+// (même fournisseur ou non) : la génération essaie la clé de plus haute priorité en premier, et
+// bascule automatiquement sur la suivante en cas d'échec (quota épuisé, erreur d'authentification).
+model AiProviderKey {
+  id String @id @default(cuid())
+
+  provider String // "gemini" | "openai" | "anthropic" — détermine le format d'appel API utilisé
+  label    String // nom donné par l'utilisateur pour s'y retrouver (ex: "Gemini principal", "OpenAI secours")
+
+  // Stockée chiffrée (AES-256-GCM, cf. cryptoService.js) : jamais renvoyée en clair par l'API,
+  // seul un aperçu masqué (4 derniers caractères) est affiché côté UI après la sauvegarde initiale.
+  encryptedApiKey String @map("encrypted_api_key")
+
+  model String? // modèle précis à utiliser (ex: "gemini-2.0-flash"), optionnel : défaut par fournisseur si vide
+
+  priority Int     @default(0) // ordre d'essai, plus petit = essayé en premier
+  isActive Boolean @default(true) @map("is_active")
+
+  lastUsedAt    DateTime? @map("last_used_at")
+  lastError     String?   @map("last_error")
+  lastErrorAt   DateTime? @map("last_error_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdBy String?  @map("created_by")
+
+  @@map("ai_provider_keys")
+}
+
+// Résultat d'une analyse IA "à la demande" sur une proposition : garde une trace de ce qui a été
+// envoyé/reçu du LLM par article, séparément de la proposition classique (ProposalLine), pour ne
+// jamais écraser le calcul standard tant que l'utilisateur n'a pas explicitement choisi d'utiliser
+// la suggestion IA à la validation.
+model AiForecastRun {
+  id String @id @default(cuid())
+
+  proposalId String  @map("proposal_id")
+  rposShopId String  @map("rpos_shop_id")
+
+  providerUsed String? @map("provider_used") // quel fournisseur a effectivement répondu (après fallback éventuel)
+  status       String  @default("PENDING") @map("status") // PENDING | RUNNING | DONE | ERROR
+  errorMessage String? @map("error_message")
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  completedAt DateTime? @map("completed_at")
+  requestedBy String?   @map("requested_by")
+
+  lines AiForecastLine[]
+
+  @@map("ai_forecast_runs")
+}
+
+model AiForecastLine {
+  id String @id @default(cuid())
+
+  runId String        @map("run_id")
+  run   AiForecastRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  ean               String
+  label             String?
+  quantitySuggested Float  @map("quantity_suggested")
+  reasoning         String? // courte justification renvoyée par le LLM, affichée à titre indicatif
+
+  @@map("ai_forecast_lines")
+}

@@ -1,0 +1,332 @@
+[
+  {
+    "pos_id": "pos1",
+    "base_url": "https://pos1-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod1",
+    "shops": [
+      {
+        "code": "050",
+        "name": "CASH CENTER ZONE 4"
+      },
+      {
+        "code": "110",
+        "name": "SUPER U VALLON"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos2",
+    "base_url": "https://pos2-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod2",
+    "shops": [
+      {
+        "code": "120",
+        "name": "MANDARINE GOLF"
+      },
+      {
+        "code": "281",
+        "name": "CASINO MANDARINE ANGRE"
+      },
+      {
+        "code": "294",
+        "name": "CASINO MANDARINE RIVIERA 4"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos3",
+    "base_url": "https://pos3-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod3",
+    "shops": [
+      {
+        "code": "230",
+        "name": "HYPER CASINO PRIMA"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos4",
+    "base_url": "https://pos4-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod4",
+    "shops": [
+      {
+        "code": "035",
+        "name": "HYPER HAYAT"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos5",
+    "base_url": "https://pos5-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod5",
+    "shops": [
+      {
+        "code": "100",
+        "name": "CASINO 2 PLATEAUX"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos6",
+    "base_url": "https://pos6-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod6",
+    "shops": [
+      {
+        "code": "220",
+        "name": "SUPER U PLATEAU"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos7",
+    "base_url": "https://pos7-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod7",
+    "shops": [
+      {
+        "code": "235",
+        "name": "SUPER U DJIBI"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos8",
+    "base_url": "https://pos8-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod8",
+    "shops": [
+      {
+        "code": "240",
+        "name": "FNAC CAP SUD"
+      },
+      {
+        "code": "245",
+        "name": "FNAC CAP NORD"
+      },
+      {
+        "code": "250",
+        "name": "GIFI Z4"
+      },
+      {
+        "code": "261",
+        "name": "MONOP COCODY"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos9",
+    "base_url": "https://pos9-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod9",
+    "shops": [
+      {
+        "code": "080",
+        "name": "MANDARINE MARCORY"
+      },
+      {
+        "code": "291",
+        "name": "MANDARINE DANGA"
+      },
+      {
+        "code": "292",
+        "name": "MANDARINE KOUMASSI"
+      },
+      {
+        "code": "293",
+        "name": "MANDARINE AMBASSADE CHINE"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos10",
+    "base_url": "https://pos10-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod10",
+    "shops": [
+      {
+        "code": "290",
+        "name": "MANDARINE BIETRY"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos11",
+    "base_url": "https://pos11-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod11",
+    "shops": [
+      {
+        "code": "295",
+        "name": "CASINO ALLABRA"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos12",
+    "base_url": "https://pos12-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod12",
+    "shops": [
+      {
+        "code": "301",
+        "name": "S2P SOCOCE ZONE 3"
+      },
+      {
+        "code": "305",
+        "name": "S2P SOCOCE RUE DES JARDINS"
+      },
+      {
+        "code": "308",
+        "name": "S2P SOCOCE ABOBO"
+      },
+      {
+        "code": "311",
+        "name": "SOCOCE CHATEAU EAU"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos13",
+    "base_url": "https://pos13-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod13",
+    "shops": [
+      {
+        "code": "302",
+        "name": "S2P HYPER U"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos14",
+    "base_url": "https://pos14-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod14",
+    "shops": [
+      {
+        "code": "304",
+        "name": "S2P SOCOCE DALOA"
+      },
+      {
+        "code": "306",
+        "name": "S2P SOCOCE YAMOUSSOKRO"
+      },
+      {
+        "code": "310",
+        "name": "S2P ECOMARCHE SAN PEDRO"
+      },
+      {
+        "code": "313",
+        "name": "S2P SOCOCE ANANI"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos15",
+    "base_url": "https://pos15-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod15",
+    "shops": [
+      {
+        "code": "303",
+        "name": "S2P SOCOCE BOUAKE"
+      },
+      {
+        "code": "307",
+        "name": "S2P SOCOCE GAGNOA"
+      },
+      {
+        "code": "309",
+        "name": "S2P SUPERETTE SOCOCE BOUAKE"
+      },
+      {
+        "code": "312",
+        "name": "S2P SOCOCE RIVIERA"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos16",
+    "base_url": "https://pos16-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod16",
+    "shops": [
+      {
+        "code": "371",
+        "name": "CASH IVOIRE ANANERAIE"
+      },
+      {
+        "code": "412",
+        "name": "CASH IVOIRE DOKUI"
+      },
+      {
+        "code": "414",
+        "name": "CASH IVOIRE U PORT-BOUËT"
+      },
+      {
+        "code": "415",
+        "name": "CASH IVOIRE U M'BADON"
+      },
+      {
+        "code": "416",
+        "name": "CASH IVOIRE U LATRILLE"
+      },
+      {
+        "code": "417",
+        "name": "CASH IVOIRE U BINGERVILLE"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos17",
+    "base_url": "https://pos17-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod17",
+    "shops": [
+      {
+        "code": "353",
+        "name": "CASH IVOIRE U ANGRE"
+      },
+      {
+        "code": "356",
+        "name": "CASH IVOIRE U COCODY"
+      },
+      {
+        "code": "364",
+        "name": "CASH IVOIRE U 7 DECEMBRE"
+      },
+      {
+        "code": "410",
+        "name": "CASH IVOIRE U BESSIKOI"
+      },
+      {
+        "code": "411",
+        "name": "CASH IVOIRE U ANTENNE"
+      },
+      {
+        "code": "413",
+        "name": "CASH IVOIRE U AGOUTI"
+      }
+    ]
+  },
+  {
+    "pos_id": "pos18",
+    "base_url": "https://pos18-prod-prosuma.prosuma.pos",
+    "prod_label": "Serveur Prosuma Prod18",
+    "shops": [
+      {
+        "code": "354",
+        "name": "CASH IVOIRE U TOITS ROUGES"
+      },
+      {
+        "code": "357",
+        "name": "CASH IVOIRE U REMBLAIS"
+      },
+      {
+        "code": "368",
+        "name": "CASH IVOIRE U SADIGUIBA"
+      },
+      {
+        "code": "372",
+        "name": "CASH IVOIRE U MAROC"
+      },
+      {
+        "code": "376",
+        "name": "CASH IVOIRE U SICOGI ANGRE"
+      },
+      {
+        "code": "378",
+        "name": "CASH IVOIRE DJE KONAN"
+      }
+    ]
+  }
+]
