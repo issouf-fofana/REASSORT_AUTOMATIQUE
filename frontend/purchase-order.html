@@ -720,6 +720,9 @@
                                                             : null;
 
                                                        let breakdownHtml = '';
+                                                       // Ces compteurs sont globaux au magasin (pas ventilés par secteur/rayon) : affichés
+                                                       // identiques que la carte apparaisse sur la vue Secteurs ou sur la vue Rayons d'un
+                                                       // secteur particulier — seul le % CA affiché juste au-dessus varie selon le niveau.
                                                        if (exclusionStats) {
                                                             const items = [
                                                                  ['genericArticle', 'Génériques exclus', exclusionStats.skippedGenericArticle],
@@ -811,9 +814,6 @@
                                                        title.textContent = 'Secteurs';
                                                        const sectors = groupLines(lines, function (l) { return l.sector || l.department || 'Sans secteur'; });
                                                        const tiles = sectors.map(function ([name, d]) { return [name, d, buildNavUrl(name, null)]; });
-                                                       // Le détail des exclusions (générique, stock négatif...) n'a de sens qu'au niveau global
-                                                       // (toutes les stats sont pour tout le magasin, pas ventilées par rayon) : affiché
-                                                       // seulement sur la vue Secteurs, pas sur la vue Rayons d'un secteur particulier.
                                                        renderTileGrid(tiles, sectors, proposal, proposal);
                                                        return;
                                                   }
@@ -825,7 +825,7 @@
                                                   const sectorLines = lines.filter(function (l) { return (l.sector || l.department || 'Sans secteur') === selectedSector; });
                                                   const rayons = groupLines(sectorLines, function (l) { return l.department || 'Sans rayon'; });
                                                   const tiles = rayons.map(function ([name, d]) { return [name, d, buildNavUrl(selectedSector, name)]; });
-                                                  renderTileGrid(tiles, rayons, null, proposal);
+                                                  renderTileGrid(tiles, rayons, proposal, proposal);
                                              }
 
                                              // Génère les boutons Précédent/1..N/Suivant. Change de page sans recharger les données
