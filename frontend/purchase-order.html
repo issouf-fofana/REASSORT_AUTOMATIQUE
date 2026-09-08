@@ -692,7 +692,7 @@
                                              // magasin" = 100% − somme des % CA affichés, pour visualiser en un coup d'œil la part que ces
                                              // cartes représentent par rapport au total (le reste couvre tout ce qui n'est pas proposé :
                                              // hors Pareto 80/20, stock négatif, déjà commandé, génériques exclus, non commandable...).
-                                             function renderTileGrid(groups, rawGroups, exclusionStats) {
+                                             function renderTileGrid(groups, rawGroups, exclusionStats, proposalForRevenue) {
                                                   const tilesHtml = groups.map(function ([name, d, href]) {
                                                        return '<div class="col-md-4 col-lg-3">' +
                                                             '<a href="' + href + '" class="card text-decoration-none h-100 reassort-dept-tile">' +
@@ -712,6 +712,12 @@
                                                        // influencer le pourcentage affiché.
                                                        const coveredPct = rawGroups.reduce(function (sum, [, d]) { return sum + d.revenuePct; }, 0);
                                                        const remainderPct = Math.max(0, 100 - coveredPct);
+                                                       // revenueSharePct (donc remainderPct) est toujours une part du CA magasin total, jamais
+                                                       // du CA du secteur affiché — cf. revenueSharePctFor() côté backend — donc le montant se
+                                                       // dérive de shopTotalRevenue même au niveau Rayons d'un secteur particulier.
+                                                       const remainderValue = proposalForRevenue && proposalForRevenue.shopTotalRevenue
+                                                            ? Math.round(proposalForRevenue.shopTotalRevenue * remainderPct / 100)
+                                                            : null;
 
                                                        let breakdownHtml = '';
                                                        if (exclusionStats) {
@@ -739,6 +745,7 @@
                                                             '<h5 class="card-title mb-1 text-muted">Reste du CA magasin</h5>' +
                                                             '<div class="text-muted small mb-2">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>' +
                                                             '<div class="fs-20 fw-semibold text-secondary">' + remainderPct.toFixed(1) + ' % CA</div>' +
+                                                            (remainderValue !== null ? '<div class="text-muted small">' + remainderValue.toLocaleString('fr-FR') + ' CFA</div>' : '') +
                                                             breakdownHtml +
                                                             '</div></div></div>';
                                                   }
@@ -807,7 +814,7 @@
                                                        // Le détail des exclusions (générique, stock négatif...) n'a de sens qu'au niveau global
                                                        // (toutes les stats sont pour tout le magasin, pas ventilées par rayon) : affiché
                                                        // seulement sur la vue Secteurs, pas sur la vue Rayons d'un secteur particulier.
-                                                       renderTileGrid(tiles, sectors, proposal);
+                                                       renderTileGrid(tiles, sectors, proposal, proposal);
                                                        return;
                                                   }
 
@@ -818,7 +825,7 @@
                                                   const sectorLines = lines.filter(function (l) { return (l.sector || l.department || 'Sans secteur') === selectedSector; });
                                                   const rayons = groupLines(sectorLines, function (l) { return l.department || 'Sans rayon'; });
                                                   const tiles = rayons.map(function ([name, d]) { return [name, d, buildNavUrl(selectedSector, name)]; });
-                                                  renderTileGrid(tiles, rayons);
+                                                  renderTileGrid(tiles, rayons, null, proposal);
                                              }
 
                                              // Génère les boutons Précédent/1..N/Suivant. Change de page sans recharger les données
