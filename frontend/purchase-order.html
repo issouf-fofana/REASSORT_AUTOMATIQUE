@@ -68,6 +68,10 @@
                               </div>
                               <div class="d-flex gap-2 align-items-center">
                                    <button id="reassort-dept-list-refresh" class="btn btn-sm btn-outline-secondary">Actualiser</button>
+                                   <button id="reassort-weekly-plan-history" class="btn btn-sm btn-outline-secondary" style="display:none;">
+                                        <iconify-icon icon="solar:history-bold-duotone" class="align-middle"></iconify-icon>
+                                        Historique de la semaine
+                                   </button>
                                    <button id="reassort-dept-list-force-generate" class="btn btn-sm btn-outline-warning">Forcer une nouvelle génération</button>
                               </div>
                          </div>
@@ -289,6 +293,25 @@
                                                   <div class="modal-footer">
                                                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
                                                        <button type="button" id="generate-confirm-ok" class="btn btn-primary">Générer</button>
+                                                  </div>
+                                             </div>
+                                        </div>
+                                   </div>
+
+                                   <div class="modal fade" id="weekly-plan-history-modal" tabindex="-1" aria-hidden="true">
+                                        <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+                                             <div class="modal-content">
+                                                  <div class="modal-header">
+                                                       <h5 class="modal-title d-flex align-items-center gap-2">
+                                                            <iconify-icon icon="solar:history-bold-duotone" class="text-primary fs-24"></iconify-icon>
+                                                            <span>Historique de la semaine</span>
+                                                       </h5>
+                                                       <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                  </div>
+                                                  <div class="modal-body">
+                                                       <div id="weekly-plan-history-body">
+                                                            <p class="text-muted text-center py-4">Chargement...</p>
+                                                       </div>
                                                   </div>
                                              </div>
                                         </div>
@@ -798,6 +821,12 @@
                                                   const title = document.getElementById('reassort-dept-list-title');
 
                                                   renderDeptListContext(proposal);
+
+                                                  // Historique de la semaine (CAHIER_DES_CHARGES.md §12-13) : bouton visible seulement si
+                                                  // cette proposition est rattachée à un plan hebdomadaire (WeeklyReplenishmentPlan).
+                                                  const historyBtn = document.getElementById('reassort-weekly-plan-history');
+                                                  historyBtn.style.display = (proposal && proposal.weeklyPlanId) ? '' : 'none';
+                                                  historyBtn.dataset.weeklyPlanId = proposal ? (proposal.weeklyPlanId || '') : '';
 
                                                   if (!lines.length) {
                                                        document.getElementById('reassort-dept-list-empty').style.display = '';
@@ -1408,6 +1437,62 @@
                                                                       '</td></tr>';
                                                             }).join('') +
                                                             '</tbody></table></div>';
+                                                  } catch (err) {
+                                                       body.innerHTML = '<div class="alert alert-danger">Erreur: ' + err.message + '</div>';
+                                                  }
+                                             });
+
+                                             // Historique de la semaine (CAHIER_DES_CHARGES.md §12-13) : liste des révisions du plan
+                                             // hebdomadaire et évolution de la quantité proposée par article entre révisions.
+                                             const weeklyPlanHistoryModalEl = document.getElementById('weekly-plan-history-modal');
+                                             document.body.appendChild(weeklyPlanHistoryModalEl);
+                                             let weeklyPlanHistoryModal = null;
+                                             function getWeeklyPlanHistoryModal() {
+                                                  if (!weeklyPlanHistoryModal) weeklyPlanHistoryModal = new bootstrap.Modal(weeklyPlanHistoryModalEl);
+                                                  return weeklyPlanHistoryModal;
+                                             }
+
+                                             document.getElementById('reassort-weekly-plan-history').addEventListener('click', async function () {
+                                                  const weeklyPlanId = this.dataset.weeklyPlanId;
+                                                  if (!weeklyPlanId) return;
+                                                  const body = document.getElementById('weekly-plan-history-body');
+                                                  body.innerHTML = '<p class="text-muted text-center py-4">Chargement...</p>';
+                                                  getWeeklyPlanHistoryModal().show();
+                                                  try {
+                                                       const res = await window.reassortFetch('/reassort/weekly-plan/' + weeklyPlanId + '/history');
+                                                       const json = await res.json();
+                                                       if (!json.success) throw new Error(json.message);
+                                                       const h = json.data;
+                                                       const weekLabel = new Date(h.targetWeekStart).toLocaleDateString('fr-FR') + ' → ' + new Date(new Date(h.targetWeekEnd).getTime() - 86400000).toLocaleDateString('fr-FR');
+
+                                                       const revisionsHtml = '<h6 class="mb-2">Révisions — semaine du ' + weekLabel + '</h6>' +
+                                                            '<div class="table-responsive mb-4"><table class="table table-sm table-hover">' +
+                                                            '<thead><tr><th>#</th><th>Générée le</th><th>Statut</th><th class="text-end">Articles</th></tr></thead><tbody>' +
+                                                            h.revisions.map(function (r) {
+                                                                 return '<tr><td>' + r.revisionNumber + '</td><td>' + new Date(r.generatedAt).toLocaleString('fr-FR') + '</td>' +
+                                                                      '<td><span class="badge bg-' + (r.status === 'VALIDATED' ? 'success' : r.status === 'REJECTED' ? 'secondary' : 'warning') + '-subtle text-' + (r.status === 'VALIDATED' ? 'success' : r.status === 'REJECTED' ? 'secondary' : 'warning') + '">' + r.status + '</span></td>' +
+                                                                      '<td class="text-end">' + r.articleCount + '</td></tr>';
+                                                            }).join('') +
+                                                            '</tbody></table></div>';
+
+                                                       const articlesWithChange = h.articles.filter(function (a) { return a.variation !== 0; });
+                                                       const articlesHtml = h.revisions.length < 2
+                                                            ? '<p class="text-muted">Une seule révision pour l\'instant : pas encore d\'évolution à comparer.</p>'
+                                                            : (!articlesWithChange.length
+                                                                 ? '<p class="text-muted">Aucun changement de quantité entre les révisions.</p>'
+                                                                 : '<h6 class="mb-2">Évolution par article (première → dernière révision)</h6>' +
+                                                                   '<div class="table-responsive"><table class="table table-sm table-hover">' +
+                                                                   '<thead><tr><th>EAN</th><th>Article</th><th class="text-end">Historique</th><th class="text-end">Variation</th></tr></thead><tbody>' +
+                                                                   articlesWithChange.map(function (a) {
+                                                                        const historyStr = a.history.map(function (pt) { return pt.quantitySuggested; }).join(' → ');
+                                                                        const variationLabel = (a.variation > 0 ? '+' : '') + a.variation;
+                                                                        return '<tr><td>' + a.ean + '</td><td>' + (a.label || '—') + '</td>' +
+                                                                             '<td class="text-end">' + historyStr + '</td>' +
+                                                                             '<td class="text-end fw-semibold text-' + (a.variation > 0 ? 'success' : 'danger') + '">' + variationLabel + '</td></tr>';
+                                                                   }).join('') +
+                                                                   '</tbody></table></div>');
+
+                                                       body.innerHTML = revisionsHtml + articlesHtml;
                                                   } catch (err) {
                                                        body.innerHTML = '<div class="alert alert-danger">Erreur: ' + err.message + '</div>';
                                                   }
