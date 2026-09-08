@@ -749,6 +749,54 @@
                          </div>
                     </div>
 
+                    <div class="row" id="system-settings-section-daily-review">
+                         <div class="col-xl-8">
+                              <div class="card">
+                                   <div class="card-header">
+                                        <h4 class="card-title d-flex align-items-center gap-1">
+                                             <iconify-icon icon="solar:refresh-circle-bold-duotone" class="text-primary fs-20"></iconify-icon>
+                                             Réajustement quotidien du réassort
+                                        </h4>
+                                   </div>
+                                   <div class="card-body">
+                                        <div class="alert alert-light border mb-3 small">
+                                             <strong>À quoi ça sert :</strong> chaque jour, le système recalcule les propositions de la semaine en
+                                             cours qui n'ont pas encore été validées, en tenant compte des ventes et du stock observés depuis la
+                                             dernière génération. Une nouvelle révision n'est créée que si la quantité totale change de plus du
+                                             seuil configuré ci-dessous — sinon la proposition reste inchangée, pour éviter de multiplier les
+                                             révisions sur des variations mineures.
+                                        </div>
+                                        <div class="mb-3">
+                                             <label class="form-label fw-semibold">Expression cron</label>
+                                             <input type="text" id="system-daily-review-cron" class="form-control" placeholder="30 6 * * *" style="max-width: 300px;">
+                                             <div class="form-text">
+                                                  Exemple : "30 6 * * *" = tous les jours à 6h30, après le job nocturne (4h) et la synchro des
+                                                  ventes de la nuit.
+                                             </div>
+                                        </div>
+                                        <div class="mb-3">
+                                             <label class="form-label fw-semibold">Seuil de changement pour créer une révision</label>
+                                             <div class="input-group" style="max-width: 200px;">
+                                                  <input type="number" id="system-revision-threshold" class="form-control" min="0" max="100" step="1">
+                                                  <span class="input-group-text">%</span>
+                                             </div>
+                                             <div class="form-text">
+                                                  Exemple : avec 10%, une variation de quantité totale proposée inférieure à 10% ne crée pas de
+                                                  nouvelle révision.
+                                             </div>
+                                        </div>
+                                        <button type="button" id="system-daily-review-save" class="btn btn-primary">Enregistrer</button>
+                                        <div id="system-daily-review-error" class="alert alert-danger mt-3" style="display:none;"></div>
+                                        <div id="system-daily-review-success" class="alert alert-success mt-3" style="display:none;"></div>
+
+                                        <hr class="my-4">
+                                        <button type="button" id="system-run-daily-review-now" class="btn btn-outline-secondary">Exécuter le réajustement maintenant</button>
+                                        <div id="system-run-daily-review-result" class="small mt-2"></div>
+                                   </div>
+                              </div>
+                         </div>
+                    </div>
+
                     </div>
                     <!-- /tab-cron -->
 
@@ -1217,6 +1265,8 @@
                                         document.getElementById('system-admin-stockout-threshold').value = Math.round((parseFloat(d.ADMIN_DASHBOARD_STOCKOUT_ALERT_THRESHOLD) || 0.30) * 100);
                                         document.getElementById('system-jwt-expires').value = d.JWT_EXPIRES_IN || '7d';
                                         document.getElementById('system-cron').value = d.NIGHTLY_PROPOSAL_CRON || '0 4 * * *';
+                                        document.getElementById('system-daily-review-cron').value = d.DAILY_REVIEW_CRON || '30 6 * * *';
+                                        document.getElementById('system-revision-threshold').value = Math.round((parseFloat(d.REVISION_CHANGE_THRESHOLD) || 0.10) * 100);
                                    } catch (err) {
                                         // silencieux si non-admin (route protégée)
                                    }
@@ -1531,6 +1581,38 @@
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
                                         resultBox.textContent = 'Terminé : ' + json.message;
+                                   } catch (err) {
+                                        resultBox.textContent = 'Erreur: ' + err.message;
+                                   }
+                              });
+
+                              // --- Réajustement quotidien (CAHIER_DES_CHARGES.md §15-16) ---
+                              document.getElementById('system-daily-review-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('system-daily-review-error');
+                                   const okBox = document.getElementById('system-daily-review-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        await saveSystemConfigKey('DAILY_REVIEW_CRON', document.getElementById('system-daily-review-cron').value);
+                                        const pctValue = parseFloat(document.getElementById('system-revision-threshold').value) / 100;
+                                        await saveSystemConfigKey('REVISION_CHANGE_THRESHOLD', pctValue);
+                                        okBox.textContent = 'Planification mise à jour.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
+
+                              document.getElementById('system-run-daily-review-now').addEventListener('click', async function () {
+                                   const resultBox = document.getElementById('system-run-daily-review-result');
+                                   resultBox.textContent = 'Exécution en cours (peut prendre plusieurs minutes par magasin à réviser)...';
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/run-daily-review', { method: 'POST' });
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        const d = json.data;
+                                        resultBox.textContent = 'Terminé : ' + d.reviewed + ' plan(s) revu(s), ' + d.revised + ' révisé(s), ' + d.skipped + ' inchangé(s), ' + d.failed + ' échec(s).';
                                    } catch (err) {
                                         resultBox.textContent = 'Erreur: ' + err.message;
                                    }

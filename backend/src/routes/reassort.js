@@ -81,6 +81,19 @@ router.post('/run-sales-sync', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/run-daily-review - déclenche manuellement le réajustement quotidien des
+// plans hebdomadaires (ADMIN, pour les tests). CAHIER_DES_CHARGES.md §15-16, étape 3.
+router.post('/run-daily-review', requireAdmin, async (req, res) => {
+  try {
+    const { runDailyReplenishmentReview } = require('../jobs/dailyReplenishmentReviewJob');
+    const result = await runDailyReplenishmentReview();
+    res.json({ success: true, message: 'Réajustement quotidien exécuté', data: result });
+  } catch (error) {
+    console.error('Manual daily review error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/sales-backfill - démarre (ou reprend, si un run existe déjà pour ce magasin
 // et cette période exacte) une récupération historique volumineuse de l'historique de vente d'un
 // magasin, découpée en tranches persistées avec reprise automatique (ADMIN). Ne bloque pas : le
@@ -1057,10 +1070,24 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Clé de configuration inconnue' });
     }
 
-    if ([systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON, systemConfig.KEYS.RECEPTION_SYNC_CRON].includes(key)) {
+    const CRON_KEYS = [
+      systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON,
+      systemConfig.KEYS.RECEPTION_SYNC_CRON,
+      systemConfig.KEYS.SALES_SYNC_CRON,
+      systemConfig.KEYS.SHOPS_SYNC_CRON,
+      systemConfig.KEYS.DAILY_REVIEW_CRON,
+    ];
+    if (CRON_KEYS.includes(key)) {
       const cron = require('node-cron');
       if (!cron.validate(value)) {
         return res.status(400).json({ success: false, message: 'Expression cron invalide' });
+      }
+    }
+
+    if (key === systemConfig.KEYS.REVISION_CHANGE_THRESHOLD) {
+      const threshold = parseFloat(value);
+      if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
+        return res.status(400).json({ success: false, message: 'Seuil invalide : nombre entre 0 et 1 (ex: 0.10 pour 10%)' });
       }
     }
 
@@ -1089,6 +1116,18 @@ router.put('/system-config', requireAdmin, async (req, res) => {
     if (key === systemConfig.KEYS.RECEPTION_SYNC_CRON) {
       const { startOrRestartReceptionSyncJob } = require('../jobs/cronManager');
       await startOrRestartReceptionSyncJob();
+    }
+    if (key === systemConfig.KEYS.SALES_SYNC_CRON) {
+      const { startOrRestartSalesSyncJob } = require('../jobs/cronManager');
+      await startOrRestartSalesSyncJob();
+    }
+    if (key === systemConfig.KEYS.SHOPS_SYNC_CRON) {
+      const { startOrRestartShopsSyncJob } = require('../jobs/cronManager');
+      await startOrRestartShopsSyncJob();
+    }
+    if (key === systemConfig.KEYS.DAILY_REVIEW_CRON) {
+      const { startOrRestartDailyReviewJob } = require('../jobs/cronManager');
+      await startOrRestartDailyReviewJob();
     }
 
     res.json({ success: true, data: { key, value: systemConfig.SENSITIVE_KEYS.has(key) ? '••••••••' : value } });
