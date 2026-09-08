@@ -20,8 +20,20 @@ const prisma = new PrismaClient();
 // MIDDLEWARE
 // =============================================
 app.use(helmet());
+// localhost et 127.0.0.1 sont deux origines distinctes pour le navigateur (CORS les compare
+// strictement) même si elles pointent sur la même machine : on autorise les deux variantes du
+// port configuré pour ne pas dépendre de la façon dont l'utilisateur tape l'URL dans son navigateur.
+const corsOriginConfig = process.env.CORS_ORIGIN || 'http://localhost:8080';
+const corsOrigins = new Set();
+corsOriginConfig.split(',').forEach((raw) => {
+  const origin = raw.trim();
+  corsOrigins.add(origin);
+  corsOrigins.add(origin.replace('://localhost', '://127.0.0.1'));
+  corsOrigins.add(origin.replace('://127.0.0.1', '://localhost'));
+});
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: [...corsOrigins],
   credentials: true
 }));
 app.use(morgan('dev'));
