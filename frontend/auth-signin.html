@@ -1,138 +1,110 @@
 <!DOCTYPE html>
-<html lang="en" class="h-100">
+<html lang="en">
 
-
-<!-- Mirrored from techzaa.in/larkon/admin/auth-signin.html by HTTrack Website Copier/3.x [XR&CO'2014], Sat, 15 Aug 2026 12:06:55 GMT -->
 <head>
      <!-- Title Meta -->
      <meta charset="utf-8" />
-     <title>Sign In | Larkon - Responsive Admin Dashboard Template</title>
+     <title>Connexion | Réassort Automatique</title>
      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     <meta name="description" content="A fully responsive premium admin dashboard template" />
-     <meta name="author" content="Techzaa" />
      <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 
-     <!-- App favicon -->
-     <link rel="shortcut icon" href="assets/images/favicon.ico">
-
-     <!-- Vendor css (Require in all Page) -->
-     <link href="assets/css/vendor.min.css" rel="stylesheet" type="text/css" />
-
-     <!-- Icons css (Require in all Page) -->
-     <link href="assets/css/icons.min.css" rel="stylesheet" type="text/css" />
-
-     <!-- App css (Require in all Page) -->
-     <link href="assets/css/app.min.css" rel="stylesheet" type="text/css" />
+     <!-- Volt Bootstrap 5 Dashboard : CSS compilée depuis template-volt-src/ + template/volt-bootstrap-5-dashboard
+          (gulp build:dev), copiée dans assets/volt/. Remplace entièrement vendor.min.css/icons.min.css/app.min.css (Larkon). -->
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
 
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
 </head>
 
-<body class="h-100">
-     <div class="d-flex flex-column h-100 p-3">
-          <div class="d-flex flex-column flex-grow-1">
-               <div class="row h-100">
-                    <div class="col-xxl-7">
-                         <div class="row justify-content-center h-100">
-                              <div class="col-lg-6 py-lg-5">
-                                   <div class="d-flex flex-column h-100 justify-content-center">
-                                        <div class="auth-logo mb-4">
-                                             <a href="index.html" class="logo-dark">
-                                                  <img src="assets/images/logo-dark.png" height="24" alt="logo dark">
-                                             </a>
+<body>
 
-                                             <a href="index.html" class="logo-light">
-                                                  <img src="assets/images/logo-light.png" height="24" alt="logo light">
-                                             </a>
-                                        </div>
-
-                                        <h2 class="fw-bold fs-24">Connexion</h2>
-
-                                        <p class="text-muted mt-1 mb-4">Réassort automatique — connectez-vous avec votre compte.</p>
-
-                                        <div id="login-error" class="alert alert-danger" style="display:none;"></div>
-
-                                        <div class="mb-5">
-                                             <form id="login-form" class="authentication-form">
-                                                  <div class="mb-3">
-                                                       <label class="form-label" for="login-email">Email</label>
-                                                       <input type="email" id="login-email" name="email" class="form-control" placeholder="Entrez votre email" required>
-                                                  </div>
-                                                  <div class="mb-3">
-                                                       <label class="form-label" for="login-password">Mot de passe</label>
-                                                       <input type="password" id="login-password" name="password" class="form-control" placeholder="Entrez votre mot de passe" required>
-                                                  </div>
-
-                                                  <div class="mb-1 text-center d-grid">
-                                                       <button id="login-submit" class="btn btn-soft-primary" type="submit">Se connecter</button>
-                                                  </div>
-                                             </form>
-                                             <script>
-                                                  (function () {
-                                                       const API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001/api';
-                                                       const form = document.getElementById('login-form');
-                                                       const errorBox = document.getElementById('login-error');
-                                                       const submitBtn = document.getElementById('login-submit');
-
-                                                       // Déjà connecté -> direct au tableau de bord
-                                                       if (localStorage.getItem('reassort_token')) {
-                                                            window.location.href = 'index.html';
-                                                       }
-
-                                                       form.addEventListener('submit', async function (e) {
-                                                            e.preventDefault();
-                                                            errorBox.style.display = 'none';
-                                                            submitBtn.disabled = true;
-
-                                                            try {
-                                                                 const res = await fetch(API_BASE + '/auth/login', {
-                                                                      method: 'POST',
-                                                                      headers: { 'Content-Type': 'application/json' },
-                                                                      body: JSON.stringify({
-                                                                           email: document.getElementById('login-email').value,
-                                                                           password: document.getElementById('login-password').value,
-                                                                      }),
-                                                                 });
-                                                                 const json = await res.json();
-                                                                 if (!json.success) throw new Error(json.message);
-
-                                                                 localStorage.setItem('reassort_token', json.data.token);
-                                                                 localStorage.setItem('reassort_user', JSON.stringify(json.data.user));
-                                                                 window.location.href = 'index.html';
-                                                            } catch (err) {
-                                                                 errorBox.textContent = err.message;
-                                                                 errorBox.style.display = 'block';
-                                                            } finally {
-                                                                 submitBtn.disabled = false;
-                                                            }
-                                                       });
-                                                  })();
-                                             </script>
-                                        </div>
+     <main>
+          <section class="vh-lg-100 mt-5 mt-lg-0 bg-soft d-flex align-items-center">
+               <div class="container">
+                    <div class="row justify-content-center">
+                         <div class="col-12 d-flex align-items-center justify-content-center">
+                              <div class="bg-white shadow border-0 rounded border-light p-4 p-lg-5 w-100" style="max-width: 500px;">
+                                   <div class="text-center text-md-center mb-4 mt-md-0">
+                                        <h1 class="mb-0 h3">Connexion</h1>
+                                        <p class="text-muted mt-1 mb-0">Réassort automatique — connectez-vous avec votre compte.</p>
                                    </div>
-                              </div>
-                         </div>
-                    </div>
 
-                    <div class="col-xxl-5 d-none d-xxl-flex">
-                         <div class="card h-100 mb-0 overflow-hidden">
-                              <div class="d-flex flex-column h-100">
-                                   <img src="assets/images/small/img-10.jpg" alt="" class="w-100 h-100">
+                                   <div id="login-error" class="alert alert-danger" style="display:none;"></div>
+
+                                   <form id="login-form" class="mt-4">
+                                        <div class="form-group mb-4">
+                                             <label for="login-email">Email</label>
+                                             <div class="input-group">
+                                                  <span class="input-group-text">
+                                                       <svg class="icon icon-xs text-gray-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path></svg>
+                                                  </span>
+                                                  <input type="email" id="login-email" name="email" class="form-control" placeholder="Entrez votre email" autofocus required>
+                                             </div>
+                                        </div>
+                                        <div class="form-group mb-4">
+                                             <label for="login-password">Mot de passe</label>
+                                             <div class="input-group">
+                                                  <span class="input-group-text">
+                                                       <svg class="icon icon-xs text-gray-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+                                                  </span>
+                                                  <input type="password" id="login-password" name="password" class="form-control" placeholder="Entrez votre mot de passe" required>
+                                             </div>
+                                        </div>
+                                        <div class="d-grid">
+                                             <button id="login-submit" class="btn btn-gray-800" type="submit">Se connecter</button>
+                                        </div>
+                                   </form>
+                                   <script>
+                                        (function () {
+                                             const API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001/api';
+                                             const form = document.getElementById('login-form');
+                                             const errorBox = document.getElementById('login-error');
+                                             const submitBtn = document.getElementById('login-submit');
+
+                                             // Déjà connecté -> direct au tableau de bord
+                                             if (localStorage.getItem('reassort_token')) {
+                                                  window.location.href = 'index.html';
+                                             }
+
+                                             form.addEventListener('submit', async function (e) {
+                                                  e.preventDefault();
+                                                  errorBox.style.display = 'none';
+                                                  submitBtn.disabled = true;
+
+                                                  try {
+                                                       const res = await fetch(API_BASE + '/auth/login', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                                 email: document.getElementById('login-email').value,
+                                                                 password: document.getElementById('login-password').value,
+                                                            }),
+                                                       });
+                                                       const json = await res.json();
+                                                       if (!json.success) throw new Error(json.message);
+
+                                                       localStorage.setItem('reassort_token', json.data.token);
+                                                       localStorage.setItem('reassort_user', JSON.stringify(json.data.user));
+                                                       window.location.href = 'index.html';
+                                                  } catch (err) {
+                                                       errorBox.textContent = err.message;
+                                                       errorBox.style.display = 'block';
+                                                  } finally {
+                                                       submitBtn.disabled = false;
+                                                  }
+                                             });
+                                        })();
+                                   </script>
                               </div>
                          </div>
                     </div>
                </div>
-          </div>
-     </div>
+          </section>
+     </main>
 
-     <!-- Vendor Javascript (Require in all Page) -->
-     <script src="assets/js/vendor.js"></script>
-
-     <!-- App Javascript (Require in all Page) -->
-     <script src="assets/js/app.js"></script>
-
+     <!-- Volt vendor JS (Require in all Page) -->
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
 </body>
 
-
-<!-- Mirrored from techzaa.in/larkon/admin/auth-signin.html by HTTrack Website Copier/3.x [XR&CO'2014], Sat, 15 Aug 2026 12:06:55 GMT -->
 </html>

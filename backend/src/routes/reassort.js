@@ -723,6 +723,23 @@ router.get('/proposal/:id/status', async (req, res) => {
   }
 });
 
+// GET /api/reassort/proposal/:id/excluded?reason=... - détail des articles exclus d'une catégorie
+// (carte "Reste du CA magasin"), triés par part de CA magasin décroissante.
+router.get('/proposal/:id/excluded', async (req, res) => {
+  try {
+    const { reason } = req.query;
+    const where = { proposalId: req.params.id };
+    if (reason) where.reason = reason;
+    const items = await prisma.excludedArticle.findMany({
+      where,
+      orderBy: { revenueSharePct: 'desc' },
+    });
+    res.json({ success: true, data: items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/conformity - taux de conformité (propositions validées sans modification)
 router.get('/conformity', async (req, res) => {
   try {

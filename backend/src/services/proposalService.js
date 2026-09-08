@@ -355,6 +355,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 
   const proposals = [];
   const skipped = { notFound: [], notOrderable: [], negativeStock: [], alreadyOrdered: [], genericArticle: [] };
+  const revenueSharePctFor = (ean) => shopTotalRevenue > 0 ? ((revenueByEan.get(ean) || 0) / shopTotalRevenue) * 100 : null;
 
   // Pré-chauffe le cache produit par lots de ~200 EAN via le filtre RPOS ean__in (confirmé
   // supporté par test direct), au lieu d'un appel getProductByEan par article : sur un magasin à
@@ -383,10 +384,10 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     const product = await getProductByEanCached(posId, shopId, ean);
 
     if (!product) {
-      return { skip: 'notFound', ean };
+      return { skip: 'notFound', ean, label: art.label, revenueSharePct: revenueSharePctFor(ean) };
     }
     if (!product.orderable) {
-      return { skip: 'notOrderable', ean };
+      return { skip: 'notOrderable', ean, label: art.label, revenueSharePct: revenueSharePctFor(ean) };
     }
 
     // Écarte les articles génériques/poids libre (agrégés au niveau d'un rayon entier, ex:
@@ -394,7 +395,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     // et faussent totalement le calcul avec des quantités proposées énormes.
     const sellingPriceForFilter = Number(product.selling_price || 0);
     if (config.excludeGenericArticlesBelowPrice > 0 && sellingPriceForFilter < config.excludeGenericArticlesBelowPrice) {
-      return { skip: 'genericArticle', ean };
+      return { skip: 'genericArticle', ean, label: art.label, revenueSharePct: revenueSharePctFor(ean) };
     }
 
     // Secteur + rayon (readme §11 et évolution "vue par secteur puis rayon") : le rayon (2e niveau
@@ -451,7 +452,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     const excludedAsAlreadyOrdered = quantityProposed <= 0 && quantityInTransit > 0;
     const excludedAsAlreadyOrderedRpos = quantityProposed <= 0 && quantityInTransit === 0 && rposOrderedQty > 0;
     if (quantityProposed <= 0 && !excludedAsAlreadyOrdered && !excludedAsAlreadyOrderedRpos) {
-      return { hadNegativeStockSkip, ean, proposal: null };
+      return { hadNegativeStockSkip, ean, label: art.label, revenueSharePct: revenueSharePctFor(ean), proposal: null };
     }
 
     // Quantité qui aurait été proposée si on ignorait la commande RPOS récente hors plateforme —
@@ -471,6 +472,8 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     return {
       hadNegativeStockSkip,
       ean,
+      label: art.label,
+      revenueSharePct,
       proposal: {
         ean,
         label: art.label,
@@ -515,12 +518,12 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     for (const result of results) {
       if (!result) continue;
       if (result.skip) {
-        skipped[result.skip].push(result.ean);
+        skipped[result.skip].push({ ean: result.ean, label: result.label, revenueSharePct: result.revenueSharePct });
         continue;
       }
-      if (result.hadNegativeStockSkip) skipped.negativeStock.push(result.ean);
+      if (result.hadNegativeStockSkip) skipped.negativeStock.push({ ean: result.ean, label: result.label, revenueSharePct: result.revenueSharePct });
       if (!result.proposal) continue;
-      if (result.proposal.excludedAsAlreadyOrdered) skipped.alreadyOrdered.push(result.ean);
+      if (result.proposal.excludedAsAlreadyOrdered) skipped.alreadyOrdered.push({ ean: result.ean, label: result.label, revenueSharePct: result.revenueSharePct });
       proposals.push(result.proposal);
     }
   }
@@ -531,6 +534,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 
   return {
     proposals,
+    skipped,
     stats: {
       totalArticlesWithSales,
       totalArticlesAnalyzed: articles.length,
@@ -631,6 +635,22 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     },
     include: { lines: true },
   });
+
+  const excludedArticleRows = [];
+  for (const [reason, items] of Object.entries(result.skipped)) {
+    for (const item of items) {
+      excludedArticleRows.push({
+        proposalId: proposal.id,
+        ean: item.ean,
+        label: item.label || null,
+        revenueSharePct: item.revenueSharePct,
+        reason,
+      });
+    }
+  }
+  if (excludedArticleRows.length) {
+    await prisma.excludedArticle.createMany({ data: excludedArticleRows });
+  }
 
   return { proposal, stats: result.stats };
 }

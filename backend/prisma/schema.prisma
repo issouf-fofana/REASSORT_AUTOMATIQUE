@@ -322,8 +322,9 @@ model Proposal {
   skippedAlreadyOrdered    Int? @map("skipped_already_ordered")
   skippedGenericArticle    Int? @map("skipped_generic_article")
 
-  lines  ProposalLine[]
-  orders ProposalOrder[]
+  lines           ProposalLine[]
+  orders          ProposalOrder[]
+  excludedArticles ExcludedArticle[]
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -333,6 +334,26 @@ model Proposal {
   // aucun index dédié n'existait, ces requêtes reposaient sur un scan complet de la table).
   @@index([rposShopId, status, validatedAt])
   @@map("proposals")
+}
+
+// =============================================
+// ARTICLES EXCLUS (détail par article de la carte "Reste du CA magasin")
+// =============================================
+// Les compteurs Proposal.skipped* donnent un total par raison, mais pas le détail des articles
+// concernés ni leur part de CA individuelle. Persisté à la génération (comme les compteurs) car
+// ce détail n'est sinon disponible qu'en mémoire le temps du calcul (result.skipped).
+model ExcludedArticle {
+  id         String   @id @default(cuid())
+  proposalId String   @map("proposal_id")
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  ean              String
+  label            String?
+  revenueSharePct  Float?  @map("revenue_share_pct")
+  reason           String  // notFound | notOrderable | negativeStock | alreadyOrdered | genericArticle
+
+  @@index([proposalId, reason])
+  @@map("excluded_articles")
 }
 
 // =============================================
