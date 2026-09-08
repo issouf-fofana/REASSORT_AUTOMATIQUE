@@ -322,17 +322,29 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 
   // Part de CA de chaque article dans le CA total du magasin, sur une période de référence
   // configurable indépendante de la période d'analyse Pareto (ex: hier, même si le Pareto est
-  // calculé sur 30 jours). Réutilise les lignes déjà chargées si les deux périodes coïncident.
+  // calculé sur 30 jours). revenueShareEnd == period.end toujours (juste au-dessus) : la fenêtre
+  // de référence est donc systématiquement une sous-partie de la FIN de la période Pareto — déjà
+  // entièrement comprise dans `lines` tant que revenueShareDays <= periodDays (cas normal ; le
+  // seul cas où ça ne tiendrait pas serait une config de revenueSharePeriodDays absurdement plus
+  // longue que la période Pareto elle-même). On filtre donc `lines` en mémoire par date au lieu de
+  // refaire un second appel (RPOS ou base) qui redemanderait exactement les mêmes ventes.
   const revenueShareDays = config.revenueSharePeriodDays || 1;
   const revenueShareEnd = period.end;
   const revenueShareStart = new Date(new Date(period.end).getTime() - revenueShareDays * 24 * 60 * 60 * 1000).toISOString();
 
   let revenueShareLines = lines;
   if (revenueShareDays !== periodDays) {
-    const revenueShareResult = await getSalesLinesForPeriod(posId, shopId, shopReference, revenueShareStart, revenueShareEnd);
-    revenueShareLines = revenueShareResult.lines;
-    if (revenueShareResult.source === 'rpos') {
-      console.log(`[proposalService] Aucune donnée locale pour le CA de référence (${revenueShareDays}j), appel RPOS...`);
+    if (revenueShareDays < periodDays) {
+      const revenueShareStartMs = new Date(revenueShareStart).getTime();
+      revenueShareLines = lines.filter((l) => new Date(l.date).getTime() >= revenueShareStartMs);
+    } else {
+      // Fenêtre de référence plus longue que la période Pareto elle-même : cas hors norme non
+      // couvert par `lines`, on retombe alors sur un appel dédié comme avant.
+      const revenueShareResult = await getSalesLinesForPeriod(posId, shopId, shopReference, revenueShareStart, revenueShareEnd);
+      revenueShareLines = revenueShareResult.lines;
+      if (revenueShareResult.source === 'rpos') {
+        console.log(`[proposalService] Aucune donnée locale pour le CA de référence (${revenueShareDays}j), appel RPOS...`);
+      }
     }
   }
 
