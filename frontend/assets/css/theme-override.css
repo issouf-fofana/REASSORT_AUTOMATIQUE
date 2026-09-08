@@ -90,6 +90,21 @@ a:not(.sidebar *),
      color: #ffffff !important;
 }
 
+/* Onglets (nav-tabs) : volt.css définit plusieurs règles concurrentes pour l'état actif, dont le
+   résultat final dépendait de l'ordre d'apparition plutôt que d'être garanti — on fixe
+   explicitement un contraste fort (fond noir, texte blanc) sur l'onglet actif, quelle que soit la
+   règle Volt qui gagnerait sinon. */
+.nav-tabs .nav-link.active {
+     background-color: #000000 !important;
+     color: #ffffff !important;
+}
+.nav-tabs .nav-link.active iconify-icon {
+     color: #ffffff !important;
+}
+.nav-tabs .nav-link:not(.active) {
+     color: #1a1a1a !important;
+}
+
 .navbar-top {
      background-color: #ffffff !important;
      border-bottom: 1px solid #e5e5e5;
