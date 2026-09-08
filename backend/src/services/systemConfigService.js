@@ -19,6 +19,10 @@ const KEYS = {
   RECEPTION_SYNC_CRON: 'RECEPTION_SYNC_CRON',
   SALES_SYNC_CRON: 'SALES_SYNC_CRON',
   SHOPS_SYNC_CRON: 'SHOPS_SYNC_CRON',
+  // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
+  // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
+  DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
+  REVISION_CHANGE_THRESHOLD: 'REVISION_CHANGE_THRESHOLD',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -49,6 +53,12 @@ const ENV_FALLBACK = {
   [KEYS.SALES_SYNC_CRON]: () => process.env.SALES_SYNC_CRON || '*/15 * * * *',
   // Toutes les heures : la liste des magasins change très rarement (ajout/fermeture manuelle).
   [KEYS.SHOPS_SYNC_CRON]: () => process.env.SHOPS_SYNC_CRON || '0 * * * *',
+  // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
+  // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
+  [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
+  // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
+  // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
+  [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
 };
 
 async function getValue(key) {

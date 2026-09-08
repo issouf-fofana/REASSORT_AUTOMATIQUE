@@ -4,7 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 
 // Import routes
@@ -85,6 +85,8 @@ async function start() {
     await startOrRestartSalesSyncJob();
     // Synchronisation locale de la liste des magasins RPOS (horaire configurable).
     await startOrRestartShopsSyncJob();
+    // Réajustement quotidien continu des plans hebdomadaires non encore validés (horaire configurable).
+    await startOrRestartDailyReviewJob();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

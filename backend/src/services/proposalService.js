@@ -563,12 +563,17 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 /**
  * Génère la proposition d'un magasin et la persiste en base (historisation, cf. readme section 16).
  * Appelée par le job planifié (nuit) ou manuellement pendant la phase pilote.
+ *
+ * @param {object} [precomputedResult] - résultat déjà obtenu via generateProposal (même posId/
+ *   shopId/shopReference/limit/periodOverride), pour éviter un second calcul complet identique
+ *   quand l'appelant a déjà dû l'exécuter une première fois pour une comparaison avant de décider
+ *   de sauvegarder (cf. dailyReplenishmentReviewJob.js, CAHIER_DES_CHARGES.md §15-16, étape 3).
  */
-async function generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride }) {
+async function generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride }, precomputedResult) {
   // On calcule d'abord la nouvelle proposition (appels RPOS potentiellement instables) avant de
   // toucher à l'ancienne : si RPOS échoue (502/503), le magasin garde sa proposition GENERATED
   // précédente au lieu de se retrouver sans aucune proposition en attente.
-  const result = await generateProposal(posId, shopId, limit, shopReference, periodOverride);
+  const result = precomputedResult || await generateProposal(posId, shopId, limit, shopReference, periodOverride);
 
   // Une seule proposition GENERATED active à la fois par magasin : on rejette l'ancienne
   // seulement maintenant que la nouvelle génération a réussi, pour ne jamais en accumuler plusieurs.

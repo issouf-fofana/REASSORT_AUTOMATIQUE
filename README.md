@@ -51,7 +51,20 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   persisté à chaque génération (aucun appel RPOS, aucun recalcul). Pas encore d'affichage frontend
   à cette étape — API testée directement. Voir `getWeeklyPlanHistory`/`findWeeklyPlanForDate` dans
   `weeklyPlanService.js`.
-- ⬜ Étape 3 — Réajustement quotidien continu (§15-16)
+- ✅ **Étape 3 — Réajustement quotidien continu** (§15-16) : nouveau job `dailyReplenishmentReviewJob`
+  (planifié via `DAILY_REVIEW_CRON`, 6h30 par défaut) qui, pour chaque plan hebdomadaire dont la
+  dernière révision n'est pas encore validée, recalcule la proposition et ne crée une nouvelle
+  révision que si le total proposé change de plus de `REVISION_CHANGE_THRESHOLD` (10% par défaut,
+  §16) — sinon le plan reste inchangé. Le calcul de comparaison est réutilisé tel quel pour la
+  sauvegarde (pas de second calcul RPOS identique), et la nouvelle révision est explicitement
+  rattachée au plan revu même si son propre calcul de semaine cible diverge (ex: config de période
+  du magasin changée entre-temps) — sans ce garde-fou, la continuité des révisions pouvait casser.
+  **Version simple assumée à cette étape** : seuls les plans PAS encore validés sont concernés ; le
+  calcul du besoin restant après une commande déjà validée (§14, distinction
+  `recommendedQuantity`/`orderedQuantity`) est une étape ultérieure, plus complexe. Vérifié avec des
+  données réelles (magasin 110) : pas de nouvelle révision à 0.1% de variation avec le seuil à 10%,
+  nouvelle révision créée avec un seuil abaissé, rattachement au bon plan confirmé après correction
+  du bug de divergence. Voir `backend/src/jobs/dailyReplenishmentReviewJob.js`.
 - ⬜ Étape 4 — Historique des prédictions (§21)
 - ⬜ Étape 5 — Résultat réel vs prédiction (§22)
 - ⬜ Étape 6 — Moteur de confiance (§20, §23)

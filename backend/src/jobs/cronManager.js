@@ -4,6 +4,7 @@ const { runNightlyProposalGeneration } = require('./nightlyProposalJob');
 const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
+const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -11,6 +12,7 @@ let currentTask = null;
 let currentReceptionSyncTask = null;
 let currentSalesSyncTask = null;
 let currentShopsSyncTask = null;
+let currentDailyReviewTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -19,6 +21,7 @@ const nightlyLock = createJobLock('Génération nocturne des propositions');
 const receptionSyncLock = createJobLock('Synchronisation des réceptions');
 const salesSyncLock = createJobLock('Synchronisation des ventes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
+const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 
 /** (Re)programme le job nocturne selon l'horaire actuellement en base (ou par défaut). */
 async function startOrRestartNightlyJob() {
@@ -116,4 +119,34 @@ async function startOrRestartShopsSyncJob() {
   console.log(`⏰ Synchronisation des magasins planifiée: ${cronSchedule}`);
 }
 
-module.exports = { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob };
+/** (Re)programme le job de réajustement quotidien du réassort (CAHIER_DES_CHARGES.md §15-16). */
+async function startOrRestartDailyReviewJob() {
+  if (currentDailyReviewTask) {
+    currentDailyReviewTask.stop();
+    currentDailyReviewTask = null;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.DAILY_REVIEW_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), réajustement quotidien non planifié`);
+    return;
+  }
+
+  currentDailyReviewTask = cron.schedule(cronSchedule, () => {
+    dailyReviewLock(async () => {
+      console.log('[cron] Démarrage du réajustement quotidien du réassort...');
+      await trackJobRun('dailyReplenishmentReview', runDailyReplenishmentReview);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Réajustement quotidien du réassort planifié: ${cronSchedule}`);
+}
+
+module.exports = {
+  startOrRestartNightlyJob,
+  startOrRestartReceptionSyncJob,
+  startOrRestartSalesSyncJob,
+  startOrRestartShopsSyncJob,
+  startOrRestartDailyReviewJob,
+};
