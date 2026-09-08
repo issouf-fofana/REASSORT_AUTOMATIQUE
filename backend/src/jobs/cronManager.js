@@ -5,6 +5,7 @@ const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
+const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -13,6 +14,7 @@ let currentReceptionSyncTask = null;
 let currentSalesSyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
+let currentPredictionOutcomeTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -22,6 +24,7 @@ const receptionSyncLock = createJobLock('Synchronisation des réceptions');
 const salesSyncLock = createJobLock('Synchronisation des ventes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
+const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
 
 /** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
 async function isJobEnabled(enabledKey) {
@@ -174,10 +177,40 @@ async function startOrRestartDailyReviewJob() {
   console.log(`⏰ Réajustement quotidien du réassort planifié: ${cronSchedule}`);
 }
 
+/** (Re)programme le job d'évaluation des prédictions passées (CAHIER_DES_CHARGES.md §22, étape 5). */
+async function startOrRestartPredictionOutcomeJob() {
+  if (currentPredictionOutcomeTask) {
+    currentPredictionOutcomeTask.stop();
+    currentPredictionOutcomeTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.PREDICTION_OUTCOME_ENABLED))) {
+    console.log('⏸️  Évaluation des prédictions désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.PREDICTION_OUTCOME_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), évaluation des prédictions non planifiée`);
+    return;
+  }
+
+  currentPredictionOutcomeTask = cron.schedule(cronSchedule, () => {
+    predictionOutcomeLock(async () => {
+      console.log('[cron] Démarrage de l\'évaluation des prédictions...');
+      await trackJobRun('predictionOutcome', runPredictionOutcomeEvaluation);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Évaluation des prédictions planifiée: ${cronSchedule}`);
+}
+
 module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
   startOrRestartSalesSyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
+  startOrRestartPredictionOutcomeJob,
 };

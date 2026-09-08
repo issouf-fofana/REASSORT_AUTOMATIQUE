@@ -676,8 +676,9 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // de création de la Proposal. `proposal` créé ci-dessus ne reflète jamais cette mise à jour
   // ultérieure (Prisma ne mute pas l'objet local) : on réassigne explicitement weeklyPlanId dessus
   // pour que la valeur retournée par cette fonction soit à jour, sans requête de relecture superflue.
+  let plan = null;
   try {
-    const plan = await attachProposalToWeeklyPlan({
+    plan = await attachProposalToWeeklyPlan({
       proposalId: proposal.id,
       rposShopId: shopId,
       rposShopReference: shopReference,
@@ -687,6 +688,35 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     proposal.weeklyPlanId = plan.id;
   } catch (weeklyPlanError) {
     console.error(`[proposalService] Rattachement au plan hebdomadaire échoué pour ${shopReference}:`, weeklyPlanError.message);
+  }
+
+  // Historique des prédictions (CAHIER_DES_CHARGES.md §21, étape 4) : une ligne par article de
+  // cette génération, sans recalcul — reprend ce que generateProposal a déjà produit. Isolé dans
+  // son propre try/catch pour ne jamais faire échouer une génération déjà réussie et sauvegardée.
+  try {
+    if (result.proposals.length) {
+      await prisma.aIPrediction.createMany({
+        data: result.proposals.map((p) => ({
+          proposalId: proposal.id,
+          rposShopId: shopId,
+          ean: p.ean,
+          label: p.label,
+          targetPeriodStart: plan ? plan.targetWeekStart : null,
+          targetPeriodEnd: plan ? plan.targetWeekEnd : null,
+          predictedWeeklyDemand: p.avgWeeklySales,
+          predictedDailyDemand: p.avgWeeklySales / 7,
+          predictedQuantity: p.quantityProposed,
+          stockAtPrediction: p.stock,
+          ordersAtPrediction: p.currentOrderedQuantity,
+          model: p.forecastMethod === 'flat' ? 'flat' : 'smoothing',
+          reasoning: p.seasonalityAdjusted
+            ? `Lissage exponentiel avec ajustement saisonnier (écart ${p.seasonalityDeviationPct ?? '?'}%)`
+            : (p.forecastMethod === 'flat' ? 'Historique trop court, moyenne simple' : 'Lissage exponentiel'),
+        })),
+      });
+    }
+  } catch (predictionError) {
+    console.error(`[proposalService] Enregistrement de l'historique des prédictions échoué pour ${shopReference}:`, predictionError.message);
   }
 
   return { proposal, stats: result.stats };

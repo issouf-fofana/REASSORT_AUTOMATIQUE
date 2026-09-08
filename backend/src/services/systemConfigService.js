@@ -23,6 +23,9 @@ const KEYS = {
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
   REVISION_CHANGE_THRESHOLD: 'REVISION_CHANGE_THRESHOLD',
+  // Évaluation des prédictions passées (CAHIER_DES_CHARGES.md §22, étape 5) : compare prédiction
+  // et réalité une fois la période cible terminée.
+  PREDICTION_OUTCOME_CRON: 'PREDICTION_OUTCOME_CRON',
   // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
   // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
   // expression cron qui ne se déclenche jamais pour le "désactiver").
@@ -31,6 +34,7 @@ const KEYS = {
   SALES_SYNC_ENABLED: 'SALES_SYNC_ENABLED',
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
+  PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -64,6 +68,10 @@ const ENV_FALLBACK = {
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
+  // Une fois par jour, en dehors des heures de pointe des autres jobs : évalue les prédictions dont
+  // la semaine cible s'est terminée depuis le dernier passage (pas besoin de fréquence plus élevée,
+  // les cibles ne changent qu'une fois par semaine).
+  [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 7 * * *',
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
@@ -74,6 +82,7 @@ const ENV_FALLBACK = {
   [KEYS.SALES_SYNC_ENABLED]: () => 'true',
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
+  [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
 };
 
 async function getValue(key) {

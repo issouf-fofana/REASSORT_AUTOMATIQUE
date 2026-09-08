@@ -4,7 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 
 // Import routes
@@ -87,6 +87,8 @@ async function start() {
     await startOrRestartShopsSyncJob();
     // Réajustement quotidien continu des plans hebdomadaires non encore validés (horaire configurable).
     await startOrRestartDailyReviewJob();
+    // Évaluation des prédictions dont la période cible est terminée (horaire configurable).
+    await startOrRestartPredictionOutcomeJob();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

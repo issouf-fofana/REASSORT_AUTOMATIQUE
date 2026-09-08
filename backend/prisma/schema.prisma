@@ -325,6 +325,7 @@ model Proposal {
   lines           ProposalLine[]
   orders          ProposalOrder[]
   excludedArticles ExcludedArticle[]
+  predictions     AIPrediction[]
 
   // Rattache cette génération à une semaine cible (CAHIER_DES_CHARGES.md §11-13, étape 1 du plan) :
   // une Proposal reste le mécanisme de calcul/validation existant, inchangé ; weeklyPlanId l'associe
@@ -385,6 +386,98 @@ model WeeklyReplenishmentPlan {
   @@unique([rposShopId, targetWeekStart])
   @@index([rposShopId, status])
   @@map("weekly_replenishment_plans")
+}
+
+// =============================================
+// HISTORIQUE DES PRÉDICTIONS (CAHIER_DES_CHARGES.md §21 — étape 4 du plan)
+// =============================================
+// Jusqu'à cette étape, la prévision de vente calculée pour chaque article (avgWeeklySales,
+// forecastMethod) n'existait qu'en tant qu'entrée de ProposalLine, couplée à la proposition qui en
+// résulte (quantité à commander, stock au moment du calcul...). AIPrediction isole la PRÉDICTION
+// elle-même (ce que le système anticipe comme demande, indépendamment de la décision de commande)
+// pour permettre plus tard (étape 5, AIPredictionOutcome) de comparer prédiction vs réalité une
+// fois la période cible écoulée. Une ligne par (proposition, article) : pas de nouveau calcul, on
+// persiste simplement ce que generateProposal a déjà produit pour cette proposition.
+model AIPrediction {
+  id String @id @default(cuid())
+
+  proposalId String   @map("proposal_id")
+  proposal   Proposal @relation(fields: [proposalId], references: [id])
+
+  rposShopId String @map("rpos_shop_id")
+  ean        String
+  label      String?
+
+  predictionDate DateTime @default(now()) @map("prediction_date")
+
+  // Semaine cible de la prédiction (= WeeklyReplenishmentPlan.targetWeekStart/End rattaché à la
+  // proposition), distincte de predictionDate qui est le moment où le calcul a été fait.
+  targetPeriodStart DateTime? @map("target_period_start")
+  targetPeriodEnd   DateTime? @map("target_period_end")
+
+  predictedWeeklyDemand Float @map("predicted_weekly_demand")
+  predictedDailyDemand  Float @map("predicted_daily_demand")
+  predictedQuantity     Int   @map("predicted_quantity") // quantité proposée à la commande (ProposalLine.quantitySuggested)
+
+  stockAtPrediction  Float @map("stock_at_prediction")
+  ordersAtPrediction Float @map("orders_at_prediction") // quantité déjà en commande au moment du calcul (currentOrderedQuantity)
+
+  // "Modèle" au sens large : méthode de prévision utilisée pour CETTE ligne (lissage exponentiel ou
+  // "flat" si historique trop court, cf. forecastService.MIN_DAYS_FOR_SMOOTHING) — pas encore de
+  // véritable modèle IA distinct à cette étape (étapes 6-8 du plan).
+  model        String  @default("smoothing")
+  modelVersion String? @map("model_version")
+
+  // Pas de score de confiance calculé à cette étape (étape 6, Confidence Engine) : colonne posée
+  // dès maintenant pour ne pas devoir migrer AIPrediction une seconde fois.
+  confidenceScore Float?  @map("confidence_score")
+  reasoning       String? // explication humaine courte, ex: "lissage exponentiel sur 42 jours d'historique"
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([rposShopId, ean, predictionDate])
+  @@index([proposalId])
+  @@map("ai_predictions")
+
+  outcome AIPredictionOutcome?
+}
+
+// =============================================
+// RÉSULTAT RÉEL VS PRÉDICTION (CAHIER_DES_CHARGES.md §22 — étape 5 du plan)
+// =============================================
+// Une fois la période cible d'une AIPrediction terminée (targetPeriodEnd dépassé), un job planifié
+// compare la prédiction à ce qui s'est réellement passé : ventes réelles sur la période (SalesLine,
+// déjà synchronisées localement — aucun appel RPOS), stock actuel en cache (ProductCache — le stock
+// exact à la fin de la période cible n'est pas historisé, seul le stock au moment du calcul de
+// clôture est disponible, limite assumée à cette étape). Une seule mesure de performance : rien ne
+// modifie encore le comportement du système (pas d'ajustement automatique de confiance, ce sera
+// l'étape 6, Confidence Engine) — cette table sert uniquement à observer la fiabilité des
+// prédictions dans le temps.
+model AIPredictionOutcome {
+  id String @id @default(cuid())
+
+  predictionId String       @unique @map("prediction_id")
+  prediction   AIPrediction @relation(fields: [predictionId], references: [id])
+
+  evaluatedAt DateTime @default(now()) @map("evaluated_at")
+
+  predictedQuantity Int   @map("predicted_quantity") // copie de AIPrediction.predictedQuantity au moment de l'évaluation
+  actualSales       Float @map("actual_sales") // somme des quantités vendues (SalesLine) sur la période cible
+  actualStock       Float? @map("actual_stock") // stock en cache au moment de l'évaluation (cf. limite ci-dessus)
+  actualOrders      Float? @map("actual_orders") // quantité effectivement commandée sur la proposition (ProposalLine.quantitySuggested si validée)
+
+  // forecastError = actual - predicted (signé : positif = sous-estimation, négatif = sur-estimation)
+  forecastError Float @map("forecast_error")
+  // absoluteError = abs(forecastError)
+  absoluteError Float @map("absolute_error")
+  // percentageError = abs(actual - predicted) / actual — null si actual = 0 (division impossible,
+  // cf. CAHIER_DES_CHARGES.md §22 "gérer correctement les cas où actual = 0").
+  percentageError Float? @map("percentage_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([evaluatedAt])
+  @@map("ai_prediction_outcomes")
 }
 
 // =============================================

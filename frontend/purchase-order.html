@@ -313,6 +313,7 @@
                                                        <div id="weekly-plan-history-body">
                                                             <p class="text-muted text-center py-4">Chargement...</p>
                                                        </div>
+                                                       <div id="weekly-plan-prediction-outcome-body" class="mt-4"></div>
                                                   </div>
                                              </div>
                                         </div>
@@ -1494,10 +1495,54 @@
                                                                    '</tbody></table></div>');
 
                                                        body.innerHTML = revisionsHtml + articlesHtml;
+
+                                                       loadPredictionOutcomes(h.revisions);
                                                   } catch (err) {
                                                        body.innerHTML = '<div class="alert alert-danger">Erreur: ' + err.message + '</div>';
                                                   }
                                              });
+
+                                             // Fiabilité des prédictions (CAHIER_DES_CHARGES.md §21-22, étapes 4-5) : pour la dernière
+                                             // révision de la semaine, affiche les articles dont la prédiction a déjà été évaluée
+                                             // (période cible terminée) — n'affiche rien tant qu'aucune évaluation n'est disponible,
+                                             // plutôt qu'un tableau vide qui laisserait croire à une absence de données.
+                                             async function loadPredictionOutcomes(revisions) {
+                                                  const outcomeBody = document.getElementById('weekly-plan-prediction-outcome-body');
+                                                  outcomeBody.innerHTML = '';
+                                                  if (!revisions.length) return;
+                                                  const lastRevisionId = revisions[revisions.length - 1].id;
+                                                  try {
+                                                       const res = await window.reassortFetch('/reassort/predictions/' + lastRevisionId);
+                                                       const json = await res.json();
+                                                       if (!json.success) return;
+                                                       const evaluated = json.data.filter(function (p) { return p.outcome; });
+                                                       if (!evaluated.length) return;
+
+                                                       evaluated.sort(function (a, b) { return (b.outcome.percentageError || 0) - (a.outcome.percentageError || 0); });
+
+                                                       const rowsHtml = evaluated.map(function (p) {
+                                                            const o = p.outcome;
+                                                            const pct = o.percentageError === null ? '—' : Math.round(o.percentageError * 100) + '%';
+                                                            const errSign = o.forecastError > 0 ? '+' : '';
+                                                            return '<tr><td>' + p.ean + '</td><td>' + (p.label || '—') + '</td>' +
+                                                                 '<td class="text-end">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
+                                                                 '<td class="text-end">' + o.actualSales + '</td>' +
+                                                                 '<td class="text-end">' + errSign + Math.round(o.forecastError) + '</td>' +
+                                                                 '<td class="text-end fw-semibold">' + pct + '</td></tr>';
+                                                       }).join('');
+
+                                                       outcomeBody.innerHTML =
+                                                            '<h6 class="mb-2 d-flex align-items-center gap-1">' +
+                                                            '<iconify-icon icon="solar:chart-2-bold-duotone" class="text-primary"></iconify-icon>' +
+                                                            'Fiabilité des prédictions (semaine écoulée)</h6>' +
+                                                            '<div class="alert alert-light border small mb-2">Vente hebdomadaire prévue comparée aux ventes réellement observées sur cette même semaine, pour les articles dont la période est terminée.</div>' +
+                                                            '<div class="table-responsive"><table class="table table-sm table-hover">' +
+                                                            '<thead><tr><th>EAN</th><th>Article</th><th class="text-end">Prévu/sem.</th><th class="text-end">Réel</th><th class="text-end">Écart</th><th class="text-end">Erreur %</th></tr></thead>' +
+                                                            '<tbody>' + rowsHtml + '</tbody></table></div>';
+                                                  } catch (err) {
+                                                       // Silencieux : la fiabilité est une information secondaire, ne doit pas casser la modale.
+                                                  }
+                                             }
 
                                              const genPeriodModeSelect = document.getElementById('generate-period-mode');
                                              const genCustomPeriodWrapper = document.getElementById('generate-custom-period-wrapper');

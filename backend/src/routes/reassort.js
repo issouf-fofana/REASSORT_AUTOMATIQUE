@@ -94,6 +94,19 @@ router.post('/run-daily-review', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/run-prediction-outcome - déclenche manuellement l'évaluation des prédictions
+// dont la période cible est terminée (ADMIN, pour les tests). CAHIER_DES_CHARGES.md §22, étape 5.
+router.post('/run-prediction-outcome', requireAdmin, async (req, res) => {
+  try {
+    const { runPredictionOutcomeEvaluation } = require('../jobs/predictionOutcomeJob');
+    const result = await runPredictionOutcomeEvaluation();
+    res.json({ success: true, message: 'Évaluation des prédictions exécutée', data: result });
+  } catch (error) {
+    console.error('Manual prediction outcome error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/sales-backfill - démarre (ou reprend, si un run existe déjà pour ce magasin
 // et cette période exacte) une récupération historique volumineuse de l'historique de vente d'un
 // magasin, découpée en tranches persistées avec reprise automatique (ADMIN). Ne bloque pas : le
@@ -783,6 +796,21 @@ router.get('/weekly-plan/:id/history', async (req, res) => {
   }
 });
 
+// GET /api/reassort/predictions/:proposalId - historique des prédictions enregistrées pour une
+// proposition donnée (CAHIER_DES_CHARGES.md §21, étape 4) : lecture seule, aucun recalcul.
+router.get('/predictions/:proposalId', async (req, res) => {
+  try {
+    const predictions = await prisma.aIPrediction.findMany({
+      where: { proposalId: req.params.proposalId },
+      orderBy: { predictedWeeklyDemand: 'desc' },
+      include: { outcome: true },
+    });
+    res.json({ success: true, data: predictions });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/conformity - taux de conformité (propositions validées sans modification)
 router.get('/conformity', async (req, res) => {
   try {
@@ -1076,6 +1104,7 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       systemConfig.KEYS.SALES_SYNC_CRON,
       systemConfig.KEYS.SHOPS_SYNC_CRON,
       systemConfig.KEYS.DAILY_REVIEW_CRON,
+      systemConfig.KEYS.PREDICTION_OUTCOME_CRON,
     ];
     if (CRON_KEYS.includes(key)) {
       const cron = require('node-cron');
@@ -1097,6 +1126,7 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       systemConfig.KEYS.SALES_SYNC_ENABLED,
       systemConfig.KEYS.SHOPS_SYNC_ENABLED,
       systemConfig.KEYS.DAILY_REVIEW_ENABLED,
+      systemConfig.KEYS.PREDICTION_OUTCOME_ENABLED,
     ];
     if (ENABLED_KEYS.includes(key) && !['true', 'false'].includes(value)) {
       return res.status(400).json({ success: false, message: 'Valeur invalide : "true" ou "false" attendu' });
@@ -1139,6 +1169,10 @@ router.put('/system-config', requireAdmin, async (req, res) => {
     if ([systemConfig.KEYS.DAILY_REVIEW_CRON, systemConfig.KEYS.DAILY_REVIEW_ENABLED].includes(key)) {
       const { startOrRestartDailyReviewJob } = require('../jobs/cronManager');
       await startOrRestartDailyReviewJob();
+    }
+    if ([systemConfig.KEYS.PREDICTION_OUTCOME_CRON, systemConfig.KEYS.PREDICTION_OUTCOME_ENABLED].includes(key)) {
+      const { startOrRestartPredictionOutcomeJob } = require('../jobs/cronManager');
+      await startOrRestartPredictionOutcomeJob();
     }
 
     res.json({ success: true, data: { key, value: systemConfig.SENSITIVE_KEYS.has(key) ? '••••••••' : value } });

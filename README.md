@@ -65,8 +65,29 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   données réelles (magasin 110) : pas de nouvelle révision à 0.1% de variation avec le seuil à 10%,
   nouvelle révision créée avec un seuil abaissé, rattachement au bon plan confirmé après correction
   du bug de divergence. Voir `backend/src/jobs/dailyReplenishmentReviewJob.js`.
-- ⬜ Étape 4 — Historique des prédictions (§21)
-- ⬜ Étape 5 — Résultat réel vs prédiction (§22)
+- ✅ **Étape 4 — Historique des prédictions** (§21) : nouveau modèle `AIPrediction`, une ligne par
+  article à chaque génération de proposition (nocturne, manuelle ou réajustement quotidien) —
+  aucun recalcul, on persiste simplement ce que `generateProposal` produit déjà (vente moyenne
+  hebdo/jour prévue, méthode de prévision, stock et commandes en cours au moment du calcul), avec
+  la semaine cible reprise du `WeeklyReplenishmentPlan` rattaché. Colonnes `confidenceScore` et
+  `model`/`modelVersion` posées dès maintenant pour éviter une seconde migration aux étapes 6/8,
+  mais pas encore renseignées par un vrai calcul de confiance à ce stade. Purement une base de
+  données pour permettre la comparaison prédiction/réalité de l'étape 5 : aucun changement de
+  comportement visible, pas encore d'affichage frontend. Route de lecture ajoutée :
+  `GET /reassort/predictions/:proposalId`. Voir `AIPrediction` dans `schema.prisma` et
+  l'écriture dans `generateAndSaveProposal` (`proposalService.js`).
+- ✅ **Étape 5 — Résultat réel vs prédiction** (§22) : nouveau modèle `AIPredictionOutcome` et
+  job planifié `predictionOutcomeJob` (`PREDICTION_OUTCOME_CRON`, 7h par défaut) qui, pour chaque
+  `AIPrediction` (étape 4) dont la semaine cible est terminée et pas encore évaluée, calcule les
+  ventes réelles sur la période (`SalesLine`, déjà synchronisées localement — aucun appel RPOS),
+  le stock actuel en cache, et la quantité effectivement commandée si la proposition a été validée.
+  Calcule `forecastError` (actual − predicted), `absoluteError` et `percentageError` (`null` si
+  `actualSales = 0`, cf. §22). **Limite assumée** : le stock persisté est celui au moment de
+  l'évaluation (pas d'historique de stock à la date exacte de fin de période). Purement une mesure
+  de fiabilité : ne modifie aucune proposition, aucun plan, aucun calcul existant. Interrupteur et
+  planification ajoutés sur la page Paramètres (onglet Planification, carte "Évaluation des
+  prédictions"). Voir `backend/src/jobs/predictionOutcomeJob.js` et `AIPredictionOutcome` dans
+  `schema.prisma`.
 - ⬜ Étape 6 — Moteur de confiance (§20, §23)
 - ⬜ Étape 7 — Détection d'anomalies (§30-31)
 - ⬜ Étape 8 — Moteur de recommandation IA typée (§18-19)
