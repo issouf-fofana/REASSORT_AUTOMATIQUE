@@ -23,6 +23,14 @@ const KEYS = {
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
   REVISION_CHANGE_THRESHOLD: 'REVISION_CHANGE_THRESHOLD',
+  // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
+  // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
+  // expression cron qui ne se déclenche jamais pour le "désactiver").
+  NIGHTLY_PROPOSAL_ENABLED: 'NIGHTLY_PROPOSAL_ENABLED',
+  RECEPTION_SYNC_ENABLED: 'RECEPTION_SYNC_ENABLED',
+  SALES_SYNC_ENABLED: 'SALES_SYNC_ENABLED',
+  SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
+  DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -59,6 +67,13 @@ const ENV_FALLBACK = {
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
+  // Tous les jobs sont actifs par défaut (comportement historique, avant l'ajout de ces
+  // interrupteurs) : seul un changement explicite depuis Paramètres les désactive.
+  [KEYS.NIGHTLY_PROPOSAL_ENABLED]: () => 'true',
+  [KEYS.RECEPTION_SYNC_ENABLED]: () => 'true',
+  [KEYS.SALES_SYNC_ENABLED]: () => 'true',
+  [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
+  [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
 };
 
 async function getValue(key) {

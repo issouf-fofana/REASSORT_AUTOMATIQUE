@@ -23,11 +23,22 @@ const salesSyncLock = createJobLock('Synchronisation des ventes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 
+/** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
+async function isJobEnabled(enabledKey) {
+  const value = await systemConfig.getValue(enabledKey);
+  return value !== 'false'; // activé par défaut si jamais réglé (cohérent avec ENV_FALLBACK = 'true')
+}
+
 /** (Re)programme le job nocturne selon l'horaire actuellement en base (ou par défaut). */
 async function startOrRestartNightlyJob() {
   if (currentTask) {
     currentTask.stop();
     currentTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.NIGHTLY_PROPOSAL_ENABLED))) {
+    console.log('⏸️  Job nocturne désactivé (voir Paramètres).');
+    return;
   }
 
   const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON);
@@ -54,6 +65,11 @@ async function startOrRestartReceptionSyncJob() {
     currentReceptionSyncTask = null;
   }
 
+  if (!(await isJobEnabled(systemConfig.KEYS.RECEPTION_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation des réceptions désactivée (voir Paramètres).');
+    return;
+  }
+
   const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.RECEPTION_SYNC_CRON);
 
   if (!cron.validate(cronSchedule)) {
@@ -76,6 +92,11 @@ async function startOrRestartSalesSyncJob() {
   if (currentSalesSyncTask) {
     currentSalesSyncTask.stop();
     currentSalesSyncTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.SALES_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation des ventes désactivée (voir Paramètres).');
+    return;
   }
 
   const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.SALES_SYNC_CRON);
@@ -102,6 +123,11 @@ async function startOrRestartShopsSyncJob() {
     currentShopsSyncTask = null;
   }
 
+  if (!(await isJobEnabled(systemConfig.KEYS.SHOPS_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation des magasins désactivée (voir Paramètres).');
+    return;
+  }
+
   const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.SHOPS_SYNC_CRON);
 
   if (!cron.validate(cronSchedule)) {
@@ -124,6 +150,11 @@ async function startOrRestartDailyReviewJob() {
   if (currentDailyReviewTask) {
     currentDailyReviewTask.stop();
     currentDailyReviewTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.DAILY_REVIEW_ENABLED))) {
+    console.log('⏸️  Réajustement quotidien désactivé (voir Paramètres).');
+    return;
   }
 
   const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.DAILY_REVIEW_CRON);

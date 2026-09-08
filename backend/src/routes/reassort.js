@@ -1091,6 +1091,17 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       }
     }
 
+    const ENABLED_KEYS = [
+      systemConfig.KEYS.NIGHTLY_PROPOSAL_ENABLED,
+      systemConfig.KEYS.RECEPTION_SYNC_ENABLED,
+      systemConfig.KEYS.SALES_SYNC_ENABLED,
+      systemConfig.KEYS.SHOPS_SYNC_ENABLED,
+      systemConfig.KEYS.DAILY_REVIEW_ENABLED,
+    ];
+    if (ENABLED_KEYS.includes(key) && !['true', 'false'].includes(value)) {
+      return res.status(400).json({ success: false, message: 'Valeur invalide : "true" ou "false" attendu' });
+    }
+
     if (key === systemConfig.KEYS.JWT_EXPIRES_IN && !/^\d+\s*(s|m|h|d)$/.test(value.trim())) {
       return res.status(400).json({ success: false, message: 'Durée invalide (format attendu : ex. "30m", "12h", "7d")' });
     }
@@ -1109,23 +1120,23 @@ router.put('/system-config', requireAdmin, async (req, res) => {
     if ([systemConfig.KEYS.RPOS_RETRY_ATTEMPTS, systemConfig.KEYS.RPOS_RETRY_DELAY_MS].includes(key)) {
       rpos.invalidateRposConfigCache();
     }
-    if (key === systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON) {
+    if ([systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON, systemConfig.KEYS.NIGHTLY_PROPOSAL_ENABLED].includes(key)) {
       const { startOrRestartNightlyJob } = require('../jobs/cronManager');
       await startOrRestartNightlyJob();
     }
-    if (key === systemConfig.KEYS.RECEPTION_SYNC_CRON) {
+    if ([systemConfig.KEYS.RECEPTION_SYNC_CRON, systemConfig.KEYS.RECEPTION_SYNC_ENABLED].includes(key)) {
       const { startOrRestartReceptionSyncJob } = require('../jobs/cronManager');
       await startOrRestartReceptionSyncJob();
     }
-    if (key === systemConfig.KEYS.SALES_SYNC_CRON) {
+    if ([systemConfig.KEYS.SALES_SYNC_CRON, systemConfig.KEYS.SALES_SYNC_ENABLED].includes(key)) {
       const { startOrRestartSalesSyncJob } = require('../jobs/cronManager');
       await startOrRestartSalesSyncJob();
     }
-    if (key === systemConfig.KEYS.SHOPS_SYNC_CRON) {
+    if ([systemConfig.KEYS.SHOPS_SYNC_CRON, systemConfig.KEYS.SHOPS_SYNC_ENABLED].includes(key)) {
       const { startOrRestartShopsSyncJob } = require('../jobs/cronManager');
       await startOrRestartShopsSyncJob();
     }
-    if (key === systemConfig.KEYS.DAILY_REVIEW_CRON) {
+    if ([systemConfig.KEYS.DAILY_REVIEW_CRON, systemConfig.KEYS.DAILY_REVIEW_ENABLED].includes(key)) {
       const { startOrRestartDailyReviewJob } = require('../jobs/cronManager');
       await startOrRestartDailyReviewJob();
     }

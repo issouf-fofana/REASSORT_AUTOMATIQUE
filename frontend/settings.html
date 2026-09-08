@@ -718,16 +718,21 @@
                     <div class="row" id="system-settings-section-3">
                          <div class="col-xl-8">
                               <div class="card">
-                                   <div class="card-header">
-                                        <h4 class="card-title d-flex align-items-center gap-1">
+                                   <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h4 class="card-title d-flex align-items-center gap-1 mb-0">
                                              <iconify-icon icon="solar:clock-circle-bold-duotone" class="text-primary fs-20"></iconify-icon>
                                              Planification du job nocturne
                                         </h4>
+                                        <div class="form-check form-switch mb-0">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="system-nightly-enabled">
+                                             <label class="form-check-label small" for="system-nightly-enabled">Actif</label>
+                                        </div>
                                    </div>
                                    <div class="card-body">
                                         <div class="alert alert-light border mb-3 small">
                                              <strong>À quoi ça sert :</strong> chaque nuit, le système calcule automatiquement la proposition de réassort
                                              de tous les magasins actifs, pour qu'elle soit prête dès que le responsable magasin se connecte le matin.
+                                             Désactivez l'interrupteur ci-dessus pour suspendre complètement ce job jusqu'à réactivation.
                                         </div>
                                         <div class="mb-3">
                                              <label class="form-label fw-semibold">Expression cron</label>
@@ -753,11 +758,15 @@
                     <div class="row" id="system-settings-section-daily-review">
                          <div class="col-xl-8">
                               <div class="card">
-                                   <div class="card-header">
-                                        <h4 class="card-title d-flex align-items-center gap-1">
+                                   <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h4 class="card-title d-flex align-items-center gap-1 mb-0">
                                              <iconify-icon icon="solar:refresh-circle-bold-duotone" class="text-primary fs-20"></iconify-icon>
                                              Réajustement quotidien du réassort
                                         </h4>
+                                        <div class="form-check form-switch mb-0">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="system-daily-review-enabled">
+                                             <label class="form-check-label small" for="system-daily-review-enabled">Actif</label>
+                                        </div>
                                    </div>
                                    <div class="card-body">
                                         <div class="alert alert-light border mb-3 small">
@@ -805,11 +814,15 @@
                     <div class="row">
                          <div class="col-12">
                               <div class="card">
-                                   <div class="card-header">
-                                        <h4 class="card-title d-flex align-items-center gap-1">
+                                   <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h4 class="card-title d-flex align-items-center gap-1 mb-0">
                                              <iconify-icon icon="solar:refresh-square-bold-duotone" class="text-primary fs-20"></iconify-icon>
                                              Synchronisation automatique
                                         </h4>
+                                        <div class="form-check form-switch mb-0">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="system-sales-sync-enabled">
+                                             <label class="form-check-label small" for="system-sales-sync-enabled">Active</label>
+                                        </div>
                                    </div>
                                    <div class="card-body">
                                         <div class="alert alert-light border mb-3 small">
@@ -1268,6 +1281,10 @@
                                         document.getElementById('system-cron').value = d.NIGHTLY_PROPOSAL_CRON || '0 4 * * *';
                                         document.getElementById('system-daily-review-cron').value = d.DAILY_REVIEW_CRON || '30 6 * * *';
                                         document.getElementById('system-revision-threshold').value = Math.round((parseFloat(d.REVISION_CHANGE_THRESHOLD) || 0.10) * 100);
+                                        // Interrupteurs marche/arrêt par job (indépendants de l'expression cron elle-même).
+                                        document.getElementById('system-nightly-enabled').checked = d.NIGHTLY_PROPOSAL_ENABLED !== 'false';
+                                        document.getElementById('system-daily-review-enabled').checked = d.DAILY_REVIEW_ENABLED !== 'false';
+                                        document.getElementById('system-sales-sync-enabled').checked = d.SALES_SYNC_ENABLED !== 'false';
                                    } catch (err) {
                                         // silencieux si non-admin (route protégée)
                                    }
@@ -1286,6 +1303,22 @@
 
                               const sysErrorBox = document.getElementById('system-config-error');
                               const sysSuccessBox = document.getElementById('system-config-success');
+
+                              // Interrupteurs marche/arrêt par job : sauvegarde immédiate au changement (pas de bouton
+                              // "Enregistrer" séparé, comportement naturel pour un switch on/off).
+                              function wireJobEnabledSwitch(checkboxId, configKey) {
+                                   document.getElementById(checkboxId).addEventListener('change', async function () {
+                                        try {
+                                             await saveSystemConfigKey(configKey, this.checked ? 'true' : 'false');
+                                        } catch (err) {
+                                             alert('Erreur: ' + err.message);
+                                             this.checked = !this.checked; // annule visuellement si l'enregistrement a échoué
+                                        }
+                                   });
+                              }
+                              wireJobEnabledSwitch('system-nightly-enabled', 'NIGHTLY_PROPOSAL_ENABLED');
+                              wireJobEnabledSwitch('system-daily-review-enabled', 'DAILY_REVIEW_ENABLED');
+                              wireJobEnabledSwitch('system-sales-sync-enabled', 'SALES_SYNC_ENABLED');
 
                               document.getElementById('system-sales-dir-save').addEventListener('click', async function () {
                                    sysErrorBox.style.display = 'none';
