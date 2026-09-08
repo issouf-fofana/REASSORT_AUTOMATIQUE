@@ -756,7 +756,7 @@
                                                        d.revenuePct += l.revenueSharePct || 0;
                                                        d.value += (l.sellingPrice || 0) * (l.quantitySuggested || 0);
                                                   });
-                                                  return Array.from(byKey.entries()).sort(function (a, b) { return b[1].value - a[1].value; });
+                                                  return Array.from(byKey.entries()).sort(function (a, b) { return b[1].revenuePct - a[1].revenuePct; });
                                              }
 
                                              // Bandeau de contexte affiché au-dessus des cartes secteurs/rayons : période d'analyse des
