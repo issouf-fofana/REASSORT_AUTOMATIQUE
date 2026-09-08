@@ -18,6 +18,7 @@ const {
 const { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop } = require('../middleware/auth');
 const { runNightlyProposalGeneration } = require('../jobs/nightlyProposalJob');
 const { runReceptionSync } = require('../jobs/receptionSyncJob');
+const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../services/weeklyPlanService');
 const { runSalesSync } = require('../jobs/salesSyncJob');
 const salesBackfillService = require('../services/salesBackfillService');
 const { getConfig, upsertConfig } = require('../services/configService');
@@ -735,6 +736,35 @@ router.get('/proposal/:id/excluded', async (req, res) => {
       orderBy: { revenueSharePct: 'desc' },
     });
     res.json({ success: true, data: items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/weekly-plan/current?shop=... - plan hebdomadaire actif du magasin pour la
+// semaine en cours (CAHIER_DES_CHARGES.md §11-13, étape 2).
+router.get('/weekly-plan/current', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const plan = await findWeeklyPlanForDate(shopId);
+    if (!plan) return res.json({ success: true, data: null });
+    const history = await getWeeklyPlanHistory(plan.id);
+    res.json({ success: true, data: history });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/weekly-plan/:id/history - historique des révisions d'un plan donné, avec
+// l'évolution de la quantité proposée par article entre révisions.
+router.get('/weekly-plan/:id/history', async (req, res) => {
+  try {
+    const history = await getWeeklyPlanHistory(req.params.id);
+    if (!history) return res.status(404).json({ success: false, message: 'Plan hebdomadaire introuvable' });
+    res.json({ success: true, data: history });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

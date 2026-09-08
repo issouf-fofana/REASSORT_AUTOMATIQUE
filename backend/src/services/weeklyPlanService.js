@@ -71,4 +71,93 @@ async function attachProposalToWeeklyPlan({ proposalId, rposShopId, rposShopRefe
   return plan;
 }
 
-module.exports = { computeTargetWeek, attachProposalToWeeklyPlan, startOfWeekUTC };
+/**
+ * Historique complet d'un plan hebdomadaire (CAHIER_DES_CHARGES.md §12-13, étape 2) : la liste
+ * de ses révisions (une par génération pour cette semaine cible, dans l'ordre chronologique) et,
+ * pour chaque article présent dans au moins une révision, l'évolution de la quantité proposée
+ * d'une révision à l'autre — pour répondre à "lundi 100, mardi 120, +20".
+ *
+ * Ne modifie ni ne consulte le calcul en temps réel : lit uniquement ce qui a déjà été persisté à
+ * chaque génération (ProposalLine.quantitySuggested), donc aucun appel RPOS ici.
+ */
+async function getWeeklyPlanHistory(weeklyPlanId) {
+  const plan = await prisma.weeklyReplenishmentPlan.findUnique({
+    where: { id: weeklyPlanId },
+    include: {
+      revisions: {
+        orderBy: { generatedAt: 'asc' },
+        include: { lines: { select: { ean: true, label: true, quantitySuggested: true } } },
+      },
+    },
+  });
+  if (!plan) return null;
+
+  const revisions = plan.revisions.map((rev, index) => ({
+    id: rev.id,
+    revisionNumber: index + 1,
+    generatedAt: rev.generatedAt,
+    status: rev.status,
+    articleCount: rev.lines.length,
+  }));
+
+  // Regroupe par EAN la quantité proposée à chaque révision où l'article apparaît (un article peut
+  // être absent d'une révision, ex: sorti du Pareto entre-temps — pas d'entrée pour cette révision
+  // plutôt qu'une quantité à 0, pour ne pas laisser croire qu'une baisse à 0 a été calculée).
+  const byEan = new Map();
+  plan.revisions.forEach((rev, index) => {
+    for (const line of rev.lines) {
+      if (!byEan.has(line.ean)) byEan.set(line.ean, { ean: line.ean, label: line.label, history: [] });
+      byEan.get(line.ean).history.push({
+        revisionNumber: index + 1,
+        proposalId: rev.id,
+        quantitySuggested: line.quantitySuggested,
+      });
+    }
+  });
+
+  const articles = Array.from(byEan.values()).map((art) => {
+    const first = art.history[0];
+    const last = art.history[art.history.length - 1];
+    return {
+      ean: art.ean,
+      label: art.label,
+      history: art.history,
+      variation: art.history.length > 1 ? last.quantitySuggested - first.quantitySuggested : 0,
+    };
+  });
+  // Les articles dont la quantité a le plus bougé entre la première et la dernière révision
+  // intéressent en premier (c'est ce qu'un responsable veut voir : "qu'est-ce qui a changé ?").
+  articles.sort((a, b) => Math.abs(b.variation) - Math.abs(a.variation));
+
+  return {
+    id: plan.id,
+    rposShopId: plan.rposShopId,
+    rposShopReference: plan.rposShopReference,
+    targetWeekStart: plan.targetWeekStart,
+    targetWeekEnd: plan.targetWeekEnd,
+    status: plan.status,
+    revisions,
+    articles,
+  };
+}
+
+/**
+ * Plan d'un magasin dont la semaine cible contient `date` (par défaut aujourd'hui) : le lundi de
+ * cette semaine calendaire EST targetWeekStart, donc directement startOfWeekUTC(date) — pas
+ * besoin de computeTargetWeek ici, qui répond à une question différente ("quelle est la semaine
+ * SUIVANT la fin d'une période d'analyse", utile seulement au moment de générer une proposition).
+ */
+async function findWeeklyPlanForDate(rposShopId, date = new Date()) {
+  const targetWeekStart = startOfWeekUTC(date);
+  return prisma.weeklyReplenishmentPlan.findUnique({
+    where: { rposShopId_targetWeekStart: { rposShopId, targetWeekStart } },
+  });
+}
+
+module.exports = {
+  computeTargetWeek,
+  attachProposalToWeeklyPlan,
+  startOfWeekUTC,
+  getWeeklyPlanHistory,
+  findWeeklyPlanForDate,
+};

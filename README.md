@@ -41,7 +41,16 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   calcul, validation ou envoi RPOS à cette étape — uniquement la base de données nécessaire aux
   étapes suivantes (révisions explicites, réajustement quotidien). Voir
   `backend/src/services/weeklyPlanService.js` et le modèle `WeeklyReplenishmentPlan`.
-- ⬜ Étape 2 — Historique des révisions de proposition (§12-13)
+- ✅ **Étape 2 — Historique des révisions de proposition** (§12-13) : `getWeeklyPlanHistory()`
+  reconstruit, à partir des `Proposal` déjà rattachées à un plan (étape 1), la liste chronologique
+  des révisions (une par génération pour cette semaine) et, pour chaque article, l'évolution de sa
+  quantité proposée d'une révision à l'autre (ex: "révision 1 = 48, révision 2 = 156, +108"), trié
+  par variation absolue décroissante pour faire remonter en premier ce qui a le plus changé. Deux
+  routes l'exposent : `GET /reassort/weekly-plan/current` (plan de la semaine en cours du magasin
+  courant) et `GET /reassort/weekly-plan/:id/history`. Purement une lecture de ce qui est déjà
+  persisté à chaque génération (aucun appel RPOS, aucun recalcul). Pas encore d'affichage frontend
+  à cette étape — API testée directement. Voir `getWeeklyPlanHistory`/`findWeeklyPlanForDate` dans
+  `weeklyPlanService.js`.
 - ⬜ Étape 3 — Réajustement quotidien continu (§15-16)
 - ⬜ Étape 4 — Historique des prédictions (§21)
 - ⬜ Étape 5 — Résultat réel vs prédiction (§22)
