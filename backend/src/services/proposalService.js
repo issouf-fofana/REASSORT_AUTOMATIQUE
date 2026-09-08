@@ -6,6 +6,7 @@ const { readSalesLinesForPeriod } = require('./salesFileService');
 const systemConfig = require('./systemConfigService');
 const { forecastAvgWeeklySales } = require('./forecastService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 
 const prisma = new PrismaClient();
 
@@ -650,6 +651,25 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   }
   if (excludedArticleRows.length) {
     await prisma.excludedArticle.createMany({ data: excludedArticleRows });
+  }
+
+  // Rattache cette génération à sa semaine cible (CAHIER_DES_CHARGES.md §11, étape 1) : ne doit
+  // jamais faire échouer la génération elle-même (déjà réussie et sauvegardée à ce stade) si ce
+  // rattachement pose problème, d'où le try/catch isolé plutôt qu'une écriture dans la transaction
+  // de création de la Proposal. `proposal` créé ci-dessus ne reflète jamais cette mise à jour
+  // ultérieure (Prisma ne mute pas l'objet local) : on réassigne explicitement weeklyPlanId dessus
+  // pour que la valeur retournée par cette fonction soit à jour, sans requête de relecture superflue.
+  try {
+    const plan = await attachProposalToWeeklyPlan({
+      proposalId: proposal.id,
+      rposShopId: shopId,
+      rposShopReference: shopReference,
+      rposPosId: posId,
+      analysisPeriodEnd: new Date(result.stats.periodEnd),
+    });
+    proposal.weeklyPlanId = plan.id;
+  } catch (weeklyPlanError) {
+    console.error(`[proposalService] Rattachement au plan hebdomadaire échoué pour ${shopReference}:`, weeklyPlanError.message);
   }
 
   return { proposal, stats: result.stats };

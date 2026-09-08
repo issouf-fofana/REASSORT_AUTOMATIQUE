@@ -326,6 +326,14 @@ model Proposal {
   orders          ProposalOrder[]
   excludedArticles ExcludedArticle[]
 
+  // Rattache cette génération à une semaine cible (CAHIER_DES_CHARGES.md §11-13, étape 1 du plan) :
+  // une Proposal reste le mécanisme de calcul/validation existant, inchangé ; weeklyPlanId l'associe
+  // en plus à un WeeklyReplenishmentPlan qui, lui, survit aux régénérations successives de la même
+  // semaine (chaque nouvelle génération pour cette semaine devient une révision de plan, au lieu de
+  // remplacer purement et simplement l'ancienne Proposal comme c'était le cas avant cette étape).
+  weeklyPlanId String?                 @map("weekly_plan_id")
+  weeklyPlan   WeeklyReplenishmentPlan? @relation(fields: [weeklyPlanId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([rposShopId, generatedAt])
@@ -333,7 +341,50 @@ model Proposal {
   // filtrent tous sur (rposShopId, status) avant de trier par validatedAt (audit performance :
   // aucun index dédié n'existait, ces requêtes reposaient sur un scan complet de la table).
   @@index([rposShopId, status, validatedAt])
+  @@index([weeklyPlanId])
   @@map("proposals")
+}
+
+// =============================================
+// PLAN DE RÉASSORT HEBDOMADAIRE (CAHIER_DES_CHARGES.md §11 — étape 1 du plan)
+// =============================================
+// Avant cette étape, chaque génération de Proposal remplaçait purement et simplement la précédente
+// (passage à REJECTED) : aucun lien ne subsistait entre "ce qui était prévu lundi" et "ce qu'on
+// recalcule jeudi avec les ventes des jours écoulés". Un WeeklyReplenishmentPlan regroupe toutes
+// les Proposal générées pour une même semaine cible d'un même magasin, permettant de :
+// - garder l'historique des révisions successives de la même semaine (§12-13), au lieu de perdre
+//   la proposition initiale à chaque nouvelle génération ;
+// - distinguer une commande déjà validée (Proposal.status=VALIDATED) des révisions ultérieures qui
+//   ne recalculent alors plus que le besoin RESTANT (§14), pas encore implémenté à cette étape.
+// Cette étape ne modifie ni le calcul (proposalService.js), ni la validation, ni l'envoi RPOS,
+// ni le frontend existant : elle ajoute uniquement le rattachement d'une Proposal à sa semaine
+// cible, base nécessaire aux étapes suivantes (révisions explicites, réajustement quotidien).
+model WeeklyReplenishmentPlan {
+  id String @id @default(cuid())
+
+  rposShopId        String @map("rpos_shop_id")
+  rposShopReference String @map("rpos_shop_reference")
+  rposPosId         String @map("rpos_pos_id")
+
+  // Semaine cible que ce plan couvre (ex: lundi 8 septembre -> dimanche 14 septembre), distincte de
+  // la période d'ANALYSE des ventes passées (Proposal.analysisPeriodStart/End) qui sert à calculer
+  // le besoin : cf. CAHIER_DES_CHARGES.md §55 ("Analyse : 1 → 7 septembre, Cible : 8 → 14 septembre").
+  targetWeekStart DateTime @map("target_week_start")
+  targetWeekEnd   DateTime @map("target_week_end")
+
+  // Un seul plan actif par magasin et par semaine cible : une nouvelle génération pour la même
+  // semaine doit rattacher sa Proposal au plan existant (nouvelle révision) plutôt que d'en créer
+  // un second en doublon.
+  status String @default("ACTIVE") // ACTIVE (en cours de semaine) -> CLOSED (semaine passée)
+
+  revisions Proposal[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([rposShopId, targetWeekStart])
+  @@index([rposShopId, status])
+  @@map("weekly_replenishment_plans")
 }
 
 // =============================================

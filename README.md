@@ -27,6 +27,34 @@ de valider puis d'envoyer les commandes directement à RPOS, rayon par rayon.
 
 Détail complet langage par langage, fichier par fichier : voir **[TECH_STACK.md](TECH_STACK.md)**.
 
+## 🧭 Montée en autonomie IA — suivi d'avancement
+
+Plan complet en 14 étapes défini dans **[CAHIER_DES_CHARGES.md](CAHIER_DES_CHARGES.md)** (§71),
+vers un système de réassort qui observe, prédit, recommande, puis progressivement automatise sous
+contrôle. Chaque étape est implémentée par-dessus l'existant, sans le réécrire.
+
+- ✅ **Étape 1 — Weekly Replenishment Plan** (§11) : chaque `Proposal` générée est désormais
+  rattachée à un `WeeklyReplenishmentPlan` représentant sa semaine cible (ex: génération basée sur
+  l'analyse des ventes du 1 → 7 septembre → plan pour la semaine du 8 → 14 septembre). Le plan
+  persiste au-delà d'une seule génération : une régénération pour la même semaine s'y rattache
+  comme révision au lieu de créer un plan séparé. Aucun changement de comportement visible côté
+  calcul, validation ou envoi RPOS à cette étape — uniquement la base de données nécessaire aux
+  étapes suivantes (révisions explicites, réajustement quotidien). Voir
+  `backend/src/services/weeklyPlanService.js` et le modèle `WeeklyReplenishmentPlan`.
+- ⬜ Étape 2 — Historique des révisions de proposition (§12-13)
+- ⬜ Étape 3 — Réajustement quotidien continu (§15-16)
+- ⬜ Étape 4 — Historique des prédictions (§21)
+- ⬜ Étape 5 — Résultat réel vs prédiction (§22)
+- ⬜ Étape 6 — Moteur de confiance (§20, §23)
+- ⬜ Étape 7 — Détection d'anomalies (§30-31)
+- ⬜ Étape 8 — Moteur de recommandation IA typée (§18-19)
+- ⬜ Étape 9 — AI Center (dashboard de performance IA, §44-46)
+- ⬜ Étape 10 — LDAP + RBAC étendu (§39-42)
+- ⬜ Étape 11 — Chatbot IA (§34-38)
+- ⬜ Étape 12 — Shadow Mode (§50)
+- ⬜ Étape 13 — Réassort automatique contrôlé (§26-29)
+- ⬜ Étape 14 — Réassort automatique complet
+
 ## 📦 Installation
 
 ### Prérequis
