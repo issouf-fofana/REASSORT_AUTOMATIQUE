@@ -11,6 +11,7 @@
   let allPredictions = [];
   let groupedByDepartment = []; // [{ department, predictions: [...] }], trié par nb d'articles décroissant
   let currentPage = 1;
+  let currentProposalId = null;
 
   async function loadShopList() {
     try {
@@ -165,334 +166,30 @@
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = currentPage >= totalPages;
 
+    // L'ouverture du panneau et toute la logique d'analyse IA / détail vivent dans le module
+    // partagé ai-recommendation-panel.js (réutilisé aussi sur purchase-order.html) : cette page ne
+    // fait que fournir les données de la ligne cliquée.
     tbody.querySelectorAll('tr[data-ean]').forEach(function (row) {
       row.addEventListener('click', function () {
         const prediction = allPredictions.find(function (p) { return p.ean === row.dataset.ean; });
-        if (prediction) openDetail(prediction);
+        if (!prediction) return;
+        window.openAiRecommendationPanel({
+          proposalId: currentProposalId,
+          shopId: shopSelect.value,
+          ean: prediction.ean,
+          label: prediction.label,
+          predictedQuantity: prediction.predictedQuantity,
+          predictedWeeklyDemand: prediction.predictedWeeklyDemand,
+          stockAtPrediction: prediction.stockAtPrediction,
+          ordersAtPrediction: prediction.ordersAtPrediction,
+          confidenceScore: prediction.confidenceScore,
+          reasoning: prediction.reasoning,
+          dailyHistory: prediction.dailyHistory,
+          outcome: prediction.outcome,
+        });
       });
     });
   }
-
-  // Sparkline SVG inline : léger, pas de dépendance, suffisant pour 7-14 points journaliers.
-  function buildSparkline(dailyHistory) {
-    if (!dailyHistory || dailyHistory.length < 2) return '<p class="text-muted small">Pas assez d\'historique pour un graphique.</p>';
-    const values = dailyHistory.map(function (d) { return d.quantity || 0; });
-    const max = Math.max.apply(null, values.concat([1]));
-    const width = 400;
-    const height = 100;
-    const step = width / (values.length - 1);
-    const points = values.map(function (v, i) {
-      const x = i * step;
-      const y = height - (v / max) * (height - 10) - 5;
-      return x + ',' + y;
-    }).join(' ');
-    const dots = values.map(function (v, i) {
-      const x = i * step;
-      const y = height - (v / max) * (height - 10) - 5;
-      return '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#000000"></circle>';
-    }).join('');
-    const labels = '<div class="d-flex justify-content-between small text-muted mt-1">' +
-      '<span>' + dailyHistory[0].date + '</span><span>' + dailyHistory[dailyHistory.length - 1].date + '</span></div>';
-    return '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:100px;">' +
-      '<polyline points="' + points + '" fill="none" stroke="#000000" stroke-width="2"></polyline>' + dots +
-      '</svg>' + labels;
-  }
-
-  function signalRow(label, value, extra) {
-    return '<div class="aip-signal-row">' +
-      '<div class="aip-signal-label">' + label + (extra ? ' <span class="text-muted">(' + extra + ')</span>' : '') + '</div>' +
-      '<div class="aip-signal-bar"><div class="aip-signal-bar-fill" style="width:' + value + '%;"></div></div>' +
-      '<div class="aip-signal-value">' + value + '%</div>' +
-      '</div>';
-  }
-
-  let currentDetailPrediction = null;
-  let currentProposalId = null;
-
-  // Jeton d'appel : si l'utilisateur ouvre un autre article (ou relance une analyse) avant que
-  // l'appel LLM précédent ne réponde, la réponse tardive du premier appel ne doit jamais écraser
-  // l'affichage d'un article différent déjà à l'écran.
-  let aiAnalysisToken = 0;
-
-  function aiLoadingHtml() {
-    return '<div class="aip-ai-loading">' +
-      '<div class="aip-scan-bar"></div>' +
-      '<div class="aip-loading-label">L\'IA analyse cet article</div>' +
-      '<div class="aip-loading-detail">Historique de ventes, stock actuel, commandes en cours&hellip;</div>' +
-      '</div>';
-  }
-
-  function aiErrorHtml(message) {
-    return '<div class="aip-ai-error-card">' +
-      '<p class="small mb-0"><strong>L\'analyse IA a échoué :</strong> ' + message + '</p>' +
-      '<button type="button" class="btn btn-outline-dark btn-sm aip-ai-retry" id="aip-ai-retry-btn">Réessayer</button>' +
-      '</div>';
-  }
-
-  // Résultat de l'IA en mémoire pour cet article ouvert (utilisé par la vue simple, la vue détail,
-  // et le champ de quantité modifiable) : null tant que l'appel n'a pas encore répondu.
-  let currentAiResult = null;
-
-  function aiReadyHtml(d) {
-    return '<div class="aip-reco-card">' +
-        '<div class="aip-reco-eyebrow"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon>Recommandation IA</div>' +
-        '<div class="aip-reco-headline">Pour cet article, l\'IA recommande de commander <strong>' + d.quantity + ' unité(s)</strong> pour la semaine à venir.</div>' +
-        '<div class="aip-reco-quantity">' + d.quantity + '</div>' +
-        '<div class="aip-reco-quantity-unit">unités recommandées</div>' +
-      '</div>' +
-      '<button type="button" class="aip-why-btn" id="aip-why-btn">Pourquoi ?</button>' +
-      '<div class="aip-order-qty-card">' +
-        '<label for="aip-order-qty-input">Quantité à commander</label>' +
-        '<div class="input-group">' +
-          '<input type="number" min="0" step="1" class="form-control" id="aip-order-qty-input" value="' + d.quantity + '">' +
-          '<button type="button" class="btn btn-dark" id="aip-order-qty-save">Appliquer</button>' +
-        '</div>' +
-        '<div class="aip-order-qty-hint" id="aip-order-qty-hint">L\'IA recommande ' + d.quantity + ' — vous pouvez commander moins ou plus selon votre jugement.</div>' +
-      '</div>';
-  }
-
-  function wireSimpleViewEvents(prediction) {
-    const whyBtn = document.getElementById('aip-why-btn');
-    if (whyBtn) whyBtn.addEventListener('click', function () { showDetailView(prediction); });
-
-    const qtyInput = document.getElementById('aip-order-qty-input');
-    const qtyHint = document.getElementById('aip-order-qty-hint');
-    const qtySaveBtn = document.getElementById('aip-order-qty-save');
-    if (qtyInput && currentAiResult) {
-      qtyInput.addEventListener('input', function () {
-        const val = parseInt(qtyInput.value, 10);
-        if (Number.isFinite(val) && val !== currentAiResult.quantity) {
-          qtyHint.textContent = 'Écart de ' + (val > currentAiResult.quantity ? '+' : '') + (val - currentAiResult.quantity) + ' par rapport à la recommandation IA (' + currentAiResult.quantity + ').';
-          qtyHint.classList.add('aip-qty-changed');
-        } else {
-          qtyHint.textContent = 'L\'IA recommande ' + currentAiResult.quantity + ' — vous pouvez commander moins ou plus selon votre jugement.';
-          qtyHint.classList.remove('aip-qty-changed');
-        }
-      });
-    }
-    if (qtySaveBtn) {
-      qtySaveBtn.addEventListener('click', function () { saveOrderQuantity(prediction, qtySaveBtn, qtyHint); });
-    }
-  }
-
-  async function saveOrderQuantity(prediction, btn, hint) {
-    const qtyInput = document.getElementById('aip-order-qty-input');
-    const value = parseInt(qtyInput.value, 10);
-    if (!Number.isFinite(value) || value < 0) return;
-    btn.disabled = true;
-    const originalText = btn.textContent;
-    btn.textContent = 'Enregistrement...';
-    try {
-      const res = await window.reassortFetch('/reassort/proposal/' + currentProposalId + '/line-quantity', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ean: prediction.ean, quantity: value }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message);
-      prediction.predictedQuantity = value; // reflète la nouvelle valeur si le panneau est rouvert
-      hint.textContent = 'Quantité enregistrée : ' + value + ' unité(s) sur cette proposition.';
-      hint.classList.remove('aip-qty-changed');
-    } catch (err) {
-      hint.textContent = 'Erreur: ' + err.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
-  }
-
-  async function runAiAnalysis(prediction) {
-    const myToken = ++aiAnalysisToken;
-    currentAiResult = null;
-    const resultBox = document.getElementById('aip-simple-view');
-    if (!resultBox) return; // le panneau a été fermé/changé entre-temps
-    resultBox.innerHTML = aiLoadingHtml();
-    try {
-      const res = await window.reassortFetch('/reassort/proposal/' + currentProposalId + '/ai-analyze-article', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ean: prediction.ean }),
-      });
-      const json = await res.json();
-      if (myToken !== aiAnalysisToken) return; // une autre analyse a été lancée depuis
-      if (!json.success) throw new Error(json.message);
-      currentAiResult = json.data;
-      const box = document.getElementById('aip-simple-view');
-      if (box) {
-        box.innerHTML = aiReadyHtml(json.data);
-        wireSimpleViewEvents(prediction);
-      }
-    } catch (err) {
-      if (myToken !== aiAnalysisToken) return;
-      const box = document.getElementById('aip-simple-view');
-      if (box) {
-        box.innerHTML = aiErrorHtml(err.message);
-        const retryBtn = document.getElementById('aip-ai-retry-btn');
-        if (retryBtn) retryBtn.addEventListener('click', function () { runAiAnalysis(prediction); });
-      }
-    }
-  }
-
-  async function loadHistoryForPeriod(days) {
-    const container = document.getElementById('aip-sparkline-container');
-    container.innerHTML = '<p class="text-muted small">Chargement...</p>';
-    try {
-      const shopId = shopSelect.value;
-      const res = await window.reassortFetch('/reassort/predictions/history?shop=' + encodeURIComponent(shopId) + '&ean=' + encodeURIComponent(currentDetailPrediction.ean) + '&days=' + days);
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message);
-      container.innerHTML = buildSparkline(json.data.dailyHistory);
-    } catch (err) {
-      container.innerHTML = '<p class="text-danger small">Erreur: ' + err.message + '</p>';
-    }
-  }
-
-  function periodButtonsHtml(activeDays) {
-    return [7, 30, 90].map(function (d) {
-      return '<button type="button" class="btn btn-sm btn-outline-secondary aip-period-btn' + (d === activeDays ? ' active' : '') + '" data-days="' + d + '">' + d + ' j</button>';
-    }).join(' ');
-  }
-
-  // Détail des 4 signaux du score de confiance : pas renvoyé en champs séparés par l'API (seulement
-  // condensé dans "reasoning" en texte) — extrait ici plutôt que de dupliquer le calcul côté
-  // frontend, pour rester fidèle à ce que confidenceService.js a réellement produit.
-  function extractConfidenceSignals(reasoning) {
-    function extract(regex) {
-      const m = reasoning && reasoning.match(regex);
-      return m ? parseInt(m[1], 10) : null;
-    }
-    return {
-      history: extract(/historique (\d+)%/),
-      volatility: extract(/stabilité (\d+)%/),
-      accuracy: extract(/précision passée (\d+)%/),
-      quality: extract(/qualité données (\d+)%/),
-      accuracyNotYetEvaluated: /pas encore évaluée/.test(reasoning || ''),
-    };
-  }
-
-  function buildDetailViewHtml(p) {
-    const outcome = p.outcome;
-    const outcomeHtml = outcome
-      ? '<div class="alert alert-light border small">' +
-          '<strong>Résultat réel :</strong> ' + outcome.actualSales.toLocaleString('fr-FR') + ' vendus contre ' +
-          Math.round(p.predictedQuantity) + ' prévus (écart ' + (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError) +
-          (outcome.percentageError !== null ? ', ' + Math.round(outcome.percentageError * 100) + '% d\'erreur' : '') + ').' +
-        '</div>'
-      : '<div class="alert alert-light border small text-muted">Semaine cible pas encore terminée : résultat réel non disponible.</div>';
-
-    const sig = extractConfidenceSignals(p.reasoning);
-    const signalsHtml = (sig.history !== null)
-      ? '<div class="mt-2">' +
-          signalRow('Historique de données', sig.history) +
-          signalRow('Stabilité des ventes', sig.volatility) +
-          signalRow('Précision passée', sig.accuracy, sig.accuracyNotYetEvaluated ? 'pas encore évaluée' : null) +
-          signalRow('Qualité des données', sig.quality) +
-        '</div>'
-      : '<p class="text-muted small">Détail des signaux non disponible pour cette prédiction.</p>';
-
-    const aiSection = currentAiResult
-      ? '<div class="aip-detail-section">' +
-          '<h6>Pourquoi l\'IA recommande ' + currentAiResult.quantity + ' unité(s) ?</h6>' +
-          '<div class="aip-reasoning-block">' + (currentAiResult.reasoning || '—') + '</div>' +
-          '<p class="small text-muted mt-2 mb-0">Modèle utilisé : ' + (currentAiResult.providerUsed || '—') + '. L\'IA a analysé l\'historique de ventes ci-dessous, le stock actuellement disponible, les quantités déjà en commande, et la tendance récente pour estimer la couverture nécessaire à la semaine à venir.</p>' +
-        '</div>'
-      : '<div class="aip-detail-section"><p class="text-muted small">Analyse IA pas encore disponible.</p></div>';
-
-    return (
-      '<button type="button" class="aip-back-btn" id="aip-back-btn"><iconify-icon icon="solar:arrow-left-linear"></iconify-icon>Retour à la recommandation</button>' +
-
-      aiSection +
-
-      '<div class="aip-detail-section">' +
-        '<div class="d-flex align-items-center justify-content-between mb-2">' +
-          '<h6 class="mb-0">Évolution des ventes</h6>' +
-          '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
-        '</div>' +
-        '<div id="aip-sparkline-container">' + buildSparkline(p.dailyHistory) + '</div>' +
-      '</div>' +
-
-      '<div class="aip-detail-section">' +
-        '<h6>Niveau de confiance de la prévision de base</h6>' +
-        '<div class="aip-classic-card">' +
-          '<div class="aip-classic-eyebrow">Calcul système (lissage exponentiel / moyenne simple)</div>' +
-          '<div class="row g-2 mb-2">' +
-            '<div class="col-6"><div class="text-muted small">Quantité prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedQuantity) + '</div></div>' +
-            '<div class="col-6"><div class="text-muted small">Vente hebdo. prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedWeeklyDemand) + '</div></div>' +
-            '<div class="col-6"><div class="text-muted small">Stock au calcul</div><div class="fs-20 fw-semibold">' + Math.round(p.stockAtPrediction) + '</div></div>' +
-            '<div class="col-6"><div class="text-muted small">Déjà en commande</div><div class="fs-20 fw-semibold">' + Math.round(p.ordersAtPrediction) + '</div></div>' +
-          '</div>' +
-          '<div class="small text-muted mb-2">Score de confiance : <strong>' + (p.confidenceScore ?? '—') + '%</strong></div>' +
-          signalsHtml +
-        '</div>' +
-      '</div>' +
-
-      '<div class="aip-detail-section">' +
-        '<h6>Résultat une fois la semaine terminée</h6>' +
-        outcomeHtml +
-      '</div>'
-    );
-  }
-
-  function showDetailView(p) {
-    const detailView = document.getElementById('aip-detail-view');
-    const simpleView = document.getElementById('aip-simple-view');
-    detailView.innerHTML = buildDetailViewHtml(p);
-    simpleView.classList.add('hide');
-    detailView.classList.add('show');
-
-    document.getElementById('aip-back-btn').addEventListener('click', function () { showSimpleView(); });
-    document.getElementById('aip-period-buttons').querySelectorAll('.aip-period-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        document.querySelectorAll('.aip-period-btn').forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        loadHistoryForPeriod(parseInt(btn.dataset.days, 10));
-      });
-    });
-  }
-
-  function showSimpleView() {
-    document.getElementById('aip-detail-view').classList.remove('show');
-    document.getElementById('aip-simple-view').classList.remove('hide');
-  }
-
-  function openDetail(p) {
-    currentDetailPrediction = p;
-    currentAiResult = null;
-    document.getElementById('aip-detail-title').textContent = p.label || p.ean;
-
-    // Deux vues empilées dans le même conteneur : la vue simple (recommandation IA + quantité
-    // modifiable) est visible par défaut, la vue détail ("Pourquoi ?") contient tout ce qui est
-    // technique — jamais les deux en même temps, cf. demande explicite de ne pas "polluer" l'écran
-    // principal avec les calculs internes (score de confiance, signaux, quantité du calcul
-    // classique...) qui restent utilisés en interne mais ne doivent être vus qu'à la demande.
-    document.getElementById('aip-detail-body').innerHTML =
-      '<div id="aip-simple-view" class="aip-simple-view">' + aiLoadingHtml() + '</div>' +
-      '<div id="aip-detail-view" class="aip-detail-view"></div>';
-
-    showDetailPanel();
-    runAiAnalysis(p);
-  }
-
-  const detailPanel = document.getElementById('aip-detail-panel');
-  const detailBackdrop = document.getElementById('aip-detail-backdrop');
-
-  function showDetailPanel() {
-    detailBackdrop.hidden = false;
-    // requestAnimationFrame : force le navigateur à peindre l'état initial (hors écran) avant
-    // d'appliquer .show, sinon la transition CSS ne joue pas (les deux changements de style
-    // arriveraient dans le même frame).
-    requestAnimationFrame(function () { detailPanel.classList.add('show'); });
-    detailPanel.setAttribute('aria-hidden', 'false');
-  }
-
-  function hideDetailPanel() {
-    detailPanel.classList.remove('show');
-    detailPanel.setAttribute('aria-hidden', 'true');
-    setTimeout(function () { detailBackdrop.hidden = true; }, 250);
-  }
-
-  document.getElementById('aip-detail-close').addEventListener('click', hideDetailPanel);
-  detailBackdrop.addEventListener('click', hideDetailPanel);
 
   shopSelect.addEventListener('change', loadProposalList);
   proposalSelect.addEventListener('change', loadPredictions);

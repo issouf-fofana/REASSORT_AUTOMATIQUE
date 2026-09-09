@@ -471,14 +471,6 @@
                                              let reassortCurrentPage = 1;
                                              let reassortCurrentLines = [];
 
-                                             // Suggestions IA (à la demande) : { ean -> { quantitySuggested, reasoning } }, chargées après
-                                             // un clic sur "Analyser avec l'IA". Reste en mémoire tant que la page n'est pas rechargée ; ne
-                                             // modifie jamais quantitySuggested/reassort-qty-input tant que l'utilisateur ne clique pas
-                                             // explicitement sur "Appliquer" pour une ligne donnée. Rempli au clic sur "Analyser"
-                                             // article par article (pas de batch sur toute la proposition, trop lent et générait
-                                             // des suggestions sans lien avec un article précis consulté par l'utilisateur).
-                                             let currentAiForecastByEan = new Map();
-
                                              // Champ de quantité en nombre de colis, avec le colisage affiché à côté (comme RPOS :
                                              // "Quantité UC" x colisage = quantité totale) : on saisit "3" pour un article en carton
                                              // de 10, le système calcule et envoie 30 unités — plus lisible que de deviner soi-même
@@ -498,29 +490,15 @@
                                                        '</div>';
                                              }
 
+                                             // Ouvre le panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js,
+                                             // même composant que ai-predictions.html) : le tableau n'affiche plus jamais le résultat
+                                             // technique en cellule (quantité + raison tronquée dans un title="...") — l'IA lance son
+                                             // analyse à l'ouverture du panneau, avec la recommandation en gros, un bouton "Pourquoi ?"
+                                             // pour le détail, et un champ pour appliquer une quantité ajustée à la ligne.
                                              function aiSuggestionCell(l) {
-                                                  const suggestion = currentAiForecastByEan.get(l.ean);
-                                                  if (!suggestion) {
-                                                       // Pas encore analysé : bouton qui déclenche l'appel IA pour CET article seul au clic
-                                                       // (cf. runAiAnalysisForLine), jamais tout le tableau d'un coup.
-                                                       return '<button type="button" class="btn btn-sm btn-outline-dark ai-analyze-line-btn" data-line-id="' + l.id + '" data-ean="' + l.ean + '" title="Demander une analyse IA pour cet article">' +
-                                                            '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle"></iconify-icon> Analyser' +
-                                                            '</button>';
-                                                  }
-                                                  if (suggestion.loading) {
-                                                       return '<span class="spinner-border spinner-border-sm align-middle text-muted"></span>';
-                                                  }
-                                                  if (suggestion.error) {
-                                                       return '<span class="text-danger small" title="' + suggestion.error.replace(/"/g, '&quot;') + '">Erreur ⟳</span>' +
-                                                            ' <button type="button" class="btn btn-sm btn-outline-dark py-0 px-1 ai-analyze-line-btn" data-line-id="' + l.id + '" data-ean="' + l.ean + '">↻</button>';
-                                                  }
-                                                  // Badge noir explicite (cf. ai-predictions.html) : jamais confondu avec la "Qté
-                                                  // proposée" du calcul classique juste à côté, même si l'IA a confirmé le même chiffre.
-                                                  return '<div class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background-color:#000000;color:#ffffff;" title="' + (suggestion.reasoning || '').replace(/"/g, '&quot;') + '">' +
-                                                       '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle" style="font-size:.85rem;"></iconify-icon>' +
-                                                       '<strong>' + suggestion.quantitySuggested + '</strong>' +
-                                                       '<button type="button" class="btn btn-sm py-0 px-1 ai-apply-btn" style="color:#ffffff;" data-line-id="' + l.id + '" data-quantity="' + suggestion.quantitySuggested + '" title="Appliquer cette suggestion à la ligne">✓</button>' +
-                                                       '</div>';
+                                                  return '<button type="button" class="btn btn-sm btn-outline-dark ai-analyze-line-btn" data-ean="' + l.ean + '" title="Demander une recommandation IA pour cet article">' +
+                                                       '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle"></iconify-icon> Analyser' +
+                                                       '</button>';
                                              }
 
                                              const tbody = document.getElementById('reassort-tbody');
@@ -1117,44 +1095,29 @@
                                                   updateOrderTotal();
                                              });
 
-                                             tbody.addEventListener('click', function (e) {
-                                                  const btn = e.target.closest('.ai-apply-btn');
-                                                  if (!btn) return;
-                                                  const lineId = btn.dataset.lineId;
-                                                  const quantity = parseFloat(btn.dataset.quantity) || 0;
-                                                  const check = document.querySelector('.reassort-line-check[data-line-id="' + lineId + '"]');
-                                                  setLineQuantity(lineId, quantity);
-                                                  if (check) check.checked = true;
-                                                  updateOrderTotal();
-                                             });
-
-                                             // --- Analyse IA à la demande, article par article : au clic sur "Analyser" (colonne IA),
-                                             // envoie CET article seul au LLM configuré (Paramètres > IA) — jamais toute la
-                                             // proposition d'un coup (trop lent sur 1000+ articles, et sans lien avec ce que
-                                             // l'utilisateur regarde à l'instant). N'écrase jamais la quantité de la ligne tant que
-                                             // l'utilisateur ne clique pas explicitement sur "Appliquer" (✓).
-                                             async function runAiAnalysisForLine(lineId, ean) {
-                                                  if (!currentProposal || !currentProposal.id) return;
-                                                  currentAiForecastByEan.set(ean, { loading: true });
-                                                  renderRows(currentProposal);
-                                                  try {
-                                                       const res = await window.reassortFetch('/reassort/proposal/' + currentProposal.id + '/ai-analyze-article', {
-                                                            method: 'POST',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ ean: ean }),
-                                                       });
-                                                       const json = await res.json();
-                                                       if (!json.success) throw new Error(json.message);
-                                                       currentAiForecastByEan.set(ean, { quantitySuggested: json.data.quantity, reasoning: json.data.reasoning });
-                                                  } catch (err) {
-                                                       currentAiForecastByEan.set(ean, { error: err.message });
-                                                  }
-                                                  renderRows(currentProposal);
-                                             }
-
+                                             // --- Recommandation IA à la demande, article par article : au clic sur "Analyser"
+                                             // (colonne IA), ouvre le panneau partagé (assets/js/ai-recommendation-panel.js) qui lance
+                                             // l'analyse pour CET article seul — jamais toute la proposition d'un coup. N'écrase la
+                                             // quantité de la ligne que si l'utilisateur clique explicitement sur "Appliquer" dans le
+                                             // panneau (onApply ci-dessous).
                                              tbody.addEventListener('click', function (e) {
                                                   const analyzeBtn = e.target.closest('.ai-analyze-line-btn');
-                                                  if (analyzeBtn) runAiAnalysisForLine(analyzeBtn.dataset.lineId, analyzeBtn.dataset.ean);
+                                                  if (!analyzeBtn) return;
+                                                  const ean = analyzeBtn.dataset.ean;
+                                                  const line = (currentProposal ? currentProposal.lines : []).find(function (l) { return l.ean === ean; });
+                                                  if (!line || !currentProposal) return;
+                                                  window.openAiRecommendationPanel({
+                                                       proposalId: currentProposal.id,
+                                                       shopId: selectedShopId(),
+                                                       ean: ean,
+                                                       label: line.label,
+                                                       onApply: function (quantity) {
+                                                            const check = document.querySelector('.reassort-line-check[data-line-id="' + line.id + '"]');
+                                                            setLineQuantity(line.id, quantity);
+                                                            if (check) check.checked = true;
+                                                            updateOrderTotal();
+                                                       },
+                                                  });
                                              });
 
                                              // --- Évolution d'un article (courbe de ventes, historique de commandes, prédiction) ---
@@ -1363,9 +1326,6 @@
 
                                              async function loadPendingProposal() {
                                                   updateTitle();
-                                                  // Une nouvelle proposition chargée invalide les suggestions IA de la précédente (les
-                                                  // lineId ne correspondent plus) : réinitialisée, chaque ligne redevient "à analyser".
-                                                  currentAiForecastByEan = new Map();
                                                   const shopId = selectedShopId();
                                                   if (!shopId) {
                                                        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
@@ -1952,6 +1912,9 @@
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <!-- Panneau partagé "Recommandation IA" (CSS + DOM injectés dynamiquement à l'ouverture) :
+          même composant que ai-predictions.html, cf. assets/js/ai-recommendation-panel.js. -->
+     <script src="assets/js/ai-recommendation-panel.js"></script>
 </body>
 
 </html>
