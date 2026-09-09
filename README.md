@@ -88,7 +88,19 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   planification ajoutés sur la page Paramètres (onglet Planification, carte "Évaluation des
   prédictions"). Voir `backend/src/jobs/predictionOutcomeJob.js` et `AIPredictionOutcome` dans
   `schema.prisma`.
-- ⬜ Étape 6 — Moteur de confiance (§20, §23)
+- ✅ **Étape 6 — Moteur de confiance** (§20) : nouveau service `confidenceService.js`, calcule un
+  `confidenceScore` (0-100) par article à chaque génération, à partir des 4 signaux ayant déjà une
+  source de données fiable dans ce projet : quantité d'historique de vente, volatilité (coefficient
+  de variation des ventes journalières), précision des prédictions passées pour cet article
+  (`AIPredictionOutcome`, étape 5 — score neutre à 50 tant qu'aucune évaluation n'existe encore,
+  plutôt qu'une fausse confiance à 100 ou une pénalité injuste à 0), et qualité des données (rupture
+  de stock détectée sur la période). **Version honnête assumée à cette étape** : le §20 liste
+  10 critères idéaux (dont détection d'anomalies et comportement magasin/article) ; ceux qui
+  dépendent d'étapes pas encore faites (anomalies = étape 7) ou d'un modèle pas encore construit ne
+  sont pas simulés — le score s'enrichira naturellement à mesure que ces étapes avanceront, sans
+  casser ce qui existe déjà. Renseigne `AIPrediction.confidenceScore` (colonne posée mais vide
+  depuis l'étape 4) et enrichit `reasoning` avec le détail par signal. Testé avec une génération
+  réelle sur le magasin 110. Voir `backend/src/services/confidenceService.js`.
 - ⬜ Étape 7 — Détection d'anomalies (§30-31)
 - ⬜ Étape 8 — Moteur de recommandation IA typée (§18-19)
 - ⬜ Étape 9 — AI Center (dashboard de performance IA, §44-46)
