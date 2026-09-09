@@ -32,7 +32,12 @@ async function evaluatePrediction(prediction) {
       where: {
         rposShopId: prediction.rposShopId,
         ean: prediction.ean,
-        date: { gte: prediction.targetPeriodStart, lte: prediction.targetPeriodEnd },
+        // targetPeriodEnd est le début du jour suivant la semaine cible (minuit exact, cf.
+        // weeklyPlanService.computeTargetWeek : targetWeekStart + 7 jours) — donc une borne
+        // EXCLUSIVE. `lte` sur ce timestamp exact au lieu de `lt` exclut à tort toute vente du
+        // dernier jour de la semaine survenue après minuit (bug constaté : 26 unités manquantes
+        // sur un total de 217 lors d'un test avec des ventes réelles connues).
+        date: { gte: prediction.targetPeriodStart, lt: prediction.targetPeriodEnd },
       },
       _sum: { quantity: true },
     }),
