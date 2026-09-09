@@ -1,7 +1,13 @@
 // Garde d'authentification pour les pages internes de la plateforme de réassort.
 // À inclure sur toute page qui n'est pas auth-signin.html.
 (function () {
-  window.REASSORT_API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001/api';
+  // En production (Dockploy), le backend est servi sur son propre domaine/sous-domaine, pas sur
+  // le port :3001 du même hôte que le frontend (chaque service a son propre reverse proxy) : la
+  // vraie URL est injectée à l'exécution du conteneur nginx dans window.REASSORT_BACKEND_URL (voir
+  // frontend/assets/config.js, généré par docker-entrypoint.sh à partir de la variable BACKEND_URL).
+  // Fallback sur l'ancien comportement (port :3001 du même hostname) pour le développement local
+  // sans cette configuration.
+  window.REASSORT_API_BASE = (window.REASSORT_BACKEND_URL || (window.location.protocol + '//' + window.location.hostname + ':3001')) + '/api';
 
   window.reassortGetToken = function () {
     return localStorage.getItem('reassort_token');

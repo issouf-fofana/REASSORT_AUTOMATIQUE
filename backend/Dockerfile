@@ -37,6 +37,8 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/magasins.json ./
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Expose port
 EXPOSE 3001
@@ -46,4 +48,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/health || exit 1
 
 # Start application
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "src/server.js"]

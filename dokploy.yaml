@@ -1,0 +1,83 @@
+# Configuration Dockploy — déploie les 3 services (postgres, backend, frontend) ensemble.
+# Après le premier déploiement, configurer dans l'UI Dockploy (onglet "Domains" de chaque
+# application) :
+#   - frontend : domaine public (ex: app.tondomaine.com) -> port interne 80
+#   - backend  : domaine public (ex: api.tondomaine.com) -> port interne 3001
+# Puis reporter ces deux domaines dans les variables BACKEND_URL et CORS_ORIGIN ci-dessous
+# (Dockploy > variables d'environnement du projet) et redéployer.
+#
+# Accès admin : à la toute première création de la base de données, un compte administrateur est
+# créé automatiquement avec un mot de passe généré aléatoirement, affiché UNE SEULE FOIS dans les
+# logs du service "app" au premier démarrage (Dockploy > app > Logs). Le retrouver avec :
+#   docker service logs <nom_du_service_app> | grep -A6 "COMPTE ADMINISTRATEUR"
+# Si vous préférez fixer l'email/mot de passe initial vous-même, définissez ADMIN_EMAIL et
+# ADMIN_PASSWORD dans les variables d'environnement du service "app" avant le tout premier
+# démarrage (n'a aucun effet si un administrateur existe déjà).
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-stock_auto_reappro}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: ./backend
+    restart: unless-stopped
+    expose:
+      - "3001"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      # Domaine public du frontend (configuré dans Dockploy > app frontend > Domains), ex:
+      # https://app.tondomaine.com — nécessaire pour autoriser les requêtes CORS du navigateur.
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      # Domaine public de CE service (configuré dans Dockploy > ce service > Domains), affiché
+      # dans les logs de démarrage pour retrouver facilement l'URL de l'API.
+      PUBLIC_URL: ${BACKEND_URL}
+      FRONTEND_URL: ${CORS_ORIGIN}
+      # Optionnel : fixe l'email/mot de passe du tout premier compte admin créé (sans effet si un
+      # admin existe déjà). Sans ces variables, un mot de passe fort est généré et affiché une
+      # seule fois dans les logs au premier démarrage.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      # Domaine public du backend (configuré dans Dockploy > app backend > Domains), ex:
+      # https://api.tondomaine.com — injecté dans le frontend au démarrage du conteneur
+      # (voir frontend/docker-entrypoint.sh), aucune reconstruction d'image nécessaire si ce
+      # domaine change plus tard.
+      BACKEND_URL: ${BACKEND_URL}
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:

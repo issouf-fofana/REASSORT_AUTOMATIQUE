@@ -15,6 +15,7 @@
 
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
 </head>
 
 <body>
@@ -57,7 +58,7 @@
                                    </form>
                                    <script>
                                         (function () {
-                                             const API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001/api';
+                                             const API_BASE = (window.REASSORT_BACKEND_URL || (window.location.protocol + '//' + window.location.hostname + ':3001')) + '/api';
                                              const form = document.getElementById('login-form');
                                              const errorBox = document.getElementById('login-error');
                                              const submitBtn = document.getElementById('login-submit');
