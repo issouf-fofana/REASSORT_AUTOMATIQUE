@@ -799,10 +799,32 @@ router.get('/weekly-plan/:id/history', async (req, res) => {
   }
 });
 
-// GET /api/reassort/predictions - dernières prédictions du magasin courant (page "IA & Prédictions"),
-// triées par score de confiance croissant (les moins fiables d'abord, celles qui méritent le plus
-// d'attention). Une ligne par article, uniquement celles de la proposition la plus récente pour
-// éviter d'afficher des doublons d'un article présent dans plusieurs générations passées.
+// GET /api/reassort/predictions/proposals - liste des propositions du magasin courant (les plus
+// récentes en premier), pour alimenter le sélecteur de la page "IA & Prédictions" : permet de
+// consulter les prédictions d'une génération passée, pas seulement la toute dernière.
+router.get('/predictions/proposals', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const proposals = await prisma.proposal.findMany({
+      where: { rposShopId: shopId, predictions: { some: {} } },
+      orderBy: { generatedAt: 'desc' },
+      take: 30,
+      select: { id: true, generatedAt: true, status: true },
+    });
+    res.json({ success: true, data: proposals });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/predictions - prédictions du magasin courant pour une proposition donnée
+// (?proposalId=... ; par défaut la plus récente), triées par score de confiance croissant (les
+// moins fiables d'abord, celles qui méritent le plus d'attention). Enrichit chaque prédiction avec
+// le détail déjà calculé sur ProposalLine (historique jour par jour, stock, commandes en cours...)
+// pour permettre d'expliquer une recommandation sans aucun recalcul.
 router.get('/predictions', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -810,35 +832,49 @@ router.get('/predictions', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
 
-    const latestProposal = await prisma.proposal.findFirst({
-      where: { rposShopId: shopId },
-      orderBy: { generatedAt: 'desc' },
-      select: { id: true },
-    });
-    if (!latestProposal) return res.json({ success: true, data: { proposalId: null, predictions: [] } });
+    let proposalId = req.query.proposalId;
+    if (!proposalId) {
+      const latestProposal = await prisma.proposal.findFirst({
+        where: { rposShopId: shopId },
+        orderBy: { generatedAt: 'desc' },
+        select: { id: true },
+      });
+      if (!latestProposal) return res.json({ success: true, data: { proposalId: null, generatedAt: null, predictions: [] } });
+      proposalId = latestProposal.id;
+    }
 
-    const predictions = await prisma.aIPrediction.findMany({
-      where: { proposalId: latestProposal.id },
-      orderBy: { confidenceScore: 'asc' },
-      include: { outcome: true },
+    const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, select: { id: true, rposShopId: true, generatedAt: true } });
+    if (!proposal || proposal.rposShopId !== shopId) {
+      return res.status(404).json({ success: false, message: 'Proposition introuvable pour ce magasin' });
+    }
+
+    const [predictions, lines] = await Promise.all([
+      prisma.aIPrediction.findMany({
+        where: { proposalId },
+        orderBy: { confidenceScore: 'asc' },
+        include: { outcome: true },
+      }),
+      prisma.proposalLine.findMany({
+        where: { proposalId },
+        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true },
+      }),
+    ]);
+
+    const lineByEan = new Map(lines.map((l) => [l.ean, l]));
+    const enriched = predictions.map((p) => {
+      const line = lineByEan.get(p.ean);
+      let dailyHistory = [];
+      if (line?.dailyHistory) {
+        try { dailyHistory = JSON.parse(line.dailyHistory); } catch { dailyHistory = []; }
+      }
+      return {
+        ...p,
+        dailyHistory,
+        revenueSharePct: line?.revenueSharePct ?? null,
+      };
     });
 
-    res.json({ success: true, data: { proposalId: latestProposal.id, predictions } });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET /api/reassort/predictions/:proposalId - historique des prédictions enregistrées pour une
-// proposition donnée (CAHIER_DES_CHARGES.md §21, étape 4) : lecture seule, aucun recalcul.
-router.get('/predictions/:proposalId', async (req, res) => {
-  try {
-    const predictions = await prisma.aIPrediction.findMany({
-      where: { proposalId: req.params.proposalId },
-      orderBy: { predictedWeeklyDemand: 'desc' },
-      include: { outcome: true },
-    });
-    res.json({ success: true, data: predictions });
+    res.json({ success: true, data: { proposalId, generatedAt: proposal.generatedAt, predictions: enriched } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

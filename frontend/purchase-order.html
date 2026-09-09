@@ -1513,10 +1513,10 @@
                                                   if (!revisions.length) return;
                                                   const lastRevisionId = revisions[revisions.length - 1].id;
                                                   try {
-                                                       const res = await window.reassortFetch('/reassort/predictions/' + lastRevisionId);
+                                                       const res = await window.reassortFetch('/reassort/predictions?proposalId=' + lastRevisionId);
                                                        const json = await res.json();
                                                        if (!json.success) return;
-                                                       const evaluated = json.data.filter(function (p) { return p.outcome; });
+                                                       const evaluated = json.data.predictions.filter(function (p) { return p.outcome; });
                                                        if (!evaluated.length) return;
 
                                                        evaluated.sort(function (a, b) { return (b.outcome.percentageError || 0) - (a.outcome.percentageError || 0); });

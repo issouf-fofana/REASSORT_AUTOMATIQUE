@@ -2,7 +2,6 @@
 <html lang="en">
 
 <head>
-     <!-- Title Meta -->
      <meta charset="utf-8" />
      <title>IA & Prédictions | Réassort Automatique</title>
      <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +12,6 @@
 
      <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
-     <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
     <script src="assets/js/reassort-auth.js"></script>
@@ -23,6 +21,13 @@
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
          .confidence-bar { height: 6px; border-radius: 0; background-color: #e5e5e5; overflow: hidden; }
          .confidence-bar-fill { height: 100%; background-color: #000000; }
+         #aip-tbody tr { cursor: pointer; }
+         #aip-tbody tr:hover { background-color: #f5f5f5; }
+         .aip-signal-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+         .aip-signal-label { width: 150px; flex-shrink: 0; font-size: .8rem; color: #666; }
+         .aip-signal-bar { height: 8px; border-radius: 0; background-color: #e5e5e5; flex-grow: 1; overflow: hidden; }
+         .aip-signal-bar-fill { height: 100%; background-color: #000000; }
+         .aip-signal-value { width: 40px; text-align: right; font-size: .8rem; font-weight: 600; }
     </style>
 </head>
 
@@ -44,12 +49,16 @@
                               <div class="card">
                                    <div class="card-body">
                                         <div class="row g-2 align-items-end">
-                                             <div class="col-md-6">
+                                             <div class="col-md-5">
                                                   <label class="form-label small">Magasin</label>
                                                   <select id="aip-shop" class="form-select"><option value="">Chargement...</option></select>
                                              </div>
                                              <div class="col-md-4">
-                                                  <button type="button" id="aip-refresh" class="btn btn-primary">Actualiser</button>
+                                                  <label class="form-label small">Génération</label>
+                                                  <select id="aip-proposal" class="form-select" disabled><option value="">—</option></select>
+                                             </div>
+                                             <div class="col-md-3">
+                                                  <button type="button" id="aip-refresh" class="btn btn-primary w-100">Actualiser</button>
                                              </div>
                                         </div>
                                         <div id="aip-proposal-info" class="small text-muted mt-2"></div>
@@ -61,19 +70,24 @@
                     <div class="card mb-3">
                          <div class="card-body">
                               <div class="alert alert-light border small mb-0">
-                                   <strong>À quoi ça sert :</strong> pour chaque article de la dernière proposition générée, le
+                                   <strong>À quoi ça sert :</strong> pour chaque article de la génération sélectionnée, le
                                    système enregistre une prédiction (vente hebdomadaire attendue) accompagnée d'un score de
-                                   confiance (0-100) — plus il est bas, plus la prévision repose sur peu de données fiables
-                                   (historique court, ventes irrégulières, précision passée décevante). Une fois la semaine
-                                   cible terminée, la colonne "Réel" se remplit automatiquement pour comparer prévision et
-                                   vente effective. Triés par confiance croissante : les articles les moins fiables d'abord.
+                                   confiance (0-100) — plus il est bas, plus la prévision repose sur peu de données fiables.
+                                   Cliquez sur une ligne pour voir le détail complet du calcul. Une fois la semaine cible
+                                   terminée, la colonne "Réel" se remplit automatiquement. Triés par confiance croissante :
+                                   les articles les moins fiables d'abord.
                               </div>
                          </div>
                     </div>
 
                     <div class="card">
-                         <div class="card-header">
-                              <h4 class="card-title mb-0">Prédictions de la dernière proposition</h4>
+                         <div class="card-header d-flex justify-content-between align-items-center">
+                              <h4 class="card-title mb-0">Prédictions</h4>
+                              <div class="d-flex align-items-center gap-2">
+                                   <button type="button" class="btn btn-sm btn-outline-secondary" id="aip-prev-page" disabled>&laquo; Précédent</button>
+                                   <span class="small text-muted" id="aip-page-label">—</span>
+                                   <button type="button" class="btn btn-sm btn-outline-secondary" id="aip-next-page" disabled>Suivant &raquo;</button>
+                              </div>
                          </div>
                          <div class="card-body p-0">
                               <div class="table-responsive">
@@ -85,7 +99,7 @@
                                                   <th class="text-end">Réel</th>
                                                   <th class="text-end">Écart</th>
                                                   <th>Confiance</th>
-                                                  <th>Explication</th>
+                                                  <th>Méthode</th>
                                              </tr>
                                         </thead>
                                         <tbody id="aip-tbody">
@@ -100,103 +114,19 @@
           </div>
      </main>
 
-     <!-- Volt vendor JS (Require in all Page) -->
+     <!-- Panneau de détail (offcanvas) : ouvert au clic sur une ligne, garde le tableau visible derrière. -->
+     <div class="offcanvas offcanvas-end" tabindex="-1" id="aip-detail-panel" style="width: 480px;">
+          <div class="offcanvas-header border-bottom">
+               <h5 class="offcanvas-title" id="aip-detail-title">Détail</h5>
+               <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+          </div>
+          <div class="offcanvas-body" id="aip-detail-body"></div>
+     </div>
+
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
-     <script>
-          (function () {
-               const shopSelect = document.getElementById('aip-shop');
-               const tbody = document.getElementById('aip-tbody');
-               const infoBox = document.getElementById('aip-proposal-info');
-
-               async function loadShopList() {
-                    try {
-                         const res = await window.reassortFetch('/reassort/shops');
-                         const json = await res.json();
-                         if (!json.success) throw new Error(json.message);
-                         const byPos = {};
-                         json.data.forEach(function (s) {
-                              if (!byPos[s.posId]) byPos[s.posId] = [];
-                              byPos[s.posId].push(s);
-                         });
-                         shopSelect.innerHTML = Object.keys(byPos).sort().map(function (posId) {
-                              const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); });
-                              const options = shops.map(function (s) {
-                                   return '<option value="' + s.id + '">' + s.reference + ' - ' + s.name + '</option>';
-                              }).join('');
-                              return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
-                         }).join('');
-                         if (window.reassortMakeShopPickerSearchable) window.reassortMakeShopPickerSearchable(shopSelect);
-                         // Le navigateur peut restaurer une sélection précédente sur ce <select> sans déclencher
-                         // d'événement "change" (valeur déjà présente dans le DOM au moment du choix) : on charge
-                         // explicitement si un magasin se retrouve déjà sélectionné après le remplissage.
-                         if (shopSelect.value) loadPredictions();
-                    } catch (err) {
-                         shopSelect.innerHTML = '<option value="">Erreur: ' + err.message + '</option>';
-                    }
-               }
-
-               function confidenceColor(score) {
-                    if (score >= 70) return '#000000';
-                    if (score >= 40) return '#666666';
-                    return '#999999';
-               }
-
-               async function loadPredictions() {
-                    const shopId = shopSelect.value;
-                    if (!shopId) {
-                         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses prédictions.</td></tr>';
-                         infoBox.textContent = '';
-                         return;
-                    }
-                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
-                    try {
-                         const res = await window.reassortFetch('/reassort/predictions?shop=' + encodeURIComponent(shopId));
-                         const json = await res.json();
-                         if (!json.success) throw new Error(json.message);
-                         const d = json.data;
-
-                         if (!d.proposalId || !d.predictions.length) {
-                              tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
-                              infoBox.textContent = '';
-                              return;
-                         }
-
-                         infoBox.textContent = d.predictions.length + ' article(s) — dernière proposition générée pour ce magasin.';
-
-                         tbody.innerHTML = d.predictions.map(function (p) {
-                              const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
-                              const outcome = p.outcome;
-                              const actual = outcome ? outcome.actualSales.toLocaleString('fr-FR') : '—';
-                              const gap = outcome
-                                   ? '<span class="' + (outcome.forecastError > 0 ? 'text-success' : outcome.forecastError < 0 ? 'text-danger' : '') + '">' + (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError) + '</span>'
-                                   : '<span class="text-muted">en attente</span>';
-                              return '<tr>' +
-                                   '<td>' + (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div></td>' +
-                                   '<td class="text-end">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
-                                   '<td class="text-end">' + actual + '</td>' +
-                                   '<td class="text-end">' + gap + '</td>' +
-                                   '<td style="min-width:140px;">' +
-                                        '<div class="d-flex align-items-center gap-2">' +
-                                             '<div class="confidence-bar flex-grow-1"><div class="confidence-bar-fill" style="width:' + score + '%; background-color:' + confidenceColor(score) + ';"></div></div>' +
-                                             '<span class="small fw-semibold">' + score + '%</span>' +
-                                        '</div>' +
-                                   '</td>' +
-                                   '<td class="small text-muted">' + (p.reasoning || '—') + '</td>' +
-                                   '</tr>';
-                         }).join('');
-                    } catch (err) {
-                         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
-                    }
-               }
-
-               shopSelect.addEventListener('change', loadPredictions);
-               document.getElementById('aip-refresh').addEventListener('click', loadPredictions);
-
-               loadShopList();
-          })();
-     </script>
+     <script src="assets/js/ai-predictions.js"></script>
 </body>
 
 </html>
