@@ -34,19 +34,27 @@ const DEFAULT_MODEL_BY_PROVIDER = {
  * calculés par le réassort classique (vente moy./sem., tendance, saisonnalité, stock, commandes en
  * cours), pour que le LLM raisonne sur des données déjà normalisées plutôt que du texte brut.
  */
+// buildArticleSummary accepte deux formes d'entrée selon l'appelant :
+// - une ProposalLine Prisma déjà persistée (dailyHistory en JSON string, stock dans
+//   stockAtGeneration, quantité dans quantitySuggested) — cas de runAiForecast/analyzeArticleRealtime ;
+// - un objet "proposal" interne pas encore persisté, tel que produit par generateProposal
+//   (dailyHistory déjà un tableau, stock dans `stock`, quantité dans quantityProposed) — cas de
+//   l'intégration IA à la génération elle-même (generateAndSaveProposal). Éviter de forcer l'appelant
+//   à reformater ses données juste pour cet appel, qui n'a pas besoin de cette distinction.
 function buildArticleSummary(line) {
-  // dailyHistory est stocké en JSON string sur ProposalLine (cf. generateAndSaveProposal) : donne
-  // à l'IA la vraie évolution jour par jour sur la période d'analyse, plutôt qu'un seul chiffre
-  // moyen (avgWeeklySales) qui masque une tendance ou un pic ponctuel — elle peut ainsi juger
-  // elle-même si la vente moyenne reflète bien un rythme stable ou doit être pondérée.
   let dailyHistory = [];
-  if (line.dailyHistory) {
+  if (Array.isArray(line.dailyHistory)) {
+    dailyHistory = line.dailyHistory;
+  } else if (typeof line.dailyHistory === 'string' && line.dailyHistory) {
     try {
       dailyHistory = JSON.parse(line.dailyHistory);
     } catch {
       dailyHistory = [];
     }
   }
+
+  const classicQuantity = line.quantitySuggested ?? line.quantityProposed ?? 0;
+  const currentStock = line.stockAtGeneration ?? line.stock ?? 0;
 
   return {
     ean: line.ean,
@@ -56,12 +64,17 @@ function buildArticleSummary(line) {
     // écarts arbitraires entre deux méthodes qui n'ont jamais eu connaissance l'une de l'autre
     // (ex: 53 vs 73 sur le même article), et rend la réponse de l'IA directement actionnable comme
     // un ajustement justifié plutôt qu'un deuxième avis concurrent à départager soi-même.
-    systemSuggestedQuantity: line.quantitySuggested ?? 0,
+    //
+    // Cas particulier : un article bloqué par une commande RPOS récente hors plateforme
+    // (excludedAsAlreadyOrderedRpos=true) a une quantité classique à 0 par construction (le besoin
+    // est considéré déjà couvert). Lui donner 0 comme point de départ ne sert à rien — l'IA ne
+    // ferait que confirmer 0 sans avoir vu le vrai besoin. On lui fournit alors
+    // quantityIfUnblocked (déjà calculé : le besoin sans tenir compte de cette commande RPOS).
+    systemSuggestedQuantity: (line.excludedAsAlreadyOrderedRpos && line.quantityIfUnblocked)
+      ? line.quantityIfUnblocked
+      : classicQuantity,
     avgWeeklySales: Number(line.avgWeeklySales?.toFixed(2) ?? 0),
-    // Bug corrigé : ProposalLine n'a pas de champ "stock" (le bon nom est stockAtGeneration) —
-    // currentStock arrivait toujours undefined jusqu'ici, ce qui a probablement contribué à des
-    // écarts importants entre le calcul classique et les suggestions IA passées.
-    currentStock: line.stockAtGeneration ?? 0,
+    currentStock,
     orderingUnit: line.orderingUnit,
     daysUntilStockout: line.daysUntilStockout !== null && line.daysUntilStockout !== undefined
       ? Number(line.daysUntilStockout.toFixed(1))
@@ -233,6 +246,40 @@ async function testProviderKey(keyId) {
 }
 
 /**
+ * Analyse un ensemble d'articles par lots (ARTICLES_PER_BATCH, en parallèle contrôlé par
+ * BATCH_CONCURRENCY) : construit le résumé de chaque article (buildArticleSummary), appelle le LLM
+ * configuré avec fallback multi-clés, et retourne les suggestions obtenues par EAN. Un lot en échec
+ * n'empêche jamais les autres de réussir — c'est à l'appelant de décider quoi faire des articles
+ * sans suggestion (fallback sur le calcul classique, cf. generateAndSaveProposal et runAiForecast).
+ * Factorisé ici car utilisé à deux endroits : l'analyse à la demande sur une proposition déjà
+ * générée (runAiForecast) et, désormais, l'analyse intégrée à chaque génération elle-même.
+ */
+async function analyzeArticlesBatch(lines, shopReference, shopName) {
+  const summaries = lines.map(buildArticleSummary);
+  const batches = [];
+  for (let i = 0; i < summaries.length; i += ARTICLES_PER_BATCH) {
+    batches.push(summaries.slice(i, i + ARTICLES_PER_BATCH));
+  }
+
+  const byEan = new Map();
+  let providerUsed = null;
+  const batchErrors = [];
+
+  await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
+    try {
+      const prompt = await buildPrompt(shopReference, shopName, batch);
+      const { result, providerUsed: usedForBatch } = await callWithFallback(prompt);
+      providerUsed = providerUsed || usedForBatch;
+      for (const r of result) byEan.set(String(r.ean), r);
+    } catch (err) {
+      batchErrors.push(err.message);
+    }
+  });
+
+  return { byEan, providerUsed, batchErrors, totalBatches: batches.length };
+}
+
+/**
  * Lance une analyse IA sur les lignes d'une proposition existante : construit le résumé par
  * article, appelle le LLM (avec fallback multi-clés), et persiste le résultat dans AiForecastRun
  * sans jamais modifier la proposition classique — l'utilisateur choisit explicitement d'appliquer
@@ -247,26 +294,9 @@ async function runAiForecast(proposalId, requestedBy) {
   });
 
   try {
-    const summaries = proposal.lines.map(buildArticleSummary);
-    const batches = [];
-    for (let i = 0; i < summaries.length; i += ARTICLES_PER_BATCH) {
-      batches.push(summaries.slice(i, i + ARTICLES_PER_BATCH));
-    }
-
-    const byEan = new Map();
-    let providerUsed = null;
-    const batchErrors = [];
-
-    await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
-      try {
-        const prompt = await buildPrompt(proposal.rposShopReference, proposal.rposShopName, batch);
-        const { result, providerUsed: usedForBatch } = await callWithFallback(prompt);
-        providerUsed = providerUsed || usedForBatch;
-        for (const r of result) byEan.set(String(r.ean), r);
-      } catch (err) {
-        batchErrors.push(err.message);
-      }
-    });
+    const { byEan, providerUsed, batchErrors, totalBatches } = await analyzeArticlesBatch(
+      proposal.lines, proposal.rposShopReference, proposal.rposShopName
+    );
 
     // Un lot en échec ne bloque pas les autres : les articles concernés gardent simplement la
     // quantité calculée classiquement (fallback silencieux), plutôt que de faire échouer toute
@@ -282,7 +312,7 @@ async function runAiForecast(proposalId, requestedBy) {
       };
     });
 
-    if (byEan.size === 0 && batches.length > 0) {
+    if (byEan.size === 0 && totalBatches > 0) {
       throw new Error(`Tous les lots ont échoué :\n${batchErrors.join('\n')}`);
     }
 
@@ -293,7 +323,7 @@ async function runAiForecast(proposalId, requestedBy) {
         status: 'DONE',
         providerUsed,
         completedAt: new Date(),
-        errorMessage: batchErrors.length > 0 ? `${batchErrors.length}/${batches.length} lot(s) en échec (fallback sur le calcul classique pour ces articles) :\n${batchErrors.join('\n')}` : null,
+        errorMessage: batchErrors.length > 0 ? `${batchErrors.length}/${totalBatches} lot(s) en échec (fallback sur le calcul classique pour ces articles) :\n${batchErrors.join('\n')}` : null,
       },
     });
 
@@ -335,4 +365,4 @@ async function analyzeArticleRealtime({ shopReference, shopName, line }) {
   };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticlesBatch };

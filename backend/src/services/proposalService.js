@@ -8,6 +8,7 @@ const { forecastAvgWeeklySales } = require('./forecastService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
+const aiForecastService = require('./aiForecastService');
 
 const prisma = new PrismaClient();
 
@@ -591,6 +592,48 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // précédente au lieu de se retrouver sans aucune proposition en attente.
   const result = precomputedResult || await generateProposal(posId, shopId, limit, shopReference, periodOverride);
 
+  // Ajustement de la quantité par IA (CAHIER_DES_CHARGES.md, demande explicite : "Qté proposée" ne
+  // doit plus être directement le calcul déterministe, mais le résultat d'une analyse IA qui reçoit
+  // ce calcul comme point de départ). Désactivé par défaut (AI_QUANTITY_ADJUSTMENT_ENABLED) : impact
+  // fort sur le coût et le temps de génération, à activer explicitement depuis Paramètres > IA.
+  // Un échec total (aucune clé API configurée, réseau LLM indisponible) ne bloque jamais la
+  // génération : chaque article garde alors simplement son calcul classique, jamais de proposition
+  // manquante pour un magasin faute d'IA disponible.
+  const aiQuantityAdjustmentEnabled = (await systemConfig.getValue(systemConfig.KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED)) === 'true';
+  if (aiQuantityAdjustmentEnabled && result.proposals.length) {
+    try {
+      const { byEan, providerUsed } = await aiForecastService.analyzeArticlesBatch(result.proposals, shopReference, shopName);
+      console.log(`[proposalService] Ajustement IA : ${byEan.size}/${result.proposals.length} article(s) analysé(s) avec succès (${providerUsed || 'aucun fournisseur'}).`);
+      for (const p of result.proposals) {
+        const suggestion = byEan.get(String(p.ean));
+        p.classicQuantitySuggested = p.quantityProposed;
+        if (suggestion) {
+          p.quantityProposed = Math.max(0, Number(suggestion.quantity) || 0);
+          p.aiAdjusted = true;
+          p.aiReasoning = suggestion.reasoning || null;
+        } else {
+          p.aiAdjusted = false;
+          p.aiReasoning = null;
+        }
+      }
+    } catch (aiError) {
+      // Échec global (ex: aucune clé API active) : chaque article garde son calcul classique,
+      // marqué explicitement comme non revu par l'IA plutôt que de faire échouer la génération.
+      console.error(`[proposalService] Ajustement IA échoué pour ${shopReference}, repli sur le calcul classique:`, aiError.message);
+      for (const p of result.proposals) {
+        p.classicQuantitySuggested = p.quantityProposed;
+        p.aiAdjusted = false;
+        p.aiReasoning = null;
+      }
+    }
+  } else {
+    for (const p of result.proposals) {
+      p.classicQuantitySuggested = p.quantityProposed;
+      p.aiAdjusted = false;
+      p.aiReasoning = null;
+    }
+  }
+
   // Une seule proposition GENERATED active à la fois par magasin : on rejette l'ancienne
   // seulement maintenant que la nouvelle génération a réussi, pour ne jamais en accumuler plusieurs.
   await prisma.proposal.updateMany({
@@ -626,6 +669,9 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           label: p.label,
           productId: p.productId,
           quantitySuggested: p.quantityProposed,
+          classicQuantitySuggested: p.classicQuantitySuggested,
+          aiAdjusted: p.aiAdjusted,
+          aiReasoning: p.aiReasoning,
           stockAtGeneration: p.stock,
           avgWeeklySales: p.avgWeeklySales,
           daysUntilStockout: p.daysUntilStockout,

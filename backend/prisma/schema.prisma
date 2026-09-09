@@ -588,10 +588,24 @@ model ProposalLine {
   label     String
   productId String @map("rpos_product_id") // uuid produit RPOS
 
-  // Quantité initialement calculée par le système, puis quantité finalement validée par l'humain
-  // (== quantitySuggested si l'utilisateur n'a rien modifié : sert au calcul du taux de conformité)
+  // Quantité FINALE proposée au magasin (celle affichée dans "Qté proposée") — la recommandation
+  // de l'IA si elle a pu tourner à la génération, sinon repli sur classicQuantitySuggested (jamais
+  // de génération bloquée faute de clé API/réseau IA). Puis quantité finalement validée par
+  // l'humain (== quantitySuggested si l'utilisateur n'a rien modifié : sert au calcul du taux de
+  // conformité).
   quantitySuggested Float @map("quantity_suggested")
   quantityValidated Float? @map("quantity_validated")
+
+  // Résultat de computeQuantityToOrder (vente moyenne + stock de sécurité - stock actuel -
+  // commandes en cours), TOUJOURS calculé et conservé même quand l'IA ajuste la recommandation
+  // finale : sert de base de calcul transmise à l'IA (systemSuggestedQuantity côté prompt) et de
+  // repère de comparaison affiché dans le panneau détail ("Pourquoi ?", section calcul classique).
+  classicQuantitySuggested Float? @map("classic_quantity_suggested")
+  // true si quantitySuggested provient réellement d'un appel IA réussi à la génération (par
+  // opposition à un repli silencieux sur classicQuantitySuggested faute d'IA disponible) : affiché
+  // dans "Pourquoi ?" pour ne jamais faire croire à une analyse IA qui n'a pas eu lieu.
+  aiAdjusted        Boolean @default(false) @map("ai_adjusted")
+  aiReasoning       String? @map("ai_reasoning") // explication de l'IA pour cette quantité finale, si aiAdjusted=true
 
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).

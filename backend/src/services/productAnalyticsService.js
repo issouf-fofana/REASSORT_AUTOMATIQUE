@@ -23,7 +23,15 @@ async function getSalesHistoryLocalFirst(posId, shopId, ean, dateStart, dateEnd)
   if (dbLines.length > 0) {
     return dbLines.map((l) => ({ date: l.date.toISOString(), quantity: l.quantity, revenue: l.revenueExclTax }));
   }
-  return rpos.getSalesHistoryForProduct(posId, shopId, ean, dateStart, dateEnd);
+  // Aucune ligne locale pour cette période précise (magasin pas encore synchronisé sur cette
+  // fenêtre) : tente RPOS en dernier recours, mais un échec réseau ne doit pas faire échouer tout
+  // le graphique — retourne un historique vide plutôt qu'une erreur bloquante.
+  try {
+    return await rpos.getSalesHistoryForProduct(posId, shopId, ean, dateStart, dateEnd);
+  } catch (err) {
+    console.error('[productAnalyticsService] Historique de ventes RPOS indisponible et base locale vide pour cette période:', err.message);
+    return [];
+  }
 }
 
 // L'historique de commandes n'a pas d'équivalent en base locale (contrairement aux ventes) : la
@@ -40,9 +48,17 @@ async function getPurchaseHistoryCached(posId, shopId, productId, dateStart, dat
   if (cached && Date.now() - cached.cachedAt < PURCHASE_HISTORY_CACHE_TTL_MS) {
     return cached.data;
   }
-  const data = await rpos.getPurchaseHistoryForProduct(posId, shopId, productId, dateStart, dateEnd);
-  purchaseHistoryCache.set(key, { data, cachedAt: Date.now() });
-  return data;
+  // Pas d'équivalent local pour l'historique de commandes (contrairement aux ventes) : un échec
+  // réseau RPOS (hors du réseau Prosuma, VPN coupé...) ne doit pas faire échouer tout le graphique
+  // d'évolution — le reste (ventes, tendance) reste utile même sans les points de commande.
+  try {
+    const data = await rpos.getPurchaseHistoryForProduct(posId, shopId, productId, dateStart, dateEnd);
+    purchaseHistoryCache.set(key, { data, cachedAt: Date.now() });
+    return data;
+  } catch (err) {
+    console.error('[productAnalyticsService] Historique de commandes RPOS indisponible:', err.message);
+    return [];
+  }
 }
 
 /**

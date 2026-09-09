@@ -186,6 +186,9 @@
           reasoning: prediction.reasoning,
           dailyHistory: prediction.dailyHistory,
           outcome: prediction.outcome,
+          classicQuantitySuggested: prediction.classicQuantitySuggested,
+          generationAiAdjusted: prediction.aiAdjusted,
+          generationAiReasoning: prediction.aiReasoningAtGeneration,
         });
       });
     });

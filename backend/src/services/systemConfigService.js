@@ -35,6 +35,13 @@ const KEYS = {
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
+  // Si "true", chaque génération de proposition (nocturne, manuelle, réajustement quotidien)
+  // envoie ses articles à l'IA pour ajuster la quantité calculée classiquement avant de
+  // l'enregistrer comme "Qté proposée" — au lieu de laisser cette étape à un appel manuel séparé
+  // ("Analyser" par article). Off par défaut : impact fort (coût API, temps de génération
+  // multiplié par lot LLM) à activer en connaissance de cause, testable magasin par magasin en
+  // attendant via l'analyse à la demande déjà existante.
+  AI_QUANTITY_ADJUSTMENT_ENABLED: 'AI_QUANTITY_ADJUSTMENT_ENABLED',
   // Prompt utilisé pour l'analyse IA d'un article (aiForecastService.js) : éditable depuis
   // Paramètres > IA (admin) sans redéploiement. Placeholders remplacés avant l'envoi au LLM :
   // {{shopReference}}, {{shopName}}, {{articles}} (JSON des articles à analyser).
@@ -104,6 +111,9 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
+  // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
+  // à activer explicitement plutôt que par défaut au premier déploiement.
+  [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
 };
 
 async function getValue(key) {

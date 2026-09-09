@@ -318,13 +318,36 @@
       : '<div class="aip-detail-section"><p class="text-muted small">Analyse IA pas encore disponible.</p></div>';
 
     const hasClassicData = item.predictedWeeklyDemand !== undefined && item.predictedWeeklyDemand !== null;
+
+    // Ajustement fait au moment de la GÉNÉRATION de la proposition (si AI_QUANTITY_ADJUSTMENT_ENABLED
+    // était actif) : distinct de l'analyse "à la demande" ci-dessus (aiSection/currentAiResult), qui
+    // se fait au clic sur ce panneau. Les deux peuvent coexister et donner des résultats différents
+    // (l'historique de ventes a pu évoluer entre les deux moments).
+    const hasClassicComparison = item.classicQuantitySuggested !== undefined && item.classicQuantitySuggested !== null
+      && Math.round(item.classicQuantitySuggested) !== Math.round(item.predictedQuantity);
+    const generationAdjustmentSection = item.generationAiAdjusted
+      ? '<div class="aip-detail-section">' +
+          '<h6>Ajustement IA à la génération</h6>' +
+          '<div class="aip-classic-card">' +
+            '<div class="aip-classic-eyebrow">Historique de la décision</div>' +
+            '<p class="small mb-2">' +
+              'Calcul initial (vente moyenne, stock, commandes en cours) : <strong>' + Math.round(item.classicQuantitySuggested) + '</strong>. ' +
+              (hasClassicComparison
+                ? 'L\'IA a ajusté cette base à <strong>' + Math.round(item.predictedQuantity) + '</strong> lors de la génération de cette proposition.'
+                : 'L\'IA a confirmé ce calcul lors de la génération de cette proposition.') +
+            '</p>' +
+            (item.generationAiReasoning ? '<p class="small text-muted mb-0">' + item.generationAiReasoning + '</p>' : '') +
+          '</div>' +
+        '</div>'
+      : '';
+
     const classicSection = hasClassicData
       ? '<div class="aip-detail-section">' +
           '<h6>Niveau de confiance de la prévision de base</h6>' +
           '<div class="aip-classic-card">' +
             '<div class="aip-classic-eyebrow">Calcul système (lissage exponentiel / moyenne simple)</div>' +
             '<div class="row g-2 mb-2">' +
-              '<div class="col-6"><div class="text-muted small">Quantité prévue</div><div class="fs-20 fw-semibold">' + Math.round(item.predictedQuantity) + '</div></div>' +
+              '<div class="col-6"><div class="text-muted small">Quantité proposée finale</div><div class="fs-20 fw-semibold">' + Math.round(item.predictedQuantity) + '</div></div>' +
               '<div class="col-6"><div class="text-muted small">Vente hebdo. prévue</div><div class="fs-20 fw-semibold">' + Math.round(item.predictedWeeklyDemand) + '</div></div>' +
               '<div class="col-6"><div class="text-muted small">Stock au calcul</div><div class="fs-20 fw-semibold">' + Math.round(item.stockAtPrediction || 0) + '</div></div>' +
               '<div class="col-6"><div class="text-muted small">Déjà en commande</div><div class="fs-20 fw-semibold">' + Math.round(item.ordersAtPrediction || 0) + '</div></div>' +
@@ -347,6 +370,8 @@
         '</div>' +
         '<div id="aip-sparkline-container">' + buildSparkline(item.dailyHistory) + '</div>' +
       '</div>' +
+
+      generationAdjustmentSection +
 
       classicSection +
 
@@ -371,6 +396,14 @@
         loadHistoryForPeriod(item, parseInt(btn.dataset.days, 10));
       });
     });
+
+    // Sans dailyHistory pré-rempli (cas purchase-order.html, qui n'a pas cette donnée sous la
+    // main contrairement à ai-predictions.html), le graphique resterait vide tant que l'utilisateur
+    // ne clique pas lui-même sur un préréglage de période — on charge donc les 30 derniers jours
+    // automatiquement à l'ouverture, à partir des ventes déjà en base locale (aucun appel RPOS).
+    if (!item.dailyHistory || !item.dailyHistory.length) {
+      loadHistoryForPeriod(item, 30);
+    }
   }
 
   function showSimpleView() {
