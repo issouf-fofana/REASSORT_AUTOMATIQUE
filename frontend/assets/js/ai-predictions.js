@@ -176,7 +176,30 @@
       '</div>';
   }
 
+  let currentDetailPrediction = null;
+
+  async function loadHistoryForPeriod(days) {
+    const container = document.getElementById('aip-sparkline-container');
+    container.innerHTML = '<p class="text-muted small">Chargement...</p>';
+    try {
+      const shopId = shopSelect.value;
+      const res = await window.reassortFetch('/reassort/predictions/history?shop=' + encodeURIComponent(shopId) + '&ean=' + encodeURIComponent(currentDetailPrediction.ean) + '&days=' + days);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message);
+      container.innerHTML = buildSparkline(json.data.dailyHistory);
+    } catch (err) {
+      container.innerHTML = '<p class="text-danger small">Erreur: ' + err.message + '</p>';
+    }
+  }
+
+  function periodButtonsHtml(activeDays) {
+    return [7, 30, 90].map(function (d) {
+      return '<button type="button" class="btn btn-sm btn-outline-secondary aip-period-btn' + (d === activeDays ? ' active' : '') + '" data-days="' + d + '">' + d + ' j</button>';
+    }).join(' ');
+  }
+
   function openDetail(p) {
+    currentDetailPrediction = p;
     document.getElementById('aip-detail-title').textContent = p.label || p.ean;
 
     const outcome = p.outcome;
@@ -219,8 +242,12 @@
         '<div class="col-6"><div class="border p-2"><div class="text-muted small">Déjà en commande</div><div class="fs-20 fw-semibold">' + Math.round(p.ordersAtPrediction) + '</div></div></div>' +
       '</div>' +
 
-      '<h6 class="text-muted small text-uppercase mb-2">Historique de ventes utilisé</h6>' +
-      buildSparkline(p.dailyHistory) +
+      '<div class="d-flex align-items-center justify-content-between mb-2">' +
+        '<h6 class="text-muted text-uppercase mb-0">Historique de ventes</h6>' +
+        '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
+      '</div>' +
+      '<div id="aip-sparkline-container">' + buildSparkline(p.dailyHistory) + '</div>' +
+      '<p class="text-muted small mt-1">Par défaut : historique utilisé pour ce calcul (' + (p.dailyHistory ? p.dailyHistory.length : 0) + ' jour(s), période d\'analyse de la génération). Choisissez une autre plage pour explorer plus large.</p>' +
 
       '<h6 class="text-muted small text-uppercase mb-2 mt-3">Score de confiance : ' + (p.confidenceScore ?? '—') + '%</h6>' +
       signalsHtml +
@@ -231,9 +258,37 @@
       '<h6 class="text-muted small text-uppercase mb-2 mt-3">Résultat</h6>' +
       outcomeHtml;
 
-    const panel = new bootstrap.Offcanvas(document.getElementById('aip-detail-panel'));
-    panel.show();
+    document.getElementById('aip-period-buttons').querySelectorAll('.aip-period-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('.aip-period-btn').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        loadHistoryForPeriod(parseInt(btn.dataset.days, 10));
+      });
+    });
+
+    showDetailPanel();
   }
+
+  const detailPanel = document.getElementById('aip-detail-panel');
+  const detailBackdrop = document.getElementById('aip-detail-backdrop');
+
+  function showDetailPanel() {
+    detailBackdrop.hidden = false;
+    // requestAnimationFrame : force le navigateur à peindre l'état initial (hors écran) avant
+    // d'appliquer .show, sinon la transition CSS ne joue pas (les deux changements de style
+    // arriveraient dans le même frame).
+    requestAnimationFrame(function () { detailPanel.classList.add('show'); });
+    detailPanel.setAttribute('aria-hidden', 'false');
+  }
+
+  function hideDetailPanel() {
+    detailPanel.classList.remove('show');
+    detailPanel.setAttribute('aria-hidden', 'true');
+    setTimeout(function () { detailBackdrop.hidden = true; }, 250);
+  }
+
+  document.getElementById('aip-detail-close').addEventListener('click', hideDetailPanel);
+  detailBackdrop.addEventListener('click', hideDetailPanel);
 
   shopSelect.addEventListener('change', loadProposalList);
   proposalSelect.addEventListener('change', loadPredictions);

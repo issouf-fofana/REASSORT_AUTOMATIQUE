@@ -880,6 +880,47 @@ router.get('/predictions', async (req, res) => {
   }
 });
 
+// GET /api/reassort/predictions/history - historique de ventes journalier d'un article (panneau
+// de détail de la page "IA & Prédictions"), sur une plage de dates choisie par l'utilisateur —
+// indépendante de la période d'analyse figée utilisée par la prédiction elle-même (dailyHistory
+// sur ProposalLine). Lit uniquement SalesLine (déjà synchronisé localement) : aucun appel RPOS.
+// Query: shop (requis), ean (requis), days (7/30/90, défaut 30).
+router.get('/predictions/history', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const { ean } = req.query;
+    if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const dateEnd = new Date();
+    const dateStart = new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const lines = await prisma.salesLine.findMany({
+      where: { rposShopId: shopId, ean, date: { gte: dateStart, lte: dateEnd } },
+      select: { date: true, quantity: true },
+      orderBy: { date: 'asc' },
+    });
+
+    const byDay = new Map();
+    for (const line of lines) {
+      const day = line.date.toISOString().slice(0, 10);
+      byDay.set(day, (byDay.get(day) || 0) + line.quantity);
+    }
+    // Complète les jours sans vente à 0 (pas absents) : une rupture de plusieurs jours doit être
+    // visible sur le graphique, pas silencieusement sauter à la vente suivante.
+    const dailyHistory = [];
+    for (let d = new Date(dateStart); d <= dateEnd; d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().slice(0, 10);
+      dailyHistory.push({ date: key, quantity: Math.round((byDay.get(key) || 0) * 100) / 100 });
+    }
+
+    res.json({ success: true, data: { days, dailyHistory } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/conformity - taux de conformité (propositions validées sans modification)
 router.get('/conformity', async (req, res) => {
   try {

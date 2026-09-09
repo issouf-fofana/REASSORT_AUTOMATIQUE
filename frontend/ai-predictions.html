@@ -28,6 +28,23 @@
          .aip-signal-bar { height: 8px; border-radius: 0; background-color: #e5e5e5; flex-grow: 1; overflow: hidden; }
          .aip-signal-bar-fill { height: 100%; background-color: #000000; }
          .aip-signal-value { width: 40px; text-align: right; font-size: .8rem; font-weight: 600; }
+
+         .aip-panel-backdrop {
+              position: fixed; inset: 0; background-color: rgba(0,0,0,.4); z-index: 1040;
+         }
+         .aip-detail-panel {
+              position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 92vw;
+              background-color: #ffffff; z-index: 1045; box-shadow: -4px 0 16px rgba(0,0,0,.15);
+              transform: translateX(100%); transition: transform .25s ease;
+              display: flex; flex-direction: column;
+         }
+         .aip-detail-panel.show { transform: translateX(0); }
+         .aip-detail-panel-header {
+              display: flex; align-items: center; justify-content: space-between;
+              padding: 1rem 1.25rem; flex-shrink: 0;
+         }
+         .aip-detail-panel-body { padding: 1.25rem; overflow-y: auto; flex-grow: 1; }
+         .aip-period-btn.active { background-color: #000000 !important; color: #ffffff !important; border-color: #000000 !important; }
     </style>
 </head>
 
@@ -114,13 +131,17 @@
           </div>
      </main>
 
-     <!-- Panneau de détail (offcanvas) : ouvert au clic sur une ligne, garde le tableau visible derrière. -->
-     <div class="offcanvas offcanvas-end" tabindex="-1" id="aip-detail-panel" style="width: 480px;">
-          <div class="offcanvas-header border-bottom">
-               <h5 class="offcanvas-title" id="aip-detail-title">Détail</h5>
-               <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+     <!-- Panneau de détail custom (le composant .offcanvas de Bootstrap n'est pas inclus dans ce
+          build Volt — seule sa variante "navbar responsive" scopée sous .navbar-expand-* l'est,
+          cf. commit qui a introduit ce panneau : sans position fixe/fond opaque, le rendu était
+          cassé). CSS pur, sans dépendance au JS Offcanvas de Bootstrap. -->
+     <div id="aip-detail-backdrop" class="aip-panel-backdrop" hidden></div>
+     <div id="aip-detail-panel" class="aip-detail-panel" aria-hidden="true">
+          <div class="aip-detail-panel-header border-bottom">
+               <h5 class="mb-0" id="aip-detail-title">Détail</h5>
+               <button type="button" class="btn-close" id="aip-detail-close" aria-label="Fermer"></button>
           </div>
-          <div class="offcanvas-body" id="aip-detail-body"></div>
+          <div class="aip-detail-panel-body" id="aip-detail-body"></div>
      </div>
 
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
