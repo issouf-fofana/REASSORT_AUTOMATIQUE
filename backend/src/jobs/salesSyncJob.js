@@ -123,6 +123,11 @@ function toSalesLineRows(lines, posId, shopId) {
       const date = new Date(l.date).toISOString();
       const quantity = parseFloat(String(l.quantity || 0).replace(',', '.')) || 0;
       const revenueExclTax = parseFloat(String(l.total_excl_tax || 0).replace(',', '.')) || 0;
+      // total_incl_tax n'est pas garanti présent selon la version/config RPOS d'un serveur donné :
+      // null plutôt que 0 si absent, pour ne pas afficher un TTC faux à 0 CFA.
+      const revenueInclTax = l.total_incl_tax !== undefined && l.total_incl_tax !== null
+        ? parseFloat(String(l.total_incl_tax).replace(',', '.')) || 0
+        : null;
       return {
         rposPosId: posId,
         rposShopId: shopId,
@@ -131,6 +136,10 @@ function toSalesLineRows(lines, posId, shopId) {
         date: new Date(date),
         quantity,
         revenueExclTax,
+        revenueInclTax,
+        // dedupKey inchangée (basée sur le HT uniquement) : ajouter le TTC la changerait pour
+        // toutes les lignes déjà synchronisées, cassant la déduplication au prochain passage
+        // (skipDuplicates ne reconnaîtrait plus les lignes existantes comme des doublons).
         dedupKey: `${shopId}|${ean}|${date}|${quantity}|${revenueExclTax}`,
       };
     });

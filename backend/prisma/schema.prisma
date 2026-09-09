@@ -750,7 +750,11 @@ model SalesLine {
   date  DateTime // date réelle de la vente côté RPOS (pas la date de synchronisation)
 
   quantity       Float
-  revenueExclTax Float @map("revenue_excl_tax")
+  revenueExclTax Float  @map("revenue_excl_tax")
+  // TTC (RPOS renvoie déjà total_incl_tax en plus de total_excl_tax, aucun appel réseau
+  // supplémentaire nécessaire) : nullable car les lignes synchronisées avant l'ajout de ce champ
+  // n'en disposent pas — ne pas les traiter comme "0 CFA de TTC", qui serait faux.
+  revenueInclTax Float? @map("revenue_incl_tax")
 
   syncedAt DateTime @default(now()) @map("synced_at")
 

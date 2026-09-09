@@ -47,6 +47,9 @@ function toSalesLineRow(line, posId, shopId) {
   const date = new Date(line.date).toISOString();
   const quantity = parseFloat(String(line.quantity || 0).replace(',', '.')) || 0;
   const revenueExclTax = parseFloat(String(line.total_excl_tax || 0).replace(',', '.')) || 0;
+  const revenueInclTax = line.total_incl_tax !== undefined && line.total_incl_tax !== null
+    ? parseFloat(String(line.total_incl_tax).replace(',', '.')) || 0
+    : null;
   return {
     rposPosId: posId,
     rposShopId: shopId,
@@ -55,6 +58,9 @@ function toSalesLineRow(line, posId, shopId) {
     date: new Date(date),
     quantity,
     revenueExclTax,
+    revenueInclTax,
+    // dedupKey inchangée (basée sur le HT uniquement, cf. salesSyncJob.js) : ne pas y inclure le
+    // TTC pour ne pas casser la déduplication des lignes déjà synchronisées avant cet ajout.
     dedupKey: buildDedupKey(shopId, ean, date, quantity, revenueExclTax),
   };
 }

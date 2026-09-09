@@ -84,7 +84,7 @@
                     </div>
 
                     <div class="row mb-3">
-                         <div class="col-md-4">
+                         <div class="col-md-3">
                               <div class="card">
                                    <div class="card-body">
                                         <div class="text-muted small">Lignes trouvées</div>
@@ -92,7 +92,7 @@
                                    </div>
                               </div>
                          </div>
-                         <div class="col-md-4">
+                         <div class="col-md-3">
                               <div class="card">
                                    <div class="card-body">
                                         <div class="text-muted small">Quantité totale</div>
@@ -100,11 +100,19 @@
                                    </div>
                               </div>
                          </div>
-                         <div class="col-md-4">
+                         <div class="col-md-3">
                               <div class="card">
                                    <div class="card-body">
                                         <div class="text-muted small">Chiffre d'affaires (HT)</div>
                                         <div class="fs-22 fw-semibold" id="sh-stat-revenue">—</div>
+                                   </div>
+                              </div>
+                         </div>
+                         <div class="col-md-3">
+                              <div class="card">
+                                   <div class="card-body">
+                                        <div class="text-muted small">Chiffre d'affaires (TTC)</div>
+                                        <div class="fs-22 fw-semibold" id="sh-stat-revenue-ttc">—</div>
                                    </div>
                               </div>
                          </div>
@@ -129,10 +137,11 @@
                                                   <th>Article</th>
                                                   <th class="text-end">Quantité</th>
                                                   <th class="text-end">CA (HT)</th>
+                                                  <th class="text-end">CA (TTC)</th>
                                              </tr>
                                         </thead>
                                         <tbody id="sh-tbody">
-                                             <tr><td colspan="5" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>
+                                             <tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>
                                         </tbody>
                                    </table>
                               </div>
@@ -190,7 +199,7 @@
                               async function search(page) {
                                    const shopId = shopSelect.value;
                                    if (!shopId) {
-                                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>';
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>';
                                         return;
                                    }
                                    currentPage = page || 1;
@@ -203,7 +212,7 @@
                                    if (dateEnd) params.set('dateEnd', dateEnd + 'T23:59:59');
                                    if (ean) params.set('ean', ean);
 
-                                   tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Chargement...</td></tr>';
+                                   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-lines?' + params.toString());
                                         const json = await res.json();
@@ -214,9 +223,12 @@
                                         document.getElementById('sh-stat-count').textContent = d.total.toLocaleString('fr-FR');
                                         document.getElementById('sh-stat-qty').textContent = d.totalQuantity.toLocaleString('fr-FR');
                                         document.getElementById('sh-stat-revenue').textContent = d.totalRevenue.toLocaleString('fr-FR') + ' CFA';
+                                        document.getElementById('sh-stat-revenue-ttc').textContent = (d.totalRevenueInclTax !== null && d.totalRevenueInclTax !== undefined)
+                                             ? d.totalRevenueInclTax.toLocaleString('fr-FR') + ' CFA'
+                                             : '— (données antérieures à l\'ajout du TTC)';
 
                                         if (!d.lines.length) {
-                                             tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Aucune vente trouvée pour ces filtres.</td></tr>';
+                                             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune vente trouvée pour ces filtres.</td></tr>';
                                         } else {
                                              tbody.innerHTML = d.lines.map(function (l) {
                                                   return '<tr>' +
@@ -225,6 +237,7 @@
                                                        '<td>' + (l.label || '—') + '</td>' +
                                                        '<td class="text-end">' + l.quantity.toLocaleString('fr-FR') + '</td>' +
                                                        '<td class="text-end">' + l.revenueExclTax.toLocaleString('fr-FR') + ' CFA</td>' +
+                                                       '<td class="text-end">' + (l.revenueInclTax !== null && l.revenueInclTax !== undefined ? l.revenueInclTax.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
                                                        '</tr>';
                                              }).join('');
                                         }
@@ -234,7 +247,7 @@
                                         document.getElementById('sh-prev-page').disabled = currentPage <= 1;
                                         document.getElementById('sh-next-page').disabled = currentPage >= totalPages;
                                    } catch (err) {
-                                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                    }
                               }
 

@@ -221,7 +221,7 @@ router.get('/sales-lines', requireAdmin, async (req, res) => {
     const [total, lines, aggregate] = await Promise.all([
       prisma.salesLine.count({ where }),
       prisma.salesLine.findMany({ where, orderBy: { date: 'desc' }, take, skip }),
-      prisma.salesLine.aggregate({ where, _sum: { quantity: true, revenueExclTax: true } }),
+      prisma.salesLine.aggregate({ where, _sum: { quantity: true, revenueExclTax: true, revenueInclTax: true } }),
     ]);
 
     res.json({
@@ -232,6 +232,9 @@ router.get('/sales-lines', requireAdmin, async (req, res) => {
         pageSize: take,
         totalQuantity: aggregate._sum.quantity || 0,
         totalRevenue: aggregate._sum.revenueExclTax || 0,
+        // null si aucune ligne de la sélection n'a de TTC connu (lignes synchronisées avant
+        // l'ajout de ce champ) — distingué de 0 pour ne pas afficher un total TTC faux.
+        totalRevenueInclTax: aggregate._sum.revenueInclTax,
         lines,
       },
     });
