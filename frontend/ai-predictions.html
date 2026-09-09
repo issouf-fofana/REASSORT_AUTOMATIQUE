@@ -100,7 +100,10 @@
           </div>
      </main>
 
-     <script src="assets/volt/js/volt.js"></script>
+     <!-- Volt vendor JS (Require in all Page) -->
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
      <script>
           (function () {
                const shopSelect = document.getElementById('aip-shop');
@@ -125,6 +128,10 @@
                               return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
                          }).join('');
                          if (window.reassortMakeShopPickerSearchable) window.reassortMakeShopPickerSearchable(shopSelect);
+                         // Le navigateur peut restaurer une sélection précédente sur ce <select> sans déclencher
+                         // d'événement "change" (valeur déjà présente dans le DOM au moment du choix) : on charge
+                         // explicitement si un magasin se retrouve déjà sélectionné après le remplissage.
+                         if (shopSelect.value) loadPredictions();
                     } catch (err) {
                          shopSelect.innerHTML = '<option value="">Erreur: ' + err.message + '</option>';
                     }
