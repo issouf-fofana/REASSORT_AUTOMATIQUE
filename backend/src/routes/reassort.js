@@ -1455,4 +1455,34 @@ router.get('/proposal/:proposalId/ai-forecast', requireAdmin, async (req, res) =
   }
 });
 
+// POST /api/reassort/proposal/:proposalId/ai-analyze-article - analyse IA en direct d'un seul
+// article (page "IA & Prédictions") : appel LLM immédiat, sans persistance (AiForecastRun est pour
+// une génération complète, pas une analyse ponctuelle). Body: { ean }.
+router.post('/proposal/:proposalId/ai-analyze-article', async (req, res) => {
+  try {
+    const { ean } = req.body;
+    if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+
+    const shopId = resolveShopId(req);
+    if (shopId && proposal.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
+    }
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans cette proposition' });
+
+    const result = await aiForecastService.analyzeArticleRealtime({
+      shopReference: proposal.rposShopReference,
+      shopName: proposal.rposShopName,
+      line,
+    });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

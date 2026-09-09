@@ -1038,6 +1038,27 @@
                                    </button>
                               </div>
                          </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
+                                   <h5 class="card-title mb-0">Prompt d'analyse IA</h5>
+                              </div>
+                              <div class="card-body">
+                                   <p class="text-muted small">
+                                        Consignes envoyées au LLM lors d'une analyse (bouton "Analyser avec l'IA", que ce soit sur
+                                        une proposition entière ou un seul article depuis la page "IA &amp; Prédictions"). Placeholders
+                                        disponibles : <code>{{shopReference}}</code>, <code>{{shopName}}</code>, <code>{{articles}}</code>
+                                        (remplacé par les données de l'article au format JSON). La réponse attendue doit rester un
+                                        tableau JSON <code>[{"ean": "...", "quantity": 0, "reasoning": "..."}]</code> — modifier cette
+                                        contrainte cassera l'analyse.
+                                   </p>
+                                   <textarea id="ai-prompt-template" class="form-control font-monospace small" rows="14"></textarea>
+                                   <button type="button" class="btn btn-primary btn-sm mt-2" id="ai-prompt-save">Enregistrer</button>
+                                   <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="ai-prompt-reset">Réinitialiser au prompt par défaut</button>
+                                   <div id="ai-prompt-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                                   <div id="ai-prompt-success" class="alert alert-success mt-2" style="display:none;"></div>
+                              </div>
+                         </div>
                     </div>
                     <!-- /tab-ai -->
 
@@ -2174,7 +2195,61 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
 
                               function initAiTab() {
                                    loadAiKeys();
+                                   loadAiPromptTemplate();
                               }
+
+                              let defaultAiPromptTemplate = null;
+
+                              async function loadAiPromptTemplate() {
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/system-config');
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        document.getElementById('ai-prompt-template').value = json.data.AI_ANALYSIS_PROMPT_TEMPLATE || '';
+                                   } catch (err) {
+                                        document.getElementById('ai-prompt-error').textContent = 'Erreur: ' + err.message;
+                                        document.getElementById('ai-prompt-error').style.display = 'block';
+                                   }
+                              }
+
+                              document.getElementById('ai-prompt-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('ai-prompt-error');
+                                   const okBox = document.getElementById('ai-prompt-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        await saveSystemConfigKey('AI_ANALYSIS_PROMPT_TEMPLATE', document.getElementById('ai-prompt-template').value);
+                                        okBox.textContent = 'Prompt enregistré.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
+
+                              // Copie exacte du texte par défaut (ENV_FALLBACK.AI_ANALYSIS_PROMPT_TEMPLATE dans
+                              // systemConfigService.js) : pas de route de "reset" côté backend, on réenregistre
+                              // simplement ce texte comme une modification normale.
+                              const DEFAULT_AI_PROMPT_TEMPLATE = `Tu es un assistant d'approvisionnement pour un magasin de grande distribution ({{shopReference}} {{shopName}}).
+Pour chaque article ci-dessous, propose la quantité à commander pour la période à venir, en te basant sur :
+- la vente moyenne hebdomadaire (avgWeeklySales) : une moyenne plate sur toute la période analysée, qui peut masquer une tendance ou un pic ponctuel
+- l'historique jour par jour (dailyHistory, [{date, quantity}]) : utilise-le pour juger si avgWeeklySales reflète bien un rythme stable, ou s'il faut l'ajuster — par exemple une seule grosse journée exceptionnelle (promotion, revente ponctuelle) ne doit pas être extrapolée comme un rythme hebdomadaire normal, alors qu'une tendance régulière à la hausse ou à la baisse sur plusieurs jours mérite d'être prise en compte
+- le stock actuel (currentStock) et le nombre de jours avant rupture (daysUntilStockout)
+- la quantité déjà en commande non reçue (currentOrderedQuantity), à ne pas recommander en double
+- l'unité de commande (orderingUnit) : la quantité proposée doit être un multiple de cette unité
+- la part de chiffre d'affaires de l'article (revenueSharePct) : les articles à forte part méritent une couverture de stock plus prudente
+
+Articles (JSON) :
+{{articles}}
+
+Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
+[{"ean": "...", "quantity": 0, "reasoning": "courte justification en français, une phrase"}]
+Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`;
+
+                              document.getElementById('ai-prompt-reset').addEventListener('click', async function () {
+                                   if (!confirm('Réinitialiser le prompt au texte par défaut ? Cliquez ensuite sur Enregistrer pour confirmer.')) return;
+                                   document.getElementById('ai-prompt-template').value = DEFAULT_AI_PROMPT_TEMPLATE;
+                              });
 
                               document.getElementById('ai-key-add-btn').addEventListener('click', function () {
                                    document.getElementById('ai-key-modal-title').textContent = 'Ajouter une clé API';

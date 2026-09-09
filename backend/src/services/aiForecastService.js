@@ -10,6 +10,7 @@
  */
 const { PrismaClient } = require('@prisma/client');
 const crypto = require('./cryptoService');
+const systemConfig = require('./systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
 const prisma = new PrismaClient();
@@ -66,22 +67,17 @@ function buildArticleSummary(line) {
   };
 }
 
-function buildPrompt(shopReference, shopName, articles) {
-  return `Tu es un assistant d'approvisionnement pour un magasin de grande distribution (${shopReference} ${shopName || ''}).
-Pour chaque article ci-dessous, propose la quantité à commander pour la période à venir, en te basant sur :
-- la vente moyenne hebdomadaire (avgWeeklySales) : une moyenne plate sur toute la période analysée, qui peut masquer une tendance ou un pic ponctuel
-- l'historique jour par jour (dailyHistory, [{date, quantity}]) : utilise-le pour juger si avgWeeklySales reflète bien un rythme stable, ou s'il faut l'ajuster — par exemple une seule grosse journée exceptionnelle (promotion, revente ponctuelle) ne doit pas être extrapolée comme un rythme hebdomadaire normal, alors qu'une tendance régulière à la hausse ou à la baisse sur plusieurs jours mérite d'être prise en compte
-- le stock actuel (currentStock) et le nombre de jours avant rupture (daysUntilStockout)
-- la quantité déjà en commande non reçue (currentOrderedQuantity), à ne pas recommander en double
-- l'unité de commande (orderingUnit) : la quantité proposée doit être un multiple de cette unité
-- la part de chiffre d'affaires de l'article (revenueSharePct) : les articles à forte part méritent une couverture de stock plus prudente
-
-Articles (JSON) :
-${JSON.stringify(articles, null, 2)}
-
-Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
-[{"ean": "...", "quantity": 0, "reasoning": "courte justification en français, une phrase"}]
-Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`;
+/**
+ * Construit le prompt à partir du template configurable (Paramètres > IA, SystemConfig), pour
+ * permettre à un admin d'ajuster les consignes données au LLM sans redéploiement. Remplace les
+ * placeholders {{shopReference}}, {{shopName}}, {{articles}} par les valeurs réelles.
+ */
+async function buildPrompt(shopReference, shopName, articles) {
+  const template = await systemConfig.getValue(systemConfig.KEYS.AI_ANALYSIS_PROMPT_TEMPLATE);
+  return template
+    .replace(/\{\{shopReference\}\}/g, shopReference || '')
+    .replace(/\{\{shopName\}\}/g, shopName || '')
+    .replace(/\{\{articles\}\}/g, JSON.stringify(articles, null, 2));
 }
 
 function parseJsonArrayFromText(text) {
@@ -254,7 +250,7 @@ async function runAiForecast(proposalId, requestedBy) {
 
     await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
       try {
-        const prompt = buildPrompt(proposal.rposShopReference, proposal.rposShopName, batch);
+        const prompt = await buildPrompt(proposal.rposShopReference, proposal.rposShopName, batch);
         const { result, providerUsed: usedForBatch } = await callWithFallback(prompt);
         providerUsed = providerUsed || usedForBatch;
         for (const r of result) byEan.set(String(r.ean), r);
@@ -310,4 +306,24 @@ async function getLatestAiForecast(proposalId) {
   });
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary };
+/**
+ * Analyse IA en direct d'un seul article (page "IA & Prédictions") : appelle le LLM immédiatement
+ * sur cet article uniquement, sans persister d'AiForecastRun (analyse ponctuelle à la demande, pas
+ * une génération complète de proposition) — retourne directement la suggestion ou lève une erreur.
+ * Le résultat n'est pas mis en cache : chaque clic relance un vrai appel, cohérent avec l'attente
+ * d'une analyse "en temps réel" plutôt qu'un résultat pré-calculé.
+ */
+async function analyzeArticleRealtime({ shopReference, shopName, line }) {
+  const summary = buildArticleSummary(line);
+  const prompt = await buildPrompt(shopReference, shopName, [summary]);
+  const { result, providerUsed } = await callWithFallback(prompt);
+  const suggestion = result.find((r) => String(r.ean) === String(line.ean)) || result[0];
+  if (!suggestion) throw new Error('Réponse IA sans suggestion exploitable pour cet article');
+  return {
+    quantity: Math.max(0, Number(suggestion.quantity) || 0),
+    reasoning: suggestion.reasoning || null,
+    providerUsed,
+  };
+}
+
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime };

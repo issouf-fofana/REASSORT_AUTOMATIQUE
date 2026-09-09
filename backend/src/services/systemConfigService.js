@@ -35,6 +35,10 @@ const KEYS = {
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
+  // Prompt utilisé pour l'analyse IA d'un article (aiForecastService.js) : éditable depuis
+  // Paramètres > IA (admin) sans redéploiement. Placeholders remplacés avant l'envoi au LLM :
+  // {{shopReference}}, {{shopName}}, {{articles}} (JSON des articles à analyser).
+  AI_ANALYSIS_PROMPT_TEMPLATE: 'AI_ANALYSIS_PROMPT_TEMPLATE',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -75,6 +79,21 @@ const ENV_FALLBACK = {
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
+  [KEYS.AI_ANALYSIS_PROMPT_TEMPLATE]: () => `Tu es un assistant d'approvisionnement pour un magasin de grande distribution ({{shopReference}} {{shopName}}).
+Pour chaque article ci-dessous, propose la quantité à commander pour la période à venir, en te basant sur :
+- la vente moyenne hebdomadaire (avgWeeklySales) : une moyenne plate sur toute la période analysée, qui peut masquer une tendance ou un pic ponctuel
+- l'historique jour par jour (dailyHistory, [{date, quantity}]) : utilise-le pour juger si avgWeeklySales reflète bien un rythme stable, ou s'il faut l'ajuster — par exemple une seule grosse journée exceptionnelle (promotion, revente ponctuelle) ne doit pas être extrapolée comme un rythme hebdomadaire normal, alors qu'une tendance régulière à la hausse ou à la baisse sur plusieurs jours mérite d'être prise en compte
+- le stock actuel (currentStock) et le nombre de jours avant rupture (daysUntilStockout)
+- la quantité déjà en commande non reçue (currentOrderedQuantity), à ne pas recommander en double
+- l'unité de commande (orderingUnit) : la quantité proposée doit être un multiple de cette unité
+- la part de chiffre d'affaires de l'article (revenueSharePct) : les articles à forte part méritent une couverture de stock plus prudente
+
+Articles (JSON) :
+{{articles}}
+
+Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
+[{"ean": "...", "quantity": 0, "reasoning": "courte justification en français, une phrase"}]
+Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`,
   // Tous les jobs sont actifs par défaut (comportement historique, avant l'ajout de ces
   // interrupteurs) : seul un changement explicite depuis Paramètres les désactive.
   [KEYS.NIGHTLY_PROPOSAL_ENABLED]: () => 'true',

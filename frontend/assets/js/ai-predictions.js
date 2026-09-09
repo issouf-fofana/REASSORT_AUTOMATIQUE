@@ -94,6 +94,7 @@
       // Reflète dans le sélecteur la proposition réellement chargée (utile au premier chargement,
       // quand proposalId n'était pas encore renseigné dans l'URL).
       if (proposalSelect.value !== d.proposalId) proposalSelect.value = d.proposalId;
+      currentProposalId = d.proposalId;
 
       infoBox.textContent = d.predictions.length + ' article(s) — génération du ' + new Date(d.generatedAt).toLocaleString('fr-FR') + '.';
 
@@ -205,6 +206,48 @@
   }
 
   let currentDetailPrediction = null;
+  let currentProposalId = null;
+
+  async function runAiAnalysis() {
+    const btn = document.getElementById('aip-ai-analyze-btn');
+    const resultBox = document.getElementById('aip-ai-result');
+    btn.disabled = true;
+    // État visible pendant l'appel réel au LLM (peut prendre plusieurs secondes) : l'utilisateur
+    // doit voir que l'IA travaille, pas juste attendre devant un bouton figé.
+    resultBox.innerHTML =
+      '<div class="d-flex align-items-center gap-2 text-muted small">' +
+        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>' +
+        '<span>IA en cours d\'analyse de l\'historique, du stock et des commandes en cours...</span>' +
+      '</div>';
+    try {
+      const res = await window.reassortFetch('/reassort/proposal/' + currentProposalId + '/ai-analyze-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ean: currentDetailPrediction.ean }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message);
+      const d = json.data;
+      const comparedToClassic = d.quantity - Math.round(currentDetailPrediction.predictedQuantity);
+      resultBox.innerHTML =
+        '<div class="border p-3">' +
+          '<div class="d-flex justify-content-between align-items-baseline mb-1">' +
+            '<span class="text-muted small">Quantité suggérée par l\'IA (' + (d.providerUsed || '—') + ')</span>' +
+            '<span class="fs-20 fw-semibold">' + d.quantity + '</span>' +
+          '</div>' +
+          '<div class="small text-muted mb-2">' +
+            (comparedToClassic === 0
+              ? 'Identique au calcul classique.'
+              : (comparedToClassic > 0 ? '+' : '') + comparedToClassic + ' par rapport au calcul classique (' + Math.round(currentDetailPrediction.predictedQuantity) + ').') +
+          '</div>' +
+          '<p class="small mb-0">' + (d.reasoning || '—') + '</p>' +
+        '</div>';
+    } catch (err) {
+      resultBox.innerHTML = '<div class="alert alert-danger small mb-0">Erreur: ' + err.message + '</div>';
+    } finally {
+      btn.disabled = false;
+    }
+  }
 
   async function loadHistoryForPeriod(days) {
     const container = document.getElementById('aip-sparkline-container');
@@ -284,7 +327,15 @@
       '<p class="small">' + (p.reasoning || '—') + '</p>' +
 
       '<h6 class="text-muted small text-uppercase mb-2 mt-3">Résultat</h6>' +
-      outcomeHtml;
+      outcomeHtml +
+
+      '<hr class="my-3">' +
+      '<h6 class="text-muted small text-uppercase mb-2">Analyse IA en direct</h6>' +
+      '<p class="text-muted small">Envoie l\'historique de ventes, le stock et les commandes en cours de cet article à l\'IA configurée (Paramètres &gt; IA), pour un second avis calculé au moment du clic — indépendant du score de confiance ci-dessus.</p>' +
+      '<button type="button" class="btn btn-outline-dark btn-sm" id="aip-ai-analyze-btn">Analyser avec l\'IA</button>' +
+      '<div id="aip-ai-result" class="mt-2"></div>';
+
+    document.getElementById('aip-ai-analyze-btn').addEventListener('click', runAiAnalysis);
 
     document.getElementById('aip-period-buttons').querySelectorAll('.aip-period-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
