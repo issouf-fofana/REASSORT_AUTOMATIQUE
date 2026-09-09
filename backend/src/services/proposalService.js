@@ -7,6 +7,7 @@ const systemConfig = require('./systemConfigService');
 const { forecastAvgWeeklySales } = require('./forecastService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
+const { computeConfidenceScore } = require('./confidenceService');
 
 const prisma = new PrismaClient();
 
@@ -690,13 +691,21 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     console.error(`[proposalService] Rattachement au plan hebdomadaire échoué pour ${shopReference}:`, weeklyPlanError.message);
   }
 
-  // Historique des prédictions (CAHIER_DES_CHARGES.md §21, étape 4) : une ligne par article de
-  // cette génération, sans recalcul — reprend ce que generateProposal a déjà produit. Isolé dans
-  // son propre try/catch pour ne jamais faire échouer une génération déjà réussie et sauvegardée.
+  // Historique des prédictions (CAHIER_DES_CHARGES.md §21, étape 4), avec score de confiance par
+  // article (§20, étape 6) : une ligne par article de cette génération, sans recalcul du besoin —
+  // reprend ce que generateProposal a déjà produit. Isolé dans son propre try/catch pour ne jamais
+  // faire échouer une génération déjà réussie et sauvegardée.
   try {
     if (result.proposals.length) {
-      await prisma.aIPrediction.createMany({
-        data: result.proposals.map((p) => ({
+      const CONFIDENCE_CONCURRENCY = 10;
+      const predictionData = await mapWithConcurrency(result.proposals, CONFIDENCE_CONCURRENCY, async (p) => {
+        const { confidenceScore, breakdown } = await computeConfidenceScore({
+          rposShopId: shopId,
+          ean: p.ean,
+          dailyHistory: p.dailyHistory,
+          hadNegativeStock: p.hadNegativeStock,
+        });
+        return {
           proposalId: proposal.id,
           rposShopId: shopId,
           ean: p.ean,
@@ -709,11 +718,15 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           stockAtPrediction: p.stock,
           ordersAtPrediction: p.currentOrderedQuantity,
           model: p.forecastMethod === 'flat' ? 'flat' : 'smoothing',
+          confidenceScore,
           reasoning: p.seasonalityAdjusted
-            ? `Lissage exponentiel avec ajustement saisonnier (écart ${p.seasonalityDeviationPct ?? '?'}%)`
-            : (p.forecastMethod === 'flat' ? 'Historique trop court, moyenne simple' : 'Lissage exponentiel'),
-        })),
+            ? `Lissage exponentiel avec ajustement saisonnier (écart ${p.seasonalityDeviationPct ?? '?'}%). Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`
+            : (p.forecastMethod === 'flat' ? 'Historique trop court, moyenne simple.' : 'Lissage exponentiel.') +
+              ` Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`,
+        };
       });
+
+      await prisma.aIPrediction.createMany({ data: predictionData });
     }
   } catch (predictionError) {
     console.error(`[proposalService] Enregistrement de l'historique des prédictions échoué pour ${shopReference}:`, predictionError.message);
