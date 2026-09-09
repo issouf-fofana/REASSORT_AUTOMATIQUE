@@ -1485,4 +1485,42 @@ router.post('/proposal/:proposalId/ai-analyze-article', async (req, res) => {
   }
 });
 
+// PUT /api/reassort/proposal/:proposalId/line-quantity - applique une quantité choisie par
+// l'utilisateur (page "IA & Prédictions") sur une ligne de proposition : la recommandation IA
+// n'est jamais imposée automatiquement, l'utilisateur reste décisionnaire (peut commander moins,
+// plus, ou suivre l'IA telle quelle). Ne touche qu'à ProposalLine.quantitySuggested — la
+// validation/envoi vers RPOS reste sur purchase-order.html comme aujourd'hui.
+router.put('/proposal/:proposalId/line-quantity', async (req, res) => {
+  try {
+    const { ean, quantity } = req.body;
+    if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty < 0) {
+      return res.status(400).json({ success: false, message: 'quantity doit être un nombre positif ou nul' });
+    }
+
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+
+    const shopId = resolveShopId(req);
+    if (shopId && proposal.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
+    }
+    if (proposal.status !== 'GENERATED') {
+      return res.status(409).json({ success: false, message: 'Cette proposition n\'est plus modifiable (déjà validée ou remplacée)' });
+    }
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans cette proposition' });
+
+    const updated = await prisma.proposalLine.update({
+      where: { id: line.id },
+      data: { quantitySuggested: Math.round(qty) },
+    });
+    res.json({ success: true, data: { ean: updated.ean, quantitySuggested: updated.quantitySuggested } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
