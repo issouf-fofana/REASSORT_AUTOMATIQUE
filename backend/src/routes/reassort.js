@@ -799,6 +799,36 @@ router.get('/weekly-plan/:id/history', async (req, res) => {
   }
 });
 
+// GET /api/reassort/predictions - dernières prédictions du magasin courant (page "IA & Prédictions"),
+// triées par score de confiance croissant (les moins fiables d'abord, celles qui méritent le plus
+// d'attention). Une ligne par article, uniquement celles de la proposition la plus récente pour
+// éviter d'afficher des doublons d'un article présent dans plusieurs générations passées.
+router.get('/predictions', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    const latestProposal = await prisma.proposal.findFirst({
+      where: { rposShopId: shopId },
+      orderBy: { generatedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!latestProposal) return res.json({ success: true, data: { proposalId: null, predictions: [] } });
+
+    const predictions = await prisma.aIPrediction.findMany({
+      where: { proposalId: latestProposal.id },
+      orderBy: { confidenceScore: 'asc' },
+      include: { outcome: true },
+    });
+
+    res.json({ success: true, data: { proposalId: latestProposal.id, predictions } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/predictions/:proposalId - historique des prédictions enregistrées pour une
 // proposition donnée (CAHIER_DES_CHARGES.md §21, étape 4) : lecture seule, aucun recalcul.
 router.get('/predictions/:proposalId', async (req, res) => {

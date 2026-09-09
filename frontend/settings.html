@@ -1487,6 +1487,14 @@
                                    const badge = document.getElementById('system-rpos-refresh-badge');
                                    if (badge) badge.style.display = '';
                                    try {
+                                        // Si l'utilisateur a le menu ouvert/focus pile au moment où la vérification RPOS
+                                        // se termine, réécrire innerHTML força le navigateur à fermer puis rouvrir le
+                                        // menu sous ses yeux (glitch visuel déjà signalé). On retente silencieusement un
+                                        // peu plus tard plutôt que de perturber une interaction en cours.
+                                        if (document.activeElement === rposServerSelect) {
+                                             setTimeout(refreshRposServersInBackground, 2000);
+                                             return;
+                                        }
                                         await loadRposServers(true, true);
                                    } finally {
                                         if (badge) badge.style.display = 'none';
