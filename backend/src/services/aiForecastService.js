@@ -51,8 +51,17 @@ function buildArticleSummary(line) {
   return {
     ean: line.ean,
     label: line.label,
+    // Résultat du calcul classique (computeQuantityToOrder), fourni comme point de départ à l'IA
+    // plutôt que de lui laisser calculer une quantité indépendante à partir de zéro — évite des
+    // écarts arbitraires entre deux méthodes qui n'ont jamais eu connaissance l'une de l'autre
+    // (ex: 53 vs 73 sur le même article), et rend la réponse de l'IA directement actionnable comme
+    // un ajustement justifié plutôt qu'un deuxième avis concurrent à départager soi-même.
+    systemSuggestedQuantity: line.quantitySuggested ?? 0,
     avgWeeklySales: Number(line.avgWeeklySales?.toFixed(2) ?? 0),
-    currentStock: line.stock,
+    // Bug corrigé : ProposalLine n'a pas de champ "stock" (le bon nom est stockAtGeneration) —
+    // currentStock arrivait toujours undefined jusqu'ici, ce qui a probablement contribué à des
+    // écarts importants entre le calcul classique et les suggestions IA passées.
+    currentStock: line.stockAtGeneration ?? 0,
     orderingUnit: line.orderingUnit,
     daysUntilStockout: line.daysUntilStockout !== null && line.daysUntilStockout !== undefined
       ? Number(line.daysUntilStockout.toFixed(1))
