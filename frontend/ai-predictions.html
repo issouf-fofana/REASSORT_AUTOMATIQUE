@@ -45,6 +45,42 @@
          }
          .aip-detail-panel-body { padding: 1.25rem; overflow-y: auto; flex-grow: 1; }
          .aip-period-btn.active { background-color: #000000 !important; color: #ffffff !important; border-color: #000000 !important; }
+
+         /* --- État de chargement IA : occupe l'espace du résultat, pas un petit spinner perdu --- */
+         .aip-ai-loading {
+              border: 1px solid #000000; padding: 1.5rem 1.25rem; text-align: center;
+         }
+         .aip-ai-loading .aip-scan-bar {
+              height: 3px; background: linear-gradient(90deg, transparent, #000000, transparent);
+              background-size: 200% 100%; animation: aip-scan 1.4s linear infinite; margin-bottom: 1rem;
+         }
+         @keyframes aip-scan { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+         .aip-ai-loading .aip-loading-label { font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: #666; }
+         .aip-ai-loading .aip-loading-detail { font-size: .8rem; color: #999; margin-top: .35rem; }
+         @media (prefers-reduced-motion: reduce) { .aip-scan-bar { animation: none; background: #000000; } }
+
+         /* --- Résultat IA : bloc principal du panneau, fond noir pour le distinguer sans ambiguïté
+              du calcul classique qui suit en retrait --- */
+         .aip-ai-result-card {
+              background-color: #000000; color: #ffffff; padding: 1.25rem;
+         }
+         .aip-ai-result-card .aip-ai-eyebrow {
+              font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: #999999; margin-bottom: .5rem;
+         }
+         .aip-ai-result-card .aip-ai-quantity { font-size: 2.5rem; font-weight: 700; line-height: 1; }
+         .aip-ai-result-card .aip-ai-quantity-label { font-size: .8rem; color: #cccccc; margin-top: .25rem; }
+         .aip-ai-result-card .aip-ai-reasoning { font-size: .85rem; color: #e5e5e5; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333333; }
+         .aip-ai-result-card .aip-ai-provider { font-size: .7rem; color: #999999; margin-top: .75rem; }
+         .aip-ai-error-card { border: 1px solid #666666; padding: 1.25rem; }
+         .aip-ai-error-card .aip-ai-retry { margin-top: .75rem; }
+
+         /* --- Calcul classique : repère de comparaison en retrait, jamais confondu avec le résultat IA --- */
+         .aip-classic-card {
+              background-color: #f5f5f5; border: 1px solid #e5e5e5; padding: 1rem 1.25rem;
+         }
+         .aip-classic-card .aip-classic-eyebrow {
+              font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: #999; margin-bottom: .5rem;
+         }
     </style>
 </head>
 

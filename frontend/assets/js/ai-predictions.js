@@ -208,44 +208,64 @@
   let currentDetailPrediction = null;
   let currentProposalId = null;
 
-  async function runAiAnalysis() {
-    const btn = document.getElementById('aip-ai-analyze-btn');
-    const resultBox = document.getElementById('aip-ai-result');
-    btn.disabled = true;
-    // État visible pendant l'appel réel au LLM (peut prendre plusieurs secondes) : l'utilisateur
-    // doit voir que l'IA travaille, pas juste attendre devant un bouton figé.
-    resultBox.innerHTML =
-      '<div class="d-flex align-items-center gap-2 text-muted small">' +
-        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>' +
-        '<span>IA en cours d\'analyse de l\'historique, du stock et des commandes en cours...</span>' +
+  // Jeton d'appel : si l'utilisateur ouvre un autre article (ou relance une analyse) avant que
+  // l'appel LLM précédent ne réponde, la réponse tardive du premier appel ne doit jamais écraser
+  // l'affichage d'un article différent déjà à l'écran.
+  let aiAnalysisToken = 0;
+
+  function aiLoadingHtml() {
+    return '<div class="aip-ai-loading">' +
+      '<div class="aip-scan-bar"></div>' +
+      '<div class="aip-loading-label">L\'IA analyse cet article</div>' +
+      '<div class="aip-loading-detail">Historique de ventes, stock actuel, commandes en cours&hellip;</div>' +
       '</div>';
+  }
+
+  function aiErrorHtml(message) {
+    return '<div class="aip-ai-error-card">' +
+      '<p class="small mb-0"><strong>L\'analyse IA a échoué :</strong> ' + message + '</p>' +
+      '<button type="button" class="btn btn-outline-dark btn-sm aip-ai-retry" id="aip-ai-retry-btn">Réessayer</button>' +
+      '</div>';
+  }
+
+  function aiResultHtml(d, predicted) {
+    const comparedToClassic = d.quantity - Math.round(predicted);
+    const compareLine = comparedToClassic === 0
+      ? 'Identique au calcul classique (' + Math.round(predicted) + ').'
+      : (comparedToClassic > 0 ? '+' : '') + comparedToClassic + ' par rapport au calcul classique (' + Math.round(predicted) + ').';
+    return '<div class="aip-ai-result-card">' +
+      '<div class="aip-ai-eyebrow">Recommandation de l\'IA</div>' +
+      '<div class="aip-ai-quantity">' + d.quantity + '</div>' +
+      '<div class="aip-ai-quantity-label">unités à commander &mdash; ' + compareLine + '</div>' +
+      '<div class="aip-ai-reasoning">' + (d.reasoning || '—') + '</div>' +
+      '<div class="aip-ai-provider">Modèle : ' + (d.providerUsed || '—') + '</div>' +
+      '</div>';
+  }
+
+  async function runAiAnalysis(prediction) {
+    const myToken = ++aiAnalysisToken;
+    const resultBox = document.getElementById('aip-ai-result');
+    if (!resultBox) return; // le panneau a été fermé/changé entre-temps
+    resultBox.innerHTML = aiLoadingHtml();
     try {
       const res = await window.reassortFetch('/reassort/proposal/' + currentProposalId + '/ai-analyze-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ean: currentDetailPrediction.ean }),
+        body: JSON.stringify({ ean: prediction.ean }),
       });
       const json = await res.json();
+      if (myToken !== aiAnalysisToken) return; // une autre analyse a été lancée depuis
       if (!json.success) throw new Error(json.message);
-      const d = json.data;
-      const comparedToClassic = d.quantity - Math.round(currentDetailPrediction.predictedQuantity);
-      resultBox.innerHTML =
-        '<div class="border p-3">' +
-          '<div class="d-flex justify-content-between align-items-baseline mb-1">' +
-            '<span class="text-muted small">Quantité suggérée par l\'IA (' + (d.providerUsed || '—') + ')</span>' +
-            '<span class="fs-20 fw-semibold">' + d.quantity + '</span>' +
-          '</div>' +
-          '<div class="small text-muted mb-2">' +
-            (comparedToClassic === 0
-              ? 'Identique au calcul classique.'
-              : (comparedToClassic > 0 ? '+' : '') + comparedToClassic + ' par rapport au calcul classique (' + Math.round(currentDetailPrediction.predictedQuantity) + ').') +
-          '</div>' +
-          '<p class="small mb-0">' + (d.reasoning || '—') + '</p>' +
-        '</div>';
+      const box = document.getElementById('aip-ai-result');
+      if (box) box.innerHTML = aiResultHtml(json.data, prediction.predictedQuantity);
     } catch (err) {
-      resultBox.innerHTML = '<div class="alert alert-danger small mb-0">Erreur: ' + err.message + '</div>';
-    } finally {
-      btn.disabled = false;
+      if (myToken !== aiAnalysisToken) return;
+      const box = document.getElementById('aip-ai-result');
+      if (box) {
+        box.innerHTML = aiErrorHtml(err.message);
+        const retryBtn = document.getElementById('aip-ai-retry-btn');
+        if (retryBtn) retryBtn.addEventListener('click', function () { runAiAnalysis(prediction); });
+      }
     }
   }
 
@@ -305,37 +325,33 @@
       : '<p class="text-muted small">Détail des signaux non disponible pour cette prédiction.</p>';
 
     document.getElementById('aip-detail-body').innerHTML =
-      '<h6 class="text-muted small text-uppercase mb-2">Recommandation</h6>' +
-      '<div class="row g-2 mb-3">' +
-        '<div class="col-6"><div class="border p-2"><div class="text-muted small">Quantité prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedQuantity) + '</div></div></div>' +
-        '<div class="col-6"><div class="border p-2"><div class="text-muted small">Vente hebdo. prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedWeeklyDemand) + '</div></div></div>' +
-        '<div class="col-6"><div class="border p-2"><div class="text-muted small">Stock au calcul</div><div class="fs-20 fw-semibold">' + Math.round(p.stockAtPrediction) + '</div></div></div>' +
-        '<div class="col-6"><div class="border p-2"><div class="text-muted small">Déjà en commande</div><div class="fs-20 fw-semibold">' + Math.round(p.ordersAtPrediction) + '</div></div></div>' +
-      '</div>' +
+      // L'IA est le contenu principal du panneau (résultat de l'appel LLM en direct, lancé
+      // automatiquement à l'ouverture ci-dessous) : occupe la première position, pas le calcul
+      // classique qui n'est qu'un repère de comparaison.
+      '<div id="aip-ai-result">' + aiLoadingHtml() + '</div>' +
 
-      '<div class="d-flex align-items-center justify-content-between mb-2">' +
-        '<h6 class="text-muted text-uppercase mb-0">Historique de ventes</h6>' +
+      '<div class="d-flex align-items-center justify-content-between mb-2 mt-3">' +
+        '<h6 class="text-muted text-uppercase mb-0">Historique de ventes utilisé</h6>' +
         '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
       '</div>' +
       '<div id="aip-sparkline-container">' + buildSparkline(p.dailyHistory) + '</div>' +
-      '<p class="text-muted small mt-1">Par défaut : historique utilisé pour ce calcul (' + (p.dailyHistory ? p.dailyHistory.length : 0) + ' jour(s), période d\'analyse de la génération). Choisissez une autre plage pour explorer plus large.</p>' +
 
-      '<h6 class="text-muted small text-uppercase mb-2 mt-3">Score de confiance : ' + (p.confidenceScore ?? '—') + '%</h6>' +
-      signalsHtml +
+      '<h6 class="text-muted small text-uppercase mb-2 mt-4">Calcul classique (comparaison)</h6>' +
+      '<div class="aip-classic-card">' +
+        '<div class="aip-classic-eyebrow">Lissage exponentiel / moyenne simple</div>' +
+        '<div class="row g-2 mb-2">' +
+          '<div class="col-6"><div class="text-muted small">Quantité prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedQuantity) + '</div></div>' +
+          '<div class="col-6"><div class="text-muted small">Vente hebdo. prévue</div><div class="fs-20 fw-semibold">' + Math.round(p.predictedWeeklyDemand) + '</div></div>' +
+          '<div class="col-6"><div class="text-muted small">Stock au calcul</div><div class="fs-20 fw-semibold">' + Math.round(p.stockAtPrediction) + '</div></div>' +
+          '<div class="col-6"><div class="text-muted small">Déjà en commande</div><div class="fs-20 fw-semibold">' + Math.round(p.ordersAtPrediction) + '</div></div>' +
+        '</div>' +
+        '<div class="small text-muted mb-2">Score de confiance : <strong>' + (p.confidenceScore ?? '—') + '%</strong></div>' +
+        signalsHtml +
+        '<p class="small mt-2 mb-0">' + (p.reasoning || '—') + '</p>' +
+      '</div>' +
 
-      '<h6 class="text-muted small text-uppercase mb-2 mt-3">Explication</h6>' +
-      '<p class="small">' + (p.reasoning || '—') + '</p>' +
-
-      '<h6 class="text-muted small text-uppercase mb-2 mt-3">Résultat</h6>' +
-      outcomeHtml +
-
-      '<hr class="my-3">' +
-      '<h6 class="text-muted small text-uppercase mb-2">Analyse IA en direct</h6>' +
-      '<p class="text-muted small">Envoie l\'historique de ventes, le stock et les commandes en cours de cet article à l\'IA configurée (Paramètres &gt; IA), pour un second avis calculé au moment du clic — indépendant du score de confiance ci-dessus.</p>' +
-      '<button type="button" class="btn btn-outline-dark btn-sm" id="aip-ai-analyze-btn">Analyser avec l\'IA</button>' +
-      '<div id="aip-ai-result" class="mt-2"></div>';
-
-    document.getElementById('aip-ai-analyze-btn').addEventListener('click', runAiAnalysis);
+      '<h6 class="text-muted small text-uppercase mb-2 mt-4">Résultat</h6>' +
+      outcomeHtml;
 
     document.getElementById('aip-period-buttons').querySelectorAll('.aip-period-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -346,6 +362,7 @@
     });
 
     showDetailPanel();
+    runAiAnalysis(p);
   }
 
   const detailPanel = document.getElementById('aip-detail-panel');
