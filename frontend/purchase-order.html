@@ -1266,7 +1266,10 @@
                                                             { seriesName: 'Quantité commandée', show: false },
                                                             { seriesName: 'Stock estimé', opposite: true, title: { text: 'Stock estimé' } },
                                                        ],
-                                                       colors: ['#3b5bdb', '#f5a623', '#2dbd7a'],
+                                                       // Palette noir/gris (cf. theme-override.css, filtre grayscale global) plutôt que les
+                                                       // couleurs d'origine (bleu/orange/vert) : celles-ci, une fois désaturées par le
+                                                       // filtre, devenaient des nuances de gris trop proches pour distinguer les 3 séries.
+                                                       colors: ['#000000', '#999999', '#4d4d4d'],
                                                        stroke: { curve: 'smooth', width: [2, 0, 2], dashArray: [0, 0, 4] },
                                                        fill: { type: ['gradient', 'solid', 'solid'], gradient: { opacityFrom: 0.35, opacityTo: 0.05 }, opacity: [1, 0.7, 1] },
                                                        dataLabels: { enabled: false },

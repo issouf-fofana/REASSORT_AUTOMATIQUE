@@ -7,8 +7,9 @@
   const prevBtn = document.getElementById('aip-prev-page');
   const nextBtn = document.getElementById('aip-next-page');
 
-  const PAGE_SIZE = 25;
+  const DEPARTMENTS_PER_PAGE = 5;
   let allPredictions = [];
+  let groupedByDepartment = []; // [{ department, predictions: [...] }], trié par nb d'articles décroissant
   let currentPage = 1;
 
   async function loadShopList() {
@@ -97,6 +98,7 @@
       infoBox.textContent = d.predictions.length + ' article(s) — génération du ' + new Date(d.generatedAt).toLocaleString('fr-FR') + '.';
 
       allPredictions = d.predictions;
+      groupedByDepartment = groupByDepartment(allPredictions);
       currentPage = 1;
       renderPage();
     } catch (err) {
@@ -104,41 +106,67 @@
     }
   }
 
-  function renderPage() {
-    const totalPages = Math.max(1, Math.ceil(allPredictions.length / PAGE_SIZE));
-    currentPage = Math.min(currentPage, totalPages);
-    const start = (currentPage - 1) * PAGE_SIZE;
-    const pageItems = allPredictions.slice(start, start + PAGE_SIZE);
+  // Regroupe par rayon (department) plutôt que de mélanger tous les articles du magasin en vrac :
+  // sinon un article "PRODUITS FRAIS" à faible confiance apparaît juste au-dessus d'un article
+  // "BAZAR" sans aucun rapport, rendant le tableau difficile à parcourir par un responsable de
+  // rayon. Chaque groupe garde le tri par confiance croissante (les moins fiables d'abord).
+  function groupByDepartment(predictions) {
+    const byDept = new Map();
+    predictions.forEach(function (p) {
+      const dept = p.department || 'Autre';
+      if (!byDept.has(dept)) byDept.set(dept, []);
+      byDept.get(dept).push(p);
+    });
+    return Array.from(byDept.entries())
+      .map(function ([department, items]) { return { department, predictions: items }; })
+      .sort(function (a, b) { return a.department.localeCompare(b.department); });
+  }
 
-    tbody.innerHTML = pageItems.map(function (p, i) {
-      const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
-      const outcome = p.outcome;
-      const actual = outcome ? outcome.actualSales.toLocaleString('fr-FR') : '—';
-      const gap = outcome
-        ? '<span class="' + (outcome.forecastError > 0 ? 'text-success' : outcome.forecastError < 0 ? 'text-danger' : '') + '">' + (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError) + '</span>'
-        : '<span class="text-muted">en attente</span>';
-      return '<tr data-index="' + (start + i) + '">' +
-        '<td>' + (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div></td>' +
-        '<td class="text-end">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
-        '<td class="text-end">' + actual + '</td>' +
-        '<td class="text-end">' + gap + '</td>' +
-        '<td style="min-width:140px;">' +
-          '<div class="d-flex align-items-center gap-2">' +
-            '<div class="confidence-bar flex-grow-1"><div class="confidence-bar-fill" style="width:' + score + '%; background-color:' + confidenceColor(score) + ';"></div></div>' +
-            '<span class="small fw-semibold">' + score + '%</span>' +
-          '</div>' +
-        '</td>' +
-        '<td class="small text-muted">' + (p.model === 'flat' ? 'Moyenne simple' : 'Lissage exponentiel') + '</td>' +
-        '</tr>';
+  function predictionRowHtml(p) {
+    const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
+    const outcome = p.outcome;
+    const actual = outcome ? outcome.actualSales.toLocaleString('fr-FR') : '—';
+    const gap = outcome
+      ? '<span class="' + (outcome.forecastError > 0 ? 'text-success' : outcome.forecastError < 0 ? 'text-danger' : '') + '">' + (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError) + '</span>'
+      : '<span class="text-muted">en attente</span>';
+    return '<tr data-ean="' + p.ean + '">' +
+      '<td>' + (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div></td>' +
+      '<td class="text-end">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
+      '<td class="text-end">' + actual + '</td>' +
+      '<td class="text-end">' + gap + '</td>' +
+      '<td style="min-width:140px;">' +
+        '<div class="d-flex align-items-center gap-2">' +
+          '<div class="confidence-bar flex-grow-1"><div class="confidence-bar-fill" style="width:' + score + '%; background-color:' + confidenceColor(score) + ';"></div></div>' +
+          '<span class="small fw-semibold">' + score + '%</span>' +
+        '</div>' +
+      '</td>' +
+      '<td class="small text-muted">' + (p.model === 'flat' ? 'Moyenne simple' : 'Lissage exponentiel') + '</td>' +
+      '</tr>';
+  }
+
+  // Pagination par groupe de département (pas par ligne) : un rayon n'est jamais coupé entre deux
+  // pages, ce qui rendrait sa lecture incohérente pour un responsable de rayon donné.
+  function renderPage() {
+    const totalPages = Math.max(1, Math.ceil(groupedByDepartment.length / DEPARTMENTS_PER_PAGE));
+    currentPage = Math.min(currentPage, totalPages);
+    const start = (currentPage - 1) * DEPARTMENTS_PER_PAGE;
+    const pageGroups = groupedByDepartment.slice(start, start + DEPARTMENTS_PER_PAGE);
+
+    tbody.innerHTML = pageGroups.map(function (group) {
+      const headerRow = '<tr class="table-light"><td colspan="6" class="fw-semibold py-2">' +
+        group.department + ' <span class="text-muted fw-normal">(' + group.predictions.length + ' article(s))</span></td></tr>';
+      return headerRow + group.predictions.map(predictionRowHtml).join('');
     }).join('');
 
-    pageLabel.textContent = 'Page ' + currentPage + ' / ' + totalPages + ' (' + allPredictions.length + ' article(s))';
+    const totalArticles = allPredictions.length;
+    pageLabel.textContent = 'Page ' + currentPage + ' / ' + totalPages + ' (' + groupedByDepartment.length + ' rayon(s), ' + totalArticles + ' article(s))';
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = currentPage >= totalPages;
 
-    tbody.querySelectorAll('tr[data-index]').forEach(function (row) {
+    tbody.querySelectorAll('tr[data-ean]').forEach(function (row) {
       row.addEventListener('click', function () {
-        openDetail(allPredictions[parseInt(row.dataset.index, 10)]);
+        const prediction = allPredictions.find(function (p) { return p.ean === row.dataset.ean; });
+        if (prediction) openDetail(prediction);
       });
     });
   }
