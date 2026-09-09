@@ -143,6 +143,10 @@ model RecentOrderCache {
   orderCount         Int    @default(0) @map("order_count")
   mostRecentDate     DateTime? @map("most_recent_date")
   mostRecentReference String?  @map("most_recent_reference")
+  // Statut RPOS de la commande la plus récente (1=en préparation, 2=validée/en attente de
+  // livraison, 6=annulée) : affiché sur le badge "commandé le X" pour distinguer une commande
+  // simplement créée d'une commande réellement transmise à l'entrepôt.
+  mostRecentStatus   Int?     @map("most_recent_status")
   ordersJson         String?  @map("orders_json") // détail des commandes (JSON), pour le badge "commandé le X" — sérialisé faute de type JSON portable simple ici
 
   syncedAt DateTime @default(now()) @map("synced_at")
@@ -660,6 +664,10 @@ model ProposalLine {
   rposOrderReference String? @map("rpos_order_reference")
   rposOrderDate      DateTime? @map("rpos_order_date")
   rposOrderCount     Int? @map("rpos_order_count")
+  // Statut RPOS de cette commande (1=en préparation, 2=validée/en attente de livraison,
+  // 6=annulée) : affiché à côté de la référence pour dire si la commande bloquante a réellement
+  // été transmise à l'entrepôt, pas seulement créée dans RPOS.
+  rposOrderStatus    Int? @map("rpos_order_status")
 
   // Quantité qui aurait été proposée si on ignorait la commande RPOS récente ci-dessus, pour
   // préremplir la saisie côté magasin s'il choisit de débloquer l'article et de commander quand

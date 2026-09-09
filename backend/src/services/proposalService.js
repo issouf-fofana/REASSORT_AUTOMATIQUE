@@ -100,6 +100,7 @@ async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productI
       orderCount: cached.orderCount,
       mostRecentDate: cached.mostRecentDate,
       mostRecentReference: cached.mostRecentReference,
+      mostRecentStatus: cached.mostRecentStatus,
       orders: cached.ordersJson ? JSON.parse(cached.ordersJson) : [],
     };
   }
@@ -114,6 +115,7 @@ async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productI
     orderCount: result.orderCount,
     mostRecentDate: result.mostRecentDate ? new Date(result.mostRecentDate) : null,
     mostRecentReference: result.mostRecentReference,
+    mostRecentStatus: result.mostRecentStatus ?? null,
     ordersJson: JSON.stringify(result.orders || []),
   };
   await prisma.recentOrderCache.upsert({
@@ -520,6 +522,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         rposOrderReference: excludedAsAlreadyOrderedRpos ? recentRposOrder.mostRecentReference : null,
         rposOrderDate: excludedAsAlreadyOrderedRpos ? recentRposOrder.mostRecentDate : null,
         rposOrderCount: excludedAsAlreadyOrderedRpos ? recentRposOrder.orderCount : null,
+        rposOrderStatus: excludedAsAlreadyOrderedRpos ? (recentRposOrder.mostRecentStatus ?? null) : null,
         rposOrders: excludedAsAlreadyOrderedRpos ? recentRposOrder.orders : null,
         quantityIfUnblocked,
       },
@@ -647,6 +650,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           rposOrderReference: p.rposOrderReference,
           rposOrderDate: p.rposOrderDate ? new Date(p.rposOrderDate) : null,
           rposOrderCount: p.rposOrderCount,
+          rposOrderStatus: p.rposOrderStatus,
           quantityIfUnblocked: p.quantityIfUnblocked,
           quantityInTransit: p.quantityInTransit,
         })),

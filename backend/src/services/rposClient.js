@@ -447,6 +447,7 @@ async function getRecentUndeliveredOrderedQuantity(posId, shopId, productId, max
     if (remaining <= 0) continue;
     quantity += remaining;
     orders.push({
+      id: line.order?.id ?? null,
       reference: line.order?.reference || null,
       date: line.order?.date || null,
       quantity: Number(line.quantity),
@@ -454,12 +455,27 @@ async function getRecentUndeliveredOrderedQuantity(posId, shopId, productId, max
     });
   }
   const mostRecent = orders[0];
+
+  // Statut RPOS de la commande bloquante (1=en préparation, 2=en attente de livraison/"validée",
+  // 6=annulée — cf. validateSupplierOrder/cancelSupplierOrder) : demandé côté UI pour distinguer
+  // "déjà commandé et validé" de "commande créée mais pas encore transmise à l'entrepôt", plutôt
+  // que d'afficher seulement la référence/date sans dire si la commande est allée plus loin.
+  let mostRecentStatus = null;
+  if (mostRecent?.id) {
+    try {
+      mostRecentStatus = await getSupplierOrderStatus(posId, mostRecent.id);
+    } catch {
+      mostRecentStatus = null; // ne bloque jamais le calcul de quantité pour un statut indisponible
+    }
+  }
+
   return {
     quantity,
     orderCount: orders.length,
     orders,
     mostRecentDate: mostRecent?.date || null,
     mostRecentReference: mostRecent?.reference || null,
+    mostRecentStatus,
   };
 }
 

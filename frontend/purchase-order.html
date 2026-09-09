@@ -110,10 +110,6 @@
                                                   <iconify-icon icon="solar:refresh-circle-bold-duotone" class="align-middle"></iconify-icon>
                                                   Forcer une nouvelle génération
                                              </button>
-                                             <button id="reassort-ai-forecast" class="btn btn-sm btn-outline-info">
-                                                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" class="align-middle"></iconify-icon>
-                                                  Analyser avec l'IA
-                                             </button>
                                              <button id="reassort-send" class="btn btn-sm btn-success" disabled>Valider et envoyer à RPOS</button>
                                         </div>
                                    </div>
@@ -438,7 +434,7 @@
                                                             <th>Dernier achat</th>
                                                             <th>Dernière vente</th>
                                                             <th class="text-end">% CA magasin</th>
-                                                            <th class="text-end" id="reassort-ai-col-header" style="display:none;"><iconify-icon icon="solar:magic-stick-3-bold" class="align-middle me-1"></iconify-icon>Suggestion IA</th>
+                                                            <th class="text-end"><iconify-icon icon="solar:magic-stick-3-bold" class="align-middle me-1"></iconify-icon>IA</th>
                                                             <th class="text-end">Qté proposée</th>
                                                             <th class="text-end">Valeur commande</th>
                                                        </tr>
@@ -478,7 +474,9 @@
                                              // Suggestions IA (à la demande) : { ean -> { quantitySuggested, reasoning } }, chargées après
                                              // un clic sur "Analyser avec l'IA". Reste en mémoire tant que la page n'est pas rechargée ; ne
                                              // modifie jamais quantitySuggested/reassort-qty-input tant que l'utilisateur ne clique pas
-                                             // explicitement sur "Appliquer" pour une ligne donnée.
+                                             // explicitement sur "Appliquer" pour une ligne donnée. Rempli au clic sur "Analyser"
+                                             // article par article (pas de batch sur toute la proposition, trop lent et générait
+                                             // des suggestions sans lien avec un article précis consulté par l'utilisateur).
                                              let currentAiForecastByEan = new Map();
 
                                              // Champ de quantité en nombre de colis, avec le colisage affiché à côté (comme RPOS :
@@ -502,7 +500,20 @@
 
                                              function aiSuggestionCell(l) {
                                                   const suggestion = currentAiForecastByEan.get(l.ean);
-                                                  if (!suggestion) return '<span class="text-muted">—</span>';
+                                                  if (!suggestion) {
+                                                       // Pas encore analysé : bouton qui déclenche l'appel IA pour CET article seul au clic
+                                                       // (cf. runAiAnalysisForLine), jamais tout le tableau d'un coup.
+                                                       return '<button type="button" class="btn btn-sm btn-outline-dark ai-analyze-line-btn" data-line-id="' + l.id + '" data-ean="' + l.ean + '" title="Demander une analyse IA pour cet article">' +
+                                                            '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle"></iconify-icon> Analyser' +
+                                                            '</button>';
+                                                  }
+                                                  if (suggestion.loading) {
+                                                       return '<span class="spinner-border spinner-border-sm align-middle text-muted"></span>';
+                                                  }
+                                                  if (suggestion.error) {
+                                                       return '<span class="text-danger small" title="' + suggestion.error.replace(/"/g, '&quot;') + '">Erreur ⟳</span>' +
+                                                            ' <button type="button" class="btn btn-sm btn-outline-dark py-0 px-1 ai-analyze-line-btn" data-line-id="' + l.id + '" data-ean="' + l.ean + '">↻</button>';
+                                                  }
                                                   // Badge noir explicite (cf. ai-predictions.html) : jamais confondu avec la "Qté
                                                   // proposée" du calcul classique juste à côté, même si l'IA a confirmé le même chiffre.
                                                   return '<div class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background-color:#000000;color:#ffffff;" title="' + (suggestion.reasoning || '').replace(/"/g, '&quot;') + '">' +
@@ -988,6 +999,10 @@
                                                                       (l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?') +
                                                                       (l.rposOrderReference ? ' (réf. ' + l.rposOrderReference + ')' : '') +
                                                                       (l.rposOrderCount && l.rposOrderCount > 1 ? ' + ' + (l.rposOrderCount - 1) + ' autre(s)' : '') +
+                                                                      // 1=en préparation, 2=validée/en attente de livraison, 6=annulée
+                                                                      // (cf. rposClient.validateSupplierOrder/cancelSupplierOrder) ; statut
+                                                                      // absent (commande ancienne, avant l'ajout de ce champ) : rien affiché.
+                                                                      (l.rposOrderStatus === 2 ? ' — validée' : l.rposOrderStatus === 1 ? ' — en préparation (pas encore validée)' : l.rposOrderStatus === 6 ? ' — annulée' : '') +
                                                                       '</span>' +
                                                                       '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '">🔓 Débloquer et commander quand même</button>'
                                                                  : '');
@@ -1010,7 +1025,7 @@
                                                                  '<span class="last-sale-result small text-muted" data-product-id="' + l.productId + '">Chargement...</span>' +
                                                             '</td>' +
                                                             '<td class="text-end">' + revenueShareCell + '</td>' +
-                                                            '<td class="text-end reassort-ai-col" style="display:none;">' + aiSuggestionCell(l) + '</td>' +
+                                                            '<td class="text-end">' + aiSuggestionCell(l) + '</td>' +
                                                             '<td class="text-end">' + qtyInputCell(l) + '</td>' +
                                                             '<td class="text-end reassort-line-value" data-line-id="' + l.id + '">' +
                                                                  (l.sellingPrice ? (l.sellingPrice * l.quantitySuggested).toLocaleString('fr-FR') + ' CFA' : '—') +
@@ -1113,33 +1128,33 @@
                                                   updateOrderTotal();
                                              });
 
-                                             // --- Analyse IA à la demande : envoie les articles de la proposition courante au LLM
-                                             // configuré (Paramètres > IA), affiche une colonne "Suggestion IA" à côté de la quantité
-                                             // calculée classiquement, sans jamais l'écraser tant que l'utilisateur ne clique pas
-                                             // explicitement sur "Appliquer" (✓) pour une ligne donnée.
-                                             const aiForecastBtn = document.getElementById('reassort-ai-forecast');
-                                             aiForecastBtn.addEventListener('click', async function () {
-                                                  if (!currentProposal || !currentProposal.id) {
-                                                       alert('Aucune proposition chargée.');
-                                                       return;
-                                                  }
-                                                  const originalText = aiForecastBtn.innerHTML;
-                                                  aiForecastBtn.disabled = true;
-                                                  aiForecastBtn.innerHTML = '<span class="spinner-border spinner-border-sm align-middle"></span> Analyse en cours...';
+                                             // --- Analyse IA à la demande, article par article : au clic sur "Analyser" (colonne IA),
+                                             // envoie CET article seul au LLM configuré (Paramètres > IA) — jamais toute la
+                                             // proposition d'un coup (trop lent sur 1000+ articles, et sans lien avec ce que
+                                             // l'utilisateur regarde à l'instant). N'écrase jamais la quantité de la ligne tant que
+                                             // l'utilisateur ne clique pas explicitement sur "Appliquer" (✓).
+                                             async function runAiAnalysisForLine(lineId, ean) {
+                                                  if (!currentProposal || !currentProposal.id) return;
+                                                  currentAiForecastByEan.set(ean, { loading: true });
+                                                  renderRows(currentProposal);
                                                   try {
-                                                       const res = await window.reassortFetch('/reassort/proposal/' + currentProposal.id + '/ai-forecast', { method: 'POST' });
+                                                       const res = await window.reassortFetch('/reassort/proposal/' + currentProposal.id + '/ai-analyze-article', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ ean: ean }),
+                                                       });
                                                        const json = await res.json();
                                                        if (!json.success) throw new Error(json.message);
-                                                       currentAiForecastByEan = new Map(json.data.lines.map(function (l) { return [l.ean, l]; }));
-                                                       document.getElementById('reassort-ai-col-header').style.display = '';
-                                                       document.querySelectorAll('.reassort-ai-col').forEach(function (el) { el.style.display = ''; });
-                                                       renderRows(currentProposal);
+                                                       currentAiForecastByEan.set(ean, { quantitySuggested: json.data.quantity, reasoning: json.data.reasoning });
                                                   } catch (err) {
-                                                       alert('Erreur analyse IA: ' + err.message + '\n\nVérifiez qu\'au moins une clé API est configurée et active dans Paramètres > IA.');
-                                                  } finally {
-                                                       aiForecastBtn.disabled = false;
-                                                       aiForecastBtn.innerHTML = originalText;
+                                                       currentAiForecastByEan.set(ean, { error: err.message });
                                                   }
+                                                  renderRows(currentProposal);
+                                             }
+
+                                             tbody.addEventListener('click', function (e) {
+                                                  const analyzeBtn = e.target.closest('.ai-analyze-line-btn');
+                                                  if (analyzeBtn) runAiAnalysisForLine(analyzeBtn.dataset.lineId, analyzeBtn.dataset.ean);
                                              });
 
                                              // --- Évolution d'un article (courbe de ventes, historique de commandes, prédiction) ---
@@ -1349,9 +1364,8 @@
                                              async function loadPendingProposal() {
                                                   updateTitle();
                                                   // Une nouvelle proposition chargée invalide les suggestions IA de la précédente (les
-                                                  // lineId ne correspondent plus) : on masque la colonne jusqu'à une nouvelle analyse.
+                                                  // lineId ne correspondent plus) : réinitialisée, chaque ligne redevient "à analyser".
                                                   currentAiForecastByEan = new Map();
-                                                  document.getElementById('reassort-ai-col-header').style.display = 'none';
                                                   const shopId = selectedShopId();
                                                   if (!shopId) {
                                                        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
