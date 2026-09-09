@@ -48,7 +48,7 @@
       const json = await res.json();
       if (!json.success) throw new Error(json.message);
       if (!json.data.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
         infoBox.textContent = '';
         return;
       }
@@ -59,7 +59,7 @@
       proposalSelect.disabled = false;
       loadPredictions();
     } catch (err) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
     }
   }
 
@@ -72,11 +72,11 @@
   async function loadPredictions() {
     const shopId = shopSelect.value;
     if (!shopId) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses prédictions.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses prédictions.</td></tr>';
       infoBox.textContent = '';
       return;
     }
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Chargement...</td></tr>';
     try {
       const proposalId = proposalSelect.value;
       const url = '/reassort/predictions?shop=' + encodeURIComponent(shopId) + (proposalId ? '&proposalId=' + encodeURIComponent(proposalId) : '');
@@ -86,7 +86,7 @@
       const d = json.data;
 
       if (!d.proposalId || !d.predictions.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
         infoBox.textContent = '';
         return;
       }
@@ -103,7 +103,7 @@
       currentPage = 1;
       renderPage();
     } catch (err) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
     }
   }
 
@@ -132,7 +132,8 @@
       : '<span class="text-muted">en attente</span>';
     return '<tr data-ean="' + p.ean + '">' +
       '<td>' + (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div></td>' +
-      '<td class="text-end">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
+      '<td class="text-end fw-semibold">' + Math.round(p.predictedQuantity) + '</td>' +
+      '<td class="text-end text-muted">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
       '<td class="text-end">' + actual + '</td>' +
       '<td class="text-end">' + gap + '</td>' +
       '<td style="min-width:140px;">' +
@@ -154,7 +155,7 @@
     const pageGroups = groupedByDepartment.slice(start, start + DEPARTMENTS_PER_PAGE);
 
     tbody.innerHTML = pageGroups.map(function (group) {
-      const headerRow = '<tr class="table-light"><td colspan="6" class="fw-semibold py-2">' +
+      const headerRow = '<tr class="table-light"><td colspan="7" class="fw-semibold py-2">' +
         group.department + ' <span class="text-muted fw-normal">(' + group.predictions.length + ' article(s))</span></td></tr>';
       return headerRow + group.predictions.map(predictionRowHtml).join('');
     }).join('');

@@ -438,7 +438,7 @@
                                                             <th>Dernier achat</th>
                                                             <th>Dernière vente</th>
                                                             <th class="text-end">% CA magasin</th>
-                                                            <th class="text-end" id="reassort-ai-col-header" style="display:none;">Suggestion IA</th>
+                                                            <th class="text-end" id="reassort-ai-col-header" style="display:none;"><iconify-icon icon="solar:magic-stick-3-bold" class="align-middle me-1"></iconify-icon>Suggestion IA</th>
                                                             <th class="text-end">Qté proposée</th>
                                                             <th class="text-end">Valeur commande</th>
                                                        </tr>
@@ -503,9 +503,12 @@
                                              function aiSuggestionCell(l) {
                                                   const suggestion = currentAiForecastByEan.get(l.ean);
                                                   if (!suggestion) return '<span class="text-muted">—</span>';
-                                                  return '<div title="' + (suggestion.reasoning || '').replace(/"/g, '&quot;') + '">' +
+                                                  // Badge noir explicite (cf. ai-predictions.html) : jamais confondu avec la "Qté
+                                                  // proposée" du calcul classique juste à côté, même si l'IA a confirmé le même chiffre.
+                                                  return '<div class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background-color:#000000;color:#ffffff;" title="' + (suggestion.reasoning || '').replace(/"/g, '&quot;') + '">' +
+                                                       '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle" style="font-size:.85rem;"></iconify-icon>' +
                                                        '<strong>' + suggestion.quantitySuggested + '</strong>' +
-                                                       ' <button type="button" class="btn btn-sm btn-outline-info py-0 px-1 ai-apply-btn" data-line-id="' + l.id + '" data-quantity="' + suggestion.quantitySuggested + '" title="Appliquer cette suggestion à la ligne">✓</button>' +
+                                                       '<button type="button" class="btn btn-sm py-0 px-1 ai-apply-btn" style="color:#ffffff;" data-line-id="' + l.id + '" data-quantity="' + suggestion.quantitySuggested + '" title="Appliquer cette suggestion à la ligne">✓</button>' +
                                                        '</div>';
                                              }
 
