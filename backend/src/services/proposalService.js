@@ -592,6 +592,22 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // précédente au lieu de se retrouver sans aucune proposition en attente.
   const result = precomputedResult || await generateProposal(posId, shopId, limit, shopReference, periodOverride);
 
+  // Score de confiance (§20, étape 6) calculé ICI, avant l'ajustement IA ci-dessous, pour pouvoir
+  // le transmettre à l'IA comme donnée d'entrée (elle doit savoir si sa propre base de départ est
+  // déjà peu fiable avant de décider d'un ajustement) — réutilisé tel quel plus loin pour
+  // l'écriture d'AIPrediction, sans second calcul.
+  const CONFIDENCE_CONCURRENCY = 10;
+  await mapWithConcurrency(result.proposals, CONFIDENCE_CONCURRENCY, async (p) => {
+    const { confidenceScore, breakdown } = await computeConfidenceScore({
+      rposShopId: shopId,
+      ean: p.ean,
+      dailyHistory: p.dailyHistory,
+      hadNegativeStock: p.hadNegativeStock,
+    });
+    p.confidenceScore = confidenceScore;
+    p.confidenceBreakdown = breakdown;
+  });
+
   // Ajustement de la quantité par IA (CAHIER_DES_CHARGES.md, demande explicite : "Qté proposée" ne
   // doit plus être directement le calcul déterministe, mais le résultat d'une analyse IA qui reçoit
   // ce calcul comme point de départ). Désactivé par défaut (AI_QUANTITY_ADJUSTMENT_ENABLED) : impact
@@ -602,7 +618,8 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   const aiQuantityAdjustmentEnabled = (await systemConfig.getValue(systemConfig.KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED)) === 'true';
   if (aiQuantityAdjustmentEnabled && result.proposals.length) {
     try {
-      const { byEan, providerUsed } = await aiForecastService.analyzeArticlesBatch(result.proposals, shopReference, shopName);
+      const shopConfig = { safetyStockRatio: result.stats.safetyStockRatio, receptionLeadTimeDays: result.stats.receptionLeadTimeDays };
+      const { byEan, providerUsed } = await aiForecastService.analyzeArticlesBatch(result.proposals, shopReference, shopName, shopConfig);
       console.log(`[proposalService] Ajustement IA : ${byEan.size}/${result.proposals.length} article(s) analysé(s) avec succès (${providerUsed || 'aucun fournisseur'}).`);
       for (const p of result.proposals) {
         const suggestion = byEan.get(String(p.ean));
@@ -747,14 +764,13 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // faire échouer une génération déjà réussie et sauvegardée.
   try {
     if (result.proposals.length) {
-      const CONFIDENCE_CONCURRENCY = 10;
-      const predictionData = await mapWithConcurrency(result.proposals, CONFIDENCE_CONCURRENCY, async (p) => {
-        const { confidenceScore, breakdown } = await computeConfidenceScore({
-          rposShopId: shopId,
-          ean: p.ean,
-          dailyHistory: p.dailyHistory,
-          hadNegativeStock: p.hadNegativeStock,
-        });
+      const predictionData = result.proposals.map((p) => {
+        const confidenceScore = p.confidenceScore;
+        const breakdown = p.confidenceBreakdown;
+        const baseReasoning = p.seasonalityAdjusted
+          ? `Lissage exponentiel avec ajustement saisonnier (écart ${p.seasonalityDeviationPct ?? '?'}%). Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`
+          : (p.forecastMethod === 'flat' ? 'Historique trop court, moyenne simple.' : 'Lissage exponentiel.') +
+            ` Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`;
         return {
           proposalId: proposal.id,
           rposShopId: shopId,
@@ -769,10 +785,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           ordersAtPrediction: p.currentOrderedQuantity,
           model: p.forecastMethod === 'flat' ? 'flat' : 'smoothing',
           confidenceScore,
-          reasoning: p.seasonalityAdjusted
-            ? `Lissage exponentiel avec ajustement saisonnier (écart ${p.seasonalityDeviationPct ?? '?'}%). Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`
-            : (p.forecastMethod === 'flat' ? 'Historique trop court, moyenne simple.' : 'Lissage exponentiel.') +
-              ` Confiance ${confidenceScore}% (historique ${breakdown.historyLength}%, stabilité ${breakdown.volatility}%, précision passée ${breakdown.historicalAccuracy}%${breakdown.historicalAccuracySampleSize === 0 ? ' — pas encore évaluée' : ''}, qualité données ${breakdown.dataQuality}%).`,
+          reasoning: p.aiAdjusted ? `${baseReasoning} Ajusté par IA : ${p.aiReasoning || '—'}` : baseReasoning,
         };
       });
 

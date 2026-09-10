@@ -38,10 +38,16 @@ const DEFAULT_MODEL_BY_PROVIDER = {
 // - une ProposalLine Prisma déjà persistée (dailyHistory en JSON string, stock dans
 //   stockAtGeneration, quantité dans quantitySuggested) — cas de runAiForecast/analyzeArticleRealtime ;
 // - un objet "proposal" interne pas encore persisté, tel que produit par generateProposal
-//   (dailyHistory déjà un tableau, stock dans `stock`, quantité dans quantityProposed) — cas de
-//   l'intégration IA à la génération elle-même (generateAndSaveProposal). Éviter de forcer l'appelant
-//   à reformater ses données juste pour cet appel, qui n'a pas besoin de cette distinction.
-function buildArticleSummary(line) {
+//   (dailyHistory déjà un tableau, stock dans `stock`, quantité dans quantityProposed, et
+//   confidenceScore déjà calculé si generateAndSaveProposal l'a fait avant l'appel IA) — cas de
+//   l'intégration IA à la génération elle-même. Éviter de forcer l'appelant à reformater ses
+//   données juste pour cet appel, qui n'a pas besoin de cette distinction.
+//
+// shopConfig (optionnel) : safetyStockRatio et receptionLeadTimeDays, communs à tous les articles
+// du même magasin (pas des champs par ligne) — expliquent à l'IA comment systemSuggestedQuantity a
+// été construit (marge de sécurité visée, délai de réapprovisionnement pris en compte), plutôt que
+// de lui laisser deviner la logique derrière ce chiffre.
+function buildArticleSummary(line, shopConfig) {
   let dailyHistory = [];
   if (Array.isArray(line.dailyHistory)) {
     dailyHistory = line.dailyHistory;
@@ -84,7 +90,22 @@ function buildArticleSummary(line) {
       ? Number(line.revenueSharePct.toFixed(2))
       : null,
     seasonalityAdjusted: !!line.seasonalityAdjusted,
+    // Écart de vente vs la même période l'an dernier (%, positif = tendance à la hausse) : déjà
+    // calculé par le système mais jusqu'ici jamais transmis à l'IA, qui ne pouvait donc pas
+    // distinguer une hausse récente structurelle (saisonnalité confirmée) d'un simple bruit
+    // statistique sur les dernières semaines de dailyHistory.
+    seasonalityDeviationPct: line.seasonalityDeviationPct ?? null,
+    forecastMethod: line.forecastMethod || 'flat',
     hadNegativeStock: !!line.hadNegativeStock,
+    // Score de confiance du système dans SA PROPRE prévision de base (§20, 0-100) : transmis quand
+    // déjà calculé (generateAndSaveProposal le calcule avant l'appel IA), pour que l'IA sache si le
+    // point de départ qu'on lui donne est déjà jugé peu fiable en interne — un ajustement mérite
+    // d'autant plus d'être envisagé que ce score est bas.
+    systemConfidenceScore: line.confidenceScore ?? null,
+    // Marge de sécurité visée (ratio appliqué à la vente moyenne) et délai de réapprovisionnement
+    // pris en compte dans le calcul classique — communs à tout le magasin, pas par article.
+    safetyStockRatio: shopConfig?.safetyStockRatio ?? null,
+    receptionLeadTimeDays: shopConfig?.receptionLeadTimeDays ?? null,
     dailyHistory,
   };
 }
@@ -254,8 +275,8 @@ async function testProviderKey(keyId) {
  * Factorisé ici car utilisé à deux endroits : l'analyse à la demande sur une proposition déjà
  * générée (runAiForecast) et, désormais, l'analyse intégrée à chaque génération elle-même.
  */
-async function analyzeArticlesBatch(lines, shopReference, shopName) {
-  const summaries = lines.map(buildArticleSummary);
+async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig) {
+  const summaries = lines.map((line) => buildArticleSummary(line, shopConfig));
   const batches = [];
   for (let i = 0; i < summaries.length; i += ARTICLES_PER_BATCH) {
     batches.push(summaries.slice(i, i + ARTICLES_PER_BATCH));
@@ -294,8 +315,9 @@ async function runAiForecast(proposalId, requestedBy) {
   });
 
   try {
+    const shopConfig = { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed };
     const { byEan, providerUsed, batchErrors, totalBatches } = await analyzeArticlesBatch(
-      proposal.lines, proposal.rposShopReference, proposal.rposShopName
+      proposal.lines, proposal.rposShopReference, proposal.rposShopName, shopConfig
     );
 
     // Un lot en échec ne bloque pas les autres : les articles concernés gardent simplement la
@@ -352,8 +374,8 @@ async function getLatestAiForecast(proposalId) {
  * Le résultat n'est pas mis en cache : chaque clic relance un vrai appel, cohérent avec l'attente
  * d'une analyse "en temps réel" plutôt qu'un résultat pré-calculé.
  */
-async function analyzeArticleRealtime({ shopReference, shopName, line }) {
-  const summary = buildArticleSummary(line);
+async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfig }) {
+  const summary = buildArticleSummary(line, shopConfig);
   const prompt = await buildPrompt(shopReference, shopName, [summary]);
   const { result, providerUsed } = await callWithFallback(prompt);
   const suggestion = result.find((r) => String(r.ean) === String(line.ean)) || result[0];

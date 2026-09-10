@@ -1481,6 +1481,7 @@ router.post('/proposal/:proposalId/ai-analyze-article', async (req, res) => {
       shopReference: proposal.rposShopReference,
       shopName: proposal.rposShopName,
       line,
+      shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
     });
     res.json({ success: true, data: result });
   } catch (error) {
