@@ -706,6 +706,46 @@ router.get('/proposal/pending', async (req, res) => {
   }
 });
 
+// GET /api/reassort/proposal/history?shop=... - liste des générations passées d'un magasin (les
+// plus récentes en premier), pour permettre de revenir consulter une proposition qui n'est plus
+// "GENERATED" (déjà validée ou remplacée par une génération plus récente — REJECTED) : jusqu'ici
+// purchase-order.html n'affichait plus rien dès qu'une proposition sortait du statut GENERATED,
+// sans aucun moyen de la revoir.
+router.get('/proposal/history', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const proposals = await prisma.proposal.findMany({
+      where: { rposShopId: shopId },
+      orderBy: { generatedAt: 'desc' },
+      take: 30,
+      select: { id: true, generatedAt: true, status: true },
+    });
+    res.json({ success: true, data: proposals });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal/:id - une proposition précise par id, quel que soit son statut
+// (GENERATED, REJECTED, VALIDATED...), avec ses lignes complètes — même format que
+// GET /proposal/pending, pour réutiliser exactement le même rendu côté frontend.
+router.get('/proposal/:id', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, include: { lines: true } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+    if (shopId && proposal.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
+    }
+    res.json({ success: true, data: proposal });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/:id/validate - démarre la validation (envoi vers RPOS en tâche de fond)
 // body: { supplierId, externalReference, comment, orderDate, deliveryDate, decisions: [{ lineId, quantity, excluded }],
 //         validateAfterCreate }
