@@ -189,6 +189,10 @@
           classicQuantitySuggested: prediction.classicQuantitySuggested,
           generationAiAdjusted: prediction.aiAdjusted,
           generationAiReasoning: prediction.aiReasoningAtGeneration,
+          hasRecentOrder: prediction.hasRecentOrder,
+          recentOrderReference: prediction.recentOrderReference,
+          recentOrderDate: prediction.recentOrderDate,
+          recentOrderCount: prediction.recentOrderCount,
         });
       });
     });

@@ -309,11 +309,30 @@
         '</div>'
       : '<p class="text-muted small">Détail des signaux non disponible pour cette prédiction.</p>';
 
+    // Commande RPOS récente (≤7j) qui a fait tomber le calcul classique à 0 par construction : à
+    // afficher AVANT l'explication de l'IA, pour que l'utilisateur ait le contexte complet (référence,
+    // date, nombre de commandes) avant de lire comment l'IA a jugé si elle suffit ou non — cf. demande
+    // explicite de ne jamais laisser croire à un blocage automatique sans analyse.
+    const recentOrderSection = item.hasRecentOrder
+      ? '<div class="aip-detail-section">' +
+          '<h6>Commande récente détectée</h6>' +
+          '<div class="aip-classic-card">' +
+            '<div class="aip-classic-eyebrow">Commande fournisseur des 7 derniers jours (hors de cette analyse)</div>' +
+            '<p class="small mb-0">' +
+              'Référence <strong>' + (item.recentOrderReference || '—') + '</strong>, passée le ' +
+              (item.recentOrderDate ? new Date(item.recentOrderDate).toLocaleDateString('fr-FR') : '—') +
+              (item.recentOrderCount && item.recentOrderCount > 1 ? ' (+ ' + (item.recentOrderCount - 1) + ' autre(s) commande(s) récente(s))' : '') +
+              '. L\'IA a analysé si cette commande couvre déjà le besoin ou si une quantité supplémentaire est nécessaire — voir son explication ci-dessous.' +
+            '</p>' +
+          '</div>' +
+        '</div>'
+      : '';
+
     const aiSection = currentAiResult
       ? '<div class="aip-detail-section">' +
           '<h6>Pourquoi l\'IA recommande ' + currentAiResult.quantity + ' unité(s) ?</h6>' +
           '<div class="aip-reasoning-block">' + (currentAiResult.reasoning || '—') + '</div>' +
-          '<p class="small text-muted mt-2 mb-0">Modèle utilisé : ' + (currentAiResult.providerUsed || '—') + '. L\'IA a analysé l\'historique de ventes ci-dessous, le stock actuellement disponible, les quantités déjà en commande, et la tendance récente pour estimer la couverture nécessaire à la semaine à venir.</p>' +
+          '<p class="small text-muted mt-2 mb-0">Modèle utilisé : ' + (currentAiResult.providerUsed || '—') + '. L\'IA a analysé l\'historique de ventes ci-dessous, le stock actuellement disponible, les quantités déjà en commande' + (item.hasRecentOrder ? ' (y compris la commande récente ci-dessus)' : '') + ', et la tendance récente pour estimer la couverture nécessaire à la semaine à venir.</p>' +
         '</div>'
       : '<div class="aip-detail-section"><p class="text-muted small">Analyse IA pas encore disponible.</p></div>';
 
@@ -360,6 +379,8 @@
 
     return (
       '<button type="button" class="aip-back-btn" id="aip-back-btn"><iconify-icon icon="solar:arrow-left-linear"></iconify-icon>Retour à la recommandation</button>' +
+
+      recentOrderSection +
 
       aiSection +
 

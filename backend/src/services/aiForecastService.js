@@ -62,6 +62,16 @@ function buildArticleSummary(line, shopConfig) {
   const classicQuantity = line.quantitySuggested ?? line.quantityProposed ?? 0;
   const currentStock = line.stockAtGeneration ?? line.stock ?? 0;
 
+  // Commande RPOS récente (≤7j, hors plateforme) qui a fait tomber le calcul classique à 0 par
+  // construction (cf. excludedAsAlreadyOrderedRpos dans proposalService.js) : jusqu'ici l'IA ne
+  // voyait ni cette commande ni ses détails, seulement un substitut recalculé (quantityIfUnblocked)
+  // à sa place — elle ne pouvait donc jamais elle-même juger si cette commande suffit. On transmet
+  // maintenant les données brutes de la commande, et systemSuggestedQuantity reste le VRAI calcul
+  // classique (potentiellement 0), sans substitution — c'est à l'IA de décider si une commande
+  // supplémentaire est nécessaire ou si les 0 du système sont justifiés, jamais un blocage imposé
+  // avant qu'elle ait pu analyser quoi que ce soit.
+  const hasRecentOrder = !!line.excludedAsAlreadyOrderedRpos;
+
   return {
     ean: line.ean,
     label: line.label,
@@ -69,16 +79,10 @@ function buildArticleSummary(line, shopConfig) {
     // plutôt que de lui laisser calculer une quantité indépendante à partir de zéro — évite des
     // écarts arbitraires entre deux méthodes qui n'ont jamais eu connaissance l'une de l'autre
     // (ex: 53 vs 73 sur le même article), et rend la réponse de l'IA directement actionnable comme
-    // un ajustement justifié plutôt qu'un deuxième avis concurrent à départager soi-même.
-    //
-    // Cas particulier : un article bloqué par une commande RPOS récente hors plateforme
-    // (excludedAsAlreadyOrderedRpos=true) a une quantité classique à 0 par construction (le besoin
-    // est considéré déjà couvert). Lui donner 0 comme point de départ ne sert à rien — l'IA ne
-    // ferait que confirmer 0 sans avoir vu le vrai besoin. On lui fournit alors
-    // quantityIfUnblocked (déjà calculé : le besoin sans tenir compte de cette commande RPOS).
-    systemSuggestedQuantity: (line.excludedAsAlreadyOrderedRpos && line.quantityIfUnblocked)
-      ? line.quantityIfUnblocked
-      : classicQuantity,
+    // un ajustement justifié plutôt qu'un deuxième avis concurrent à départager soi-même. Jamais
+    // substitué : si le calcul dit 0 à cause d'une commande récente, l'IA voit ce 0 ET les détails
+    // de la commande ci-dessous pour juger elle-même si ce 0 est justifié.
+    systemSuggestedQuantity: classicQuantity,
     avgWeeklySales: Number(line.avgWeeklySales?.toFixed(2) ?? 0),
     currentStock,
     orderingUnit: line.orderingUnit,
@@ -86,6 +90,17 @@ function buildArticleSummary(line, shopConfig) {
       ? Number(line.daysUntilStockout.toFixed(1))
       : null,
     currentOrderedQuantity: line.currentOrderedQuantity || 0,
+    // Détail de la commande RPOS récente bloquante, si elle existe (hasRecentOrder=false sinon,
+    // tous les champs suivants alors à null) : à ne jamais confondre avec currentOrderedQuantity
+    // ci-dessus, qui peut inclure d'autres commandes en cours indépendantes de celle-ci.
+    hasRecentOrder,
+    recentOrderReference: hasRecentOrder ? (line.rposOrderReference || null) : null,
+    recentOrderDate: hasRecentOrder ? (line.rposOrderDate || null) : null,
+    recentOrderCount: hasRecentOrder ? (line.rposOrderCount || null) : null,
+    // Quantité que le calcul classique aurait proposée en ignorant cette commande récente (le
+    // besoin "brut", sans déduire cette commande) : donne à l'IA un ordre de grandeur du besoin
+    // total, à comparer elle-même à ce que la commande récente couvre déjà.
+    quantityIfIgnoringRecentOrder: hasRecentOrder ? (line.quantityIfUnblocked ?? null) : null,
     revenueSharePct: line.revenueSharePct !== null && line.revenueSharePct !== undefined
       ? Number(line.revenueSharePct.toFixed(2))
       : null,

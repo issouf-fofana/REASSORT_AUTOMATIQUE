@@ -856,7 +856,7 @@ router.get('/predictions', async (req, res) => {
       }),
       prisma.proposalLine.findMany({
         where: { proposalId },
-        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true },
+        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true, excludedAsAlreadyOrderedRpos: true, rposOrderReference: true, rposOrderDate: true, rposOrderCount: true },
       }),
     ]);
 
@@ -874,6 +874,10 @@ router.get('/predictions', async (req, res) => {
         classicQuantitySuggested: line?.classicQuantitySuggested ?? null,
         aiAdjusted: line?.aiAdjusted ?? false,
         aiReasoningAtGeneration: line?.aiReasoning ?? null,
+        hasRecentOrder: line?.excludedAsAlreadyOrderedRpos ?? false,
+        recentOrderReference: line?.rposOrderReference ?? null,
+        recentOrderDate: line?.rposOrderDate ?? null,
+        recentOrderCount: line?.rposOrderCount ?? null,
         department: line?.department || 'Autre',
         sector: line?.sector || null,
       };

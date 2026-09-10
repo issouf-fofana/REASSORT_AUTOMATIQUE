@@ -1111,6 +1111,10 @@
                                                        shopId: selectedShopId(),
                                                        ean: ean,
                                                        label: line.label,
+                                                       hasRecentOrder: !!line.excludedAsAlreadyOrderedRpos,
+                                                       recentOrderReference: line.rposOrderReference,
+                                                       recentOrderDate: line.rposOrderDate,
+                                                       recentOrderCount: line.rposOrderCount,
                                                        onApply: function (quantity) {
                                                             const check = document.querySelector('.reassort-line-check[data-line-id="' + line.id + '"]');
                                                             setLineQuantity(line.id, quantity);
