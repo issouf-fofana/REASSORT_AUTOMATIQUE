@@ -101,7 +101,7 @@
                          <div class="col-xl-12">
                               <div class="card">
                                    <div class="d-flex card-header justify-content-between align-items-center">
-                                        <a href="purchase-order.html" class="btn btn-sm btn-outline-secondary me-2" id="reassort-back-to-depts" title="Retour aux rayons">
+                                        <a href="/purchase-order" class="btn btn-sm btn-outline-secondary me-2" id="reassort-back-to-depts" title="Retour aux rayons">
                                              <iconify-icon icon="solar:arrow-left-linear" class="align-middle"></iconify-icon>
                                         </a>
                                         <div>
@@ -715,7 +715,7 @@
                                                   if (shopId) params.set('shop', shopId);
                                                   if (posId) params.set('pos', posId);
                                                   const qs = params.toString();
-                                                  return 'purchase-order.html' + (qs ? '?' + qs : '');
+                                                  return '/purchase-order' + (qs ? '?' + qs : '');
                                              }
 
                                              // rawGroups (avant construction des tuiles [name, d, href]) sert à calculer le "Reste du CA

@@ -65,7 +65,7 @@
 
                                              // Déjà connecté -> direct au tableau de bord
                                              if (localStorage.getItem('reassort_token')) {
-                                                  window.location.href = 'index.html';
+                                                  window.location.href = '/';
                                              }
 
                                              form.addEventListener('submit', async function (e) {
@@ -87,7 +87,7 @@
 
                                                        localStorage.setItem('reassort_token', json.data.token);
                                                        localStorage.setItem('reassort_user', JSON.stringify(json.data.user));
-                                                       window.location.href = 'index.html';
+                                                       window.location.href = '/';
                                                   } catch (err) {
                                                        errorBox.textContent = err.message;
                                                        errorBox.style.display = 'block';

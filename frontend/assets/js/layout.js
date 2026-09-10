@@ -26,13 +26,20 @@
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html');
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html');
 
-  // Item de navigation actif : correspondance sur le nom de fichier de la page courante.
-  const currentPage = window.location.pathname.split('/').pop() || 'index.html';
+  // Item de navigation actif : correspondance sur le nom de fichier de la page courante. Les
+  // data-nav-item/data-nav-group gardent le suffixe ".html" (valeur historique, encore utilisée
+  // par purchase-order.html pour son propre routage interne) — on normalise donc les deux côtés
+  // (URL courante ET valeurs comparées) en retirant ".html" avant de comparer, pour fonctionner
+  // aussi bien avec l'ancienne forme (/admin-dashboard.html) que l'URL propre servie par nginx
+  // (/admin-dashboard, cf. frontend/nginx.conf) sans avoir à réécrire ces attributs partout.
+  function stripHtmlExt(name) { return name.replace(/\.html$/, ''); }
+  let currentPage = window.location.pathname.split('/').pop() || 'index';
+  currentPage = stripHtmlExt(currentPage) || 'index';
   document.querySelectorAll('[data-nav-item]').forEach(function (li) {
-    if (li.dataset.navItem === currentPage) li.classList.add('active');
+    if (stripHtmlExt(li.dataset.navItem) === currentPage) li.classList.add('active');
   });
   document.querySelectorAll('[data-nav-group]').forEach(function (li) {
-    const pages = li.dataset.navGroup.split(',');
+    const pages = li.dataset.navGroup.split(',').map(stripHtmlExt);
     if (pages.indexOf(currentPage) === -1) return;
     li.classList.add('active');
     const toggle = li.querySelector('[data-bs-toggle="collapse"]');

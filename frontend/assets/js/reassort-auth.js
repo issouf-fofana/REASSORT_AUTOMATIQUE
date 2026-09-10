@@ -24,7 +24,7 @@
   window.reassortLogout = function () {
     localStorage.removeItem('reassort_token');
     localStorage.removeItem('reassort_user');
-    window.location.href = 'auth-signin.html';
+    window.location.href = '/login';
   };
 
   // Wrapper fetch qui ajoute automatiquement le token, et déconnecte sur 401.
@@ -42,7 +42,7 @@
   };
 
   if (!window.reassortGetToken()) {
-    window.location.href = 'auth-signin.html';
+    window.location.href = '/login';
   }
 
   document.addEventListener('DOMContentLoaded', function () {
