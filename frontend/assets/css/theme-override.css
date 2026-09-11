@@ -14,14 +14,12 @@
      border-radius: 0 !important;
 }
 
-/* Volt code une bonne partie de ses couleurs (accents, badges, texte secondaire...) en dur plutôt
-   que via variables CSS (102 occurrences relevées dans volt.css) : les neutraliser une par une
-   serait long et fragile face à une future mise à jour du CSS Volt. Un filtre grayscale global
-   garantit à coup sûr qu'aucune couleur ne subsiste nulle part sur la page, indépendamment de la
-   façon dont Volt l'a codée. */
-html {
-     filter: grayscale(100%);
-}
+/* Le filtre grayscale global précédent désaturait TOUTE la page, y compris les couleurs
+   sémantiques (succès/erreur/alerte) que les règles plus bas dans ce fichier tentaient justement de
+   préserver — contradiction relevée par l'utilisateur ("tout est trop sombre", badges succès/erreur
+   indistinguables l'un de l'autre). Retiré : seuls l'accent (boutons, liens, sidebar) et les badges
+   restent gérés couleur par couleur ci-dessous, pour que les statuts (réussi/échoué/en attente)
+   redeviennent identifiables au premier coup d'œil plutôt que par une simple nuance de gris. */
 
 /* Palette noir/blanc/gris : neutralise les couleurs d'accent de Volt (bleu, jaune, vert, rouge)
    utilisées sur les boutons primaires, badges et liens actifs. Les couleurs sémantiques
@@ -115,21 +113,44 @@ a:not(.sidebar *),
      box-shadow: none !important;
 }
 
+/* Couleurs sémantiques réelles (succès/erreur/alerte/info) : distinctes du noir/blanc utilisé
+   partout ailleurs (boutons, sidebar, accents), pour que les statuts (proposition validée/rejetée,
+   commande en erreur, avertissement de couverture de données...) restent identifiables d'un coup
+   d'œil plutôt que par une simple nuance de gris. */
 .badge.bg-success,
 .badge.bg-success-subtle {
-     background-color: #000000 !important;
+     background-color: #1e7e34 !important;
      color: #ffffff !important;
 }
 .badge.bg-danger,
 .badge.bg-danger-subtle {
-     background-color: #666666 !important;
+     background-color: #c0392b !important;
      color: #ffffff !important;
 }
 .badge.bg-warning,
 .badge.bg-warning-subtle {
-     background-color: #999999 !important;
+     background-color: #d68910 !important;
      color: #ffffff !important;
 }
+.badge.bg-info,
+.badge.bg-info-subtle {
+     background-color: #2471a3 !important;
+     color: #ffffff !important;
+}
+
+.text-success { color: #1e7e34 !important; }
+.text-danger { color: #c0392b !important; }
+.text-warning { color: #b9770e !important; }
+.text-info { color: #2471a3 !important; }
+
+.alert-success { background-color: #eafaf1 !important; border-color: #a9dfbf !important; color: #1e7e34 !important; }
+.alert-danger { background-color: #fdedec !important; border-color: #f5b7b1 !important; color: #c0392b !important; }
+.alert-warning { background-color: #fef5e7 !important; border-color: #f8d78e !important; color: #9a6b0a !important; }
+.alert-info { background-color: #eaf2f8 !important; border-color: #a9cce3 !important; color: #2471a3 !important; }
+
+.progress-bar.bg-success { background-color: #1e7e34 !important; }
+.progress-bar.bg-danger { background-color: #c0392b !important; }
+.progress-bar.bg-primary { background-color: #2471a3 !important; }
 
 body {
      background-color: #f5f5f5;

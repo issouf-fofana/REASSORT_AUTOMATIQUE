@@ -8,19 +8,32 @@ const { forecastAvgWeeklySales } = require('./forecastService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
+const { detectAnomalies } = require('./anomalyService');
 const aiForecastService = require('./aiForecastService');
 
 const prisma = new PrismaClient();
+
+// En dessous de cette tolérance (heures), un léger décalage entre le début réel des données
+// locales et le début de période demandé est considéré normal (la toute première synchro d'une
+// journée peut démarrer quelques heures après minuit, ou le magasin n'a simplement pas vendu dans
+// les premières heures) — pas la peine de déclencher un appel RPOS de complément pour ça.
+const COVERAGE_GAP_TOLERANCE_HOURS = 24;
 
 /**
  * Récupère les lignes de vente d'un magasin sur une période, dans l'ordre de préférence :
  * 1. Fichier d'export local (le plus rapide, zéro appel réseau) si disponible pour la période.
  * 2. Base locale SalesLine, alimentée en tâche de fond par salesSyncJob.js (rapide, pas d'appel
- *    RPOS bloquant) — c'est la source normale une fois la synchro en place.
+ *    RPOS bloquant) — c'est la source normale une fois la synchro en place. Si cette base ne
+ *    couvre qu'une PARTIE de la période demandée (ex: backfill initial jamais lancé assez loin en
+ *    arrière), le début manquant est complété par un appel RPOS ciblé sur ce seul trou, plutôt que
+ *    d'utiliser silencieusement des données partielles comme si elles couvraient toute la période
+ *    — un bug réel constaté : un magasin dont la base ne remontait qu'à 10 jours voyait son Pareto
+ *    et son CA calculés sur ces 10 jours tout en étant présentés comme portant sur 30 jours,
+ *    faussant les quantités proposées sans aucun avertissement.
  * 3. RPOS en direct (lent, pagination potentiellement de plusieurs minutes) : seulement en
- *    dernier recours, si aucune des deux sources locales n'a de données pour cette période — par
- *    exemple un magasin dont la synchro n'a pas encore tourné, ou une période trop ancienne pour
- *    avoir été synchronisée.
+ *    dernier recours, si aucune donnée locale n'existe du tout pour cette période — par exemple un
+ *    magasin dont la synchro n'a pas encore tourné, ou une période trop ancienne pour avoir été
+ *    synchronisée.
  */
 async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, dateEnd) {
   if (shopReference) {
@@ -32,15 +45,35 @@ async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, d
   const dbLines = await prisma.salesLine.findMany({
     where: { rposShopId: shopId, date: { gte: new Date(dateStart), lt: new Date(dateEnd) } },
   });
-  if (dbLines.length > 0) {
-    return {
-      lines: dbLines.map((l) => ({ ean: l.ean, label_1: l.label, quantity: l.quantity, total_excl_tax: l.revenueExclTax, date: l.date.toISOString() })),
-      source: 'db',
-    };
+
+  if (dbLines.length === 0) {
+    const rposLines = await rpos.getProductLinesForPeriod(posId, shopId, dateStart, dateEnd);
+    return { lines: rposLines, source: 'rpos' };
   }
 
-  const rposLines = await rpos.getProductLinesForPeriod(posId, shopId, dateStart, dateEnd);
-  return { lines: rposLines, source: 'rpos' };
+  const mappedDbLines = dbLines.map((l) => ({ ean: l.ean, label_1: l.label, quantity: l.quantity, total_excl_tax: l.revenueExclTax, date: l.date.toISOString() }));
+
+  // Couverture réelle vs période demandée : la première vente locale dans la fenêtre peut être
+  // largement postérieure à dateStart si le backfill initial n'a jamais couvert le début de la
+  // période (cas constaté). Un simple sondage de la borne min suffit, sans lire toute la table.
+  const earliestLocal = dbLines.reduce((min, l) => (l.date < min ? l.date : min), dbLines[0].date);
+  const requestedStart = new Date(dateStart);
+  const gapHours = (earliestLocal.getTime() - requestedStart.getTime()) / (60 * 60 * 1000);
+
+  if (gapHours <= COVERAGE_GAP_TOLERANCE_HOURS) {
+    return { lines: mappedDbLines, source: 'db' };
+  }
+
+  console.warn(`[proposalService] Base locale incomplète pour ${shopId} : couvre depuis ${earliestLocal.toISOString()} au lieu de ${dateStart} demandé (écart ${Math.round(gapHours / 24)}j) — complément via RPOS pour la partie manquante.`);
+  let gapLines = [];
+  try {
+    gapLines = await rpos.getProductLinesForPeriod(posId, shopId, dateStart, earliestLocal.toISOString());
+  } catch (err) {
+    console.error(`[proposalService] Échec du complément RPOS pour la période manquante (${shopId}) : ${err.message} — la génération continue avec les seules données locales disponibles, potentiellement incomplètes.`);
+    return { lines: mappedDbLines, source: 'db', coverageIncomplete: true, coverageGapDays: Math.round(gapHours / 24) };
+  }
+
+  return { lines: [...gapLines, ...mappedDbLines], source: 'db+rpos', coverageGapFilled: true };
 }
 
 // Un appel RPOS getProductByEan par article (jusqu'à 700+ sur un gros magasin) domine largement le
@@ -69,9 +102,14 @@ async function cacheProduct(shopId, posId, ean, product) {
   });
 }
 
-async function getProductByEanCached(posId, shopId, ean) {
+// ignoreRposStock (config.ignoreRposStockInCalculation) : permet de générer une proposition sans
+// réseau Prosuma disponible — le cache produit est alors utilisé même très périmé (TTL ignoré),
+// plutôt que de retomber sur un appel RPOS qui échouerait forcément. Le stock qu'il contient est de
+// toute façon écrasé à 0 par l'appelant (processArticle) dans ce mode, donc sa fraîcheur n'a pas
+// d'importance ici — seuls prix/colisage/rayon doivent rester valides, peu sensibles au temps.
+async function getProductByEanCached(posId, shopId, ean, ignoreRposStock) {
   const cached = await prisma.productCache.findUnique({ where: { rposShopId_ean: { rposShopId: shopId, ean } } });
-  if (cached && Date.now() - cached.syncedAt.getTime() < PRODUCT_CACHE_TTL_MS) {
+  if (cached && (ignoreRposStock || Date.now() - cached.syncedAt.getTime() < PRODUCT_CACHE_TTL_MS)) {
     return {
       id: cached.productId,
       orderable: cached.orderable,
@@ -83,6 +121,8 @@ async function getProductByEanCached(posId, shopId, ean) {
     };
   }
 
+  if (ignoreRposStock) return null; // jamais vu en cache et pas de réseau à disposition : exclu proprement (pas de prix/colisage connus)
+
   const product = await rpos.getProductByEan(posId, shopId, ean);
   if (!product) return null;
 
@@ -93,9 +133,13 @@ async function getProductByEanCached(posId, shopId, ean) {
 // Même principe de cache-aside que getProductByEanCached, pour le second appel RPOS par article
 // (commandes récentes non livrées) qui restait le goulot dominant une fois ProductCache en place
 // (mesuré : ~30% de gain avec ProductCache seul, cet appel domine le temps restant).
-async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productId, maxAgeDays) {
+const EMPTY_RECENT_ORDER = { quantity: 0, orderCount: 0, mostRecentDate: null, mostRecentReference: null, mostRecentStatus: null, orders: [] };
+
+async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productId, maxAgeDays, ignoreRposStock) {
   const cached = await prisma.recentOrderCache.findUnique({ where: { rposShopId_productId: { rposShopId: shopId, productId } } });
-  if (cached && Date.now() - cached.syncedAt.getTime() < PRODUCT_CACHE_TTL_MS) {
+  // En mode ignoreRposStock (hors réseau Prosuma), un cache existant reste utilisable même très
+  // périmé plutôt que de forcer un appel RPOS voué à échouer.
+  if (cached && (ignoreRposStock || Date.now() - cached.syncedAt.getTime() < PRODUCT_CACHE_TTL_MS)) {
     return {
       quantity: cached.quantity,
       orderCount: cached.orderCount,
@@ -106,7 +150,25 @@ async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productI
     };
   }
 
-  const result = await rpos.getRecentUndeliveredOrderedQuantity(posId, shopId, productId, maxAgeDays);
+  // Bug constaté (session du 10/09) : un cache resté figé plusieurs jours pour un produit alors
+  // que d'autres produits de la même génération se rafraîchissaient normalement — le calcul
+  // classique avait alors utilisé une commande RPOS récente non détectée (24 unités passées 7h
+  // avant la génération), proposant 12 unités là où l'IA (données à jour) recommandait 0. Ni
+  // l'appel RPOS ni l'upsert n'avaient de log dédié pour diagnostiquer la cause exacte (échec
+  // réseau partiel ? résultat inattendu ? conflit d'upsert ?) — ajoutés ici pour la prochaine
+  // occurrence plutôt que de devoir deviner après coup sans pouvoir reproduire (réseau RPOS
+  // indisponible au moment de l'investigation).
+  let result;
+  try {
+    result = await rpos.getRecentUndeliveredOrderedQuantity(posId, shopId, productId, maxAgeDays);
+  } catch (err) {
+    console.error(`[proposalService] getRecentUndeliveredOrderedQuantity a échoué pour productId=${productId} (shop=${shopId}) : ${err.message} — le cache existant (s'il y en a un) reste inchangé, potentiellement périmé.`);
+    // Aucun cache du tout ET pas de réseau (ignoreRposStock) : on ne peut pas savoir si une
+    // commande récente existe — traité comme "aucune connue" plutôt que de faire échouer tout
+    // l'article pour une donnée secondaire (le magasin devra vérifier lui-même dans RPOS).
+    if (ignoreRposStock) return EMPTY_RECENT_ORDER;
+    throw err;
+  }
 
   const data = {
     rposPosId: posId,
@@ -119,11 +181,15 @@ async function getRecentUndeliveredOrderedQuantityCached(posId, shopId, productI
     mostRecentStatus: result.mostRecentStatus ?? null,
     ordersJson: JSON.stringify(result.orders || []),
   };
-  await prisma.recentOrderCache.upsert({
-    where: { rposShopId_productId: { rposShopId: shopId, productId } },
-    update: data,
-    create: data,
-  });
+  try {
+    await prisma.recentOrderCache.upsert({
+      where: { rposShopId_productId: { rposShopId: shopId, productId } },
+      update: data,
+      create: data,
+    });
+  } catch (err) {
+    console.error(`[proposalService] Échec de l'upsert recentOrderCache pour productId=${productId} (shop=${shopId}) : ${err.message} — le résultat RPOS frais (quantity=${result.quantity}) est quand même retourné à l'appelant pour ce calcul, seul le cache pour les PROCHAINS appels reste périmé.`);
+  }
 
   return result;
 }
@@ -235,7 +301,8 @@ function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit,
  * @param {string} [shopReference] - code magasin (ex: "050"), nécessaire pour chercher les fichiers locaux
  * @param {number} [limit] - limite le nombre d'articles traités (pour tests rapides)
  */
-async function generateProposal(posId, shopId, limit, shopReference, periodOverride) {
+async function generateProposal(posId, shopId, limit, shopReference, periodOverride, onProgress) {
+  const reportProgress = onProgress || (() => {});
   console.log(`[proposalService] Génération démarrée : posId=${posId} shopId=${shopId} shopReference=${shopReference || '-'} limit=${limit || 'aucune'}`);
 
   const baseConfig = await getConfig(shopId);
@@ -257,6 +324,26 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   }
   console.log(`[proposalService] ${lines.length} ligne(s) de vente chargée(s) (source: ${salesSource})`);
 
+  // Couverture RÉELLE des données utilisées (peut être plus étroite que period.start/end demandé,
+  // ex: base locale avec un trou comblé partiellement, ou magasin sans vente sur le tout début de
+  // la période) : à afficher à la place de la période configurée, pour ne jamais laisser croire
+  // qu'une analyse a porté sur 30 jours quand elle n'a en réalité eu que 10 jours de vraies ventes
+  // — bug constaté (Pareto/CA calculés sur des données partielles, sans que rien ne le signale).
+  let actualDataStart = null;
+  let actualDataEnd = null;
+  for (const line of lines) {
+    const d = new Date(line.date);
+    if (Number.isNaN(d.getTime())) continue;
+    if (!actualDataStart || d < actualDataStart) actualDataStart = d;
+    if (!actualDataEnd || d > actualDataEnd) actualDataEnd = d;
+  }
+  const coverageGapDays = actualDataStart
+    ? Math.round((actualDataStart.getTime() - new Date(period.start).getTime()) / (24 * 60 * 60 * 1000))
+    : null;
+  if (coverageGapDays && coverageGapDays > 1) {
+    console.warn(`[proposalService] Couverture de données incomplète : demandé depuis ${period.start}, données réelles disponibles seulement depuis ${actualDataStart.toISOString()} (${coverageGapDays}j manquant(s)).`);
+  }
+
   const { priorityArticles, totalArticlesWithSales } = computeParetoFromLines(
     lines,
     config.paretoThreshold,
@@ -264,9 +351,11 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     { enabled: config.forecastEnabled, alpha: config.forecastAlpha }
   );
   console.log(`[proposalService] Pareto : ${priorityArticles.length}/${totalArticlesWithSales} article(s) prioritaire(s) (seuil ${config.paretoThreshold * 100}%)`);
+  reportProgress({ step: 'PARETO' });
 
   let articles = priorityArticles;
   if (limit) articles = articles.slice(0, limit);
+  reportProgress({ step: 'QUANTITIES', articlesTotal: articles.length, articlesProcessed: 0 });
 
   // Saisonnalité (readme §8) : compare la période d'analyse actuelle à la même période N années
   // en arrière, et ajuste la vente moyenne prévue si l'écart dépasse le seuil configuré, pour ne
@@ -363,12 +452,22 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     shopTotalRevenue += caHt;
   }
 
+  // Mode "sans réseau Prosuma" (config.ignoreRposStockInCalculation) : tous les appels RPOS
+  // ci-dessous (transit plateforme, préchauffe produit) échoueraient forcément hors réseau — on les
+  // saute entièrement plutôt que de laisser leur échec remonter et faire échouer toute la
+  // génération. inTransitByEan reste vide (aucune commande en transit connue dans ce mode, cohérent
+  // avec l'absence d'accès aux données à jour) et la préchauffe est ignorée : chaque article relira
+  // directement son ProductCache existant (même périmé) dans processArticle ci-dessous.
+  const ignoreRposStock = !!config.ignoreRposStockInCalculation;
+
   // RPOS ne reflète pas toujours les commandes "en préparation" dans current_ordered_quantity
   // côté produit : on interroge nous-mêmes la quantité déjà en transit (commandée par cette
   // plateforme, pas encore reçue) pour chaque article, et on la déduit du besoin plutôt que
   // d'exclure silencieusement l'article — l'article reste visible avec un badge explicite si son
   // besoin résiduel tombe à 0 à cause de cette quantité en transit.
-  const { quantityByEan: inTransitByEan, orderInfoByEan: platformOrderInfoByEan } = await rpos.getPendingPlatformOrderedEans(posId, shopId);
+  const { quantityByEan: inTransitByEan, orderInfoByEan: platformOrderInfoByEan } = ignoreRposStock
+    ? { quantityByEan: new Map(), orderInfoByEan: new Map() }
+    : await rpos.getPendingPlatformOrderedEans(posId, shopId);
 
   const proposals = [];
   const skipped = { notFound: [], notOrderable: [], negativeStock: [], alreadyOrdered: [], genericArticle: [] };
@@ -379,11 +478,14 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   // cache froid (1000+ articles Pareto), ça remplace ~1000 appels réseau individuels par ~5-10
   // appels en lot — c'était le principal goulot de la génération de proposition (audit
   // performance). getProductByEanCached en dessous lira ensuite tout depuis ProductCache, déjà
-  // rempli ici, sans appel RPOS supplémentaire pour les articles trouvés.
-  const eansToPrefetch = articles.map((a) => a.code);
-  const productsByEan = await rpos.getProductsByEans(posId, shopId, eansToPrefetch);
-  await Promise.all(Array.from(productsByEan.entries()).map(([ean, product]) => cacheProduct(shopId, posId, ean, product)));
-  console.log(`[proposalService] Pré-chauffe produit : ${productsByEan.size}/${eansToPrefetch.length} article(s) trouvé(s) en un lot RPOS`);
+  // rempli ici, sans appel RPOS supplémentaire pour les articles trouvés. Sautée en mode
+  // ignoreRposStock : chaque article relira son cache existant directement (voir plus haut).
+  if (!ignoreRposStock) {
+    const eansToPrefetch = articles.map((a) => a.code);
+    const productsByEan = await rpos.getProductsByEans(posId, shopId, eansToPrefetch);
+    await Promise.all(Array.from(productsByEan.entries()).map(([ean, product]) => cacheProduct(shopId, posId, ean, product)));
+    console.log(`[proposalService] Pré-chauffe produit : ${productsByEan.size}/${eansToPrefetch.length} article(s) trouvé(s) en un lot RPOS`);
+  }
 
   // Un appel RPOS par article (getProductByEan) en série peut prendre 10-20+ minutes sur un
   // magasin à fort catalogue Pareto (1000+ articles prioritaires) : RPOS répond en 200-500ms+ par
@@ -398,7 +500,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     const ean = art.code;
     const quantityInTransit = inTransitByEan.get(ean) || 0;
 
-    const product = await getProductByEanCached(posId, shopId, ean);
+    const product = await getProductByEanCached(posId, shopId, ean, ignoreRposStock);
 
     if (!product) {
       return { skip: 'notFound', ean, label: art.label, revenueSharePct: revenueSharePctFor(ean) };
@@ -419,9 +521,29 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     // de la hiérarchie RPOS) sert à regrouper les articles à la validation et créer une commande
     // fournisseur distincte par rayon ; le secteur (1er niveau) sert uniquement à la navigation
     // dans l'UI (un responsable de secteur clique sur son secteur puis choisit le rayon précis).
-    const { sector, rayon: department } = await rpos.getDepartmentHierarchy(posId, product.department?.id);
+    // Le cache mémoire de getDepartmentHierarchy est volatile (vidé à chaque redémarrage backend) :
+    // en mode ignoreRposStock, un cache froid + RPOS injoignable planterait sinon cet article — on
+    // retombe alors sur "Sans secteur/Sans rayon" plutôt que d'exclure l'article entièrement pour
+    // un simple regroupement d'affichage.
+    let sector = 'Sans secteur';
+    let department = 'Sans rayon';
+    try {
+      const hierarchy = await rpos.getDepartmentHierarchy(posId, product.department?.id);
+      sector = hierarchy.sector;
+      department = hierarchy.rayon;
+    } catch (err) {
+      if (!ignoreRposStock) throw err; // comportement normal inchangé : une vraie panne RPOS reste visible
+    }
 
     let stock = Number(product.stock || 0);
+    if (ignoreRposStock) {
+      // Stock jamais à jour dans ce mode (pas d'appel RPOS) : traité comme totalement inconnu,
+      // jamais utilisé tel quel dans le calcul (qui se baserait alors sur une valeur potentiellement
+      // périmée de plusieurs jours sans que rien ne le signale) — le besoin est couvert uniquement
+      // sur la base des ventes réelles, à charge pour le magasin de vérifier physiquement le stock
+      // avant de valider la commande proposée.
+      stock = 0;
+    }
     const hadNegativeStock = stock < 0;
     const actualStock = stock; // valeur brute RPOS avant écrasement à 0, conservée pour l'affichage
     let hadNegativeStockSkip = false;
@@ -451,7 +573,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     // commandes RPOS récentes (≤ config.recentOrderMaxAgeDays, réglable par magasin dans
     // Paramètres) : au-delà, on considère qu'il est légitime de repasser commande même si RPOS
     // affiche encore un reliquat.
-    const recentRposOrder = await getRecentUndeliveredOrderedQuantityCached(posId, shopId, product.id, config.recentOrderMaxAgeDays);
+    const recentRposOrder = await getRecentUndeliveredOrderedQuantityCached(posId, shopId, product.id, config.recentOrderMaxAgeDays, ignoreRposStock);
     const rposOrderedQty = recentRposOrder.quantity;
     const orderedQty = Math.max(rposOrderedQty, quantityInTransit);
     const orderingUnit = Number(product.ordering_unit || 1);
@@ -544,6 +666,14 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       if (result.proposal.excludedAsAlreadyOrdered) skipped.alreadyOrdered.push({ ean: result.ean, label: result.label, revenueSharePct: result.revenueSharePct });
       proposals.push(result.proposal);
     }
+    const lastArticle = batch[batch.length - 1];
+    reportProgress({
+      step: 'QUANTITIES',
+      articlesTotal: articles.length,
+      articlesProcessed: Math.min(i + batch.length, articles.length),
+      lastArticleEan: lastArticle?.code || null,
+      lastArticleLabel: lastArticle?.label || null,
+    });
   }
 
   proposals.sort((a, b) => b.avgWeeklySales - a.avgWeeklySales);
@@ -564,6 +694,13 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       skippedGenericArticle: skipped.genericArticle.length,
       periodStart: period.start,
       periodEnd: period.end,
+      // Couverture RÉELLE des données utilisées pour ce calcul (peut différer de periodStart/End
+      // ci-dessus si la base locale avait un trou) : à afficher en priorité côté UI plutôt que la
+      // période configurée, pour ne jamais laisser croire qu'un calcul a porté sur une période
+      // plus large que les données dont on disposait réellement.
+      actualDataStart: actualDataStart ? actualDataStart.toISOString() : null,
+      actualDataEnd: actualDataEnd ? actualDataEnd.toISOString() : null,
+      coverageGapDays: coverageGapDays && coverageGapDays > 1 ? coverageGapDays : 0,
       periodMode: config.periodMode,
       paretoThreshold: config.paretoThreshold,
       safetyStockRatio: config.safetyStockRatio,
@@ -586,11 +723,25 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
  *   quand l'appelant a déjà dû l'exécuter une première fois pour une comparaison avant de décider
  *   de sauvegarder (cf. dailyReplenishmentReviewJob.js, CAHIER_DES_CHARGES.md §15-16, étape 3).
  */
-async function generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride }, precomputedResult) {
+async function generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress }, precomputedResult) {
   // On calcule d'abord la nouvelle proposition (appels RPOS potentiellement instables) avant de
   // toucher à l'ancienne : si RPOS échoue (502/503), le magasin garde sa proposition GENERATED
   // précédente au lieu de se retrouver sans aucune proposition en attente.
-  const result = precomputedResult || await generateProposal(posId, shopId, limit, shopReference, periodOverride);
+  const result = precomputedResult || await generateProposal(posId, shopId, limit, shopReference, periodOverride, onProgress);
+
+  // Détection d'anomalies (§30-31, étape 7) : calculée ICI, avant le score de confiance, pour que
+  // celui-ci puisse pénaliser un article présentant un signal anormal (explosion/chute de ventes,
+  // stock incohérent) — synchrone et sans appel réseau, donc aucun impact sur le temps de génération.
+  for (const p of result.proposals) {
+    const { anomalies, trend } = detectAnomalies({
+      stock: p.stock,
+      avgWeeklySales: p.avgWeeklySales,
+      dailyHistory: p.dailyHistory,
+    });
+    p.anomalies = anomalies;
+    p.trendCategory = trend.category;
+    p.trendChangePct = trend.changePct;
+  }
 
   // Score de confiance (§20, étape 6) calculé ICI, avant l'ajustement IA ci-dessous, pour pouvoir
   // le transmettre à l'IA comme donnée d'entrée (elle doit savoir si sa propre base de départ est
@@ -603,6 +754,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
       ean: p.ean,
       dailyHistory: p.dailyHistory,
       hadNegativeStock: p.hadNegativeStock,
+      hasAnomaly: p.anomalies.length > 0,
     });
     p.confidenceScore = confidenceScore;
     p.confidenceBreakdown = breakdown;
@@ -616,11 +768,23 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // génération : chaque article garde alors simplement son calcul classique, jamais de proposition
   // manquante pour un magasin faute d'IA disponible.
   const aiQuantityAdjustmentEnabled = (await systemConfig.getValue(systemConfig.KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED)) === 'true';
+  const reportProgress = onProgress || (() => {});
   if (aiQuantityAdjustmentEnabled && result.proposals.length) {
     try {
+      reportProgress({ step: 'AI_ADJUSTMENT', articlesTotal: result.proposals.length, articlesProcessed: 0 });
       const shopConfig = { safetyStockRatio: result.stats.safetyStockRatio, receptionLeadTimeDays: result.stats.receptionLeadTimeDays };
-      const { byEan, providerUsed } = await aiForecastService.analyzeArticlesBatch(result.proposals, shopReference, shopName, shopConfig);
+      const { byEan, providerUsed, batchErrors, totalBatches } = await aiForecastService.analyzeArticlesBatch(
+        result.proposals, shopReference, shopName, shopConfig, posId, shopId,
+        (p) => reportProgress({ step: 'AI_ADJUSTMENT', articlesTotal: p.articlesTotal, articlesProcessed: p.articlesProcessed })
+      );
       console.log(`[proposalService] Ajustement IA : ${byEan.size}/${result.proposals.length} article(s) analysé(s) avec succès (${providerUsed || 'aucun fournisseur'}).`);
+      // batchErrors était collecté mais jamais loggé : un taux de succès anormalement bas (ex: 8/1128)
+      // sans aucune trace de la cause exacte par lot rendait le diagnostic impossible après coup —
+      // affiché maintenant systématiquement dès qu'un lot échoue, même si l'ajustement global "réussit"
+      // globalement (byEan.size > 0) grâce aux autres lots.
+      if (batchErrors && batchErrors.length > 0) {
+        console.warn(`[proposalService] Ajustement IA : ${batchErrors.length}/${totalBatches} lot(s) en échec :\n${batchErrors.join('\n')}`);
+      }
       for (const p of result.proposals) {
         const suggestion = byEan.get(String(p.ean));
         p.classicQuantitySuggested = p.quantityProposed;
@@ -633,6 +797,17 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           p.aiReasoning = null;
         }
       }
+      // Le modal de progression affichait "Analyse IA des quantités ✓ Terminé" même quand l'IA
+      // n'a en réalité analysé aucun article (ex: crédit API épuisé, chaque lot en échec) : rien
+      // ne distinguait alors un vrai succès d'un repli intégral sur le calcul classique. On le
+      // signale maintenant explicitement dans le statut de progression consulté par le frontend.
+      reportProgress({
+        step: 'AI_ADJUSTMENT',
+        articlesTotal: result.proposals.length,
+        articlesProcessed: result.proposals.length,
+        aiUnavailable: byEan.size === 0,
+        aiArticlesAdjusted: byEan.size,
+      });
     } catch (aiError) {
       // Échec global (ex: aucune clé API active) : chaque article garde son calcul classique,
       // marqué explicitement comme non revu par l'IA plutôt que de faire échouer la génération.
@@ -642,6 +817,14 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
         p.aiAdjusted = false;
         p.aiReasoning = null;
       }
+      reportProgress({
+        step: 'AI_ADJUSTMENT',
+        articlesTotal: result.proposals.length,
+        articlesProcessed: result.proposals.length,
+        aiUnavailable: true,
+        aiArticlesAdjusted: 0,
+        aiErrorMessage: aiError.message,
+      });
     }
   } else {
     for (const p of result.proposals) {
@@ -671,6 +854,9 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
       analysisPeriodStart: new Date(result.stats.periodStart),
       analysisPeriodEnd: new Date(result.stats.periodEnd),
       analysisPeriodMode: result.stats.periodMode,
+      actualDataStart: result.stats.actualDataStart ? new Date(result.stats.actualDataStart) : null,
+      actualDataEnd: result.stats.actualDataEnd ? new Date(result.stats.actualDataEnd) : null,
+      coverageGapDays: result.stats.coverageGapDays || 0,
       paretoThresholdUsed: result.stats.paretoThreshold,
       safetyStockRatioUsed: result.stats.safetyStockRatio,
       receptionLeadTimeDaysUsed: result.stats.receptionLeadTimeDays,
@@ -716,6 +902,9 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           rposOrderStatus: p.rposOrderStatus,
           quantityIfUnblocked: p.quantityIfUnblocked,
           quantityInTransit: p.quantityInTransit,
+          anomalies: p.anomalies && p.anomalies.length ? JSON.stringify(p.anomalies) : null,
+          trendCategory: p.trendCategory || null,
+          trendChangePct: p.trendChangePct ?? null,
         })),
       },
     },
@@ -1321,4 +1510,5 @@ module.exports = {
   getOverstockRate,
   getAdminDashboard,
   getForecastAccuracy,
+  getProductByEanCached,
 };

@@ -32,6 +32,12 @@ const KEYS = {
   NIGHTLY_PROPOSAL_ENABLED: 'NIGHTLY_PROPOSAL_ENABLED',
   RECEPTION_SYNC_ENABLED: 'RECEPTION_SYNC_ENABLED',
   SALES_SYNC_ENABLED: 'SALES_SYNC_ENABLED',
+  // Restreint la synchro des ventes (job planifié + bouton "Lancer maintenant") à une liste de
+  // magasins précise (rposShopId séparés par virgule) au lieu de tous les magasins actifs — utile
+  // pour se concentrer sur un ou quelques magasins pendant les tests, sans désactiver la synchro
+  // globalement pour tout le monde (SALES_SYNC_ENABLED reste le marche/arrêt général). Vide (défaut)
+  // = comportement historique, tous les magasins actifs.
+  SALES_SYNC_SHOP_IDS: 'SALES_SYNC_SHOP_IDS',
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
@@ -46,6 +52,11 @@ const KEYS = {
   // Paramètres > IA (admin) sans redéploiement. Placeholders remplacés avant l'envoi au LLM :
   // {{shopReference}}, {{shopName}}, {{articles}} (JSON des articles à analyser).
   AI_ANALYSIS_PROMPT_TEMPLATE: 'AI_ANALYSIS_PROMPT_TEMPLATE',
+  // Questions suggérées affichées dans l'Assistant IA (chatbotService.js) — une question par ligne.
+  // Éditable depuis Paramètres > IA (admin), sans redéploiement. Sert aussi de liste de référence
+  // pour indiquer au magasin ce que l'assistant sait réellement faire quand une question posée sort
+  // du périmètre couvert (cf. buildChatbotPrompt, dataSection de repli).
+  CHATBOT_SUGGESTED_QUESTIONS: 'CHATBOT_SUGGESTED_QUESTIONS',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -90,6 +101,19 @@ const ENV_FALLBACK = {
 
 Pour chaque article ci-dessous, procède dans cet ordre précis — n'inverse pas les étapes :
 
+ÉTAPE 0 — Avant toute analyse de l'article, regarde le statut du MAGASIN lui-même (shopActivityStatus, shopMonthsSinceLastActivity, shopHadActivityBeyondSampleWindow) — un champ générique calculé pour tous les magasins de la même façon, jamais une exception propre à tel ou tel magasin ou telle période :
+  - shopActivityStatus="ACTIVE" : le magasin a vendu récemment (ce mois-ci ou le mois dernier). Analyse l'article normalement (étapes 1 à 5) — une absence de vente de CET article dans un magasin actif signifie simplement que la demande pour cet article précis est nulle ou faible, pas que le magasin est arrêté.
+  - shopActivityStatus="RESUMED" : le magasin a repris une activité récente après une période sans aucune vente (tous articles confondus). Traite l'historique d'AVANT la reprise comme peu représentatif de la demande actuelle : ne l'utilise pas pour projeter une quantité, base-toi surtout sur les ventes constatées depuis la reprise, même si cette période est courte — et reste prudent sur les quantités tant que cette reprise n'est pas confirmée sur plusieurs semaines.
+  - shopActivityStatus="INACTIVE" : aucune vente (tous articles confondus) depuis plusieurs mois (shopMonthsSinceLastActivity indique depuis combien de mois). Un historique de ventes ancien ou une moyenne calculée sur une période où le magasin vendait encore ne reflète PAS une demande actuelle : ne recommande pas de quantité basée sur cet historique. Dans ce cas, quantity doit être 0 (sauf si des ventes réelles et récentes apparaissent malgré tout dans dailyHistory, ce qui contredirait ce statut et mérite d'être signalé), et reasoning doit clairement indiquer que le magasin semble ne plus être en activité et qu'aucune commande n'est recommandée pour cette raison, pas parce que l'article ne se vend pas.
+  - shopActivityStatus="NEVER_ACTIVE" ou null (statut non calculé, ex. échec réseau ponctuel) : traite l'article normalement à partir des seules données disponibles, sans supposition sur l'état du magasin.
+Dans tous les cas, ne confonds jamais "cet article précis n'a pas de vente" (une information sur l'article, dans un magasin par ailleurs actif) avec "le magasin n'a pas de vente" (une information sur le magasin lui-même) : ce sont deux causes différentes à une même absence de ventes dans dailyHistory, et seule l'analyse du statut du magasin ci-dessus permet de les distinguer.
+
+ÉTAPE 0bis — Regarde ensuite anomalies ([{type, changePct, message}], vide si aucune détectée) et trendCategory (GROWING, DECLINING, STABLE, VOLATILE ou UNKNOWN) : des signaux calculés automatiquement par le système, pas une opinion humaine.
+  - Un type "SALES_SPIKE" ou "SALES_DROP" signale une variation brutale et récente déjà détectée par le système : ne l'ignore pas, mais reste prudent avant d'extrapoler intégralement ce mouvement — vérifie dans dailyHistory si c'est un pic ponctuel (promotion, événement) ou le début d'un vrai changement durable.
+  - Un type "STOCK_INCONSISTENCY" signale un stock disponible mais aucune vente récente sur un article qui vend habituellement : cela ressemble à une rupture invisible (article mal positionné, code-barre non scanné) plutôt qu'à une vraie absence de demande — ne recommande pas quantity=0 uniquement à cause de ce silence de ventes, explique ce doute dans reasoning et privilégie une estimation basée sur le rythme habituel de l'article avant cette anomalie.
+  - trendCategory="VOLATILE" signale des ventes trop irrégulières pour dégager une tendance fiable : reste modéré sur l'ampleur de tout ajustement, plutôt que de suivre le dernier chiffre observé.
+  - Aucune anomalie et trendCategory renseigné (GROWING/DECLINING/STABLE) : traite normalement, c'est un signal de confirmation supplémentaire à combiner avec ton analyse de l'étape 1.
+
 ÉTAPE 1 — Analyse l'évolution réelle des ventes. Regarde dailyHistory ([{date, quantity}]) jour par jour, dans l'ordre chronologique. Identifie toi-même : la tendance (les derniers jours sont-ils clairement au-dessus ou en dessous de la moyenne de la période ?), l'accélération ou le ralentissement, un éventuel pic isolé à ne pas extrapoler (promotion, événement ponctuel) par opposition à une hausse ou baisse soutenue sur plusieurs jours consécutifs. IMPORTANT — évalue aussi le RECUL disponible : dailyHistory ne couvre parfois que quelques jours ; une hausse observée sur seulement 2-3 jours au sein d'un historique court est un signal fragile (pic isolé, erreur de caisse, effet ponctuel possible), pas une preuve de tendance durable — dans ce cas, ne recommande qu'un ajustement modéré et dis-le explicitement dans reasoning, plutôt que de projeter l'intégralité du dernier rythme observé comme s'il était acquis. Une tendance vue sur une plus longue période, ou confirmée par seasonalityDeviationPct, mérite davantage de confiance qu'une hausse qui ne repose que sur les tout derniers jours d'un historique court.
 
 ÉTAPE 2 — À partir de cette tendance réelle, forme ta propre estimation de la demande attendue pour la période à venir (en te basant sur le rythme récent plutôt que sur la seule moyenne globale quand une tendance nette se dégage).
@@ -107,19 +131,30 @@ Articles (JSON) :
 {{articles}}
 
 Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
-[{"ean": "...", "quantity": 0, "reasoning": "2-4 phrases en français : la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
+[{"ean": "...", "quantity": 0, "reasoning": "2-4 phrases en français : le statut d'activité du magasin s'il n'est pas ACTIVE et son influence sur la décision, la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
 Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`,
   // Tous les jobs sont actifs par défaut (comportement historique, avant l'ajout de ces
   // interrupteurs) : seul un changement explicite depuis Paramètres les désactive.
   [KEYS.NIGHTLY_PROPOSAL_ENABLED]: () => 'true',
   [KEYS.RECEPTION_SYNC_ENABLED]: () => 'true',
   [KEYS.SALES_SYNC_ENABLED]: () => 'true',
+  [KEYS.SALES_SYNC_SHOP_IDS]: () => '',
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
+  [KEYS.CHATBOT_SUGGESTED_QUESTIONS]: () => [
+    'Quels articles risquent d\'être en rupture ?',
+    'Quels articles sont en surstock ?',
+    'Quels articles font 80% du chiffre d\'affaires ?',
+    'Quelle est la précision de l\'IA sur ce magasin ?',
+    'Comment évoluent les ventes ce mois-ci ?',
+    'Quel est le CA du magasin aujourd\'hui ?',
+    'Quels articles dois-je commander aujourd\'hui ?',
+    'Quelles commandes ont été passées récemment ?',
+  ].join('\n'),
 };
 
 async function getValue(key) {

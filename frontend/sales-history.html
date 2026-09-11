@@ -78,6 +78,10 @@
                                              </div>
                                         </div>
                                         <div id="sh-coverage" class="small text-muted mt-2"></div>
+                                        <div class="form-check form-switch mt-2">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="sh-group-by-department">
+                                             <label class="form-check-label small" for="sh-group-by-department">Grouper par rayon (résolu depuis RPOS, peut prendre quelques secondes sur la première page)</label>
+                                        </div>
                                    </div>
                               </div>
                          </div>
@@ -169,7 +173,7 @@
                                         shopSelect.innerHTML = Object.keys(byPos).sort().map(function (posId) {
                                              const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); });
                                              const options = shops.map(function (s) {
-                                                  return '<option value="' + s.id + '">' + s.reference + ' - ' + s.name + '</option>';
+                                                  return '<option value="' + s.id + '" data-pos-id="' + s.posId + '">' + s.reference + ' - ' + s.name + '</option>';
                                              }).join('');
                                              return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
                                         }).join('');
@@ -195,6 +199,67 @@
                                         box.textContent = '';
                                    }
                               }
+
+                              function renderSaleRow(l) {
+                                   return '<tr>' +
+                                        '<td>' + new Date(l.date).toLocaleString('fr-FR') + '</td>' +
+                                        '<td>' + l.ean + '</td>' +
+                                        '<td>' + (l.label || '—') + '</td>' +
+                                        '<td class="text-end">' + l.quantity.toLocaleString('fr-FR') + '</td>' +
+                                        '<td class="text-end">' + l.revenueExclTax.toLocaleString('fr-FR') + ' CFA</td>' +
+                                        '<td class="text-end">' + (l.revenueInclTax !== null && l.revenueInclTax !== undefined ? l.revenueInclTax.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
+                                        '</tr>';
+                              }
+
+                              // Le rayon n'existe pas sur SalesLine (une ligne de vente individuelle, pas un article
+                              // catalogué) : on le résout à la demande via /sales-lines/departments, qui s'appuie sur le
+                              // cache produit déjà alimenté par les générations de proposition passées sur ce magasin (donc
+                              // rapide une fois "chaud"), avec repli RPOS pour les EAN encore inconnus. Ne regroupe que les
+                              // lignes de la PAGE COURANTE (pas tout l'historique filtré) — cohérent avec la pagination déjà
+                              // en place, un même article peut réapparaître sur d'autres pages.
+                              async function renderGroupedByDepartment(lines) {
+                                   const shopId = shopSelect.value;
+                                   const posId = shopSelect.selectedOptions[0] ? shopSelect.selectedOptions[0].dataset.posId : null;
+                                   const eans = [...new Set(lines.map(function (l) { return l.ean; }))];
+
+                                   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Résolution des rayons (' + eans.length + ' article(s) distinct(s))...</td></tr>';
+                                   let departmentByEan = {};
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/sales-lines/departments?shopId=' + encodeURIComponent(shopId) + '&posId=' + encodeURIComponent(posId) + '&eans=' + encodeURIComponent(eans.join(',')));
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        departmentByEan = json.data;
+                                   } catch (err) {
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur lors de la résolution des rayons: ' + err.message + '</td></tr>';
+                                        return;
+                                   }
+
+                                   const byDepartment = new Map();
+                                   lines.forEach(function (l) {
+                                        const dept = (departmentByEan[l.ean] && departmentByEan[l.ean].department) || 'Rayon inconnu';
+                                        if (!byDepartment.has(dept)) byDepartment.set(dept, []);
+                                        byDepartment.get(dept).push(l);
+                                   });
+                                   const departments = Array.from(byDepartment.keys()).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+
+                                   tbody.innerHTML = departments.map(function (dept) {
+                                        const rows = byDepartment.get(dept);
+                                        const header = '<tr class="table-secondary"><td colspan="6"><strong>' + dept + '</strong> <span class="text-muted small">(' + rows.length + ' ligne(s))</span></td></tr>';
+                                        return header + rows.map(renderSaleRow).join('');
+                                   }).join('');
+                              }
+
+                              let lastLoadedLines = [];
+                              async function renderCurrentLines() {
+                                   if (!lastLoadedLines.length) {
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune vente trouvée pour ces filtres.</td></tr>';
+                                   } else if (document.getElementById('sh-group-by-department').checked) {
+                                        await renderGroupedByDepartment(lastLoadedLines);
+                                   } else {
+                                        tbody.innerHTML = lastLoadedLines.map(renderSaleRow).join('');
+                                   }
+                              }
+                              document.getElementById('sh-group-by-department').addEventListener('change', renderCurrentLines);
 
                               async function search(page) {
                                    const shopId = shopSelect.value;
@@ -227,20 +292,8 @@
                                              ? d.totalRevenueInclTax.toLocaleString('fr-FR') + ' CFA'
                                              : '— (données antérieures à l\'ajout du TTC)';
 
-                                        if (!d.lines.length) {
-                                             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune vente trouvée pour ces filtres.</td></tr>';
-                                        } else {
-                                             tbody.innerHTML = d.lines.map(function (l) {
-                                                  return '<tr>' +
-                                                       '<td>' + new Date(l.date).toLocaleString('fr-FR') + '</td>' +
-                                                       '<td>' + l.ean + '</td>' +
-                                                       '<td>' + (l.label || '—') + '</td>' +
-                                                       '<td class="text-end">' + l.quantity.toLocaleString('fr-FR') + '</td>' +
-                                                       '<td class="text-end">' + l.revenueExclTax.toLocaleString('fr-FR') + ' CFA</td>' +
-                                                       '<td class="text-end">' + (l.revenueInclTax !== null && l.revenueInclTax !== undefined ? l.revenueInclTax.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
-                                                       '</tr>';
-                                             }).join('');
-                                        }
+                                        lastLoadedLines = d.lines;
+                                        await renderCurrentLines();
 
                                         const totalPages = Math.max(1, Math.ceil(d.total / pageSize));
                                         document.getElementById('sh-page-label').textContent = 'Page ' + currentPage + ' / ' + totalPages;
@@ -286,6 +339,8 @@
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
 </body>
 
 </html>

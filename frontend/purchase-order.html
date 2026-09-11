@@ -294,6 +294,8 @@
                                                                  <input type="date" id="generate-custom-end" class="form-control form-control-sm">
                                                             </div>
                                                        </div>
+                                                       <div class="alert alert-info small mb-3" id="generate-period-preview">Calcul de la période...</div>
+                                                       <div class="alert alert-warning small mb-3" id="generate-coverage-warning" style="display:none;"></div>
                                                        <div class="alert alert-light border small mb-0">
                                                             Le système va analyser les ventes sur la période choisie, classer les articles prioritaires
                                                             (Pareto) et calculer les quantités à commander. Sur un magasin à fort volume de ventes, cette
@@ -387,12 +389,12 @@
                                         </div>
                                    </div>
 
-                                   <div class="modal fade" id="generate-progress-modal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+                                   <div class="modal fade" id="generate-progress-modal" tabindex="-1" aria-hidden="true">
                                         <div class="modal-dialog modal-dialog-centered">
                                              <div class="modal-content">
                                                   <div class="modal-header">
                                                        <h5 class="modal-title">Génération de la proposition</h5>
-                                                       <button type="button" id="generate-modal-close" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="display:none;"></button>
+                                                       <button type="button" id="generate-modal-close" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                                   </div>
                                                   <div class="modal-body">
                                                        <ul class="list-group list-group-flush mb-3">
@@ -408,18 +410,28 @@
                                                                  <span class="step-icon-wrap"><iconify-icon icon="solar:clock-circle-bold-duotone" class="text-muted"></iconify-icon></span>
                                                                  <span>Calcul des quantités à commander</span>
                                                             </li>
+                                                            <li class="list-group-item d-flex align-items-center gap-2 validation-step" id="gen-step-ai-adjustment" style="display:none;">
+                                                                 <span class="step-icon-wrap"><iconify-icon icon="solar:clock-circle-bold-duotone" class="text-muted"></iconify-icon></span>
+                                                                 <span>Analyse IA des quantités</span>
+                                                            </li>
                                                             <li class="list-group-item d-flex align-items-center gap-2 validation-step" id="gen-step-done">
                                                                  <span class="step-icon-wrap"><iconify-icon icon="solar:clock-circle-bold-duotone" class="text-muted"></iconify-icon></span>
                                                                  <span>Terminé</span>
                                                             </li>
                                                        </ul>
                                                        <div class="progress mb-2" style="height: 10px;">
-                                                            <div id="generate-progress-bar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                                                            <div id="generate-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%;"></div>
                                                        </div>
                                                        <p id="generate-progress-text" class="text-muted small mb-0">En attente...</p>
+                                                       <p id="generate-progress-hint" class="text-muted small mb-0 mt-2 fst-italic" style="display:none;">Vous pouvez fermer cette fenêtre : la génération continue en arrière-plan, une bannière en haut de page vous permettra de revenir suivre sa progression.</p>
                                                   </div>
                                              </div>
                                         </div>
+                                   </div>
+
+                                   <div id="reassort-generation-banner" class="alert alert-info d-flex justify-content-between align-items-center mx-3 mt-3 mb-0 small" style="display:none;">
+                                        <span><iconify-icon icon="solar:refresh-bold-duotone" class="me-1"></iconify-icon> Une génération de proposition est en cours pour ce magasin.</span>
+                                        <button type="button" id="reassort-generation-banner-view" class="btn btn-sm btn-outline-dark">Voir la progression</button>
                                    </div>
 
                                    <div id="reassort-revenue-context" class="alert alert-light border mx-3 mt-3 mb-0 small" style="display:none;"></div>
@@ -485,7 +497,15 @@
                                              // le multiple exact à taper dans un champ unique en unités.
                                              function qtyInputCell(l) {
                                                   const unit = Number(l.orderingUnit) || 1;
-                                                  const suggestedQty = l.excludedAsAlreadyOrderedRpos && l.quantityIfUnblocked ? l.quantityIfUnblocked : l.quantitySuggested;
+                                                  // Affiche TOUJOURS quantitySuggested (la vraie quantité finale décidée — calcul classique,
+                                                  // ou l'IA si AI_QUANTITY_ADJUSTMENT_ENABLED est actif), jamais quantityIfUnblocked par
+                                                  // défaut : un article bloqué par une commande RPOS récente a normalement 0 ici (l'IA/le
+                                                  // calcul en a déjà tenu compte), et quantityIfUnblocked n'est qu'une valeur hypothétique
+                                                  // ("si on ignorait cette commande") préremplie SEULEMENT après un clic explicite sur
+                                                  // "Débloquer et commander quand même" (cf. reassort-unblock-btn plus bas) — l'afficher par
+                                                  // défaut avant ce clic laissait croire à tort que c'était la proposition normale, alors que
+                                                  // le panneau IA (même article) répondait cohéremment 0, créant une contradiction visible.
+                                                  const suggestedQty = l.quantitySuggested;
                                                   const nbColis = Math.round((suggestedQty / unit) * 100) / 100;
 
                                                   // Affiché systématiquement, même pour un colisage de 1 (vendu à l'unité) : "× 1" rend
@@ -603,10 +623,12 @@
                                                             shopSelect.addEventListener('change', function () {
                                                                  listShopSelect.value = shopSelect.value;
                                                                  loadPendingProposal();
+                                                                 checkActiveGeneration();
                                                             });
                                                             listShopSelect.addEventListener('change', function () {
                                                                  shopSelect.value = listShopSelect.value;
                                                                  loadPendingProposal();
+                                                                 checkActiveGeneration();
                                                             });
                                                             window.reassortMakeShopPickerSearchable(shopSelect);
                                                             window.reassortMakeShopPickerSearchable(listShopSelect);
@@ -817,8 +839,43 @@
                                                   const revenueLabel = proposal.shopTotalRevenue
                                                        ? proposal.shopTotalRevenue.toLocaleString('fr-FR') + ' CFA'
                                                        : '—';
-                                                  box.innerHTML = '<strong>Période d\'analyse :</strong> ' + periodLabel +
-                                                       ' &nbsp;•&nbsp; <strong>CA magasin (période de référence) :</strong> ' + revenueLabel;
+                                                  // ATTENTION : le CA magasin ci-dessous porte sur une fenêtre DISTINCTE de la période
+                                                  // d'analyse Pareto (revenueShareStart/End, configurable indépendamment — 1 jour par défaut,
+                                                  // cf. ReassortConfig.revenueSharePeriodDays), jamais la même période que periodLabel
+                                                  // ci-dessus. Les deux dates de cette fenêtre doivent être affichées explicitement à côté du
+                                                  // montant, sous peine de laisser croire à tort que ce CA porte sur toute la période Pareto
+                                                  // (ex: un CA d'une seule journée affiché à côté d'une période d'un mois, sans préciser
+                                                  // laquelle, semble alors anormalement bas).
+                                                  let revenuePeriodLabel = '';
+                                                  if (proposal.revenueShareStart && proposal.revenueShareEnd) {
+                                                       const revStart = new Date(proposal.revenueShareStart);
+                                                       const revEnd = new Date(new Date(proposal.revenueShareEnd).getTime() - 24 * 60 * 60 * 1000);
+                                                       revenuePeriodLabel = revEnd.getTime() === revStart.getTime()
+                                                            ? ' (' + revStart.toLocaleDateString('fr-FR') + ')'
+                                                            : ' (du ' + revStart.toLocaleDateString('fr-FR') + ' au ' + revEnd.toLocaleDateString('fr-FR') + ')';
+                                                  }
+                                                  // Couverture RÉELLE des données utilisées (peut être plus étroite que la période configurée
+                                                  // ci-dessus si la base locale a un trou d'historique, ex: backfill jamais lancé assez loin
+                                                  // en arrière) : affichée en priorité, avec un avertissement explicite si elle diffère
+                                                  // notablement de la période demandée — pour que l'utilisateur sache si le calcul a
+                                                  // réellement porté sur toute la période affichée ou seulement sur une partie, et juge
+                                                  // lui-même s'il faut relancer un backfill avant de faire confiance à la proposition.
+                                                  let coverageHtml = '';
+                                                  if (proposal.coverageGapDays && proposal.coverageGapDays > 1 && proposal.actualDataStart) {
+                                                       const actualStart = new Date(proposal.actualDataStart);
+                                                       const actualEnd = proposal.actualDataEnd ? new Date(proposal.actualDataEnd) : end;
+                                                       coverageHtml = '<div class="alert alert-warning small mt-2 mb-0">' +
+                                                            '<strong>⚠ Données incomplètes :</strong> cette génération demandait des ventes depuis le ' + start.toLocaleDateString('fr-FR') +
+                                                            ', mais les données réellement disponibles ne remontent qu\'au <strong>' + actualStart.toLocaleDateString('fr-FR') + '</strong>' +
+                                                            ' (jusqu\'au ' + actualEnd.toLocaleDateString('fr-FR') + ') — soit ' + proposal.coverageGapDays + ' jour(s) manquant(s). ' +
+                                                            'Le calcul (Pareto, quantités proposées) porte donc sur une période plus courte que celle affichée ci-dessus. ' +
+                                                            'Lancez un backfill (Paramètres > Fichiers de ventes) pour combler ce manque avant de vous fier pleinement à cette proposition.' +
+                                                            '</div>';
+                                                  }
+                                                  box.innerHTML = '<strong>Période d\'analyse configurée (Pareto) :</strong> ' + periodLabel +
+                                                       ' &nbsp;•&nbsp; <strong>CA magasin sur une période DIFFÉRENTE' + revenuePeriodLabel + ' :</strong> ' + revenueLabel +
+                                                       ' <span class="text-muted">— sert uniquement à calculer le % CA de chaque article, pas à représenter le CA sur la période d\'analyse ci-dessus</span>' +
+                                                       coverageHtml;
                                                   box.style.display = '';
                                              }
 
@@ -1119,6 +1176,14 @@
                                                        shopId: selectedShopId(),
                                                        ean: ean,
                                                        label: line.label,
+                                                       predictedQuantity: line.quantitySuggested,
+                                                       generationAiAdjusted: line.aiAdjusted,
+                                                       generationAiReasoning: line.aiReasoning,
+                                                       classicQuantitySuggested: line.classicQuantitySuggested,
+                                                       stockAtPrediction: line.stockAtGeneration,
+                                                       avgWeeklySales: line.avgWeeklySales,
+                                                       orderingUnit: line.orderingUnit,
+                                                       daysUntilStockout: line.daysUntilStockout,
                                                        hasRecentOrder: !!line.excludedAsAlreadyOrderedRpos,
                                                        recentOrderReference: line.rposOrderReference,
                                                        recentOrderDate: line.rposOrderDate,
@@ -1336,6 +1401,16 @@
                                                   await Promise.all(workers);
                                              }
 
+                                             // Lance en fond (sans attendre) le calcul du profil d'activité du magasin utilisé par
+                                             // l'analyse IA par article : ce calcul (~15-30s au pire, mis en cache 24h) est le principal
+                                             // facteur de lenteur du tout premier clic "Analyser" — le déclencher dès la sélection du
+                                             // magasin laisse le temps qu'il soit déjà en cache au moment où l'utilisateur clique un article.
+                                             function warmShopActivity() {
+                                                  const shopId = selectedShopId();
+                                                  if (!shopId) return;
+                                                  window.reassortFetch('/reassort/shop-activity/warm?' + shopQueryParam(), { method: 'POST' }).catch(function () {});
+                                             }
+
                                              async function loadPendingProposal() {
                                                   updateTitle();
                                                   const shopId = selectedShopId();
@@ -1343,6 +1418,7 @@
                                                        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
                                                        return;
                                                   }
+                                                  warmShopActivity();
                                                   status.textContent = 'Chargement...';
                                                   refreshBtn.disabled = true;
                                                   sendBtn.disabled = true;
@@ -1437,11 +1513,12 @@
                                              const genStepSales = document.getElementById('gen-step-sales');
                                              const genStepPareto = document.getElementById('gen-step-pareto');
                                              const genStepQuantities = document.getElementById('gen-step-quantities');
+                                             const genStepAiAdjustment = document.getElementById('gen-step-ai-adjustment');
                                              const genStepDone = document.getElementById('gen-step-done');
                                              const genProgressBar = document.getElementById('generate-progress-bar');
                                              const genProgressText = document.getElementById('generate-progress-text');
                                              const genModalClose = document.getElementById('generate-modal-close');
-                                             const genSteps = [genStepSales, genStepPareto, genStepQuantities, genStepDone];
+                                             const genSteps = [genStepSales, genStepPareto, genStepQuantities, genStepAiAdjustment, genStepDone];
 
                                              function setGenStepState(stepEl, state) {
                                                   setStepState(stepEl, state);
@@ -1600,9 +1677,53 @@
 
                                              const genPeriodModeSelect = document.getElementById('generate-period-mode');
                                              const genCustomPeriodWrapper = document.getElementById('generate-custom-period-wrapper');
+                                             const genPeriodPreview = document.getElementById('generate-period-preview');
+
+                                             // Affiche les dates EXACTES qui seront analysées, calculées côté backend (le mode par défaut
+                                             // dépend de la dernière vente réelle du magasin via RPOS, pas d'un simple calcul local sur la
+                                             // date système) — pour que l'utilisateur sache concrètement quel intervalle va être utilisé
+                                             // avant de confirmer, plutôt qu'un libellé générique ("période configurée du magasin").
+                                             const genCoverageWarning = document.getElementById('generate-coverage-warning');
+
+                                             async function refreshPeriodPreview() {
+                                                  const mode = genPeriodModeSelect.value;
+                                                  const customStart = document.getElementById('generate-custom-start').value;
+                                                  const customEnd = document.getElementById('generate-custom-end').value;
+                                                  genCoverageWarning.style.display = 'none';
+                                                  if (mode === 'CUSTOM' && (!customStart || !customEnd)) {
+                                                       genPeriodPreview.textContent = 'Choisissez une date de début et de fin pour voir la période exacte.';
+                                                       return;
+                                                  }
+                                                  genPeriodPreview.textContent = 'Calcul de la période...';
+                                                  try {
+                                                       const params = new URLSearchParams(shopQueryParam());
+                                                       if (mode) params.set('periodMode', mode);
+                                                       if (mode === 'CUSTOM') { params.set('customStart', customStart); params.set('customEnd', customEnd); }
+                                                       const res = await window.reassortFetch('/reassort/proposal/generate/preview-period?' + params.toString());
+                                                       const json = await res.json();
+                                                       if (!json.success) throw new Error(json.message);
+                                                       const start = new Date(json.data.start);
+                                                       const end = new Date(json.data.end);
+                                                       genPeriodPreview.textContent = 'Période qui sera analysée : du ' + start.toLocaleDateString('fr-FR') + ' au ' + end.toLocaleDateString('fr-FR') +
+                                                            (json.data.referenceDate ? ' (basée sur la dernière vente connue du magasin, le ' + new Date(json.data.referenceDate).toLocaleDateString('fr-FR') + ')' : '') + '.';
+                                                       // Alerte AVANT de lancer si la base locale ne couvre pas encore toute la période choisie —
+                                                       // évite de le découvrir seulement après la génération (bug constaté : calcul silencieux
+                                                       // sur des données partielles présentées comme complètes).
+                                                       if (json.data.coverageWarning) {
+                                                            genCoverageWarning.innerHTML = '<strong>⚠ ' + json.data.coverageWarning.message + '</strong>';
+                                                            genCoverageWarning.style.display = '';
+                                                       }
+                                                  } catch (err) {
+                                                       genPeriodPreview.textContent = 'Impossible de calculer la période à l\'avance : ' + err.message;
+                                                  }
+                                             }
+
                                              genPeriodModeSelect.addEventListener('change', function () {
                                                   genCustomPeriodWrapper.style.display = genPeriodModeSelect.value === 'CUSTOM' ? '' : 'none';
+                                                  refreshPeriodPreview();
                                              });
+                                             document.getElementById('generate-custom-start').addEventListener('change', refreshPeriodPreview);
+                                             document.getElementById('generate-custom-end').addEventListener('change', refreshPeriodPreview);
 
                                              function askGenerateNewProposal(force) {
                                                   const shopId = selectedShopId();
@@ -1619,6 +1740,7 @@
                                                   document.getElementById('generate-custom-start').value = '';
                                                   document.getElementById('generate-custom-end').value = '';
                                                   getGenConfirmModal().show();
+                                                  refreshPeriodPreview();
                                              }
 
                                              function buildPeriodOverride() {
@@ -1633,35 +1755,194 @@
                                                   return { periodMode: mode, customStart: null, customEnd: null };
                                              }
 
+                                             // Applique l'état de progression réel renvoyé par le backend (polling) aux 3 étapes
+                                             // affichées + à la barre de progression, avec le détail X/Y articles et le dernier
+                                             // article traité pendant l'étape "Calcul des quantités" (seule étape mesurable
+                                             // article par article — les deux premières n'ont pas de sous-progression connue).
+                                             const generationBanner = document.getElementById('reassort-generation-banner');
+                                             const generationBannerViewBtn = document.getElementById('reassort-generation-banner-view');
+                                             const genProgressHint = document.getElementById('generate-progress-hint');
+                                             // Le runId en cours pour ce magasin (mémoire uniquement, pas de persistance côté frontend
+                                             // nécessaire : GET /proposal/generate/active le retrouve depuis le backend à chaque
+                                             // chargement de page, la tâche de fond continuant indépendamment du frontend).
+                                             let activeGenerationRunId = null;
+
+                                             function applyGenProgress(status) {
+                                                  const stepOrder = ['SALES', 'PARETO', 'QUANTITIES', 'AI_ADJUSTMENT', 'DONE'];
+                                                  const stepEls = { SALES: genStepSales, PARETO: genStepPareto, QUANTITIES: genStepQuantities, AI_ADJUSTMENT: genStepAiAdjustment, DONE: genStepDone };
+                                                  const currentIdx = stepOrder.indexOf(status.step);
+
+                                                  // L'étape "Analyse IA des quantités" n'existe que si AI_QUANTITY_ADJUSTMENT_ENABLED était actif
+                                                  // pour cette génération — invisible par défaut (cf. HTML), révélée dès qu'on la voit réellement
+                                                  // dans le statut renvoyé par le backend, pour ne jamais l'afficher sur une génération qui ne
+                                                  // passera jamais par cette étape (interrupteur désactivé).
+                                                  if (status.step === 'AI_ADJUSTMENT') genStepAiAdjustment.style.display = '';
+
+                                                  stepOrder.forEach(function (step, idx) {
+                                                       if (stepEls[step].style.display === 'none') return; // étape IA pas encore révélée : ne pas y toucher
+                                                       if (idx < currentIdx || status.status === 'DONE') setGenStepState(stepEls[step], 'done');
+                                                       else if (idx === currentIdx) setGenStepState(stepEls[step], 'active');
+                                                       else setGenStepState(stepEls[step], 'pending');
+                                                  });
+
+                                                  if (status.step === 'SALES') {
+                                                       genProgressBar.style.width = '10%';
+                                                       genProgressText.textContent = 'Analyse des ventes du magasin (peut prendre jusqu\'à 1-2 minutes si RPOS est sollicité)...';
+                                                  } else if (status.step === 'PARETO') {
+                                                       genProgressBar.style.width = '25%';
+                                                       genProgressText.textContent = 'Classement des articles prioritaires (Pareto)...';
+                                                  } else if (status.step === 'QUANTITIES') {
+                                                       const total = status.articlesTotal || 0;
+                                                       const processed = status.articlesProcessed || 0;
+                                                       const pct = total > 0 ? Math.round(30 + (processed / total) * 45) : 30;
+                                                       genProgressBar.style.width = pct + '%';
+                                                       genProgressText.textContent = 'Calcul des quantités : ' + processed + ' / ' + total + ' article(s)' +
+                                                            (status.lastArticleLabel ? ' — dernier traité : ' + status.lastArticleLabel + ' (' + status.lastArticleEan + ')' : '') + '.';
+                                                  } else if (status.step === 'AI_ADJUSTMENT') {
+                                                       const total = status.articlesTotal || 0;
+                                                       const processed = status.articlesProcessed || 0;
+                                                       const pct = total > 0 ? Math.round(75 + (processed / total) * 20) : 75;
+                                                       genProgressBar.style.width = pct + '%';
+                                                       if (status.aiUnavailable) {
+                                                            // Un échec total de l'IA (crédit API épuisé, réseau LLM indisponible) ne bloque jamais
+                                                            // la génération, mais l'ancien message générique "✓ Terminé" laissait croire à tort que
+                                                            // l'IA avait bien analysé les articles : on l'affiche maintenant explicitement pour ne
+                                                            // pas induire en erreur sur l'origine réelle des quantités proposées.
+                                                            genProgressText.innerHTML = '<span class="text-warning fw-semibold">⚠ IA non disponible' +
+                                                                 (status.aiErrorMessage ? ' (' + status.aiErrorMessage + ')' : '') + '.</span> ' +
+                                                                 'Les quantités proposées restent basées sur le calcul statistique classique (ventes réelles), sans ajustement IA.';
+                                                       } else {
+                                                            genProgressText.textContent = 'L\'IA analyse et ajuste les quantités proposées : ' + processed + ' / ' + total + ' article(s) — chaque article peut être confirmé ou revu par l\'IA selon son historique de ventes réel.';
+                                                       }
+                                                  } else if (status.step === 'DONE') {
+                                                       genProgressBar.style.width = '100%';
+                                                  }
+                                             }
+
+                                             // Poursuit le polling d'un run EN ARRIÈRE-PLAN, indépendamment du modal (qui peut être
+                                             // fermé/rouvert sans jamais interrompre cette boucle) : met à jour le modal seulement s'il
+                                             // est affiché, et la bannière persistante dans tous les cas tant que le run est actif.
+                                             // Dernier statut connu (mis à jour à chaque poll, y compris quand le modal est fermé) : permet
+                                             // de peindre correctement le modal dans son état RÉEL dès qu'il est rouvert, plutôt que de le
+                                             // laisser affiché figé sur l'état visuel qu'il avait au moment de sa fermeture (bug observé :
+                                             // rouvrir le modal après la fin de la génération montrait encore la barre grise "en cours" au
+                                             // lieu du vert "terminé", parce que la coloration finale n'était appliquée qu'au moment précis
+                                             // où le polling détectait DONE — jamais rejouée à une réouverture ultérieure).
+                                             let lastKnownGenStatus = null;
+
+                                             function showGenSuccess(status) {
+                                                  genSteps.forEach(function (s) { setGenStepState(s, 'done'); });
+                                                  genProgressBar.style.width = '100%';
+                                                  genProgressBar.classList.remove('bg-danger', 'bg-primary', 'progress-bar-striped', 'progress-bar-animated');
+                                                  genProgressBar.classList.add('bg-success');
+                                                  const lineCount = (status.proposal && status.proposal.lines) ? status.proposal.lines.length : 0;
+                                                  genProgressText.innerHTML = '<span class="text-success fw-semibold">✓ Génération terminée avec succès.</span> ' +
+                                                       (lineCount ? lineCount + ' article(s) proposé(s).' : 'Aucun article à proposer pour le moment.') +
+                                                       (status.aiUnavailable
+                                                            ? '<br><span class="text-warning small">⚠ IA non disponible' + (status.aiErrorMessage ? ' (' + status.aiErrorMessage + ')' : '') + ' — quantités basées sur le calcul statistique classique uniquement.</span>'
+                                                            : '');
+                                                  genProgressHint.style.display = 'none';
+                                             }
+
+                                             function showGenError(status) {
+                                                  const activeStep = genSteps.find(function (s) { return s.classList.contains('state-active'); }) || genStepSales;
+                                                  setGenStepState(activeStep, 'error');
+                                                  genProgressBar.classList.remove('bg-success', 'bg-primary', 'progress-bar-striped', 'progress-bar-animated');
+                                                  genProgressBar.classList.add('bg-danger');
+                                                  genProgressText.innerHTML = '<span class="text-danger fw-semibold">✗ Échec de la génération.</span> ' + (status.errorMessage || 'Erreur inconnue');
+                                                  genProgressHint.style.display = 'none';
+                                             }
+
+                                             // Repeint le modal selon le dernier statut connu, à appeler à chaque ouverture (bouton
+                                             // "Forcer une nouvelle génération" gère son propre état de départ séparément dans
+                                             // askGenerateNewProposal ; ceci couvre la réouverture via la bannière ou un double-clic).
+                                             function repaintGenModalFromLastStatus() {
+                                                  if (!lastKnownGenStatus) return;
+                                                  if (lastKnownGenStatus.status === 'DONE') showGenSuccess(lastKnownGenStatus);
+                                                  else if (lastKnownGenStatus.status === 'ERROR') showGenError(lastKnownGenStatus);
+                                                  else applyGenProgress(lastKnownGenStatus);
+                                             }
+
+                                             async function watchGenerationRun(runId) {
+                                                  activeGenerationRunId = runId;
+                                                  generationBanner.style.display = '';
+                                                  const POLL_INTERVAL_MS = 800;
+
+                                                  try {
+                                                       while (true) {
+                                                            const res = await window.reassortFetch('/reassort/proposal/generate/' + encodeURIComponent(runId) + '/status?' + shopQueryParam());
+                                                            const json = await res.json();
+                                                            if (!json.success) throw new Error(json.message);
+                                                            const status = json.data;
+                                                            lastKnownGenStatus = status;
+
+                                                            if (status.status === 'ERROR') throw new Error(status.errorMessage || 'Échec de la génération');
+                                                            if (genProgressModalEl.classList.contains('show')) applyGenProgress(status);
+
+                                                            if (status.status === 'DONE') {
+                                                                 activeGenerationRunId = null;
+                                                                 generationBanner.style.display = 'none';
+                                                                 if (genProgressModalEl.classList.contains('show')) showGenSuccess(status);
+                                                                 generateBtn.disabled = false;
+                                                                 refreshBtn.disabled = false;
+                                                                 await loadPendingProposal();
+                                                                 return;
+                                                            }
+
+                                                            await new Promise(function (resolve) { setTimeout(resolve, POLL_INTERVAL_MS); });
+                                                       }
+                                                  } catch (err) {
+                                                       console.error('[purchase-order] watchGenerationRun error:', err);
+                                                       lastKnownGenStatus = { status: 'ERROR', errorMessage: err.message };
+                                                       activeGenerationRunId = null;
+                                                       generationBanner.style.display = 'none';
+                                                       generateBtn.disabled = false;
+                                                       refreshBtn.disabled = false;
+                                                       if (genProgressModalEl.classList.contains('show')) showGenError(lastKnownGenStatus);
+                                                       else alert('La génération de proposition a échoué : ' + err.message);
+                                                  }
+                                             }
+
+                                             generationBannerViewBtn.addEventListener('click', function () {
+                                                  getGenProgressModal().show();
+                                                  repaintGenModalFromLastStatus();
+                                             });
+
+                                             // Au chargement (ou changement de magasin) : une génération lancée précédemment peut encore
+                                             // tourner en fond (page rechargée, ou modal fermé puis navigation ailleurs et retour) — on la
+                                             // retrouve pour réafficher la bannière et reprendre le suivi, plutôt que de laisser croire
+                                             // qu'il n'y a rien en cours.
+                                             async function checkActiveGeneration() {
+                                                  if (activeGenerationRunId) return; // déjà suivi par cette page
+                                                  try {
+                                                       const res = await window.reassortFetch('/reassort/proposal/generate/active?' + shopQueryParam());
+                                                       const json = await res.json();
+                                                       if (json.success && json.data && json.data.runId) {
+                                                            generateBtn.disabled = true;
+                                                            refreshBtn.disabled = true;
+                                                            watchGenerationRun(json.data.runId);
+                                                       }
+                                                  } catch (err) {
+                                                       // silencieux : au pire l'utilisateur ne voit pas la bannière et devra relancer manuellement
+                                                  }
+                                             }
+
                                              async function generateNewProposal() {
                                                   const shopId = selectedShopId();
                                                   if (!shopId) return;
                                                   generateBtn.disabled = true;
                                                   refreshBtn.disabled = true;
+                                                  lastKnownGenStatus = null;
 
                                                   genSteps.forEach(function (s) { setGenStepState(s, 'pending'); });
+                                                  genStepAiAdjustment.style.display = 'none';
                                                   genProgressBar.style.width = '0%';
                                                   genProgressBar.classList.remove('bg-danger', 'bg-success');
-                                                  genModalClose.style.display = 'none';
+                                                  genProgressBar.classList.add('bg-primary', 'progress-bar-striped', 'progress-bar-animated');
+                                                  genProgressHint.style.display = '';
                                                   getGenProgressModal().show();
-
-                                                  // Le backend ne renvoie pas de progression intermédiaire (un seul appel bloquant).
-                                                  // L'étape la plus longue est presque toujours "Analyse des ventes" : si aucun fichier
-                                                  // local n'est disponible, le système interroge RPOS et télécharge tout l'historique
-                                                  // de vente du magasin sur la période, ce qui peut prendre de quelques secondes à plus
-                                                  // d'une minute selon le volume. On le reste actif tant que la requête n'a pas répondu,
-                                                  // plutôt que de simuler un déroulé qui donnerait l'impression d'un blocage.
                                                   setGenStepState(genStepSales, 'active');
-                                                  genProgressText.textContent = 'Analyse des ventes du magasin (peut prendre jusqu\'à 1-2 minutes si RPOS est sollicité)...';
-                                                  genProgressBar.style.width = '15%';
-                                                  const t1 = setTimeout(function () {
-                                                       genProgressText.textContent = 'Toujours en cours — le système télécharge l\'historique de vente depuis RPOS...';
-                                                       genProgressBar.style.width = '35%';
-                                                  }, 8000);
-                                                  const t2 = setTimeout(function () {
-                                                       genProgressText.textContent = 'Cela prend plus de temps que d\'habitude, merci de patienter...';
-                                                       genProgressBar.style.width = '55%';
-                                                  }, 25000);
+                                                  genProgressText.textContent = 'Démarrage...';
 
                                                   try {
                                                        const res = await window.reassortFetch('/reassort/proposal/generate?' + shopQueryParam(), {
@@ -1676,29 +1957,12 @@
                                                        const json = await res.json();
                                                        if (!json.success) throw new Error(json.message);
 
-                                                       clearTimeout(t1);
-                                                       clearTimeout(t2);
-                                                       genSteps.forEach(function (s) { setGenStepState(s, 'done'); });
-                                                       genProgressBar.style.width = '100%';
-                                                       genProgressBar.classList.add('bg-success');
-                                                       const lineCount = json.data.proposal.lines.length;
-                                                       genProgressText.textContent = lineCount
-                                                            ? lineCount + ' article(s) proposé(s).'
-                                                            : 'Terminé — aucun article à proposer pour le moment.';
-                                                       genModalClose.style.display = '';
-
-                                                       await loadPendingProposal();
+                                                       watchGenerationRun(json.data.runId); // en arrière-plan, ne bloque pas — voir la fonction ci-dessus
                                                   } catch (err) {
-                                                       clearTimeout(t1);
-                                                       clearTimeout(t2);
-                                                       const activeStep = genSteps.find(function (s) { return s.classList.contains('state-active'); }) || genStepSales;
-                                                       setGenStepState(activeStep, 'error');
-                                                       genProgressBar.classList.add('bg-danger');
-                                                       genProgressText.textContent = 'Erreur: ' + err.message;
-                                                       genModalClose.style.display = '';
-                                                  } finally {
                                                        generateBtn.disabled = false;
                                                        refreshBtn.disabled = false;
+                                                       lastKnownGenStatus = { status: 'ERROR', errorMessage: err.message };
+                                                       showGenError(lastKnownGenStatus);
                                                   }
                                              }
 
@@ -1944,6 +2208,8 @@
                                              sendBtn.addEventListener('click', validateProposal);
                                              initShopPicker().then(function () {
                                                   return loadPendingProposal();
+                                             }).then(function () {
+                                                  return checkActiveGeneration();
                                              }).catch(function (err) {
                                                   console.error('[purchase-order] ERREUR non catchée dans initShopPicker/loadPendingProposal:', err);
                                              });
@@ -1984,6 +2250,8 @@
      <!-- Panneau partagé "Recommandation IA" (CSS + DOM injectés dynamiquement à l'ouverture) :
           même composant que ai-predictions.html, cf. assets/js/ai-recommendation-panel.js. -->
      <script src="assets/js/ai-recommendation-panel.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
 </body>
 
 </html>

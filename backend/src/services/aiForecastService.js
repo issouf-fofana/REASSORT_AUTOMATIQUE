@@ -12,6 +12,7 @@ const { PrismaClient } = require('@prisma/client');
 const crypto = require('./cryptoService');
 const systemConfig = require('./systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const shopActivityService = require('./shopActivityService');
 
 const prisma = new PrismaClient();
 
@@ -47,7 +48,7 @@ const DEFAULT_MODEL_BY_PROVIDER = {
 // du même magasin (pas des champs par ligne) — expliquent à l'IA comment systemSuggestedQuantity a
 // été construit (marge de sécurité visée, délai de réapprovisionnement pris en compte), plutôt que
 // de lui laisser deviner la logique derrière ce chiffre.
-function buildArticleSummary(line, shopConfig) {
+function buildArticleSummary(line, shopConfig, shopActivity) {
   let dailyHistory = [];
   if (Array.isArray(line.dailyHistory)) {
     dailyHistory = line.dailyHistory;
@@ -122,6 +123,25 @@ function buildArticleSummary(line, shopConfig) {
     safetyStockRatio: shopConfig?.safetyStockRatio ?? null,
     receptionLeadTimeDays: shopConfig?.receptionLeadTimeDays ?? null,
     dailyHistory,
+    // Statut d'activité du MAGASIN (pas de l'article) — shopActivityService.js : permet à l'IA de
+    // distinguer un article peu/pas vendu dans un magasin actif ("absence de vente ≠ magasin actif
+    // avec demande nulle" n'exclut pas que la demande soit réellement nulle) d'un magasin qui ne
+    // fonctionne plus, où le même historique ne doit jamais être extrapolé en besoin de réassort.
+    // null si non calculé (échec réseau ponctuel) : l'IA analyse alors sans cette information plutôt
+    // que de se voir imposer une valeur par défaut arbitraire.
+    shopActivityStatus: shopActivity?.status ?? null,
+    shopMonthsSinceLastActivity: shopActivity?.monthsSinceLastActivity ?? null,
+    shopHadActivityBeyondSampleWindow: shopActivity?.hadActivityBeyondSampleWindow ?? null,
+    // Anomalies détectées par anomalyService.js (§30, étape 7) : explosion/chute de ventes, stock
+    // incohérent (stock disponible mais 0 vente récente malgré une demande habituelle). Présentes
+    // ici pour que l'IA privilégie la prudence (VERIFY_STOCK plutôt qu'une commande à l'aveugle,
+    // §69) quand un signal anormal existe, au lieu d'extrapoler un historique déjà jugé suspect.
+    anomalies: Array.isArray(line.anomalies) ? line.anomalies : (line.anomalies ? JSON.parse(line.anomalies) : []),
+    // Tendance générale de l'article sur toute la période analysée (§31) — distincte de
+    // seasonalityDeviationPct (comparaison à l'an dernier) : ici, comparaison à l'intérieur de la
+    // période courante elle-même.
+    trendCategory: line.trendCategory || null,
+    trendChangePct: line.trendChangePct ?? null,
   };
 }
 
@@ -138,6 +158,28 @@ async function buildPrompt(shopReference, shopName, articles) {
     .replace(/\{\{articles\}\}/g, JSON.stringify(articles, null, 2));
 }
 
+// Variante du prompt pour l'analyse en direct d'UN SEUL article (panneau "Analyser", clic
+// utilisateur) : réutilise les mêmes étapes d'analyse (0 à 5) que le prompt batch — chargées depuis
+// le même template configurable, jamais dupliquées en dur ici — mais remplace la consigne finale
+// (qui demande un tableau JSON, pensé pour traiter plusieurs articles d'un coup) par un format texte
+// simple. Un JSON en cours de construction ne peut pas s'afficher progressivement de façon lisible
+// (accolades et guillemets incomplets à l'écran) ; un format "QUANTITE: n" suivi du texte en clair
+// permet au frontend d'extraire la quantité dès la première ligne puis de streamer le texte
+// d'explication mot à mot, comme une conversation avec un assistant.
+async function buildStreamingPrompt(shopReference, shopName, article) {
+  const template = await systemConfig.getValue(systemConfig.KEYS.AI_ANALYSIS_PROMPT_TEMPLATE);
+  const cutMarker = template.indexOf('Articles (JSON)');
+  const analysisSteps = cutMarker !== -1 ? template.slice(0, cutMarker) : template;
+
+  return analysisSteps
+    .replace(/\{\{shopReference\}\}/g, shopReference || '')
+    .replace(/\{\{shopName\}\}/g, shopName || '')
+    + `Article à analyser (JSON) :\n${JSON.stringify(article, null, 2)}\n\n` +
+    'Réponds au format texte EXACT suivant, sans rien ajouter avant ni après :\n' +
+    'QUANTITE: <entier positif ou nul, multiple de orderingUnit>\n' +
+    '<explication en français, MAXIMUM 3 phrases COURTES ou 3 puces (jamais les deux à la fois, jamais plus) — en Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés, puces ("- ") uniquement si tu listes plusieurs raisons ou facteurs distincts (sinon un paragraphe simple suffit, ne force jamais une liste sur une explication à une seule idée). Va droit à la décision et sa justification la plus importante (tendance ou statut du magasin si pertinent, comparaison à systemSuggestedQuantity si l\'écart est notable, commande récente si hasRecentOrder=true) — pas d\'introduction, pas de récapitulatif final, pas de détail secondaire>';
+}
+
 function parseJsonArrayFromText(text) {
   // Les LLM enveloppent parfois la réponse dans un bloc ```json ... ``` malgré la consigne : on
   // extrait le premier tableau JSON trouvé plutôt que d'exiger un JSON.parse strict sur tout le texte.
@@ -146,9 +188,35 @@ function parseJsonArrayFromText(text) {
   return JSON.parse(match[0]);
 }
 
+// Sans ce timeout, un appel LLM sans réseau disponible (hors réseau Prosuma/internet) pouvait
+// rester bloqué indéfiniment côté navigateur — `fetch` n'échoue pas toujours rapidement sur une
+// simple absence de connectivité (dépend du système), et le panneau "L'IA analyse cet article"
+// restait figé sans jamais afficher d'erreur. 90s (porté de 25s) : mesuré en pratique qu'un lot de
+// ARTICLES_PER_BATCH articles avec gemini-3.6-flash (mode "thinking" actif par défaut, plus lent que
+// l'ancien 2.0-flash) prend jusqu'à ~52s pour répondre — 25s faisait échouer systématiquement
+// l'ajustement IA à la génération avec un faux "réseau indisponible", alors que le crédit et le
+// réseau étaient valides. 90s garde une vraie marge de sécurité au-delà de ce temps de réponse
+// mesuré, tout en continuant à détecter une absence réelle de réseau en un temps raisonnable.
+const LLM_CALL_TIMEOUT_MS = 90000;
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LLM_CALL_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Aucune réponse après ${LLM_CALL_TIMEOUT_MS / 1000}s (réseau indisponible ou fournisseur trop lent) — vérifiez votre connexion.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function callGemini(apiKey, model, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -167,7 +235,7 @@ async function callGemini(apiKey, model, prompt) {
 }
 
 async function callOpenAi(apiKey, model, prompt) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -187,7 +255,7 @@ async function callOpenAi(apiKey, model, prompt) {
 }
 
 async function callAnthropic(apiKey, model, prompt) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
@@ -207,6 +275,150 @@ async function callAnthropic(apiKey, model, prompt) {
 }
 
 const CALLERS = { gemini: callGemini, openai: callOpenAi, anthropic: callAnthropic };
+
+/**
+ * Lit un flux SSE (Server-Sent Events) ligne par ligne depuis chaque fournisseur LLM, et appelle
+ * onChunk(textDelta) pour chaque fragment de texte reçu — permet d'afficher le texte au fur et à
+ * mesure côté frontend plutôt que d'attendre la réponse complète. Chaque fournisseur encode son
+ * flux différemment (extractText reçoit l'objet JSON d'un événement SSE et renvoie le texte à en
+ * extraire, ou null si l'événement ne contient pas de texte exploitable).
+ */
+async function readSseStream(res, extractText, onChunk) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // dernière ligne potentiellement incomplète, conservée pour le prochain chunk
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const jsonStr = trimmed.slice(5).trim();
+      if (jsonStr === '[DONE]') continue;
+      try {
+        const event = JSON.parse(jsonStr);
+        const text = extractText(event);
+        if (text) {
+          fullText += text;
+          onChunk(text);
+        }
+      } catch {
+        // fragment JSON incomplet à cheval sur deux chunks réseau : ignoré, la ligne complète
+        // arrivera dans un prochain chunk (comportement SSE normal, pas une vraie erreur).
+      }
+    }
+  }
+  return fullText;
+}
+
+async function streamGemini(apiKey, model, prompt, onChunk) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:streamGenerateContent?alt=sse&key=${apiKey}`;
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.2 },
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Gemini ${res.status}: ${errText}`);
+  }
+  return readSseStream(res, (event) => event.candidates?.[0]?.content?.parts?.[0]?.text, onChunk);
+}
+
+async function streamOpenAi(apiKey, model, prompt, onChunk) {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || DEFAULT_MODEL_BY_PROVIDER.openai,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`OpenAI ${res.status}: ${errText}`);
+  }
+  return readSseStream(res, (event) => event.choices?.[0]?.delta?.content, onChunk);
+}
+
+async function streamAnthropic(apiKey, model, prompt, onChunk) {
+  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: model || DEFAULT_MODEL_BY_PROVIDER.anthropic,
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Anthropic ${res.status}: ${errText}`);
+  }
+  return readSseStream(res, (event) => (event.type === 'content_block_delta' ? event.delta?.text : null), onChunk);
+}
+
+const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: streamAnthropic };
+
+/**
+ * Variante streamée de callWithFallback, pour l'analyse en direct d'un seul article : appelle
+ * onChunk(textDelta) au fil de la réponse. Même logique de bascule multi-clés que la version batch
+ * — si un fournisseur échoue AVANT d'avoir streamé quoi que ce soit, on retente avec le suivant ;
+ * s'il a déjà commencé à streamer puis échoue en cours de route, l'erreur remonte telle quelle
+ * (annuler un flux partiellement affiché à l'utilisateur pour le recommencer ailleurs serait plus
+ * déroutant qu'un message d'erreur clair à ce stade).
+ */
+async function streamWithFallback(prompt, onChunk) {
+  const keys = await prisma.aiProviderKey.findMany({
+    where: { isActive: true },
+    orderBy: { priority: 'asc' },
+  });
+  if (keys.length === 0) {
+    throw new Error('Aucune clé API IA configurée. Ajoutez-en une dans Paramètres > IA.');
+  }
+
+  const errors = [];
+  for (const key of keys) {
+    const streamer = STREAM_CALLERS[key.provider];
+    if (!streamer) {
+      errors.push(`${key.label}: fournisseur "${key.provider}" non supporté`);
+      continue;
+    }
+    let startedStreaming = false;
+    try {
+      const apiKey = crypto.decrypt(key.encryptedApiKey);
+      const fullText = await streamer(apiKey, key.model, prompt, (chunk) => {
+        startedStreaming = true;
+        onChunk(chunk);
+      });
+      await prisma.aiProviderKey.update({
+        where: { id: key.id },
+        data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
+      });
+      return { fullText, providerUsed: key.provider };
+    } catch (err) {
+      errors.push(`${key.label} (${key.provider}): ${err.message}`);
+      await prisma.aiProviderKey.update({
+        where: { id: key.id },
+        data: { lastError: err.message, lastErrorAt: new Date() },
+      }).catch(() => {});
+      if (startedStreaming) throw err; // déjà affiché du texte à l'utilisateur, pas de bascule silencieuse
+    }
+  }
+  throw new Error(`Toutes les clés IA ont échoué :\n${errors.join('\n')}`);
+}
 
 /**
  * Essaie chaque clé API active par ordre de priorité jusqu'à ce qu'une réponde avec succès.
@@ -290,8 +502,22 @@ async function testProviderKey(keyId) {
  * Factorisé ici car utilisé à deux endroits : l'analyse à la demande sur une proposition déjà
  * générée (runAiForecast) et, désormais, l'analyse intégrée à chaque génération elle-même.
  */
-async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig) {
-  const summaries = lines.map((line) => buildArticleSummary(line, shopConfig));
+async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig, posId, shopId, onProgress) {
+  const reportProgress = onProgress || (() => {});
+  // Une seule sonde d'activité pour tout le magasin (pas par article) : échantillonnage RPOS léger,
+  // mis en cache 24h par shopActivityService — jamais recalculé article par article. Un échec
+  // réseau ponctuel (hors réseau Prosuma, cf. contrainte connue) ne doit jamais bloquer l'analyse
+  // IA : l'article est alors envoyé sans ce statut plutôt que d'échouer toute la génération.
+  let shopActivity = null;
+  if (posId && shopId) {
+    try {
+      shopActivity = await shopActivityService.getShopActivityProfile(posId, shopId);
+    } catch {
+      shopActivity = null;
+    }
+  }
+
+  const summaries = lines.map((line) => buildArticleSummary(line, shopConfig, shopActivity));
   const batches = [];
   for (let i = 0; i < summaries.length; i += ARTICLES_PER_BATCH) {
     batches.push(summaries.slice(i, i + ARTICLES_PER_BATCH));
@@ -300,6 +526,9 @@ async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig) 
   const byEan = new Map();
   let providerUsed = null;
   const batchErrors = [];
+  let batchesDone = 0;
+
+  reportProgress({ articlesTotal: summaries.length, articlesProcessed: 0 });
 
   await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
     try {
@@ -309,6 +538,9 @@ async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig) 
       for (const r of result) byEan.set(String(r.ean), r);
     } catch (err) {
       batchErrors.push(err.message);
+    } finally {
+      batchesDone += 1;
+      reportProgress({ articlesTotal: summaries.length, articlesProcessed: Math.min(batchesDone * ARTICLES_PER_BATCH, summaries.length) });
     }
   });
 
@@ -332,7 +564,8 @@ async function runAiForecast(proposalId, requestedBy) {
   try {
     const shopConfig = { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed };
     const { byEan, providerUsed, batchErrors, totalBatches } = await analyzeArticlesBatch(
-      proposal.lines, proposal.rposShopReference, proposal.rposShopName, shopConfig
+      proposal.lines, proposal.rposShopReference, proposal.rposShopName, shopConfig,
+      proposal.rposPosId, proposal.rposShopId
     );
 
     // Un lot en échec ne bloque pas les autres : les articles concernés gardent simplement la
@@ -389,8 +622,16 @@ async function getLatestAiForecast(proposalId) {
  * Le résultat n'est pas mis en cache : chaque clic relance un vrai appel, cohérent avec l'attente
  * d'une analyse "en temps réel" plutôt qu'un résultat pré-calculé.
  */
-async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfig }) {
-  const summary = buildArticleSummary(line, shopConfig);
+async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfig, posId, shopId }) {
+  let shopActivity = null;
+  if (posId && shopId) {
+    try {
+      shopActivity = await shopActivityService.getShopActivityProfile(posId, shopId);
+    } catch {
+      shopActivity = null;
+    }
+  }
+  const summary = buildArticleSummary(line, shopConfig, shopActivity);
   const prompt = await buildPrompt(shopReference, shopName, [summary]);
   const { result, providerUsed } = await callWithFallback(prompt);
   const suggestion = result.find((r) => String(r.ean) === String(line.ean)) || result[0];
@@ -402,4 +643,110 @@ async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfi
   };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticlesBatch };
+// Format de sortie attendu du prompt streamé (cf. buildStreamingPrompt) : une première ligne
+// "QUANTITE: n", puis le texte d'explication qui suit. Extrait la quantité au fil de la réponse
+// dès que la première ligne est complète (elle arrive en tout premier, avant tout le texte
+// d'explication), pour que le frontend affiche le nombre recommandé sans attendre la fin du stream.
+const QUANTITY_LINE_RE = /^QUANTITE:\s*(-?\d+(?:\.\d+)?)\s*\n+/i;
+
+/**
+ * Variante streamée de analyzeArticleRealtime (panneau "Analyser", clic utilisateur) : appelle
+ * onTextChunk(text) au fil de la réponse de l'IA pour un affichage progressif façon conversation,
+ * et onQuantity(n) dès que la quantité recommandée est identifiée (généralement en tout début de
+ * réponse). Retourne le résultat final complet une fois le stream terminé.
+ */
+async function analyzeArticleRealtimeStream({ shopReference, shopName, line, shopConfig, posId, shopId, onTextChunk, onQuantity }) {
+  let shopActivity = null;
+  if (posId && shopId) {
+    try {
+      shopActivity = await shopActivityService.getShopActivityProfile(posId, shopId);
+    } catch {
+      shopActivity = null;
+    }
+  }
+  const summary = buildArticleSummary(line, shopConfig, shopActivity);
+  const prompt = await buildStreamingPrompt(shopReference, shopName, summary);
+
+  let buffer = '';
+  let quantity = null;
+  let quantityAnnounced = false;
+  let reasoningStarted = false;
+
+  const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
+    buffer += chunk;
+    if (!quantityAnnounced) {
+      const match = buffer.match(QUANTITY_LINE_RE);
+      if (match) {
+        quantity = Math.max(0, Math.round(Number(match[1])));
+        quantityAnnounced = true;
+        if (onQuantity) onQuantity(quantity);
+        buffer = buffer.slice(match[0].length);
+        reasoningStarted = true;
+        if (buffer && onTextChunk) onTextChunk(buffer); // reste du chunk déjà reçu après la ligne QUANTITE
+        buffer = '';
+        return;
+      }
+      // La ligne QUANTITE n'est pas encore complète (coupée entre deux chunks réseau) : on
+      // attend le prochain chunk plutôt que d'afficher un fragment de "QUANTITE: " à l'écran.
+      return;
+    }
+    if (reasoningStarted && onTextChunk) onTextChunk(chunk);
+  });
+
+  if (quantity === null) {
+    // Le modèle n'a pas respecté le format demandé : tentative de repli sur un nombre trouvé en
+    // tout début de texte plutôt que d'échouer entièrement sur un résultat par ailleurs exploitable.
+    const fallbackMatch = fullText.match(/-?\d+(?:\.\d+)?/);
+    quantity = fallbackMatch ? Math.max(0, Math.round(Number(fallbackMatch[0]))) : 0;
+  }
+
+  const reasoning = quantityAnnounced ? fullText.replace(QUANTITY_LINE_RE, '').trim() : fullText.trim();
+  return { quantity, reasoning: reasoning || null, providerUsed };
+}
+
+/**
+ * Question libre posée par le magasin sur une recommandation déjà donnée (cf. demande explicite :
+ * "le magasin doit pouvoir demander à l'IA pourquoi elle recommande une quantité donnée" — combien
+ * de jours de couverture, tendance en hausse/baisse, comparaison au calcul statistique, etc.).
+ * Réutilise le même résumé de données (buildArticleSummary) que l'analyse initiale, pour que l'IA
+ * réponde à partir des VRAIES données de l'article plutôt que du texte de raisonnement seul (qui
+ * peut ne pas contenir tous les chiffres nécessaires pour répondre à une question de suivi précise,
+ * ex: "quelle est la moyenne sur les 10 derniers jours ?" si le raisonnement initial n'a pas cité ce
+ * chiffre exact). previousReasoning et conversationHistory donnent le contexte de ce qui a déjà été
+ * dit, pour permettre l'enchaînement de questions ("et pourquoi pas plus ?" après une 1ère réponse).
+ */
+async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, posId, shopId, previousQuantity, previousReasoning, conversationHistory, question, onTextChunk }) {
+  let shopActivity = null;
+  if (posId && shopId) {
+    try {
+      shopActivity = await shopActivityService.getShopActivityProfile(posId, shopId);
+    } catch {
+      shopActivity = null;
+    }
+  }
+  const summary = buildArticleSummary(line, shopConfig, shopActivity);
+
+  const historyText = (conversationHistory || [])
+    .map((turn) => `Question du magasin : ${turn.question}\nTa réponse précédente : ${turn.answer}`)
+    .join('\n\n');
+
+  const prompt =
+    `Tu es un analyste de la demande pour un magasin de grande distribution (${shopReference || ''} ${shopName || ''}). ` +
+    'Tu as déjà analysé un article et recommandé une quantité à commander. Le magasin te pose maintenant une question de suivi sur cette recommandation. ' +
+    'Réponds UNIQUEMENT à partir des données réelles ci-dessous (jamais d\'invention ni de généralité) : cite des chiffres précis tirés de ces données à chaque fois que c\'est pertinent (moyenne exacte, nombre de jours de couverture calculé, tendance chiffrée...). ' +
+    'Reste TRÈS bref et direct (1-2 phrases COURTES maximum, ou 3 puces maximum si plusieurs éléments distincts à lister — jamais les deux à la fois), en français, sans réintroduire toute l\'analyse depuis le début ni ajouter de récapitulatif final — le magasin a déjà vu ta première explication et veut juste la réponse à sa question précise.\n\n' +
+    `Données de l'article (JSON) :\n${JSON.stringify(summary, null, 2)}\n\n` +
+    `Ta recommandation précédente : ${previousQuantity} unité(s).\n` +
+    `Ton explication précédente : ${previousReasoning || '(aucune)'}\n\n` +
+    (historyText ? `Échanges précédents dans cette conversation :\n${historyText}\n\n` : '') +
+    `Nouvelle question du magasin : ${question}\n\n` +
+    'Réponds directement à cette question, sans préambule. Format Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés, puces ("- ") uniquement si la réponse liste plusieurs éléments distincts (plusieurs raisons, plusieurs dates, plusieurs quantités à comparer) — sinon un paragraphe simple suffit, ne force jamais une liste sur une réponse à une seule idée.';
+
+  const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
+    if (onTextChunk) onTextChunk(chunk);
+  });
+
+  return { answer: fullText.trim(), providerUsed };
+}
+
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback };

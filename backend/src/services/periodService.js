@@ -1,4 +1,7 @@
 const rpos = require('./rposClient');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 const MODE_DAYS = {
   YESTERDAY: 1,
@@ -24,7 +27,18 @@ async function resolvePeriod(posId, shopId, config) {
     };
   }
 
-  const lastSaleDate = await rpos.getLastSaleDate(posId, shopId);
+  // Mode "sans réseau Prosuma" (config.ignoreRposStockInCalculation) : rpos.getLastSaleDate ci-
+  // dessous échouerait forcément hors réseau, bloquant la génération avant même d'atteindre le
+  // calcul par article (là où le reste du mode "sans réseau" est géré, cf. proposalService.js) — on
+  // retombe alors sur la dernière vente connue dans la base LOCALE (SalesLine, alimentée par la
+  // synchro incrémentale), qui ne nécessite aucun appel réseau.
+  let lastSaleDate;
+  if (config.ignoreRposStockInCalculation) {
+    const latestLocal = await prisma.salesLine.findFirst({ where: { rposShopId: shopId }, orderBy: { date: 'desc' }, select: { date: true } });
+    lastSaleDate = latestLocal ? latestLocal.date.toISOString() : null;
+  } else {
+    lastSaleDate = await rpos.getLastSaleDate(posId, shopId);
+  }
   if (!lastSaleDate) {
     throw new Error('Aucune vente trouvée pour ce magasin, impossible de déterminer une période');
   }

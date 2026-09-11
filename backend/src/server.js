@@ -83,6 +83,20 @@ async function start() {
     await seedServersFromJson();
     console.log('🗺️  Serveurs RPOS synchronisés depuis magasins.json');
 
+    // Un redémarrage du process (rebuild, crash, redéploiement) abandonne toute génération de
+    // proposition en tâche de fond sans jamais la marquer en erreur — le run restait à RUNNING pour
+    // toujours en base, avec sa bannière de progression figée indéfiniment côté frontend, laissant
+    // croire à tort qu'une génération est encore active. Marqués en erreur au redémarrage : plus
+    // fiable que d'espérer reprendre une tâche dont l'état intermédiaire (connexions RPOS, etc.)
+    // n'a de toute façon pas survécu au redémarrage.
+    const staleRuns = await prisma.proposalGenerationRun.updateMany({
+      where: { status: 'RUNNING' },
+      data: { status: 'ERROR', errorMessage: 'Génération interrompue par un redémarrage du serveur — relancez-la si besoin.', completedAt: new Date() },
+    });
+    if (staleRuns.count > 0) {
+      console.log(`⚠️  ${staleRuns.count} génération(s) de proposition interrompue(s) par le redémarrage, marquée(s) en erreur.`);
+    }
+
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Dashboard: http://localhost:${PORT}`);

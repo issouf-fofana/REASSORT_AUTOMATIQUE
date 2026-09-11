@@ -2301,4 +2301,44 @@ Full Auto Replenishment
 
 Le système doit être conçu pour évoluer progressivement vers l'autonomie.
 
+---
+
+# 72. État d'avancement (vérifié le 11/09/2026)
+
+Point de suivi par rapport à l'ordre recommandé §71 — à mettre à jour au fil de l'avancement, pas figé.
+
+## Fait / en place
+
+* STEP 1 — `WeeklyReplenishmentPlan` (modèle présent) ;
+* STEP 3 — Daily Continuous Review (`dailyReplenishmentReviewJob.js`) ;
+* STEP 4 — Prediction History (`AIPrediction`) ;
+* STEP 5 — Prediction Outcome (`AIPredictionOutcome`) ;
+* Périodes d'analyse, Pareto, calcul déterministe, exclusions (`ExcludedArticle`), synchro des ventes locale (§4-10) ;
+* Séparation calcul backend / interprétation IA respectée (§53) ;
+* STEP 6 — Confidence Engine (`confidenceService.js`) : score 0-100 pondéré sur 4 signaux réels (longueur d'historique, volatilité/coefficient de variation, précision historique passée via `AIPredictionOutcome`, qualité des données/rupture de stock), avec repli neutre (jamais optimiste) quand un signal manque. Il ne reste à y intégrer que les signaux anomalie et saisonnalité (dépendent de STEP 7, non fait) et le "comportement magasin/article" distinct (pas encore modélisé séparément).
+
+## Partiel / à vérifier
+
+* §16 — `REVISION_CHANGE_THRESHOLD` existe en configuration, mais son application réelle dans le job de révision quotidienne n'a pas été revérifiée récemment ;
+* §18 — l'IA ne produit aujourd'hui qu'une quantité + un texte de raisonnement libre, pas un type d'action structuré (`ORDER_NOW`, `WAIT`, `ANOMALY`, etc.).
+
+## Fait / en place (suite)
+
+* STEP 7 — Anomaly Detection (`anomalyService.js`) : détecte explosion/chute de ventes (comparaison 3 derniers jours vs reste de la période), stock incohérent/rupture invisible (stock disponible mais 0 vente récente sur un article qui vend habituellement), et catégorise la tendance générale (`trendCategory` : GROWING/DECLINING/STABLE/VOLATILE/UNKNOWN, §31). Intégré au Confidence Engine (pénalise `dataQuality`) et transmis à l'IA (prompt étape 0bis) pour privilégier la prudence plutôt qu'une extrapolation aveugle (§69). Nécessite au moins 7 jours d'historique local pour se déclencher — sans effet tant que la couverture de données réelle est plus courte (ex: après une purge récente).
+
+## Fait / en place (suite 2)
+
+* STEP 11 — AI Chatbot (`chatbotService.js`, `chatbotToolsService.js`, page `ai-assistant.html`) : architecture Intent Detection -> Tools -> LLM (§35) respectée — détection d'intention par mots-clés (déterministe, pas d'appel LLM pour router), 8 outils dédiés lisant uniquement les vraies données en base (stock, ventes, ruptures, surstock, précision IA, commandes), jamais d'accès direct base pour le LLM. Sécurisé par `resolveShopId` (§43, un utilisateur ne peut interroger que son propre magasin). Mémoire de conversation, questions suggérées, sélection magasin/rayon/sous-rayon.
+
+## Pas commencé
+
+* STEP 9 — AI Center (dashboard dédié précision/KPI) ;
+* STEP 10 — LDAP + RBAC (rôles fins) ;
+* §32 — saisonnalité par jour de semaine ;
+* §47-48 — `AIDecisionLog` / traçabilité complète ;
+* STEP 12 — Shadow Mode ;
+* STEP 13-14 — Auto Replenishment contrôlé/complet (prématuré à ce stade, cohérent avec l'ordre recommandé).
+
+Rien de ce qui précède n'est bloquant pour l'usage courant (génération, validation, ajustement IA à la demande, synchro des ventes) : ce sont des couches d'amélioration à ajouter progressivement, dans l'ordre du §71.
+
 # FIN DU README

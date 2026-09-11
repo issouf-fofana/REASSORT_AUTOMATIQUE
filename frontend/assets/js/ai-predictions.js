@@ -26,7 +26,7 @@
       shopSelect.innerHTML = Object.keys(byPos).sort().map(function (posId) {
         const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); });
         const options = shops.map(function (s) {
-          return '<option value="' + s.id + '">' + s.reference + ' - ' + s.name + '</option>';
+          return '<option value="' + s.id + '" data-pos-id="' + s.posId + '">' + s.reference + ' - ' + s.name + '</option>';
         }).join('');
         return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
       }).join('');
@@ -39,11 +39,23 @@
     }
   }
 
+  // Lance en fond (sans attendre) le calcul du profil d'activité du magasin utilisé par l'analyse
+  // IA par article : ce calcul (~15-30s au pire, mis en cache 24h ensuite) est le principal facteur
+  // de lenteur du tout premier clic "Analyser" sur un magasin — le déclencher dès sa sélection
+  // laisse le temps qu'il soit déjà en cache au moment où l'utilisateur clique réellement un article.
+  function warmShopActivity(shopId) {
+    const opt = shopSelect.querySelector('option[value="' + shopId + '"]');
+    const posId = opt ? opt.dataset.posId : null;
+    if (!shopId || !posId) return;
+    window.reassortFetch('/reassort/shop-activity/warm?shop=' + encodeURIComponent(shopId) + '&pos=' + encodeURIComponent(posId), { method: 'POST' }).catch(function () {});
+  }
+
   async function loadProposalList() {
     const shopId = shopSelect.value;
     proposalSelect.innerHTML = '<option value="">—</option>';
     proposalSelect.disabled = true;
     if (!shopId) return;
+    warmShopActivity(shopId);
     try {
       const res = await window.reassortFetch('/reassort/predictions/proposals?shop=' + encodeURIComponent(shopId));
       const json = await res.json();
@@ -193,6 +205,9 @@
           recentOrderReference: prediction.recentOrderReference,
           recentOrderDate: prediction.recentOrderDate,
           recentOrderCount: prediction.recentOrderCount,
+          orderingUnit: prediction.orderingUnit,
+          avgWeeklySales: prediction.avgWeeklySales,
+          daysUntilStockout: prediction.daysUntilStockout,
         });
       });
     });

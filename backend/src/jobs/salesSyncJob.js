@@ -12,6 +12,7 @@
 const { PrismaClient } = require('@prisma/client');
 const rpos = require('../services/rposClient');
 const rposServers = require('../services/rposServersService');
+const systemConfig = require('../services/systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
 const prisma = new PrismaClient();
@@ -54,6 +55,26 @@ async function fetchAndSaveWindow(posId, shopId, start, now) {
   return total;
 }
 
+// Fenêtre de réconciliation : RPOS peut parfois répondre incomplet sur une page sans lever
+// d'erreur (dégradation serveur, coupure réseau ponctuelle non fatale) — la synchro incrémentale
+// avance alors silencieusement lastSyncedUntil sans avoir tout récupéré, et l'overlap de 30 min
+// ne rattrape rien passé ce délai. Après chaque synchro, on recompare donc le total RPOS vs local
+// sur les dernières 48h et on réimporte la fenêtre entière au moindre écart.
+const RECONCILE_HOURS = 48;
+
+/**
+ * Compare rapidement le nombre de lignes RPOS et locales sur [start, now] (un seul appel RPOS,
+ * page_size=1, pour ne lire que `count`) : si les totaux diffèrent, retourne true et le job
+ * réimporte toute la fenêtre pour combler l'écart, quel qu'il soit.
+ */
+async function windowNeedsReconciliation(posId, shopId, start, now) {
+  const dateStart = start.toISOString().slice(0, 19);
+  const dateEnd = now.toISOString().slice(0, 19);
+  const rposPage = await rpos.fetchProductLinesPage(posId, shopId, dateStart, dateEnd, 1, 1);
+  const localCount = await prisma.salesLine.count({ where: { rposShopId: shopId, date: { gte: start, lte: now } } });
+  return rposPage.count !== localCount;
+}
+
 async function syncShop(posId, shop) {
   const shopId = shop.id;
   const state = await prisma.salesSyncState.findUnique({ where: { rposShopId: shopId } });
@@ -70,6 +91,19 @@ async function syncShop(posId, shop) {
     await prisma.salesLine.deleteMany({ where: { rposShopId: shopId, date: { gte: start, lte: now } } });
 
     const totalLines = await fetchAndSaveWindow(posId, shopId, start, now);
+
+    // Réconciliation : si la fenêtre récente (48h) ne correspond plus entre RPOS et le local,
+    // probable trou silencieux d'un cycle précédent — on réimporte toute la fenêtre pour le combler.
+    const reconcileStart = new Date(now.getTime() - RECONCILE_HOURS * 60 * 60 * 1000);
+    if (reconcileStart < start) {
+      const needsReconcile = await windowNeedsReconciliation(posId, shopId, reconcileStart, start);
+      if (needsReconcile) {
+        console.warn(`[salesSyncJob] ${shop.reference || shopId} (${posId}) : écart détecté sur ${reconcileStart.toISOString()} -> ${start.toISOString()}, réimport...`);
+        await prisma.salesLine.deleteMany({ where: { rposShopId: shopId, date: { gte: reconcileStart, lte: start } } });
+        const reconciledLines = await fetchAndSaveWindow(posId, shopId, reconcileStart, start);
+        console.log(`[salesSyncJob] ${shop.reference || shopId} (${posId}) : réconciliation terminée, ${reconciledLines} ligne(s) réimportée(s).`);
+      }
+    }
 
     await prisma.salesSyncState.upsert({
       where: { rposShopId: shopId },
@@ -99,7 +133,14 @@ async function runSalesSync() {
   const servers = await rposServers.listServers();
   const activeServers = servers.filter((s) => s.isActive && s.rposUser && s.rposPassword);
 
-  console.log(`[salesSyncJob] Synchronisation démarrée sur ${activeServers.length} serveur(s)...`);
+  // Restriction optionnelle à une liste de magasins précise (Paramètres > Synchronisation des
+  // ventes) : vide = comportement historique, tous les magasins actifs de tous les serveurs.
+  const shopIdsConfig = await systemConfig.getValue(systemConfig.KEYS.SALES_SYNC_SHOP_IDS);
+  const restrictedShopIds = shopIdsConfig ? shopIdsConfig.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const restrictToShops = restrictedShopIds.length > 0;
+
+  console.log(`[salesSyncJob] Synchronisation démarrée sur ${activeServers.length} serveur(s)` +
+    (restrictToShops ? ` (restreinte à ${restrictedShopIds.length} magasin(s))` : '') + '...');
 
   await Promise.all(activeServers.map(async (server) => {
     let shops;
@@ -109,6 +150,7 @@ async function runSalesSync() {
       console.error(`[salesSyncJob] Impossible de lister les magasins de ${server.posId}:`, err.message);
       return;
     }
+    if (restrictToShops) shops = shops.filter((shop) => restrictedShopIds.includes(shop.id));
     await mapWithConcurrency(shops, SHOP_CONCURRENCY_PER_SERVER, (shop) => syncShop(server.posId, shop));
   }));
 

@@ -59,5 +59,13 @@
     if (user && user.role === 'ADMIN' && adminDashboardMenuItem) {
       adminDashboardMenuItem.style.display = '';
     }
+    // Sous-liens Paramètres réservés ADMIN (mêmes onglets que settings.html masque pour un compte
+    // STORE/SUPERVISOR — cf. initShopPicker) : révélés ici pour rester coordonné, jamais en dur.
+    if (user && user.role === 'ADMIN') {
+      ['settings-menu-files', 'settings-menu-rpos', 'settings-menu-cron', 'settings-menu-sync', 'settings-menu-ai'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = '';
+      });
+    }
   });
 })();

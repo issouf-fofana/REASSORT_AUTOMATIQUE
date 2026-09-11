@@ -155,6 +155,24 @@ model RecentOrderCache {
   @@map("recent_order_cache")
 }
 
+// Profil d'activité d'un magasin (shopActivityService.js) : permet à l'IA de distinguer un article
+// peu vendu dans un magasin actif d'un magasin qui ne fonctionne plus (fermé, en pause, jamais
+// démarré) — construit par échantillonnage RPOS mensuel, mis en cache car le statut d'un magasin
+// ne change pas d'heure en heure.
+model ShopActivityProfile {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @unique @map("rpos_shop_id")
+
+  status      String // ACTIVE | RESUMED | INACTIVE | NEVER_ACTIVE
+  profileJson String @map("profile_json") // détail complet (mois échantillonnés, dernière activité...) pour affichage "Pourquoi ?"
+
+  computedAt DateTime @default(now()) @updatedAt @map("computed_at")
+
+  @@map("shop_activity_profile")
+}
+
 // =============================================
 // CONFIGURATION DU RÉASSORT (paramétrable par magasin, cf. page Paramètres)
 // =============================================
@@ -179,6 +197,13 @@ model ReassortConfig {
   // Si vrai (comportement historique), un stock négatif (anomalie de suivi RPOS) est ramené à 0
   // avant calcul du besoin. Si faux, la valeur négative réelle est conservée et affichée telle quelle.
   treatNegativeStockAsZero Boolean @default(true) @map("treat_negative_stock_as_zero")
+
+  // Si vrai, la génération n'appelle jamais RPOS pour le stock/prix/colisage d'un article déjà vu
+  // au moins une fois (ProductCache utilisé même très périmé, TTL ignoré) — permet de générer une
+  // proposition en étant hors du réseau Prosuma, au prix d'un stock potentiellement obsolète (mis à
+  // 0 dans le calcul plutôt qu'utilisé comme une vraie valeur non fiable). Un article jamais vu reste
+  // exclu, faute de prix/colisage connus. Off par défaut.
+  ignoreRposStockInCalculation Boolean @default(false) @map("ignore_rpos_stock_in_calculation")
 
   // Nombre de jours de la période de référence utilisée pour calculer la part de CA de chaque
   // article proposé par rapport au CA total du magasin (ex: 1 = hier, 7 = 7 derniers jours).
@@ -256,6 +281,49 @@ model ReassortConfig {
   @@map("reassort_configs")
 }
 
+// Suivi de progression d'une génération de proposition en tâche de fond (bouton "Forcer une
+// nouvelle génération") : la génération pouvant prendre de quelques secondes à plusieurs minutes
+// (appel RPOS pour l'historique de ventes, calcul article par article), l'ancien comportement
+// bloquait la requête HTTP jusqu'à la fin et affichait une barre de progression simulée
+// (setTimeout) côté frontend, sans lien avec l'avancement réel. Ce modèle permet de répondre
+// immédiatement au clic et de suivre la vraie progression via polling (même principe que
+// Proposal.linesTotal/linesProcessed pour la validation).
+model ProposalGenerationRun {
+  id String @id @default(cuid())
+
+  rposShopId String @map("rpos_shop_id")
+
+  status String @default("RUNNING") // RUNNING -> DONE -> ERROR
+  // Étape en cours, alignée sur les 3 étapes déjà affichées côté UI : SALES (analyse des ventes,
+  // avant que le nombre total d'articles à traiter soit connu) -> PARETO (classement) ->
+  // QUANTITIES (calcul par article, seule étape avec un vrai compteur X/Y) -> DONE.
+  step String @default("SALES")
+
+  articlesTotal     Int @default(0) @map("articles_total")
+  articlesProcessed Int @default(0) @map("articles_processed")
+  // Dernier article traité (EAN + libellé), pour afficher "en cours : ..." plutôt qu'un compteur
+  // seul — répond à la demande de voir "les articles qu'il a fini de faire".
+  lastArticleEan   String? @map("last_article_ean")
+  lastArticleLabel String? @map("last_article_label")
+
+  proposalId   String? @map("proposal_id") // renseigné une fois la proposition créée (statut DONE)
+  errorMessage String? @map("error_message")
+
+  // Renseigné à l'étape AI_ADJUSTMENT : distingue un ajustement IA réellement effectué d'un repli
+  // intégral sur le calcul classique (ex: crédit API épuisé) — sans ça, le modal de progression
+  // affichait "Analyse IA des quantités ✓ Terminé" même quand aucun article n'a été analysé par
+  // l'IA, ce qui donnait l'illusion trompeuse d'un succès.
+  aiUnavailable      Boolean? @map("ai_unavailable")
+  aiArticlesAdjusted Int?     @map("ai_articles_adjusted")
+  aiErrorMessage     String?  @map("ai_error_message")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([rposShopId, createdAt])
+  @@map("proposal_generation_run")
+}
+
 // =============================================
 // PROPOSITIONS DE RÉASSORT (historisation, cf. readme section 16)
 // =============================================
@@ -307,6 +375,15 @@ model Proposal {
   analysisPeriodStart DateTime? @map("analysis_period_start")
   analysisPeriodEnd   DateTime? @map("analysis_period_end")
   analysisPeriodMode  String?   @map("analysis_period_mode")
+
+  // Couverture RÉELLE des données de vente utilisées (peut être plus étroite qu'analysisPeriodStart
+  // ci-dessus, ex: base locale avec un trou d'historique jamais comblé) : à afficher en priorité à
+  // l'utilisateur plutôt que la période configurée en arrière-plan, pour qu'il sache concrètement
+  // sur quelle période le calcul a réellement porté et juge lui-même s'il faut relancer un backfill
+  // avant de faire confiance à la proposition. null si aucune vente trouvée du tout dans la période.
+  actualDataStart DateTime? @map("actual_data_start")
+  actualDataEnd   DateTime? @map("actual_data_end")
+  coverageGapDays Int?      @default(0) @map("coverage_gap_days")
 
   // Paramètres de calcul effectivement appliqués à cette génération (peuvent différer de la
   // configuration actuelle du magasin si elle a changé depuis) : nécessaires pour reconstruire
@@ -709,6 +786,16 @@ model ProposalLine {
   // interroge RPOS/la base séparément, cf. productAnalyticsService.js).
   dailyHistory String? @map("daily_history")
 
+  // Détection d'anomalies (CAHIER_DES_CHARGES.md §30-31, étape 7) : signaux calculés à la
+  // génération par anomalyService.js (JSON: [{type, changePct, message}]), et catégorie de
+  // tendance générale de l'article sur la période analysée. Alimentent le score de confiance
+  // (dataQuality, cf. confidenceService.js) et l'analyse IA à la demande — jamais utilisés pour
+  // bloquer automatiquement une commande à cette étape (§69 : en cas de doute, ne pas commander
+  // automatiquement n'est pertinent qu'à partir de l'auto-réassort, pas encore actif ici).
+  anomalies         String? @map("anomalies") // JSON: [{type, changePct, message}]
+  trendCategory     String? @map("trend_category") // GROWING | DECLINING | STABLE | VOLATILE | UNKNOWN
+  trendChangePct    Float?  @map("trend_change_pct")
+
   @@map("proposal_lines")
 }
 
@@ -953,4 +1040,56 @@ model AiForecastLine {
   reasoning         String? // courte justification renvoyée par le LLM, affichée à titre indicatif
 
   @@map("ai_forecast_lines")
+}
+
+// =============================================
+// ASSISTANT IA — HISTORIQUE DES CONVERSATIONS (CAHIER_DES_CHARGES.md §34-38, étape 11)
+// =============================================
+// Une conversation par fil de discussion ouvert (comme ChatGPT) : rattachée à un utilisateur (pas
+// seulement un magasin, pour ne jamais mélanger l'historique de deux comptes qui partagent un même
+// magasin) et à un magasin précis (le contexte ne change pas en cours de conversation — changer de
+// magasin ouvre une nouvelle conversation, plus simple à raisonner que migrer un fil en cours).
+model ChatbotConversation {
+  id String @id @default(cuid())
+
+  userId     String @map("user_id")
+  rposShopId String @map("rpos_shop_id")
+
+  // Titre affiché dans la liste des conversations : la première question posée, tronquée — jamais
+  // généré par un appel LLM séparé (coût/latence inutile pour un simple titre de liste).
+  title String
+
+  department    String? // rayon sélectionné au moment de la création de cette conversation
+  subDepartment String? @map("sub_department")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages ChatbotMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("chatbot_conversations")
+}
+
+model ChatbotMessage {
+  id             String               @id @default(cuid())
+  conversationId String               @map("conversation_id")
+  conversation   ChatbotConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role    String // "user" | "assistant"
+  content String
+
+  // Renseigné uniquement sur les messages "assistant" : quel outil a été utilisé pour répondre
+  // (chatbotToolsService.js), pour audit/debug — jamais affiché tel quel à l'utilisateur final.
+  toolUsed String? @map("tool_used")
+
+  // Résultat brut (JSON stringifié) de l'outil appelé pour ce message, quand il y en a un : permet
+  // de reconstruire le tableau/graphique associé à la réponse à la réouverture de la conversation,
+  // sans jamais redemander ce rendu au LLM (qui pourrait le déformer en le redécrivant).
+  toolResult String? @map("tool_result")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@map("chatbot_messages")
 }

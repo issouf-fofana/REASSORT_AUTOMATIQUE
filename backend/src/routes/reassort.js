@@ -14,15 +14,18 @@ const {
   getOverstockRate,
   getForecastAccuracy,
   getAdminDashboard,
+  getProductByEanCached,
 } = require('../services/proposalService');
 const { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop } = require('../middleware/auth');
+const shopActivityService = require('../services/shopActivityService');
+const chatbotService = require('../services/chatbotService');
 const { runNightlyProposalGeneration } = require('../jobs/nightlyProposalJob');
 const { runReceptionSync } = require('../jobs/receptionSyncJob');
 const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../services/weeklyPlanService');
 const { runSalesSync } = require('../jobs/salesSyncJob');
 const salesBackfillService = require('../services/salesBackfillService');
 const { getConfig, upsertConfig } = require('../services/configService');
-const { MODE_DAYS } = require('../services/periodService');
+const { MODE_DAYS, resolvePeriod } = require('../services/periodService');
 const systemConfig = require('../services/systemConfigService');
 const rposServers = require('../services/rposServersService');
 const productInsightCache = require('../services/productInsightCacheService');
@@ -266,6 +269,39 @@ router.delete('/sales-lines', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/sales-lines/departments - résout le rayon (department) de chaque EAN fourni,
+// pour regrouper l'affichage de "Ventes synchronisées" par rayon (ADMIN) comme sur les pages
+// Historique des commandes et IA & Prédictions. SalesLine ne stocke que l'EAN (une ligne de vente
+// individuelle, pas un article catalogué) : le rayon n'existe qu'au niveau du produit RPOS, donc on
+// le résout via ProductCache (déjà alimenté par toute génération de proposition passée sur ce
+// magasin, cache-aside persistant) + un appel RPOS de repli pour les EAN encore inconnus.
+// Query: shopId, posId, eans (CSV). Réponse: { [ean]: { sector, department } }.
+router.get('/sales-lines/departments', requireAdmin, async (req, res) => {
+  try {
+    const { shopId, posId, eans } = req.query;
+    if (!shopId || !posId || !eans) return res.status(400).json({ success: false, message: 'shopId, posId et eans sont requis' });
+
+    const eanList = [...new Set(eans.split(',').map((e) => e.trim()).filter(Boolean))];
+    const byEan = {};
+    const EAN_CONCURRENCY = 8;
+
+    await mapWithConcurrency(eanList, EAN_CONCURRENCY, async (ean) => {
+      try {
+        const product = await getProductByEanCached(posId, shopId, ean);
+        if (!product) { byEan[ean] = { sector: 'Article introuvable', department: 'Article introuvable' }; return; }
+        const { sector, rayon } = await rpos.getDepartmentHierarchy(posId, product.department?.id);
+        byEan[ean] = { sector, department: rayon };
+      } catch (err) {
+        byEan[ean] = { sector: 'Erreur', department: 'Erreur' };
+      }
+    });
+
+    res.json({ success: true, data: byEan });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/sales-lines/coverage - pour un magasin, la plus ancienne et la plus récente
 // date de vente synchronisée localement (ADMIN), pour visualiser d'un coup d'œil quelle période
 // est déjà couverte avant de lancer un nouveau backfill sur une autre période.
@@ -281,6 +317,24 @@ router.get('/sales-lines/coverage', requireAdmin, async (req, res) => {
     ]);
 
     res.json({ success: true, data: { oldestDate: oldest?.date || null, newestDate: newest?.date || null, count } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/sales-lines/rpos-earliest-available - interroge RPOS pour savoir jusqu'à
+// quelle date le magasin a réellement un historique de ventes disponible (ADMIN). RPOS n'expose
+// aucune limite de rétention connue à l'avance ("l'API ne dit pas jusqu'où on peut remonter") :
+// c'est la seule façon de le savoir, en demandant directement la toute première vente enregistrée.
+// Distinct de /sales-lines/coverage (ce qui est déjà en BASE LOCALE) : ici on répond à "combien de
+// jours puis-je encore récupérer en plus ?" en comparant à la limite réelle côté serveur.
+router.get('/sales-lines/rpos-earliest-available', requireAdmin, async (req, res) => {
+  try {
+    const { shopId, posId } = req.query;
+    if (!shopId || !posId) return res.status(400).json({ success: false, message: 'shopId et posId requis' });
+
+    const earliestDate = await rpos.getEarliestSaleDate(posId, shopId);
+    res.json({ success: true, data: { earliestDate } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -658,9 +712,70 @@ router.post('/create-order', async (req, res) => {
 
 // --- Flux historisé (phase pilote) ---
 
+// GET /api/reassort/proposal/generate/preview-period?periodMode=&customStart=&customEnd= - calcule
+// et renvoie les dates exactes (début/fin) qui seraient utilisées pour une génération, SANS lancer
+// quoi que ce soit — pour que l'utilisateur voie concrètement quel intervalle sera analysé avant de
+// confirmer (le mode par défaut ne dit pas la date réelle, calculée à partir de la dernière vente
+// RÉELLE du magasin via RPOS, pas de la date système). periodMode vide = période configurée du
+// magasin (comportement par défaut au lancement réel).
+router.get('/proposal/generate/preview-period', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    const baseConfig = await getConfig(shopId);
+    const { periodMode, customStart, customEnd } = req.query;
+    const config = periodMode
+      ? { ...baseConfig, periodMode, customStart: customStart || null, customEnd: customEnd || null }
+      : baseConfig;
+
+    const period = await resolvePeriod(posId, shopId, config);
+
+    // Couverture locale réelle sur cette période (avant même de lancer quoi que ce soit) : permet
+    // d'avertir l'utilisateur dans CE modal de confirmation si la base n'a pas encore toutes les
+    // données de la période choisie, plutôt que de le découvrir après coup dans le bandeau de
+    // résultat une fois la génération faite — bug constaté où une génération tournait
+    // silencieusement sur des données partielles sans que rien ne le signale avant de lancer.
+    const [earliestLocal, latestLocal] = await Promise.all([
+      prisma.salesLine.findFirst({ where: { rposShopId: shopId, date: { gte: new Date(period.start), lt: new Date(period.end) } }, orderBy: { date: 'asc' }, select: { date: true } }),
+      prisma.salesLine.findFirst({ where: { rposShopId: shopId, date: { gte: new Date(period.start), lt: new Date(period.end) } }, orderBy: { date: 'desc' }, select: { date: true } }),
+    ]);
+
+    let coverageWarning = null;
+    if (!earliestLocal) {
+      coverageWarning = { type: 'NO_DATA', message: 'Aucune donnée locale pour cette période — la génération devra tout récupérer depuis RPOS en direct (peut prendre plusieurs minutes).' };
+    } else {
+      const gapStartHours = (earliestLocal.date.getTime() - new Date(period.start).getTime()) / (60 * 60 * 1000);
+      const gapEndHours = (new Date(period.end).getTime() - latestLocal.date.getTime()) / (60 * 60 * 1000);
+      if (gapStartHours > 24) {
+        coverageWarning = {
+          type: 'PARTIAL_START',
+          message: `Les données locales de ce magasin ne remontent qu'au ${earliestLocal.date.toLocaleDateString('fr-FR')} — ${Math.round(gapStartHours / 24)} jour(s) de début de période manquant(s). La génération complétera automatiquement via RPOS, mais cela peut ralentir le calcul.`,
+        };
+      } else if (gapEndHours > 24) {
+        coverageWarning = {
+          type: 'PARTIAL_END',
+          message: `Les données locales de ce magasin s'arrêtent au ${latestLocal.date.toLocaleDateString('fr-FR')} — ${Math.round(gapEndHours / 24)} jour(s) de fin de période manquant(s) (synchro pas encore à jour).`,
+        };
+      }
+    }
+
+    res.json({ success: true, data: { ...period, coverageWarning } });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/generate?limit=<n> - génère et sauvegarde une proposition, à la
 // demande. Ouvert aux comptes STORE (pour leur propre magasin) et ADMIN (avec ?shop=&pos=).
 // Rejette l'ancienne proposition GENERATED du magasin si elle n'a pas encore été validée.
+// Répond immédiatement avec un runId à suivre via GET /proposal/generate/:runId/status, au lieu de
+// bloquer la requête HTTP jusqu'à la fin (jusqu'à plusieurs minutes sur un gros magasin avec appel
+// RPOS) — même principe que /proposal/:id/validate, pour permettre une vraie barre de progression
+// (étape en cours, X/Y articles traités, dernier article traité) plutôt qu'un déroulé simulé.
 router.post('/proposal/generate', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -682,10 +797,107 @@ router.post('/proposal/generate', async (req, res) => {
     // configuration permanente du magasin) : { periodMode, customStart, customEnd }.
     const periodOverride = req.body.periodOverride || undefined;
 
-    const { proposal, stats } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride });
-    res.status(201).json({ success: true, data: { proposal, stats } });
+    const run = await prisma.proposalGenerationRun.create({
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'SALES' },
+    });
+
+    res.status(202).json({ success: true, data: { runId: run.id } });
+
+    // Tâche de fond : la réponse HTTP est déjà partie, toute erreur ici est capturée et écrite sur
+    // le run (jamais renvoyée au client via cette requête, qui a déjà répondu).
+    (async () => {
+      try {
+        const onProgress = async (p) => {
+          await prisma.proposalGenerationRun.update({
+            where: { id: run.id },
+            data: {
+              step: p.step,
+              ...(p.articlesTotal !== undefined ? { articlesTotal: p.articlesTotal } : {}),
+              ...(p.articlesProcessed !== undefined ? { articlesProcessed: p.articlesProcessed } : {}),
+              ...(p.lastArticleEan !== undefined ? { lastArticleEan: p.lastArticleEan } : {}),
+              ...(p.lastArticleLabel !== undefined ? { lastArticleLabel: p.lastArticleLabel } : {}),
+              ...(p.aiUnavailable !== undefined ? { aiUnavailable: p.aiUnavailable } : {}),
+              ...(p.aiArticlesAdjusted !== undefined ? { aiArticlesAdjusted: p.aiArticlesAdjusted } : {}),
+              ...(p.aiErrorMessage !== undefined ? { aiErrorMessage: p.aiErrorMessage } : {}),
+            },
+          }).catch(() => {}); // une mise à jour de progression manquée ne doit jamais interrompre la génération elle-même
+        };
+
+        const { proposal } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress });
+
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', proposalId: proposal.id, completedAt: new Date() },
+        });
+      } catch (error) {
+        console.error('Proposal generate+save error:', error);
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
   } catch (error) {
-    console.error('Proposal generate+save error:', error);
+    console.error('Proposal generate start error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal/generate/active?shop=... - le run de génération EN COURS pour ce
+// magasin, s'il y en a un (RUNNING). Permet de retrouver une génération lancée puis dont le modal a
+// été fermé (ou la page quittée/rechargée) sans l'annuler : la tâche de fond continue indépendamment
+// du frontend, ce endpoint sert juste à savoir "est-ce qu'il y a quelque chose en cours ?" pour
+// pouvoir rouvrir le suivi de progression.
+router.get('/proposal/generate/active', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+
+    const run = await prisma.proposalGenerationRun.findFirst({
+      where: { rposShopId: shopId, status: 'RUNNING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ success: true, data: run ? { runId: run.id } : null });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal/generate/:runId/status - progression d'une génération en cours
+// (polling, cf. commentaire ci-dessus). Répond aussi le contenu complet de la proposition une fois
+// DONE (proposal + stats), pour éviter un second aller-retour au frontend une fois terminé.
+router.get('/proposal/generate/:runId/status', async (req, res) => {
+  try {
+    const run = await prisma.proposalGenerationRun.findUnique({ where: { id: req.params.runId } });
+    if (!run) return res.status(404).json({ success: false, message: 'Génération introuvable' });
+
+    const shopId = resolveShopId(req);
+    if (shopId && run.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette génération n\'appartient pas à votre magasin' });
+    }
+
+    let proposal = null;
+    if (run.status === 'DONE' && run.proposalId) {
+      proposal = await prisma.proposal.findUnique({ where: { id: run.proposalId }, include: { lines: true } });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        status: run.status,
+        step: run.step,
+        articlesTotal: run.articlesTotal,
+        articlesProcessed: run.articlesProcessed,
+        lastArticleEan: run.lastArticleEan,
+        lastArticleLabel: run.lastArticleLabel,
+        errorMessage: run.errorMessage,
+        aiUnavailable: run.aiUnavailable,
+        aiArticlesAdjusted: run.aiArticlesAdjusted,
+        aiErrorMessage: run.aiErrorMessage,
+        proposal,
+      },
+    });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -896,7 +1108,7 @@ router.get('/predictions', async (req, res) => {
       }),
       prisma.proposalLine.findMany({
         where: { proposalId },
-        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true, excludedAsAlreadyOrderedRpos: true, rposOrderReference: true, rposOrderDate: true, rposOrderCount: true },
+        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true, excludedAsAlreadyOrderedRpos: true, rposOrderReference: true, rposOrderDate: true, rposOrderCount: true, orderingUnit: true, avgWeeklySales: true, daysUntilStockout: true },
       }),
     ]);
 
@@ -920,6 +1132,9 @@ router.get('/predictions', async (req, res) => {
         recentOrderCount: line?.rposOrderCount ?? null,
         department: line?.department || 'Autre',
         sector: line?.sector || null,
+        orderingUnit: line?.orderingUnit ?? null,
+        avgWeeklySales: line?.avgWeeklySales ?? null,
+        daysUntilStockout: line?.daysUntilStockout ?? null,
       };
     });
 
@@ -943,7 +1158,24 @@ router.get('/predictions/history', async (req, res) => {
 
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     const dateEnd = new Date();
-    const dateStart = new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+    const requestedStart = new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    // Bug constaté (session du 11/09) : compléter aveuglément chaque jour de la période DEMANDÉE
+    // avec 0 fabriquait de fausses "ventes nulles" pour des jours où la base locale n'a en réalité
+    // AUCUNE donnée (magasin dont la synchro/backfill ne couvre que quelques jours) — un tableau
+    // "30 jours" sur un magasin qui n'a que 4 jours d'historique affichait 26 lignes à 0 inventées,
+    // indiscernables visuellement d'une vraie absence de vente. On borne donc la période retournée
+    // à la couverture RÉELLE de la base (première vente connue pour ce magasin, tous articles
+    // confondus), jamais au-delà — un jour hors de cette borne est absent du tableau plutôt que
+    // faussement à 0 ; un jour DANS la borne mais sans vente pour CET article reste à 0 (une vraie
+    // information : le magasin vendait, cet article non).
+    const earliestKnown = await prisma.salesLine.findFirst({
+      where: { rposShopId: shopId },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    });
+    const dateStart = earliestKnown && earliestKnown.date > requestedStart ? earliestKnown.date : requestedStart;
+    const coverageLimited = earliestKnown && earliestKnown.date > requestedStart;
 
     const lines = await prisma.salesLine.findMany({
       where: { rposShopId: shopId, ean, date: { gte: dateStart, lte: dateEnd } },
@@ -956,15 +1188,27 @@ router.get('/predictions/history', async (req, res) => {
       const day = line.date.toISOString().slice(0, 10);
       byDay.set(day, (byDay.get(day) || 0) + line.quantity);
     }
-    // Complète les jours sans vente à 0 (pas absents) : une rupture de plusieurs jours doit être
-    // visible sur le graphique, pas silencieusement sauter à la vente suivante.
+    // Complète chaque jour DANS la période réellement couverte à 0 (pas absent) : une rupture de
+    // plusieurs jours pour cet article précis doit être visible sur le graphique, distincte d'une
+    // période hors couverture (qui n'apparaît pas du tout, cf. borne dateStart ci-dessus).
     const dailyHistory = [];
     for (let d = new Date(dateStart); d <= dateEnd; d.setUTCDate(d.getUTCDate() + 1)) {
       const key = d.toISOString().slice(0, 10);
       dailyHistory.push({ date: key, quantity: Math.round((byDay.get(key) || 0) * 100) / 100 });
     }
 
-    res.json({ success: true, data: { days, dailyHistory } });
+    res.json({
+      success: true,
+      data: {
+        days,
+        dailyHistory,
+        // coverageLimited=true : le magasin n'a pas d'historique local aussi loin que "days" jours
+        // demandés — le frontend peut alors afficher "X jours disponibles sur Y demandés" plutôt
+        // que de laisser croire que toute la période demandée a été analysée.
+        coverageLimited,
+        actualDays: dailyHistory.length,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -1129,7 +1373,7 @@ router.put('/config', async (req, res) => {
 
     const {
       paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha,
+      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
     } = req.body;
     const data = {};
     if (paretoThreshold !== undefined) data.paretoThreshold = paretoThreshold;
@@ -1152,6 +1396,7 @@ router.put('/config', async (req, res) => {
     if (recentOrderMaxAgeDays !== undefined) data.recentOrderMaxAgeDays = recentOrderMaxAgeDays;
     if (forecastEnabled !== undefined) data.forecastEnabled = forecastEnabled;
     if (forecastAlpha !== undefined) data.forecastAlpha = forecastAlpha;
+    if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
 
     const config = await upsertConfig(shopId, data, req.user.email);
     res.json({ success: true, data: config });
@@ -1172,7 +1417,7 @@ router.put('/config/bulk', async (req, res) => {
 
     const {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha,
+      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
       return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
@@ -1209,6 +1454,7 @@ router.put('/config/bulk', async (req, res) => {
     if (recentOrderMaxAgeDays !== undefined) data.recentOrderMaxAgeDays = recentOrderMaxAgeDays;
     if (forecastEnabled !== undefined) data.forecastEnabled = forecastEnabled;
     if (forecastAlpha !== undefined) data.forecastAlpha = forecastAlpha;
+    if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
 
     const results = [];
     for (const shopId of shopIds) {
@@ -1502,6 +1748,21 @@ router.get('/proposal/:proposalId/ai-forecast', requireAdmin, async (req, res) =
   }
 });
 
+// POST /api/reassort/shop-activity/warm - déclenche le calcul du profil d'activité du magasin
+// (shopActivityService) en arrière-plan, SANS attendre le résultat (répond immédiatement) : à
+// appeler dès qu'un magasin est sélectionné sur une page qui propose l'analyse IA par article, pour
+// que ce profil soit déjà en cache (24h) au moment du premier clic "Analyser" — évite de faire
+// attendre l'utilisateur ~15-30s sur ce calcul au moment précis où il veut un résultat rapide.
+// Idempotent et sans risque : un appel répété pendant que le cache est déjà chaud ne fait rien
+// (getShopActivityProfile relit le cache directement).
+router.post('/shop-activity/warm', async (req, res) => {
+  const shopId = resolveShopId(req);
+  const posId = resolvePosId(req);
+  res.json({ success: true }); // répond tout de suite, le calcul continue derrière
+  if (!shopId || !posId) return;
+  shopActivityService.getShopActivityProfile(posId, shopId).catch(() => {}); // best-effort, jamais bloquant
+});
+
 // POST /api/reassort/proposal/:proposalId/ai-analyze-article - analyse IA en direct d'un seul
 // article (page "IA & Prédictions") : appel LLM immédiat, sans persistance (AiForecastRun est pour
 // une génération complète, pas une analyse ponctuelle). Body: { ean }.
@@ -1526,10 +1787,256 @@ router.post('/proposal/:proposalId/ai-analyze-article', async (req, res) => {
       shopName: proposal.rposShopName,
       line,
       shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
+      posId: proposal.rposPosId,
+      shopId: proposal.rposShopId,
     });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/proposal/:proposalId/ai-analyze-article-stream - variante streamée (SSE) de la
+// route ci-dessus : le texte de l'IA s'affiche au fur et à mesure côté frontend (façon
+// conversation), plutôt que d'attendre la réponse complète avant de tout afficher d'un coup. POST
+// (pas l'EventSource natif du navigateur, qui ne supporte ni POST ni header Authorization custom) :
+// le frontend consomme ce flux via fetch() + response.body.getReader(), même mécanisme que celui
+// utilisé côté serveur pour lire les flux des fournisseurs LLM. Body: { ean }.
+router.post('/proposal/:proposalId/ai-analyze-article-stream', async (req, res) => {
+  const { ean } = req.body;
+  if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+    if (!proposal) { send('error', { message: 'Proposition introuvable' }); return res.end(); }
+
+    const shopId = resolveShopId(req);
+    if (shopId && proposal.rposShopId !== shopId) {
+      send('error', { message: 'Cette proposition n\'appartient pas à votre magasin' });
+      return res.end();
+    }
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) { send('error', { message: 'Article introuvable dans cette proposition' }); return res.end(); }
+
+    const result = await aiForecastService.analyzeArticleRealtimeStream({
+      shopReference: proposal.rposShopReference,
+      shopName: proposal.rposShopName,
+      line,
+      shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
+      posId: proposal.rposPosId,
+      shopId: proposal.rposShopId,
+      onQuantity: (quantity) => send('quantity', { quantity }),
+      onTextChunk: (text) => send('chunk', { text }),
+    });
+
+    send('done', result);
+    res.end();
+  } catch (error) {
+    send('error', { message: error.message });
+    res.end();
+  }
+});
+
+// POST /api/reassort/proposal/:proposalId/ai-ask-followup-stream - question libre du magasin sur
+// une recommandation déjà donnée (cf. demande explicite : "le magasin doit pouvoir demander à l'IA
+// pourquoi elle recommande une quantité donnée", "combien de jours cette commande va-t-elle
+// couvrir ?", etc.). Streamé en SSE comme l'analyse initiale. Body: { ean, previousQuantity,
+// previousReasoning, conversationHistory, question }.
+router.post('/proposal/:proposalId/ai-ask-followup-stream', async (req, res) => {
+  const { ean, previousQuantity, previousReasoning, conversationHistory, question } = req.body;
+  if (!ean || !question) return res.status(400).json({ success: false, message: 'ean et question sont requis' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+    if (!proposal) { send('error', { message: 'Proposition introuvable' }); return res.end(); }
+
+    const shopId = resolveShopId(req);
+    if (shopId && proposal.rposShopId !== shopId) {
+      send('error', { message: 'Cette proposition n\'appartient pas à votre magasin' });
+      return res.end();
+    }
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) { send('error', { message: 'Article introuvable dans cette proposition' }); return res.end(); }
+
+    const result = await aiForecastService.askFollowUpQuestion({
+      shopReference: proposal.rposShopReference,
+      shopName: proposal.rposShopName,
+      line,
+      shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
+      posId: proposal.rposPosId,
+      shopId: proposal.rposShopId,
+      previousQuantity,
+      previousReasoning,
+      conversationHistory,
+      question,
+      onTextChunk: (text) => send('chunk', { text }),
+    });
+
+    send('done', result);
+    res.end();
+  } catch (error) {
+    send('error', { message: error.message });
+    res.end();
+  }
+});
+
+// GET /api/reassort/chatbot/suggested-questions - questions suggérées (§34), éditables depuis
+// Paramètres > IA (CHATBOT_SUGGESTED_QUESTIONS, une par ligne) sans redéploiement.
+router.get('/chatbot/suggested-questions', async (req, res) => {
+  res.json({ success: true, data: await chatbotService.getSuggestedQuestions() });
+});
+
+// GET /api/reassort/chatbot/conversations - liste des conversations de l'utilisateur connecté
+// (toutes magasins confondus, plus récentes d'abord), pour la liste latérale façon ChatGPT.
+router.get('/chatbot/conversations', async (req, res) => {
+  try {
+    const conversations = await prisma.chatbotConversation.findMany({
+      where: { userId: req.user.id },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, title: true, rposShopId: true, department: true, subDepartment: true, updatedAt: true },
+      take: 100,
+    });
+    res.json({ success: true, data: conversations });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/chatbot/conversations/:id - messages complets d'une conversation (vérifie
+// qu'elle appartient bien à l'utilisateur connecté, jamais l'historique d'un autre compte).
+router.get('/chatbot/conversations/:id', async (req, res) => {
+  try {
+    const conversation = await prisma.chatbotConversation.findUnique({
+      where: { id: req.params.id },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!conversation || conversation.userId !== req.user.id) {
+      return res.status(404).json({ success: false, message: 'Conversation introuvable' });
+    }
+    res.json({ success: true, data: conversation });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/reassort/chatbot/conversations/:id - supprime une conversation (et ses messages, cascade).
+router.delete('/chatbot/conversations/:id', async (req, res) => {
+  try {
+    const conversation = await prisma.chatbotConversation.findUnique({ where: { id: req.params.id } });
+    if (!conversation || conversation.userId !== req.user.id) {
+      return res.status(404).json({ success: false, message: 'Conversation introuvable' });
+    }
+    await prisma.chatbotConversation.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/chatbot/ask-stream - AI Store Assistant (CAHIER_DES_CHARGES.md §34-38, étape
+// 11) : question libre du responsable magasin, avec contexte magasin/rayon/sous-rayon. Streamé en
+// SSE comme les autres analyses IA. Body: { conversationId (optionnel, crée une nouvelle
+// conversation si absent), department, subDepartment, question }. Le magasin est déterminé par
+// resolveShopId (permission de l'utilisateur), jamais par un paramètre libre côté client — cohérent
+// avec §43 (le chatbot ne doit jamais pouvoir contourner les permissions pour consulter un autre
+// magasin). Chaque question/réponse est persistée (ChatbotMessage) pour l'historique.
+router.post('/chatbot/ask-stream', async (req, res) => {
+  const { conversationId, department, subDepartment, question } = req.body;
+  if (!question) return res.status(400).json({ success: false, message: 'question requise' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) { send('error', { message: 'Aucun magasin assigné à ce compte' }); return res.end(); }
+
+    const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId } });
+    if (!shop) { send('error', { message: 'Magasin introuvable' }); return res.end(); }
+
+    let conversation = conversationId
+      ? await prisma.chatbotConversation.findUnique({ where: { id: conversationId }, include: { messages: { orderBy: { createdAt: 'asc' } } } })
+      : null;
+    if (conversation && conversation.userId !== req.user.id) {
+      send('error', { message: 'Cette conversation ne vous appartient pas' });
+      return res.end();
+    }
+    if (!conversation) {
+      conversation = await prisma.chatbotConversation.create({
+        data: {
+          userId: req.user.id,
+          rposShopId: shopId,
+          title: question.slice(0, 80),
+          department: department || null,
+          subDepartment: subDepartment || null,
+        },
+        include: { messages: true },
+      });
+    }
+
+    // Reconstruit les tours question/réponse en parcourant les messages dans l'ordre (déjà triés
+    // par createdAt asc) : chaque message "user" est suivi de sa réponse "assistant" correspondante.
+    const conversationHistory = [];
+    for (let i = 0; i < conversation.messages.length - 1; i++) {
+      if (conversation.messages[i].role === 'user' && conversation.messages[i + 1].role === 'assistant') {
+        conversationHistory.push({
+          question: conversation.messages[i].content,
+          answer: conversation.messages[i + 1].content,
+          toolUsed: conversation.messages[i + 1].toolUsed || null,
+          toolResult: conversation.messages[i + 1].toolResult ? JSON.parse(conversation.messages[i + 1].toolResult) : null,
+        });
+      }
+    }
+
+    await prisma.chatbotMessage.create({ data: { conversationId: conversation.id, role: 'user', content: question } });
+
+    const result = await chatbotService.askAssistant({
+      rposShopId: shopId,
+      shopReference: shop.reference,
+      shopName: shop.name,
+      department: department || conversation.department,
+      subDepartment: subDepartment || conversation.subDepartment,
+      conversationHistory,
+      question,
+      onTextChunk: (text) => send('chunk', { text }),
+    });
+
+    await Promise.all([
+      prisma.chatbotMessage.create({ data: { conversationId: conversation.id, role: 'assistant', content: result.answer, toolUsed: result.toolUsed, toolResult: result.toolResult ? JSON.stringify(result.toolResult) : null } }),
+      prisma.chatbotConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } }),
+    ]);
+
+    send('done', { ...result, conversationId: conversation.id });
+    res.end();
+  } catch (error) {
+    send('error', { message: error.message });
+    res.end();
   }
 });
 

@@ -23,6 +23,13 @@ const DEFAULTS = {
   recentOrderMaxAgeDays: 3,
   forecastEnabled: false,
   forecastAlpha: 0.3,
+  // Si vrai, la génération n'appelle jamais RPOS pour le stock/prix/colisage d'un article déjà vu
+  // au moins une fois (ProductCache utilisé même très périmé, TTL ignoré) — permet de générer une
+  // proposition en étant hors du réseau Prosuma, au prix d'un stock potentiellement obsolète (mis à
+  // 0 dans le calcul, jamais utilisé comme une vraie valeur non fiable). Un article jamais vu (aucun
+  // cache) reste exclu, faute de prix/colisage connus. Off par défaut : le stock réel reste le
+  // comportement normal et le plus fiable, à activer explicitement en connaissance de cause.
+  ignoreRposStockInCalculation: false,
 };
 
 /** Récupère la config d'un magasin, ou les valeurs par défaut si aucune n'a été personnalisée. */

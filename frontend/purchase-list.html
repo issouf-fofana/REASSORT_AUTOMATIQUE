@@ -181,24 +181,69 @@
                                                   return d.toLocaleDateString('fr-FR') + (iso.includes('T') && !iso.endsWith('T00:00:00') ? ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
                                              }
 
+                                             // Le rayon n'est pas un champ structuré côté RPOS (une commande fournisseur = un rayon,
+                                                  // readme §11, mais l'API supplier_order ne renvoie que external_reference en texte libre) :
+                                                  // on l'extrait de ce libellé ("Proposition réassort IA — LIQUIDES" -> "LIQUIDES") pour
+                                                  // pouvoir grouper l'affichage, comme déjà fait sur purchase-order.html à partir des vraies
+                                                  // données structurées (ProposalLine.department).
+                                             function extractDepartment(externalReference) {
+                                                  if (!externalReference) return 'Sans rayon identifié';
+                                                  const marker = ' — ';
+                                                  const idx = externalReference.indexOf(marker);
+                                                  return idx === -1 ? externalReference : externalReference.slice(idx + marker.length);
+                                             }
+
+                                             function renderOrderRow(o) {
+                                                  const badgeClass = STATUS_BADGE[o.status_display] || 'bg-secondary-subtle text-secondary';
+                                                  return '<tr class="cursor-pointer order-row" data-order-id="' + o.id + '" data-order-reference="' + o.reference + '" data-order-status="' + o.status_display + '" style="cursor:pointer;">' +
+                                                       '<td><strong>' + o.reference + '</strong></td>' +
+                                                       '<td>' + (o.external_reference || '—') + '</td>' +
+                                                       '<td>' + (o.supplier ? o.supplier.code + ' / ' + o.supplier.name : '—') + '</td>' +
+                                                       '<td>' + formatDate(o.date) + '</td>' +
+                                                       '<td>' + formatDate(o.delivery_date) + '</td>' +
+                                                       '<td><span class="badge ' + badgeClass + ' py-1 px-2">' + o.status_display + '</span></td>' +
+                                                       '<td>' + (o.created_by || '—') + '</td>' +
+                                                       '</tr>';
+                                             }
+
+                                             // Rayons dépliés (accordéon) : mémorisé par nom de rayon plutôt que par index, pour survivre
+                                             // à un rechargement de la liste (Actualiser) tant que le même rayon existe toujours.
+                                             const expandedDepartments = new Set();
+                                             let lastLoadedOrders = [];
+
                                              function renderRows(orders) {
                                                   if (!orders.length) {
                                                        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune commande trouvée.</td></tr>';
                                                        return;
                                                   }
-                                                  tbody.innerHTML = orders.map(function (o) {
-                                                       const badgeClass = STATUS_BADGE[o.status_display] || 'bg-secondary-subtle text-secondary';
-                                                       return '<tr class="cursor-pointer order-row" data-order-id="' + o.id + '" data-order-reference="' + o.reference + '" data-order-status="' + o.status_display + '" style="cursor:pointer;">' +
-                                                            '<td><strong>' + o.reference + '</strong></td>' +
-                                                            '<td>' + (o.external_reference || '—') + '</td>' +
-                                                            '<td>' + (o.supplier ? o.supplier.code + ' / ' + o.supplier.name : '—') + '</td>' +
-                                                            '<td>' + formatDate(o.date) + '</td>' +
-                                                            '<td>' + formatDate(o.delivery_date) + '</td>' +
-                                                            '<td><span class="badge ' + badgeClass + ' py-1 px-2">' + o.status_display + '</span></td>' +
-                                                            '<td>' + (o.created_by || '—') + '</td>' +
-                                                            '</tr>';
+
+                                                  const byDepartment = new Map();
+                                                  orders.forEach(function (o) {
+                                                       const dept = extractDepartment(o.external_reference);
+                                                       if (!byDepartment.has(dept)) byDepartment.set(dept, []);
+                                                       byDepartment.get(dept).push(o);
+                                                  });
+                                                  const departments = Array.from(byDepartment.keys()).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+
+                                                  tbody.innerHTML = departments.map(function (dept) {
+                                                       const rows = byDepartment.get(dept);
+                                                       const isExpanded = expandedDepartments.has(dept);
+                                                       const header = '<tr class="table-secondary department-row" style="cursor:pointer;" data-department="' + dept.replace(/"/g, '&quot;') + '">' +
+                                                            '<td colspan="7">' +
+                                                            '<iconify-icon icon="' + (isExpanded ? 'solar:alt-arrow-down-bold' : 'solar:alt-arrow-right-bold') + '" class="me-1"></iconify-icon>' +
+                                                            '<strong>' + dept + '</strong> <span class="text-muted small">(' + rows.length + ' commande(s))</span></td></tr>';
+                                                       return header + (isExpanded ? rows.map(renderOrderRow).join('') : '');
                                                   }).join('');
                                              }
+
+                                             tbody.addEventListener('click', function (e) {
+                                                  const deptRow = e.target.closest('.department-row');
+                                                  if (!deptRow) return;
+                                                  const dept = deptRow.dataset.department;
+                                                  if (expandedDepartments.has(dept)) expandedDepartments.delete(dept);
+                                                  else expandedDepartments.add(dept);
+                                                  renderRows(lastLoadedOrders);
+                                             });
 
                                              const orderDetailModalEl = document.getElementById('order-detail-modal');
                                              let orderDetailModal = null;
@@ -298,7 +343,8 @@
                                                        const res = await window.reassortFetch('/reassort/orders?shop=' + encodeURIComponent(shopId) + (posId ? '&pos=' + encodeURIComponent(posId) : ''));
                                                        const json = await res.json();
                                                        if (!json.success) throw new Error(json.message);
-                                                       renderRows(json.data.orders);
+                                                       lastLoadedOrders = json.data.orders;
+                                                       renderRows(lastLoadedOrders);
                                                        status.textContent = json.data.count + ' commande(s) au total';
                                                   } catch (err) {
                                                        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
@@ -342,6 +388,8 @@
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
 </body>
 
 </html>

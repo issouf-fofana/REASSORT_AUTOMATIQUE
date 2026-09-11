@@ -9,10 +9,10 @@
  * - modèle de "comportement magasin/article" distinct : pas encore modélisé séparément.
  * Version assumée à cette étape (honnête plutôt que complète) : combine les 4 signaux qui ont déjà
  * une source de données fiable ici — quantité d'historique, volatilité, précision historique
- * passée (AIPredictionOutcome, étape 5), qualité des données (rupture de stock détectée). Un score
- * PRUDENT (pas optimiste) est retourné quand un signal manque, plutôt que de l'ignorer ou de
- * l'inventer — ex: aucun historique d'erreur passée pour cet article => précision historique notée
- * au niveau neutre (50/100), pas au maximum.
+ * passée (AIPredictionOutcome, étape 5), qualité des données (rupture de stock détectée OU anomalie
+ * détectée par anomalyService.js, étape 7). Un score PRUDENT (pas optimiste) est retourné quand un
+ * signal manque, plutôt que de l'ignorer ou de l'inventer — ex: aucun historique d'erreur passée
+ * pour cet article => précision historique notée au niveau neutre (50/100), pas au maximum.
  */
 const { PrismaClient } = require('@prisma/client');
 
@@ -84,9 +84,15 @@ async function scoreHistoricalAccuracy(rposShopId, ean) {
   return { score, sampleSize: withPct.length };
 }
 
-/** Qualité des données = pénalité si une rupture de stock a faussé la période d'analyse récente. */
-function scoreDataQuality(hadNegativeStock) {
-  return hadNegativeStock ? 40 : 100;
+/**
+ * Qualité des données = pénalité si une rupture de stock a faussé la période d'analyse récente,
+ * ou si anomalyService.js a détecté un signal anormal (explosion/chute de ventes, stock incohérent)
+ * qui rend l'historique récent moins représentatif d'une demande normale.
+ */
+function scoreDataQuality(hadNegativeStock, hasAnomaly) {
+  if (hadNegativeStock && hasAnomaly) return 20;
+  if (hadNegativeStock || hasAnomaly) return 40;
+  return 100;
 }
 
 /**
@@ -94,12 +100,12 @@ function scoreDataQuality(hadNegativeStock) {
  * signal (pour affichage/débogage). Ne modifie rien : lecture seule sur les données déjà connues
  * de cette ligne + historique d'évaluations passées.
  */
-async function computeConfidenceScore({ rposShopId, ean, dailyHistory, hadNegativeStock }) {
+async function computeConfidenceScore({ rposShopId, ean, dailyHistory, hadNegativeStock, hasAnomaly }) {
   const daysOfHistory = dailyHistory ? dailyHistory.length : 0;
   const historyLengthScore = scoreHistoryLength(daysOfHistory);
   const volatilityScore = scoreVolatility(dailyHistory);
   const { score: accuracyScore, sampleSize: accuracySampleSize } = await scoreHistoricalAccuracy(rposShopId, ean);
-  const dataQualityScore = scoreDataQuality(hadNegativeStock);
+  const dataQualityScore = scoreDataQuality(hadNegativeStock, !!hasAnomaly);
 
   const confidenceScore = Math.round(
     historyLengthScore * WEIGHTS.historyLength +

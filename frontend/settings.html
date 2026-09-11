@@ -207,6 +207,25 @@
                                              </div>
 
                                              <div class="mb-4">
+                                                  <label class="form-label fw-semibold">Génération sans réseau Prosuma</label>
+                                                  <select id="config-ignore-rpos-stock" class="form-select" style="max-width: 300px;">
+                                                       <option value="false">Utiliser le stock RPOS en temps réel (par défaut)</option>
+                                                       <option value="true">Ignorer le stock RPOS (générer uniquement sur les ventes)</option>
+                                                  </select>
+                                                  <div class="alert alert-light border mt-2 mb-0 small">
+                                                       <strong>À quoi ça sert :</strong> le stock actuel, le prix et le colisage d'un article viennent de RPOS en
+                                                       temps réel — sans accès au réseau Prosuma, une génération de proposition échoue normalement dès qu'un
+                                                       article n'est plus en cache local depuis moins de 15 minutes.<br>
+                                                       <strong>Si activé :</strong> la génération réutilise le dernier stock/prix/colisage connu en cache local,
+                                                       même vieux de plusieurs jours, au lieu d'appeler RPOS — et le <strong>stock est ignoré dans le calcul du
+                                                       besoin</strong> (traité comme inconnu, jamais utilisé tel quel car potentiellement périmé). Le besoin est
+                                                       alors couvert uniquement sur la base des ventes réelles, ce qui peut sur-proposer si du stock existe déjà
+                                                       en réalité — vérifiez physiquement le stock avant de valider une commande générée dans ce mode.
+                                                       Un article jamais vu au moins une fois reste exclu, faute de prix/colisage connus.
+                                                  </div>
+                                             </div>
+
+                                             <div class="mb-4">
                                                   <label class="form-label fw-semibold">Ignorer les commandes RPOS de plus de</label>
                                                   <div class="input-group" style="max-width: 300px;">
                                                        <input type="number" id="config-recent-order-max-age" class="form-control" min="1" max="365" step="1">
@@ -875,7 +894,15 @@
                                              historique — sinon la synchro automatique ne couvrira que les dernières 24h.
                                         </div>
 
-                                        <button type="button" id="system-run-sales-sync-now" class="btn btn-outline-secondary mb-2">Lancer la synchro incrémentale maintenant (tous les magasins)</button>
+                                        <div class="mb-3">
+                                             <label class="form-label small">Magasins concernés par la synchro automatique</label>
+                                             <select id="system-sales-sync-shop-ids" class="form-select" multiple size="6"></select>
+                                             <div class="form-text">Aucune sélection = tous les magasins actifs (comportement par défaut). Sélectionnez un ou plusieurs magasins pour restreindre la synchro planifiée (et le bouton ci-dessous) à ceux-ci uniquement — utile pour se concentrer sur quelques magasins sans tout arrêter.</div>
+                                             <button type="button" id="system-sales-sync-shop-ids-save" class="btn btn-outline-secondary btn-sm mt-2">Enregistrer la sélection</button>
+                                             <span id="system-sales-sync-shop-ids-result" class="small ms-2"></span>
+                                        </div>
+
+                                        <button type="button" id="system-run-sales-sync-now" class="btn btn-outline-secondary mb-2">Lancer la synchro incrémentale maintenant</button>
                                         <div id="system-run-sales-sync-result" class="small mt-2"></div>
                                    </div>
                               </div>
@@ -905,6 +932,10 @@
                                              </div>
                                              <div class="col-md-6">
                                                   <div id="sales-backfill-coverage" class="small text-muted"></div>
+                                                  <div class="d-flex align-items-center gap-2 mt-1">
+                                                       <button type="button" id="sales-backfill-check-rpos-limit" class="btn btn-outline-secondary btn-sm">Vérifier la limite RPOS</button>
+                                                       <div id="sales-backfill-rpos-limit" class="small text-muted"></div>
+                                                  </div>
                                              </div>
                                         </div>
                                         <div class="row g-2 align-items-end">
@@ -1081,6 +1112,25 @@
                                    <div id="ai-prompt-success" class="alert alert-success mt-2" style="display:none;"></div>
                               </div>
                          </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
+                                   <h5 class="card-title mb-0">Assistant IA — questions suggérées</h5>
+                              </div>
+                              <div class="card-body">
+                                   <p class="text-muted small">
+                                        Une question par ligne. Affichées comme suggestions cliquables dans l'Assistant IA, et
+                                        utilisées par l'IA elle-même pour indiquer au magasin ce qu'elle sait faire quand une
+                                        question posée sort de son périmètre. N'ajoutez que des questions couvertes par un outil
+                                        de données réel (voir chatbotService.js) — une suggestion à laquelle l'assistant ne peut
+                                        pas répondre avec de vraies données serait trompeuse.
+                                   </p>
+                                   <textarea id="chatbot-suggested-questions" class="form-control small" rows="8"></textarea>
+                                   <button type="button" class="btn btn-primary btn-sm mt-2" id="chatbot-suggested-questions-save">Enregistrer</button>
+                                   <div id="chatbot-suggested-questions-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                                   <div id="chatbot-suggested-questions-success" class="alert alert-success mt-2" style="display:none;"></div>
+                              </div>
+                         </div>
                     </div>
                     <!-- /tab-ai -->
 
@@ -1247,6 +1297,7 @@
                                         if (c.customStart) document.getElementById('config-custom-start').value = c.customStart.slice(0, 10);
                                         if (c.customEnd) document.getElementById('config-custom-end').value = c.customEnd.slice(0, 10);
                                         document.getElementById('config-negative-stock').value = c.treatNegativeStockAsZero === false ? 'false' : 'true';
+                                        document.getElementById('config-ignore-rpos-stock').value = c.ignoreRposStockInCalculation ? 'true' : 'false';
                                         document.getElementById('config-revenue-share-days').value = c.revenueSharePeriodDays || 1;
                                         document.getElementById('config-overstock-threshold').value = c.overstockThresholdMultiplier || 1.5;
                                         document.getElementById('config-split-by-department').value = c.splitOrdersByDepartment === false ? 'false' : 'true';
@@ -1292,6 +1343,7 @@
                                         safetyStockRatio: parseFloat(document.getElementById('config-safety-ratio').value) / 100,
                                         periodMode: periodModeSelect.value,
                                         treatNegativeStockAsZero: document.getElementById('config-negative-stock').value === 'true',
+                                        ignoreRposStockInCalculation: document.getElementById('config-ignore-rpos-stock').value === 'true',
                                         revenueSharePeriodDays: parseInt(document.getElementById('config-revenue-share-days').value, 10) || 1,
                                         overstockThresholdMultiplier: parseFloat(document.getElementById('config-overstock-threshold').value) || 1.5,
                                         splitOrdersByDepartment: document.getElementById('config-split-by-department').value === 'true',
@@ -1371,9 +1423,22 @@
                                         document.getElementById('system-daily-review-enabled').checked = d.DAILY_REVIEW_ENABLED !== 'false';
                                         document.getElementById('system-sales-sync-enabled').checked = d.SALES_SYNC_ENABLED !== 'false';
                                         document.getElementById('system-prediction-outcome-enabled').checked = d.PREDICTION_OUTCOME_ENABLED !== 'false';
+                                        salesSyncShopIdsFromConfig = (d.SALES_SYNC_SHOP_IDS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                                        applySalesSyncShopIdsSelection();
                                    } catch (err) {
                                         // silencieux si non-admin (route protégée)
                                    }
+                              }
+
+                              // La sélection à appliquer peut arriver avant que le <select> soit peuplé (loadSystemConfig
+                              // et loadShopSelect s'exécutent en parallèle) : mémorisée puis réappliquée dès que possible.
+                              let salesSyncShopIdsFromConfig = [];
+                              function applySalesSyncShopIdsSelection() {
+                                   const select = document.getElementById('system-sales-sync-shop-ids');
+                                   if (!select || !select.options.length) return;
+                                   Array.from(select.options).forEach(function (opt) {
+                                        opt.selected = salesSyncShopIdsFromConfig.indexOf(opt.value) !== -1;
+                                   });
                               }
 
                               async function saveSystemConfigKey(key, value) {
@@ -1407,6 +1472,25 @@
                               wireJobEnabledSwitch('system-sales-sync-enabled', 'SALES_SYNC_ENABLED');
                               wireJobEnabledSwitch('system-prediction-outcome-enabled', 'PREDICTION_OUTCOME_ENABLED');
                               wireJobEnabledSwitch('ai-quantity-adjustment-enabled', 'AI_QUANTITY_ADJUSTMENT_ENABLED');
+
+                              loadShopSelect('system-sales-sync-shop-ids', true).then(applySalesSyncShopIdsSelection);
+                              document.getElementById('system-sales-sync-shop-ids-save').addEventListener('click', async function () {
+                                   const select = document.getElementById('system-sales-sync-shop-ids');
+                                   const resultEl = document.getElementById('system-sales-sync-shop-ids-result');
+                                   const selectedIds = Array.from(select.selectedOptions).map(function (o) { return o.value; });
+                                   resultEl.className = 'small ms-2 text-muted';
+                                   resultEl.textContent = 'Enregistrement...';
+                                   try {
+                                        await saveSystemConfigKey('SALES_SYNC_SHOP_IDS', selectedIds.join(','));
+                                        resultEl.className = 'small ms-2 text-success';
+                                        resultEl.textContent = selectedIds.length
+                                             ? 'Enregistré — synchro restreinte à ' + selectedIds.length + ' magasin(s).'
+                                             : 'Enregistré — tous les magasins actifs seront synchronisés.';
+                                   } catch (err) {
+                                        resultEl.className = 'small ms-2 text-danger';
+                                        resultEl.textContent = 'Erreur : ' + err.message;
+                                   }
+                              });
 
                               document.getElementById('system-sales-dir-save').addEventListener('click', async function () {
                                    sysErrorBox.style.display = 'none';
@@ -1792,7 +1876,7 @@
                                    }
                               });
 
-                              async function loadShopSelect(selectId) {
+                              async function loadShopSelect(selectId, skipSearchable) {
                                    const select = document.getElementById(selectId);
                                    try {
                                         const res = await window.reassortFetch('/reassort/shops');
@@ -1810,7 +1894,10 @@
                                              }).join('');
                                              return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
                                         }).join('');
-                                        if (window.reassortMakeShopPickerSearchable) window.reassortMakeShopPickerSearchable(select);
+                                        // Le picker "recherche" (reassortMakeShopPickerSearchable) transforme un <select> simple en
+                                        // overlay avec champ de recherche : incompatible avec un <select multiple> natif
+                                        // (system-sales-sync-shop-ids), donc explicitement sauté pour celui-ci.
+                                        if (!skipSearchable && window.reassortMakeShopPickerSearchable) window.reassortMakeShopPickerSearchable(select);
                                    } catch (err) {
                                         select.innerHTML = '<option value="">Erreur: ' + err.message + '</option>';
                                    }
@@ -2062,7 +2149,32 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                    }
                               }
 
-                              document.getElementById('sales-backfill-run').addEventListener('click', async function () {
+                              // Interroge RPOS en direct (pas la base locale) pour savoir jusqu'à quelle date le
+              // magasin a réellement un historique disponible côté serveur — RPOS n'expose aucune
+              // limite de rétention à l'avance, seul un appel réel le révèle. Bouton à la demande
+              // (pas automatique) : cet appel peut être lent et n'a de sens que sur le réseau Prosuma.
+              document.getElementById('sales-backfill-check-rpos-limit').addEventListener('click', async function () {
+                   const select = document.getElementById('sales-backfill-shop');
+                   const shopId = select.value;
+                   const opt = select.selectedOptions[0];
+                   const posId = opt ? opt.dataset.posId : null;
+                   const box = document.getElementById('sales-backfill-rpos-limit');
+                   if (!shopId || !posId) { box.textContent = 'Sélectionnez un magasin.'; return; }
+                   box.textContent = 'Interrogation de RPOS en cours (peut prendre quelques secondes)...';
+                   try {
+                        const res = await window.reassortFetch('/reassort/sales-lines/rpos-earliest-available?shopId=' + encodeURIComponent(shopId) + '&posId=' + encodeURIComponent(posId));
+                        const json = await res.json();
+                        if (!json.success) throw new Error(json.message);
+                        const d = json.data.earliestDate;
+                        box.textContent = d
+                             ? 'Limite RPOS : historique disponible depuis le ' + new Date(d).toLocaleDateString('fr-FR') + ' — récupération possible jusqu\'à cette date.'
+                             : 'Aucune vente trouvée côté RPOS pour ce magasin sur la période interrogée.';
+                   } catch (err) {
+                        box.textContent = 'Erreur : ' + err.message;
+                   }
+              });
+
+              document.getElementById('sales-backfill-run').addEventListener('click', async function () {
                                    const select = document.getElementById('sales-backfill-shop');
                                    const resultBox = document.getElementById('sales-backfill-result');
                                    const shopId = select.value;
@@ -2230,11 +2342,27 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                         if (!json.success) throw new Error(json.message);
                                         document.getElementById('ai-prompt-template').value = json.data.AI_ANALYSIS_PROMPT_TEMPLATE || '';
                                         document.getElementById('ai-quantity-adjustment-enabled').checked = json.data.AI_QUANTITY_ADJUSTMENT_ENABLED === 'true';
+                                        document.getElementById('chatbot-suggested-questions').value = json.data.CHATBOT_SUGGESTED_QUESTIONS || '';
                                    } catch (err) {
                                         document.getElementById('ai-prompt-error').textContent = 'Erreur: ' + err.message;
                                         document.getElementById('ai-prompt-error').style.display = 'block';
                                    }
                               }
+
+                              document.getElementById('chatbot-suggested-questions-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('chatbot-suggested-questions-error');
+                                   const okBox = document.getElementById('chatbot-suggested-questions-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        await saveSystemConfigKey('CHATBOT_SUGGESTED_QUESTIONS', document.getElementById('chatbot-suggested-questions').value);
+                                        okBox.textContent = 'Questions suggérées enregistrées.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
 
                               document.getElementById('ai-prompt-save').addEventListener('click', async function () {
                                    const errBox = document.getElementById('ai-prompt-error');
@@ -2258,6 +2386,13 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
 
 Pour chaque article ci-dessous, procède dans cet ordre précis — n'inverse pas les étapes :
 
+ÉTAPE 0 — Avant toute analyse de l'article, regarde le statut du MAGASIN lui-même (shopActivityStatus, shopMonthsSinceLastActivity, shopHadActivityBeyondSampleWindow) — un champ générique calculé pour tous les magasins de la même façon, jamais une exception propre à tel ou tel magasin ou telle période :
+  - shopActivityStatus="ACTIVE" : le magasin a vendu récemment (ce mois-ci ou le mois dernier). Analyse l'article normalement (étapes 1 à 5) — une absence de vente de CET article dans un magasin actif signifie simplement que la demande pour cet article précis est nulle ou faible, pas que le magasin est arrêté.
+  - shopActivityStatus="RESUMED" : le magasin a repris une activité récente après une période sans aucune vente (tous articles confondus). Traite l'historique d'AVANT la reprise comme peu représentatif de la demande actuelle : ne l'utilise pas pour projeter une quantité, base-toi surtout sur les ventes constatées depuis la reprise, même si cette période est courte — et reste prudent sur les quantités tant que cette reprise n'est pas confirmée sur plusieurs semaines.
+  - shopActivityStatus="INACTIVE" : aucune vente (tous articles confondus) depuis plusieurs mois (shopMonthsSinceLastActivity indique depuis combien de mois). Un historique de ventes ancien ou une moyenne calculée sur une période où le magasin vendait encore ne reflète PAS une demande actuelle : ne recommande pas de quantité basée sur cet historique. Dans ce cas, quantity doit être 0 (sauf si des ventes réelles et récentes apparaissent malgré tout dans dailyHistory, ce qui contredirait ce statut et mérite d'être signalé), et reasoning doit clairement indiquer que le magasin semble ne plus être en activité et qu'aucune commande n'est recommandée pour cette raison, pas parce que l'article ne se vend pas.
+  - shopActivityStatus="NEVER_ACTIVE" ou null (statut non calculé, ex. échec réseau ponctuel) : traite l'article normalement à partir des seules données disponibles, sans supposition sur l'état du magasin.
+Dans tous les cas, ne confonds jamais "cet article précis n'a pas de vente" (une information sur l'article, dans un magasin par ailleurs actif) avec "le magasin n'a pas de vente" (une information sur le magasin lui-même) : ce sont deux causes différentes à une même absence de ventes dans dailyHistory, et seule l'analyse du statut du magasin ci-dessus permet de les distinguer.
+
 ÉTAPE 1 — Analyse l'évolution réelle des ventes. Regarde dailyHistory ([{date, quantity}]) jour par jour, dans l'ordre chronologique. Identifie toi-même : la tendance (les derniers jours sont-ils clairement au-dessus ou en dessous de la moyenne de la période ?), l'accélération ou le ralentissement, un éventuel pic isolé à ne pas extrapoler (promotion, événement ponctuel) par opposition à une hausse ou baisse soutenue sur plusieurs jours consécutifs. IMPORTANT — évalue aussi le RECUL disponible : dailyHistory ne couvre parfois que quelques jours ; une hausse observée sur seulement 2-3 jours au sein d'un historique court est un signal fragile (pic isolé, erreur de caisse, effet ponctuel possible), pas une preuve de tendance durable — dans ce cas, ne recommande qu'un ajustement modéré et dis-le explicitement dans reasoning, plutôt que de projeter l'intégralité du dernier rythme observé comme s'il était acquis. Une tendance vue sur une plus longue période, ou confirmée par seasonalityDeviationPct, mérite davantage de confiance qu'une hausse qui ne repose que sur les tout derniers jours d'un historique court.
 
 ÉTAPE 2 — À partir de cette tendance réelle, forme ta propre estimation de la demande attendue pour la période à venir (en te basant sur le rythme récent plutôt que sur la seule moyenne globale quand une tendance nette se dégage).
@@ -2275,7 +2410,7 @@ Articles (JSON) :
 {{articles}}
 
 Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
-[{"ean": "...", "quantity": 0, "reasoning": "2-4 phrases en français : la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
+[{"ean": "...", "quantity": 0, "reasoning": "2-4 phrases en français : le statut d'activité du magasin s'il n'est pas ACTIVE et son influence sur la décision, la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
 Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`;
 
                               document.getElementById('ai-prompt-reset').addEventListener('click', async function () {
@@ -2389,7 +2524,25 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                    }
                               });
 
-                              initShopPicker().then(loadReassortConfig);
+                              // Ouvre directement le bon onglet si l'URL contient une ancre #tab-xxx (liens
+                              // de la sidebar "Paramètres > Réassort/Fichiers/RPOS/..."), au lieu de toujours
+                              // retomber sur "Réassort" (premier onglet) quel que soit le lien cliqué.
+                              function openTabFromHash() {
+                                   const hash = window.location.hash;
+                                   if (!hash || !hash.startsWith('#tab-')) return;
+                                   const tabLink = document.querySelector('a.nav-link[href="' + hash + '"]');
+                                   const tabPane = document.querySelector(hash);
+                                   if (!tabLink || !tabPane) return;
+                                   document.querySelectorAll('.nav-tabs .nav-link').forEach(function (l) { l.classList.remove('active'); });
+                                   document.querySelectorAll('.tab-content .tab-pane').forEach(function (p) { p.classList.remove('show', 'active'); });
+                                   tabLink.classList.add('active');
+                                   tabPane.classList.add('show', 'active');
+                              }
+
+                              initShopPicker().then(function () {
+                                   loadReassortConfig();
+                                   openTabFromHash();
+                              });
                          })();
                     </script>
                <!-- End Container Fluid -->
@@ -2416,6 +2569,8 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
 </body>
 
 </html>

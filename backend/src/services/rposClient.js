@@ -65,6 +65,15 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Sans ce timeout, un appel RPOS lancé alors que le réseau Prosuma est injoignable (VPN coupé, hors
+// site) pouvait rester en attente très longtemps avant que Node ne détecte l'échec (contrairement à
+// une résolution DNS qui échoue vite avec ENOTFOUND, une connexion qui ne répond jamais côté réseau
+// ne déclenche pas systématiquement d'erreur rapide) — bloquant par exemple le panneau "Analyser"
+// d'un article, qui dépend d'un appel RPOS (profil d'activité du magasin) avant même d'atteindre le
+// LLM. 15s laisse largement le temps à RPOS de répondre en usage normal (quelques centaines de ms à
+// quelques secondes) tout en donnant un échec rapide et clair en cas de réseau réellement coupé.
+const RPOS_REQUEST_TIMEOUT_MS = 15000;
+
 /**
  * RPOS retourne parfois des 502/503 transitoires sous charge, sans lien avec la validité de la
  * requête (observé de façon reproductible sur des requêtes par ailleurs identiques et valides).
@@ -80,18 +89,28 @@ async function rposGet(posId, path, params = {}) {
 
   for (let attempt = 1; attempt <= retryAttempts; attempt++) {
     let res;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), RPOS_REQUEST_TIMEOUT_MS);
     try {
       res = await fetch(url, {
         method: 'GET',
         headers: { Authorization: authHeader(user, password) },
         dispatcher: insecureDispatcher,
+        signal: controller.signal,
       });
     } catch (err) {
+      clearTimeout(timeoutId);
       // fetch échoue avant même d'obtenir une réponse HTTP (DNS injoignable, connexion refusée,
-      // pas de réseau...) : sans ce catch, l'erreur brute undici ("fetch failed", cause dans
-      // err.cause) remontait telle quelle jusqu'à l'UI, peu compréhensible pour l'utilisateur.
+      // pas de réseau, timeout...) : sans ce catch, l'erreur brute undici ("fetch failed", cause
+      // dans err.cause) remontait telle quelle jusqu'à l'UI, peu compréhensible pour l'utilisateur.
       const cause = err.cause;
-      const isNetworkError = cause && ['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'].includes(cause.code);
+      // UND_ERR_CONNECT_TIMEOUT : timeout de connexion natif d'undici (le serveur ne répond pas du
+      // tout au niveau TCP, ex: réseau Prosuma injoignable) — distinct de mon propre AbortController
+      // ci-dessus (RPOS_REQUEST_TIMEOUT_MS), qui se déclenche plus tard si la connexion s'établit
+      // mais que la réponse HTTP elle-même ne vient jamais. Les deux sont des absences de réseau du
+      // point de vue de l'utilisateur, à traiter pareil (retry rapide, puis message clair).
+      const isTimeout = err.name === 'AbortError' || cause?.code === 'UND_ERR_CONNECT_TIMEOUT';
+      const isNetworkError = isTimeout || (cause && ['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'].includes(cause.code));
       // Une seule retentative rapide (pas le nombre complet de retryAttempts avec délai croissant) :
       // contrairement à un 502/503 (le serveur répond mais est temporairement indisponible, où
       // patienter un peu aide), une résolution DNS/connexion qui échoue ne se rétablit typiquement
@@ -99,15 +118,16 @@ async function rposGet(posId, path, params = {}) {
       // comportement (jusqu'à 3 tentatives × délai croissant PAR serveur) pouvait faire attendre
       // l'utilisateur 15-20+ secondes avant d'afficher une simple erreur réseau.
       if (isNetworkError && attempt === 1 && retryAttempts > 1) {
-        console.warn(`[rposClient] GET ${path} -> réseau injoignable (${cause.code}), 1 nouvel essai rapide dans 300ms...`);
+        console.warn(`[rposClient] GET ${path} -> réseau injoignable (${isTimeout ? 'timeout' : cause.code}), 1 nouvel essai rapide dans 300ms...`);
         await sleep(300);
         continue;
       }
       if (isNetworkError) {
-        throw new Error(`Serveur RPOS "${posId}" injoignable (${cause.code === 'ENOTFOUND' ? 'nom d\'hôte introuvable' : 'connexion impossible'}) — vérifiez la connexion réseau/VPN.`);
+        throw new Error(`Serveur RPOS "${posId}" injoignable (${isTimeout ? `aucune réponse après ${RPOS_REQUEST_TIMEOUT_MS / 1000}s` : cause.code === 'ENOTFOUND' ? 'nom d\'hôte introuvable' : 'connexion impossible'}) — vérifiez la connexion réseau/VPN.`);
       }
       throw err;
     }
+    clearTimeout(timeoutId);
 
     if (res.ok) {
       if (attempt > 1) console.log(`[rposClient] GET ${path} OK après ${attempt} tentative(s)`);
@@ -618,6 +638,64 @@ async function getSalesHistoryForProduct(posId, shopId, ean, dateStart, dateEnd)
 }
 
 /** Vérifie si une commande fournisseur RPOS existe toujours (non supprimée). */
+/**
+ * Date de la PREMIÈRE vente jamais enregistrée pour un magasin (ISO string), ou null si aucune —
+ * symétrique de getLastSaleDate ci-dessus, mais RPOS n'expose aucune limite de rétention connue à
+ * l'avance : on ne peut la découvrir qu'en interrogeant réellement le serveur. Un seul appel léger
+ * (page_size:1, ordering:'date' ascendant, fenêtre ouverte jusqu'à "maintenant") suffit : RPOS
+ * retourne directement la ligne la plus ancienne de tout l'historique disponible pour ce magasin,
+ * sans avoir besoin de sonder par paliers comme getLastSaleDate (qui élargit progressivement pour
+ * éviter un timeout sur une vente récente — ici on veut justement l'extrémité la plus large).
+ * Sert à répondre à la question "jusqu'où puis-je encore remonter avec la récupération initiale ?"
+ * (page Paramètres > Fichiers de ventes), plutôt que de laisser l'utilisateur deviner une valeur.
+ */
+async function getEarliestSaleDate(posId, shopId) {
+  // Même stratégie par paliers croissants que getLastSaleDate (une fenêtre trop large dès le
+  // premier essai peut faire timeout côté RPOS sur un gros volume) : on part d'une fenêtre passée
+  // raisonnable et on l'élargit jusqu'à toucher le tout début de l'historique disponible.
+  const now = new Date();
+  const windowsConfig = await systemConfig.getValue(systemConfig.KEYS.LAST_SALE_SEARCH_WINDOWS_DAYS);
+  const windowsInDays = windowsConfig.split(',').map((s) => parseInt(s.trim(), 10)).filter(Boolean);
+
+  let earliestFound = null;
+  for (const days of windowsInDays) {
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const data = await rposGet(posId, '/api/product_line/', {
+      shop: shopId,
+      date_0: start.toISOString().slice(0, 19),
+      date_1: now.toISOString().slice(0, 19),
+      page_size: 1,
+      ordering: 'date',
+      fields: 'date',
+    });
+    const results = data.results || [];
+    if (!results.length) break; // aucune vente même sur cette fenêtre élargie : celle du palier précédent est la plus ancienne connue
+    earliestFound = results[0].date;
+    // Si la ligne la plus ancienne trouvée est nettement postérieure au début de la fenêtre
+    // interrogée, l'historique s'arrête réellement là (pas juste une limite de la fenêtre) : pas
+    // la peine d'élargir davantage.
+    if (new Date(earliestFound).getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000) break;
+  }
+  return earliestFound;
+}
+
+/**
+ * Nombre de ventes (toutes lignes confondues, tous articles) d'un magasin sur une période donnée
+ * — appel volontairement léger (page_size:1, on ne lit que data.count) pour servir de sonde
+ * d'activité mensuelle sans jamais télécharger le détail des ventes (shopActivityService.js,
+ * échantillonnage sur 12-24 mois : un appel coûteux par mois ferait trop d'appels cumulés).
+ */
+async function getMonthlySalesCount(posId, shopId, dateStart, dateEnd) {
+  const data = await rposGet(posId, '/api/product_line/', {
+    shop: shopId,
+    date_0: dateStart,
+    date_1: dateEnd,
+    page_size: 1,
+    fields: 'id',
+  });
+  return data.count || 0;
+}
+
 async function supplierOrderExists(posId, orderId) {
   try {
     const data = await rposGet(posId, `/api/supplier_order/${orderId}/`, {});
@@ -784,6 +862,7 @@ module.exports = {
   getSupplierOrders,
   getPendingPlatformOrderedEans,
   getLastSaleDate,
+  getEarliestSaleDate,
   getProductLinesForPeriod,
   fetchProductLinesPage,
   supplierOrderExists,
@@ -794,5 +873,6 @@ module.exports = {
   getLastSaleForProduct,
   getSalesQuantityForProductInPeriod,
   getSalesHistoryForProduct,
+  getMonthlySalesCount,
   invalidateRposConfigCache,
 };
