@@ -41,6 +41,6 @@ tmp/
 temp/
 
 # Fichiers de travail locaux (notes, brouillons, swaps d'éditeur) — jamais versionnés
-reassort
+/reassort
 commede.text
 *.kate-swp
