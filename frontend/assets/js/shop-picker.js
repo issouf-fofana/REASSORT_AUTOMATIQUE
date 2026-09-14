@@ -38,6 +38,16 @@
     window.reassortSetShopContext(parsed.posLabel, parsed.name, parsed.reference);
   }
 
+  // Ce picker vient de sélectionner explicitement un magasin (clic utilisateur) : répercute ce
+  // choix comme nouveau magasin global (cf. global-shop-selector.js), pour qu'un changement fait
+  // sur N'IMPORTE QUELLE page se propage aux autres pages visitées ensuite — pas seulement au
+  // sélecteur unique de la topbar.
+  function syncToGlobalShop(opt) {
+    if (!window.reassortSetActiveShop) return;
+    const parsed = parseShopOption(opt);
+    window.reassortSetActiveShop({ id: opt.value, reference: parsed.reference, name: parsed.name, posLabel: parsed.posLabel });
+  }
+
   function buildPicker(selectEl) {
     const existingWrapper = selectEl.parentElement.querySelector('.shop-picker-wrapper');
     if (existingWrapper) existingWrapper.remove();
@@ -126,10 +136,26 @@
           selectEl.dispatchEvent(new Event('change'));
           button.textContent = opt.textContent;
           updateShopContext(opt);
+          syncToGlobalShop(opt);
           const bsModal = bootstrap.Modal.getInstance(modal);
           if (bsModal) bsModal.hide();
         });
       });
+    }
+
+    // N'écrase JAMAIS une valeur déjà présente (ex: magasin restauré depuis l'URL ?shop=...,
+    // priorité assumée à ce qui est explicite dans l'URL courante) — ne s'applique que si le
+    // select est encore vide, cas normal d'un premier chargement de page.
+    function applyGlobalShopIfAny() {
+      if (selectEl.value || !window.reassortGetActiveShop) return;
+      const activeShop = window.reassortGetActiveShop();
+      if (!activeShop) return;
+      const matchingOption = options.find(function (o) { return o.value === activeShop.id; });
+      if (!matchingOption) return;
+      selectEl.value = matchingOption.value;
+      selectEl.dispatchEvent(new Event('change'));
+      button.textContent = matchingOption.textContent;
+      updateShopContext(matchingOption);
     }
 
     searchInput.addEventListener('input', function () { renderRows(searchInput.value); });
@@ -143,8 +169,16 @@
       if (selectEl.selectedOptions.length) {
         button.textContent = selectEl.selectedOptions[0].textContent;
         updateShopContext(selectEl.selectedOptions[0]);
+        syncToGlobalShop(selectEl.selectedOptions[0]);
       }
     });
+
+    // Magasin global déjà choisi (topbar, cf. global-shop-selector.js) : présélectionne ce picker
+    // avec ce magasin dès sa construction, pour qu'une page nouvellement chargée démarre déjà sur
+    // le bon magasin sans que l'utilisateur ait à le rechoisir à chaque page (demande du
+    // 14/09/2026). Ne fait rien si le magasin global n'existe pas parmi les options de CETTE page
+    // (ex: un select dédié à un sous-ensemble de magasins).
+    applyGlobalShopIfAny();
 
     // Sélection déjà présente au moment où le picker est construit (ex: magasin restauré depuis
     // l'URL ou le localStorage) : affiche le contexte dès le départ, pas seulement au prochain

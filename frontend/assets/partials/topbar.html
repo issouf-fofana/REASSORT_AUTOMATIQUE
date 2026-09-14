@@ -14,7 +14,12 @@
                     </button>
                     <div class="d-none d-md-block text-truncate" style="min-width:0;">
                          <h4 class="fw-bold text-uppercase mb-0 text-gray-800 text-truncate" id="page-title"></h4>
+                         <!-- Contexte magasin : lecture seule pour un compte STORE (un seul magasin assigné,
+                              rien à choisir), ou sélecteur global cliquable pour ADMIN/SUPERVISOR (demande du
+                              14/09/2026 : le magasin choisi une fois doit s'appliquer à toutes les pages, plus
+                              besoin de le resélectionner à chaque page — cf. global-shop-selector.js). -->
                          <div class="small text-muted text-truncate" id="page-shop-context" style="display:none;"></div>
+                         <button type="button" class="btn btn-link btn-sm p-0 small text-truncate" id="global-shop-selector-btn" style="display:none;"></button>
                     </div>
                </div>
                <ul class="navbar-nav align-items-center">
