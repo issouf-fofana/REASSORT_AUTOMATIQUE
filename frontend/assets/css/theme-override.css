@@ -121,7 +121,9 @@ a:not(.sidebar *),
 }
 .shop-picker-modal .modal-header {
      background-color: #000000;
-     color: #ffffff;
+}
+.shop-picker-modal .modal-header .modal-title {
+     color: #ffffff !important;
 }
 .shop-picker-modal .modal-header .btn-close {
      filter: invert(1);
