@@ -623,6 +623,10 @@
                                                             if (urlShopId && shopSelect.querySelector('option[value="' + urlShopId + '"]')) {
                                                                  shopSelect.value = urlShopId;
                                                                  listShopSelect.value = urlShopId;
+                                                                 // Signale à shop-picker.js que ce choix est EXPLICITE (restauré depuis l'URL),
+                                                                 // pour qu'il ne soit jamais écrasé par le magasin global de la topbar.
+                                                                 shopSelect.dataset.preselected = '1';
+                                                                 listShopSelect.dataset.preselected = '1';
                                                             }
                                                             shopSelect.addEventListener('change', function () {
                                                                  listShopSelect.value = shopSelect.value;

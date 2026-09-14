@@ -70,16 +70,13 @@
     button.setAttribute('data-bs-target', '#' + modalId);
     button.textContent = selectEl.selectedOptions.length ? selectEl.selectedOptions[0].textContent : 'Sélectionner un magasin';
 
-    // Le sélecteur global de la topbar (ADMIN/SUPERVISOR, cf. global-shop-selector.js) couvre déjà
-    // le choix du magasin partout : afficher CE bouton en plus créait un doublon visuel (le même
-    // magasin, ou pire deux magasins différents avant la synchro en direct ci-dessous — demande du
-    // 14/09/2026 "on ne doit plus voir ça"). Masqué pour ADMIN/SUPERVISOR ; conservé pour STORE
-    // (un seul magasin, le sélecteur global ne s'affiche jamais dans ce cas) et comme filet de
-    // sécurité si le script topbar n'a pas pu se charger.
-    const user = window.reassortGetUser && window.reassortGetUser();
-    const hideForGlobalSelector = user && user.role !== 'STORE' && window.reassortGetActiveShop;
-    if (hideForGlobalSelector) wrapper.style.display = 'none';
-
+    // NE PAS masquer ce bouton pour ADMIN/SUPERVISOR (essayé le 14/09/2026, abandonné) : certaines
+    // pages (ex: Paramètres > Synchronisation, "Récupération initiale"/"Purger les ventes") sont
+    // des actions ADMIN indépendantes qui doivent pouvoir cibler N'IMPORTE QUEL magasin, pas
+    // forcément celui actif dans la topbar — masquer leur sélecteur les rendait inutilisables
+    // (plus aucun moyen de choisir un magasin différent). Ce bouton reste synchronisé EN DIRECT
+    // avec le magasin global (applyGlobalShopIfAny / reassortOnActiveShopChange ci-dessous), qui
+    // ne fait que le PRÉ-remplir par défaut, jamais l'imposer.
     wrapper.appendChild(button);
     selectEl.insertAdjacentElement('afterend', wrapper);
 
@@ -153,11 +150,17 @@
       });
     }
 
-    // N'écrase JAMAIS une valeur déjà présente (ex: magasin restauré depuis l'URL ?shop=...,
-    // priorité assumée à ce qui est explicite dans l'URL courante) — ne s'applique que si le
-    // select est encore vide, cas normal d'un premier chargement de page.
+    // N'écrase JAMAIS une valeur déjà EXPLICITEMENT choisie par la page appelante (ex: magasin
+    // restauré depuis l'URL ?shop=..., positionné via selectEl.value AVANT d'appeler
+    // reassortMakeShopPickerSearchable) : ce cas se signale avec l'attribut data-preselected="1"
+    // sur le <select>, posé par la page elle-même. Sans ce marqueur explicite, on ne peut pas se
+    // fier à selectEl.value seul pour savoir si un choix réel a déjà été fait — un <select> HTML
+    // natif fraîchement rempli d'<option> a TOUJOURS une valeur non vide par défaut (la première
+    // option, un pur artefact du DOM, jamais un vrai choix utilisateur), ce qui empêchait presque
+    // toujours la présélection automatique du magasin global (bug observé le 14/09/2026 : le
+    // magasin actif de la topbar n'était jamais répercuté sur Paramètres > Synchronisation).
     function applyGlobalShopIfAny() {
-      if (selectEl.value || !window.reassortGetActiveShop) return;
+      if (selectEl.dataset.preselected || !window.reassortGetActiveShop) return;
       const activeShop = window.reassortGetActiveShop();
       if (!activeShop) return;
       applyShop(activeShop);
