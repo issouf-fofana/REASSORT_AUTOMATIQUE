@@ -70,6 +70,16 @@
     button.setAttribute('data-bs-target', '#' + modalId);
     button.textContent = selectEl.selectedOptions.length ? selectEl.selectedOptions[0].textContent : 'Sélectionner un magasin';
 
+    // Le sélecteur global de la topbar (ADMIN/SUPERVISOR, cf. global-shop-selector.js) couvre déjà
+    // le choix du magasin partout : afficher CE bouton en plus créait un doublon visuel (le même
+    // magasin, ou pire deux magasins différents avant la synchro en direct ci-dessous — demande du
+    // 14/09/2026 "on ne doit plus voir ça"). Masqué pour ADMIN/SUPERVISOR ; conservé pour STORE
+    // (un seul magasin, le sélecteur global ne s'affiche jamais dans ce cas) et comme filet de
+    // sécurité si le script topbar n'a pas pu se charger.
+    const user = window.reassortGetUser && window.reassortGetUser();
+    const hideForGlobalSelector = user && user.role !== 'STORE' && window.reassortGetActiveShop;
+    if (hideForGlobalSelector) wrapper.style.display = 'none';
+
     wrapper.appendChild(button);
     selectEl.insertAdjacentElement('afterend', wrapper);
 
