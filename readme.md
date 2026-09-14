@@ -210,6 +210,22 @@ docker compose up -d --build
 - Backend : `http://localhost:3001`
 - Frontend : `http://localhost:8080`
 
+#### 🔑 Accès
+
+Au tout premier démarrage, `backend/prisma/create-admin.js` crée automatiquement un compte ADMIN
+si aucun n'existe encore (voir `docker-entrypoint.sh`) — mot de passe fort généré et affiché
+**une seule fois** dans les logs du conteneur backend (`docker logs <conteneur-backend>` ou via
+le script `./docker-up.sh` qui l'affiche directement après le build).
+
+Compte de dev/local créé manuellement pour cet environnement :
+
+| Email | Mot de passe | Rôle |
+|---|---|---|
+| `admin@admin.com` | `12345678` | ADMIN |
+
+⚠️ Identifiants faibles, réservés au dev/test local — à ne jamais utiliser en production. À
+changer dès la première connexion (page Paramètres > Utilisateurs).
+
 ### Setup local sans Docker (backend seul)
 
 ```bash
