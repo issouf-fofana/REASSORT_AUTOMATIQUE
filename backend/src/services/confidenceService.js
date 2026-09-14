@@ -14,9 +14,8 @@
  * signal manque, plutôt que de l'ignorer ou de l'inventer — ex: aucun historique d'erreur passée
  * pour cet article => précision historique notée au niveau neutre (50/100), pas au maximum.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 // Pondération de chaque signal dans le score final (somme = 1). La précision historique pèse le
 // plus lourd : c'est le seul signal qui mesure directement "l'IA a-t-elle eu raison par le passé

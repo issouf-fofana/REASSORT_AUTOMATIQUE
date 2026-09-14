@@ -9,11 +9,10 @@
  * (jamais "si shopId = X" ou "si année = 2025") : uniquement à partir de la présence/absence de
  * ventes réelles sur des fenêtres mensuelles échantillonnées.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
-const prisma = new PrismaClient();
 
 // Le statut d'un magasin ne change pas d'heure en heure : un cache long évite de refaire
 // l'échantillonnage RPOS (jusqu'à 24 appels légers) à chaque génération de proposition.

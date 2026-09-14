@@ -8,9 +8,8 @@
  * par permission (§43, quel magasin l'utilisateur a le droit de consulter) est appliquée en amont,
  * dans la route qui appelle ces outils, jamais ici.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 async function getLatestProposal(rposShopId) {
   return prisma.proposal.findFirst({

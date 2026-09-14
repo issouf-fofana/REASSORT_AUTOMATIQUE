@@ -16,7 +16,7 @@ const systemConfig = require('./systemConfigService');
 // spécifiques (rupture, surstock, précision) sont placées avant la règle générique "stock".
 const INTENT_RULES = [
   { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux'], tool: 'getParetoArticles' },
-  { keywords: ['ca ', 'chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', ' ca du', ' ca le', ' ca est', ' ca de'], tool: 'getRevenue' },
+  { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de'], tool: 'getRevenue' },
   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer'], tool: 'getStockoutRisks' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock'], tool: 'getOverstockArticles' },
   { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne'], tool: 'getPredictionAccuracy' },

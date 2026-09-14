@@ -1,8 +1,7 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 const systemConfig = require('./systemConfigService');
 
-const prisma = new PrismaClient();
 
 /**
  * Dernier achat et dernière vente d'un produit, avec cache journalier (TTL configurable) pour

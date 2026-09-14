@@ -5,10 +5,9 @@
  * durée de la période (minute/heure sur une période courte, jour/semaine/mois sur une période
  * longue) — pour que le graphique reste lisible aussi bien sur une journée que sur une année.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 
-const prisma = new PrismaClient();
 
 /**
  * Historique de vente d'un article, en lisant d'abord la base locale SalesLine (alimentée par

@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
 
-const prisma = new PrismaClient();
 
 const MAGASINS_JSON_PATH = path.join(__dirname, '..', '..', 'magasins.json');
 

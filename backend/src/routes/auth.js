@@ -3,11 +3,10 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const { requireAuth } = require('../middleware/auth');
 const { getJwtConfig } = require('../services/jwtConfigService');
 
-const prisma = new PrismaClient();
 
 // Limite les tentatives de connexion par IP (brute-force sur mot de passe) : sans ce garde-fou,
 // rien n'empêchait un script d'essayer des milliers de mots de passe par minute sur /login.

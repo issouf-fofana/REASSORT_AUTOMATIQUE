@@ -20,10 +20,9 @@
  *    l'insertion utilise skipDuplicates, donc relancer un run déjà partiellement fait ne crée
  *    jamais de doublons, même si une tranche est retraitée depuis le début.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 
-const prisma = new PrismaClient();
 
 const TARGET_LINES_PER_CHUNK = 400_000;
 const PAGE_SIZE = 250;

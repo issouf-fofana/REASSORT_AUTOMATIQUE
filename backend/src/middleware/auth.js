@@ -1,8 +1,7 @@
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const { getJwtConfig } = require('../services/jwtConfigService');
 
-const prisma = new PrismaClient();
 
 /** Vérifie le token JWT et attache l'utilisateur (id, role, rposShopId) à req.user. */
 async function requireAuth(req, res, next) {

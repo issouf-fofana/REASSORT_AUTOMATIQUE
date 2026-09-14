@@ -8,9 +8,8 @@
  * Pas d'envoi d'alerte externe (email/Slack) pour l'instant, faute de service déjà configuré dans
  * ce projet — le compteur d'échecs consécutifs est la donnée qu'un futur webhook consommerait.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 const JOB_HEALTH_KEY_PREFIX = 'JOB_HEALTH_';
 
