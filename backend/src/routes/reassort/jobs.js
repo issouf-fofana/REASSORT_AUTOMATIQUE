@@ -3,7 +3,7 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop } = require('../../middleware/auth');
+const { requireAdmin } = require('../../middleware/auth');
 const { runNightlyProposalGeneration } = require('../../jobs/nightlyProposalJob');
 const { runReceptionSync } = require('../../jobs/receptionSyncJob');
 const { runSalesSync } = require('../../jobs/salesSyncJob');

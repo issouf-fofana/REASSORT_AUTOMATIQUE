@@ -308,6 +308,9 @@ async function readSseStream(res, extractText, onChunk) {
   let buffer = '';
   let fullText = '';
 
+  // Boucle de lecture du flux SSE : `while (true)` volontaire (sortie par `break`
+  // quand le flux est terminé) — pas une condition constante oubliée.
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;

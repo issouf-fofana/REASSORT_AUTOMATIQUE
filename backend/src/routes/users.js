@@ -14,6 +14,8 @@ function normalizeRole(role) {
 }
 
 function toPublicUser(user) {
+  // `password` est volontairement omis de la réponse (jamais exposé côté API).
+  // eslint-disable-next-line no-unused-vars
   const { password, ...rest } = user;
   return rest;
 }

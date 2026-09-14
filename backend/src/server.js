@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
+const logger = require('./utils/logger');
 const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 
@@ -101,7 +102,12 @@ app.get('/api/health', (req, res) => {
 // ERROR HANDLING
 // =============================================
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  logger.error('Erreur serveur', {
+    method: req.method,
+    url: req.originalUrl,
+    message: err.message,
+    stack: err.stack,
+  });
   res.locals.errorStack = err.stack || null; // relu par le hook debug global (ErrorReport)
   res.status(err.status || 500).json({
     success: false,

@@ -3,7 +3,7 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop } = require('../../middleware/auth');
+const { requireAdmin, resolveShopId } = require('../../middleware/auth');
 const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const { getConfig, upsertConfig } = require('../../services/configService');

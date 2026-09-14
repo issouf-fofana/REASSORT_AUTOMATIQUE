@@ -3,7 +3,7 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop } = require('../../middleware/auth');
+const { requireAdmin } = require('../../middleware/auth');
 const salesBackfillService = require('../../services/salesBackfillService');
 
 router.post('/sales-backfill', requireAdmin, async (req, res) => {

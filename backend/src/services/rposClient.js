@@ -571,7 +571,6 @@ async function getLastSaleForProduct(posId, shopId, ean) {
 async function getSalesQuantityForProductInPeriod(posId, shopId, ean, dateStart, dateEnd) {
   const pageSize = 250;
   let page = 1;
-  let total = null;
   let sum = 0;
 
   do {
@@ -584,7 +583,6 @@ async function getSalesQuantityForProductInPeriod(posId, shopId, ean, dateStart,
       page,
       fields: 'quantity',
     });
-    total = data.count || 0;
     for (const line of data.results || []) {
       sum += Number(line.quantity) || 0;
     }
@@ -612,7 +610,6 @@ async function getSalesHistoryForProduct(posId, shopId, ean, dateStart, dateEnd)
 
   const pageSize = 1000;
   let page = 1;
-  let total = null;
   const lines = [];
 
   do {
@@ -625,7 +622,6 @@ async function getSalesHistoryForProduct(posId, shopId, ean, dateStart, dateEnd)
       page,
       fields: 'date,quantity,total_excl_tax',
     });
-    total = data.count || 0;
     for (const line of data.results || []) {
       lines.push({ date: line.date, quantity: Number(line.quantity) || 0, revenue: Number(line.total_excl_tax) || 0 });
     }

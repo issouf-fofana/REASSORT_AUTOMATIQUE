@@ -26,6 +26,9 @@ const MONTHS_TO_SAMPLE = 24;
 // En dessous de ce nombre de jours depuis la dernière vente connue, le magasin est considéré actif
 // sans ambiguïté. Au-delà, on regarde le détail des mois échantillonnés pour qualifier plus finement
 // (inactif, en reprise...).
+// NOTE : seuil conservé pour documentation (valeur métier de référence = 14 jours) mais non
+// appliqué directement par le code actuel — la qualification passe par MONTHS_TO_SAMPLE.
+// eslint-disable-next-line no-unused-vars
 const RECENT_ACTIVITY_THRESHOLD_DAYS = 14;
 
 /** Un seul mois échantillonné : y a-t-il eu au moins une vente sur ce magasin durant ce mois ? */
