@@ -114,6 +114,33 @@ a:not(.sidebar *),
      object-fit: contain;
 }
 
+/* Sélecteur de magasin en modale plein tableau (demande du 14/09/2026, style calqué sur RPOS mais
+   noir/blanc au lieu de bleu, cohérent avec le reste de l'application). */
+.shop-picker-button {
+     cursor: pointer;
+}
+.shop-picker-modal .modal-header {
+     background-color: #000000;
+     color: #ffffff;
+}
+.shop-picker-modal .modal-header .btn-close {
+     filter: invert(1);
+}
+.shop-picker-table thead th {
+     font-size: 0.75rem;
+     text-transform: uppercase;
+     letter-spacing: 0.03em;
+     color: #666666;
+     border-bottom-width: 2px;
+}
+.shop-picker-row {
+     cursor: pointer;
+}
+.shop-picker-row.table-active td {
+     background-color: #000000 !important;
+     color: #ffffff;
+}
+
 /* Sidebar masquable sur desktop (bouton topbar, demande du 14/09/2026) : menu escamoté et
    contenu en pleine largeur. Desktop uniquement (≥992px, là où .content a sa marge de 260px)
    — sur mobile, le hamburger en overlay reste le mécanisme. */
