@@ -19,6 +19,10 @@
 
      <style>
           .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          /* Cellules longues (message d'erreur, page/API) : retour à la ligne au lieu de forcer
+             le tableau à s'étirer hors du viewport (bug observé : la scrollbar de la page entière
+             débordait jusque sur la sidebar au lieu de rester contenue dans .table-responsive). */
+          #err-tbody td { word-break: break-word; overflow-wrap: break-word; white-space: normal; }
      </style>
 </head>
 
@@ -63,7 +67,15 @@
                          <div class="card-body">
                               <div class="small text-muted mb-2" id="err-summary"></div>
                               <div class="table-responsive">
-                                   <table class="table table-sm align-middle mb-0">
+                                   <table class="table table-sm align-middle mb-0" style="table-layout: fixed; width: 100%;">
+                                        <colgroup>
+                                             <col style="width: 130px;">
+                                             <col style="width: 90px;">
+                                             <col style="width: 220px;">
+                                             <col>
+                                             <col style="width: 160px;">
+                                             <col style="width: 110px;">
+                                        </colgroup>
                                         <thead class="bg-light-subtle">
                                              <tr>
                                                   <th>Date</th>
