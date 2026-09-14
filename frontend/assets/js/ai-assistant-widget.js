@@ -56,6 +56,16 @@
     return div.innerHTML;
   }
 
+  // Même comportement que ai-assistant.js/ai-recommendation-panel.js : gras traité avant
+  // l'italique simple (sinon les astérisques du gras seraient consommés par erreur par la règle
+  // d'italique). Fichiers volontairement indépendants (pas de fonctions partagées entre le widget
+  // et la page dédiée), mais le rendu d'une même réponse IA doit rester identique partout.
+  function applyInlineMarkdown(str) {
+    return str
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+  }
+
   function markdownLiteToHtml(text) {
     if (!text) return '';
     const escaped = escapeHtml(text);
@@ -71,9 +81,9 @@
     lines.forEach(function (rawLine) {
       const line = rawLine.trim();
       const bulletMatch = line.match(/^[-*]\s+(.*)/);
-      if (bulletMatch) { listBuffer.push(bulletMatch[1].replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')); return; }
+      if (bulletMatch) { listBuffer.push(applyInlineMarkdown(bulletMatch[1])); return; }
       flushList();
-      if (line) htmlParts.push('<p>' + line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</p>');
+      if (line) htmlParts.push('<p>' + applyInlineMarkdown(line) + '</p>');
     });
     flushList();
     return htmlParts.join('');

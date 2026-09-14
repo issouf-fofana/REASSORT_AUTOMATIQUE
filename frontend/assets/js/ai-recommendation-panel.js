@@ -172,7 +172,13 @@
   }
 
   function applyInlineMarkdown(str) {
-    return str.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Le gras (**mot**) est traité en premier : sinon les deux astérisques du gras seraient
+    // consommés par erreur par la règle d'italique simple (*mot*) ci-dessous. Même comportement
+    // que ai-assistant.js/ai-assistant-widget.js (fichiers volontairement indépendants, mais le
+    // rendu doit rester identique quelle que soit la surface UI qui affiche une réponse IA).
+    return str
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
   }
 
   function aiLoadingHtml() {
