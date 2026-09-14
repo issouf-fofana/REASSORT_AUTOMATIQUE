@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
 const { detectAnomalies } = require('./anomalyService');
+const { PRIORITY_RANK } = require('./improvementService');
 const aiForecastService = require('./aiForecastService');
 
 
@@ -1353,7 +1354,7 @@ async function getAdminDashboard() {
   // un historique complet).
   const dashboardWindowStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  const [pendingCounts, validatedProposals, allValidatedLines] = await Promise.all([
+  const [pendingCounts, validatedProposals, allValidatedLines, openImprovements] = await Promise.all([
     prisma.proposal.groupBy({
       by: ['rposShopId'],
       where: { rposShopId: { in: shopIds }, status: 'GENERATED' },
@@ -1372,9 +1373,26 @@ async function getAdminDashboard() {
         quantitySuggested: true,
         quantityValidated: true,
         daysUntilStockout: true,
+        avgWeeklySales: true,
       },
     }),
+    // Constats du Conseiller d'amélioration (§44-46, AI Center) : les plus prioritaires d'abord,
+    // pour donner une vraie vue "santé du système IA" sur ce même tableau de bord plutôt que de
+    // laisser cette information isolée sur la page Améliorations IA.
+    prisma.aIImprovement.findMany({
+      where: { status: { in: ['PROPOSED', 'IN_PROGRESS', 'TO_VERIFY'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, type: true, severity: true, priority: true, title: true, scope: true, status: true, createdAt: true },
+      take: 30,
+    }),
   ]);
+
+  // Tri par priorité réelle (CRITICAL avant HIGH avant MEDIUM avant LOW) : Prisma ne peut pas trier
+  // sur cet ordre métier directement (orderBy alphabétique donnerait CRITICAL, HIGH, LOW, MEDIUM,
+  // faux), donc trié ici avec le même PRIORITY_RANK que la page Améliorations IA, puis borné à 10.
+  const topImprovements = openImprovements
+    .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9))
+    .slice(0, 10);
 
   const pendingByShop = new Map(pendingCounts.map((p) => [p.rposShopId, p._count]));
   const validatedByShop = new Map();
@@ -1383,15 +1401,25 @@ async function getAdminDashboard() {
     validatedByShop.get(p.rposShopId).push(p);
   }
 
+  // Seuils par défaut (configService.js DEFAULTS) utilisés tels quels pour ce calcul agrégé multi-
+  // magasins : la config précise diffère parfois d'un magasin à l'autre, mais interroger getConfig
+  // par magasin ici (N+1) ralentirait ce tableau de bord pour un gain de précision marginal sur un
+  // indicateur de TENDANCE globale, pas une mesure exacte par magasin (cf. commentaire
+  // dashboardWindowStart ci-dessus, même logique).
+  const DEFAULT_SAFETY_STOCK_RATIO = 0.5;
+  const DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER = 1.5;
+
   let totalLines = 0;
   let unchangedLines = 0;
   let stockoutLines = 0;
   let stockoutEligible = 0;
+  let overstockLines = 0;
+  let overstockEligible = 0;
   const perShopLines = new Map();
 
   for (const line of allValidatedLines) {
     const shopId = line.proposal.rposShopId;
-    if (!perShopLines.has(shopId)) perShopLines.set(shopId, { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0 });
+    if (!perShopLines.has(shopId)) perShopLines.set(shopId, { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0 });
     const bucket = perShopLines.get(shopId);
 
     if (!line.wasExcluded) {
@@ -1409,11 +1437,20 @@ async function getAdminDashboard() {
           bucket.stockout += 1;
         }
       }
+      if (line.avgWeeklySales !== null && line.avgWeeklySales !== undefined && line.quantityValidated !== null) {
+        overstockEligible += 1;
+        bucket.overstockEligible += 1;
+        const theoreticalNeed = line.avgWeeklySales * (1 + DEFAULT_SAFETY_STOCK_RATIO);
+        if (theoreticalNeed > 0 && line.quantityValidated > theoreticalNeed * DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER) {
+          overstockLines += 1;
+          bucket.overstock += 1;
+        }
+      }
     }
   }
 
   const perShop = shops.map((s) => {
-    const bucket = perShopLines.get(s.rposShopId) || { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0 };
+    const bucket = perShopLines.get(s.rposShopId) || { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0 };
     const validated = validatedByShop.get(s.rposShopId) || [];
     return {
       rposShopId: s.rposShopId,
@@ -1425,6 +1462,7 @@ async function getAdminDashboard() {
       lastValidatedAt: validated[0]?.validatedAt || null,
       conformityRate: bucket.total > 0 ? bucket.unchanged / bucket.total : null,
       stockoutRate: bucket.stockoutEligible > 0 ? bucket.stockout / bucket.stockoutEligible : null,
+      overstockRate: bucket.overstockEligible > 0 ? bucket.overstock / bucket.overstockEligible : null,
     };
   });
 
@@ -1439,8 +1477,13 @@ async function getAdminDashboard() {
     totalValidatedProposals: validatedProposals.length,
     globalConformityRate: totalLines > 0 ? unchangedLines / totalLines : null,
     globalStockoutRate: stockoutEligible > 0 ? stockoutLines / stockoutEligible : null,
+    globalOverstockRate: overstockEligible > 0 ? overstockLines / overstockEligible : null,
     stockoutAlertThreshold,
     perShop,
+    // Constats ouverts du Conseiller d'amélioration (§44-46, AI Center) : donne une vue "santé du
+    // système IA" directement sur ce tableau de bord, avec un lien vers la page dédiée pour agir.
+    openImprovements: topImprovements,
+    openImprovementsCount: openImprovements.length,
   };
 }
 
