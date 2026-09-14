@@ -64,10 +64,17 @@
   // Contexte magasin sous le titre de page (style RPOS "Serveur X : NOM MAGASIN (CODE)", demande
   // du 14/09/2026) : appelé par shop-picker.js à chaque sélection, pour ne pas dupliquer cette
   // logique sur chaque page qui a un sélecteur de magasin.
+  //
+  // Affiché en LECTURE SEULE uniquement pour un compte STORE (un seul magasin possible, rien à
+  // choisir). Pour ADMIN/SUPERVISOR, le sélecteur global cliquable (#global-shop-selector-btn, cf.
+  // global-shop-selector.js) fait déjà ce travail — les deux affichés en même temps créaient un
+  // doublon visuel (bug observé : "CASH CENTER ZONE 4" en lecture seule ET "SUPER U VALLON"
+  // cliquable superposés), la décision est donc centralisée ici plutôt que dans chaque appelant.
   window.reassortSetShopContext = function (posLabel, shopName, shopReference) {
     const el = document.getElementById('page-shop-context');
     if (!el) return;
-    if (!shopName) { el.style.display = 'none'; el.textContent = ''; return; }
+    const user = window.reassortGetUser && window.reassortGetUser();
+    if (!shopName || (user && user.role !== 'STORE')) { el.style.display = 'none'; el.textContent = ''; return; }
     el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
     el.style.display = '';
   };
