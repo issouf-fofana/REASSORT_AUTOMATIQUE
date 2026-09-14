@@ -11,6 +11,7 @@ const { seedServersFromJson } = require('./services/rposServersService');
 const reassortRoutes = require('./routes/reassort');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const fallbackRoutes = require('./routes/fallback');
 
 // Initialize Express
 const app = express();
@@ -72,8 +73,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static files (dashboard)
-app.use(express.static('public'));
+// Pages de secours (fallback minimal : / et /login + leurs assets, dossier
+// backend/public-fallback/ synchronisé via `npm run sync-fallback`). Monté AVANT
+// les routes /api : il ne répond qu'à sa whitelist + aux assets existants, et
+// passe la main (next) dans tous les autres cas — l'API n'est jamais masquée.
+// Remplace l'ancien `express.static('public')` (snapshot anglais du template,
+// 36 Mo, pages divergentes) supprimé lors du ménage P1 : plus aucun doublon.
+app.use(fallbackRoutes);
 
 // =============================================
 // API ROUTES

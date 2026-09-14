@@ -9,7 +9,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 COPY src ./src/
-COPY public ./public/
+COPY public-fallback ./public-fallback/
+COPY scripts ./scripts/
 COPY magasins.json ./
 
 # Install dependencies
@@ -35,7 +36,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src ./src
-COPY --from=builder /app/public ./public
+COPY --from=builder /app/public-fallback ./public-fallback
 COPY --from=builder /app/magasins.json ./
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh

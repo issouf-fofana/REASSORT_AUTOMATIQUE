@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <!-- Title Meta -->
+     <meta charset="utf-8" />
+     <title>Connexion | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+     <!-- Volt Bootstrap 5 Dashboard : CSS compilée depuis template-volt-src/ + template/volt-bootstrap-5-dashboard
+          (gulp build:dev), copiée dans assets/volt/. Remplace entièrement vendor.min.css/icons.min.css/app.min.css (Larkon). -->
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <!-- Theme Config js (Require in all Page) -->
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+</head>
+
+<body>
+
+     <main>
+          <section class="vh-lg-100 mt-5 mt-lg-0 bg-soft d-flex align-items-center">
+               <div class="container">
+                    <div class="row justify-content-center">
+                         <div class="col-12 d-flex align-items-center justify-content-center">
+                              <div class="bg-white shadow border-0 rounded border-light p-4 p-lg-5 w-100" style="max-width: 500px;">
+                                   <div class="text-center text-md-center mb-4 mt-md-0">
+                                        <h1 class="mb-0 h3">Connexion</h1>
+                                        <p class="text-muted mt-1 mb-0">Réassort automatique — connectez-vous avec votre compte.</p>
+                                   </div>
+
+                                   <div id="login-error" class="alert alert-danger" style="display:none;"></div>
+
+                                   <form id="login-form" class="mt-4">
+                                        <div class="form-group mb-4">
+                                             <label for="login-email">Email</label>
+                                             <div class="input-group">
+                                                  <span class="input-group-text">
+                                                       <svg class="icon icon-xs text-gray-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path></svg>
+                                                  </span>
+                                                  <input type="email" id="login-email" name="email" class="form-control" placeholder="Entrez votre email" autofocus required>
+                                             </div>
+                                        </div>
+                                        <div class="form-group mb-4">
+                                             <label for="login-password">Mot de passe</label>
+                                             <div class="input-group">
+                                                  <span class="input-group-text">
+                                                       <svg class="icon icon-xs text-gray-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+                                                  </span>
+                                                  <input type="password" id="login-password" name="password" class="form-control" placeholder="Entrez votre mot de passe" required>
+                                             </div>
+                                        </div>
+                                        <div class="d-grid">
+                                             <button id="login-submit" class="btn btn-gray-800" type="submit">Se connecter</button>
+                                        </div>
+                                   </form>
+                                   <script>
+                                        (function () {
+                                             const API_BASE = (window.REASSORT_BACKEND_URL || (window.location.protocol + '//' + window.location.hostname + ':3001')) + '/api';
+                                             const form = document.getElementById('login-form');
+                                             const errorBox = document.getElementById('login-error');
+                                             const submitBtn = document.getElementById('login-submit');
+
+                                             // Déjà connecté -> direct au tableau de bord
+                                             if (localStorage.getItem('reassort_token')) {
+                                                  window.location.href = '/';
+                                             }
+
+                                             form.addEventListener('submit', async function (e) {
+                                                  e.preventDefault();
+                                                  errorBox.style.display = 'none';
+                                                  submitBtn.disabled = true;
+
+                                                  try {
+                                                       const res = await fetch(API_BASE + '/auth/login', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                                 email: document.getElementById('login-email').value,
+                                                                 password: document.getElementById('login-password').value,
+                                                            }),
+                                                       });
+                                                       const json = await res.json();
+                                                       if (!json.success) throw new Error(json.message);
+
+                                                       localStorage.setItem('reassort_token', json.data.token);
+                                                       localStorage.setItem('reassort_user', JSON.stringify(json.data.user));
+                                                       window.location.href = '/';
+                                                  } catch (err) {
+                                                       errorBox.textContent = err.message;
+                                                       errorBox.style.display = 'block';
+                                                  } finally {
+                                                       submitBtn.disabled = false;
+                                                  }
+                                             });
+                                        })();
+                                   </script>
+                              </div>
+                         </div>
+                    </div>
+               </div>
+          </section>
+     </main>
+
+     <!-- Volt vendor JS (Require in all Page) -->
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+</body>
+
+</html>

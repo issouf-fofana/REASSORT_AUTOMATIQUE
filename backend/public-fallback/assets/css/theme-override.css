@@ -1,0 +1,185 @@
+/* Surcharge de style au-dessus de volt.css : bordures carrées (aucun coin arrondi) et palette
+   strictement noir/blanc/gris (cf. THEME_SYSTEM.md — bordures carrées = --r/--r-lg à 0, palette
+   réduite). Volt code ses border-radius en valeurs fixes plutôt qu'en variables CSS : on force
+   donc 0 partout via un sélecteur générique plutôt que de réécrire chaque composant. */
+
+:root {
+     --r: 0px;
+     --r-lg: 0px;
+}
+
+*,
+*::before,
+*::after {
+     border-radius: 0 !important;
+}
+
+/* Le filtre grayscale global précédent désaturait TOUTE la page, y compris les couleurs
+   sémantiques (succès/erreur/alerte) que les règles plus bas dans ce fichier tentaient justement de
+   préserver — contradiction relevée par l'utilisateur ("tout est trop sombre", badges succès/erreur
+   indistinguables l'un de l'autre). Retiré : seuls l'accent (boutons, liens, sidebar) et les badges
+   restent gérés couleur par couleur ci-dessous, pour que les statuts (réussi/échoué/en attente)
+   redeviennent identifiables au premier coup d'œil plutôt que par une simple nuance de gris. */
+
+/* Palette noir/blanc/gris : neutralise les couleurs d'accent de Volt (bleu, jaune, vert, rouge)
+   utilisées sur les boutons primaires, badges et liens actifs. Les couleurs sémantiques
+   (succès/erreur/alerte) restent inchangées ailleurs dans l'appli — seule l'identité visuelle
+   générale (accent, sidebar, liens) passe en noir/blanc. */
+:root {
+     --bs-primary: #000000;
+     --bs-primary-rgb: 0, 0, 0;
+     --bs-secondary: #666666;
+     --bs-secondary-rgb: 102, 102, 102;
+}
+
+.btn-primary,
+.btn-gray-800 {
+     background-color: #000000;
+     border-color: #000000;
+     color: #ffffff;
+}
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-gray-800:hover,
+.btn-gray-800:focus {
+     background-color: #1a1a1a;
+     border-color: #1a1a1a;
+     color: #ffffff;
+}
+
+.btn-outline-primary,
+.btn-outline-secondary,
+.btn-outline-warning,
+.btn-outline-info,
+.btn-outline-danger {
+     color: #000000 !important;
+     border-color: #000000 !important;
+}
+.btn-outline-primary:hover,
+.btn-outline-secondary:hover,
+.btn-outline-warning:hover,
+.btn-outline-info:hover,
+.btn-outline-danger:hover {
+     background-color: #000000 !important;
+     border-color: #000000 !important;
+     color: #ffffff !important;
+}
+
+a:not(.sidebar *),
+.text-primary {
+     color: #000000 !important;
+}
+
+/* volt.css définit .text-secondary deux fois : une via var(--bs-secondary-rgb) (déjà neutralisée
+   ci-dessus), une seconde plus loin dans le fichier avec la couleur codée en dur (#f0bc74), qui
+   l'emporte sur la première par ordre d'apparition — on la neutralise donc explicitement ici. */
+.text-secondary,
+.text-secondary:hover {
+     color: #666666 !important;
+}
+
+.sidebar {
+     background-color: #000000 !important;
+}
+
+.sidebar .nav-item.active > .nav-link,
+.sidebar .nav-item .nav-link:hover {
+     background-color: #262626 !important;
+     color: #ffffff !important;
+}
+
+/* Sidebar plate par sections (demande du 14/09/2026) : intitulés de section discrets et
+   sous-liens Paramètres légèrement indentés pour marquer la hiérarchie sans groupe repliable. */
+.sidebar-heading {
+     color: #8a8a8a !important;
+     font-size: 0.68rem;
+     font-weight: 600;
+     letter-spacing: 0.1em;
+     text-transform: uppercase;
+     padding: 1rem 0.5rem 0.25rem;
+     list-style: none;
+}
+.sidebar .nav-link.sidebar-sub {
+     padding-left: 2.75rem;
+     font-size: 0.9rem;
+}
+
+/* Sidebar masquable sur desktop (bouton topbar, demande du 14/09/2026) : menu escamoté et
+   contenu en pleine largeur. Desktop uniquement (≥992px, là où .content a sa marge de 260px)
+   — sur mobile, le hamburger en overlay reste le mécanisme. */
+@media (min-width: 992px) {
+     body.sidebar-hidden .sidebar {
+          display: none !important;
+     }
+     body.sidebar-hidden .content {
+          margin-left: 0;
+     }
+}
+
+/* Onglets (nav-tabs) : volt.css définit plusieurs règles concurrentes pour l'état actif, dont le
+   résultat final dépendait de l'ordre d'apparition plutôt que d'être garanti — on fixe
+   explicitement un contraste fort (fond noir, texte blanc) sur l'onglet actif, quelle que soit la
+   règle Volt qui gagnerait sinon. */
+.nav-tabs .nav-link.active {
+     background-color: #000000 !important;
+     color: #ffffff !important;
+}
+.nav-tabs .nav-link.active iconify-icon {
+     color: #ffffff !important;
+}
+.nav-tabs .nav-link:not(.active) {
+     color: #1a1a1a !important;
+}
+
+.navbar-top {
+     background-color: #ffffff !important;
+     border-bottom: 1px solid #e5e5e5;
+}
+
+.card {
+     border: 1px solid #e5e5e5 !important;
+     box-shadow: none !important;
+}
+
+/* Couleurs sémantiques réelles (succès/erreur/alerte/info) : distinctes du noir/blanc utilisé
+   partout ailleurs (boutons, sidebar, accents), pour que les statuts (proposition validée/rejetée,
+   commande en erreur, avertissement de couverture de données...) restent identifiables d'un coup
+   d'œil plutôt que par une simple nuance de gris. */
+.badge.bg-success,
+.badge.bg-success-subtle {
+     background-color: #1e7e34 !important;
+     color: #ffffff !important;
+}
+.badge.bg-danger,
+.badge.bg-danger-subtle {
+     background-color: #c0392b !important;
+     color: #ffffff !important;
+}
+.badge.bg-warning,
+.badge.bg-warning-subtle {
+     background-color: #d68910 !important;
+     color: #ffffff !important;
+}
+.badge.bg-info,
+.badge.bg-info-subtle {
+     background-color: #2471a3 !important;
+     color: #ffffff !important;
+}
+
+.text-success { color: #1e7e34 !important; }
+.text-danger { color: #c0392b !important; }
+.text-warning { color: #b9770e !important; }
+.text-info { color: #2471a3 !important; }
+
+.alert-success { background-color: #eafaf1 !important; border-color: #a9dfbf !important; color: #1e7e34 !important; }
+.alert-danger { background-color: #fdedec !important; border-color: #f5b7b1 !important; color: #c0392b !important; }
+.alert-warning { background-color: #fef5e7 !important; border-color: #f8d78e !important; color: #9a6b0a !important; }
+.alert-info { background-color: #eaf2f8 !important; border-color: #a9cce3 !important; color: #2471a3 !important; }
+
+.progress-bar.bg-success { background-color: #1e7e34 !important; }
+.progress-bar.bg-danger { background-color: #c0392b !important; }
+.progress-bar.bg-primary { background-color: #2471a3 !important; }
+
+body {
+     background-color: #f5f5f5;
+}

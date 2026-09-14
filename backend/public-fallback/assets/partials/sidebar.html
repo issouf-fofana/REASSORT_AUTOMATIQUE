@@ -1,0 +1,136 @@
+<!-- Sidebar Volt partagée entre toutes les pages (injectée par assets/js/layout.js).
+     Organisation plate par sections (PILOTAGE / RÉASSORT / ADMINISTRATION) : aucun groupe
+     repliable, rien ne se referme au changement de page (demande du 14/09/2026).
+     État actif : data-nav-item pour les pages (comparé à l'URL par layout.js),
+     data-nav-href="tab-xxx" pour les sous-liens Paramètres (comparé au hash, suivi en live). -->
+<nav id="sidebarMenu" class="sidebar d-lg-block bg-gray-800 text-white collapse" data-simplebar>
+     <div class="sidebar-inner px-4 pt-3">
+          <div class="user-card d-flex d-md-none align-items-center justify-content-between justify-content-md-center pb-4">
+               <div class="d-flex align-items-center">
+                    <div class="d-block">
+                         <h2 class="h5 mb-0" id="user-menu-name-mobile">Réassort</h2>
+                    </div>
+               </div>
+               <div class="collapse-close d-md-none">
+                    <a href="#sidebarMenu" data-bs-toggle="collapse" data-bs-target="#sidebarMenu" aria-controls="sidebarMenu" aria-expanded="true" aria-label="Toggle navigation">
+                         <svg class="icon icon-xs" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                    </a>
+               </div>
+          </div>
+          <ul class="nav flex-column pt-3 pt-md-0">
+               <li class="sidebar-heading">Pilotage</li>
+               <li class="nav-item" data-nav-item="index.html">
+                    <a href="/" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"></path><path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Tableau de bord</span>
+                    </a>
+               </li>
+               <li class="nav-item" id="menu-item-admin-dashboard" data-nav-item="admin-dashboard.html" style="display:none;">
+                    <a href="/admin-dashboard" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.94 6.94a1.5 1.5 0 112.12 2.12L9.5 10.62V13a1 1 0 11-2 0v-3a1 1 0 01.293-.707l1.147-1.353z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Vue globale</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="ai-assistant.html">
+                    <a href="/ai-assistant" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Assistant IA</span>
+                    </a>
+               </li>
+               <li class="sidebar-heading">Réassort</li>
+               <li class="nav-item" data-nav-item="purchase-order.html">
+                    <a class="nav-link d-flex align-items-center" href="/purchase-order">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0z"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Proposition de commande</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="purchase-list.html">
+                    <a class="nav-link d-flex align-items-center" href="/purchase-list">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Historique</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="sales-history.html">
+                    <a class="nav-link d-flex align-items-center" href="/sales-history">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Ventes synchronisées</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="ai-predictions.html">
+                    <a class="nav-link d-flex align-items-center" href="/ai-predictions">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">IA &amp; Prédictions</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="ai-improvements.html" id="menu-item-ai-improvements" style="display:none;">
+                    <a class="nav-link d-flex align-items-center" href="/ai-improvements">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Améliorations IA</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-item="audit-errors.html" id="menu-item-audit-errors" style="display:none;">
+                    <a class="nav-link d-flex align-items-center" href="/audit-errors">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0v3a1 1 0 102 0v-3zm2-3a1 1 0 011 1v5a1 1 0 11-2 0v-5a1 1 0 011-1zm4-1a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Journal d'audit</span>
+                    </a>
+               </li>
+               <li class="sidebar-heading">Administration</li>
+               <li class="nav-item" id="menu-item-users" data-nav-item="users-list.html" style="display:none;">
+                    <a href="/users-list" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Utilisateurs</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-reassort">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-reassort">
+                         <span class="sidebar-text">Paramètres · Réassort</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-files" id="settings-menu-files" style="display:none;">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-files">
+                         <span class="sidebar-text">Paramètres · Fichiers de ventes</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-rpos" id="settings-menu-rpos" style="display:none;">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-rpos">
+                         <span class="sidebar-text">Paramètres · RPOS &amp; Sécurité</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-cron" id="settings-menu-cron" style="display:none;">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-cron">
+                         <span class="sidebar-text">Paramètres · Planification</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-sync" id="settings-menu-sync" style="display:none;">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-sync">
+                         <span class="sidebar-text">Paramètres · Synchronisation</span>
+                    </a>
+               </li>
+               <li class="nav-item" data-nav-href="tab-ai" id="settings-menu-ai" style="display:none;">
+                    <a class="nav-link sidebar-sub" href="/settings#tab-ai">
+                         <span class="sidebar-text">Paramètres · IA</span>
+                    </a>
+               </li>
+          </ul>
+     </div>
+</nav>

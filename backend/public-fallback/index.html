@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <!-- Title Meta -->
+     <meta charset="utf-8" />
+     <title>Tableau de bord | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+     <!-- Volt Bootstrap 5 Dashboard (page pilote de migration) : CSS compilée depuis
+          template-volt-src/ + template/volt-bootstrap-5-dashboard (gulp build:dev), copiée dans
+          assets/volt/. Remplace entièrement vendor.min.css/icons.min.css/app.min.css (Larkon). -->
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <!-- Iconify (icônes <iconify-icon> déjà utilisées partout dans cette page) : Larkon la fournissait
+          via vendor.js, absent du build Volt. Chargée séparément pour ne pas réécrire ~30 icônes. -->
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <!-- Theme Config js (Require in all Page) -->
+     <script src="assets/js/config.js"></script>
+    <script src="assets/js/backend-config.js"></script>
+    <script src="assets/js/reassort-auth.js"></script>
+    <script src="assets/js/shop-picker.js"></script>
+
+    <style>
+         .step-icon-wrap { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+         .step-icon-wrap iconify-icon { font-size: 20px; }
+         .step-icon-wrap.state-active iconify-icon { animation: step-spin 1s linear infinite; }
+         @keyframes step-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+         .validation-step { transition: background-color .3s ease, opacity .3s ease; opacity: .55; }
+         .validation-step.state-active, .validation-step.state-done, .validation-step.state-error { opacity: 1; }
+         .validation-step.state-active { background-color: rgba(35, 97, 206, .06); }
+         /* Volt attend des libellés de menu courts (nowrap) ; les nôtres sont plus longs
+            ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
+            le débordement horizontal du panneau latéral. */
+         .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+    </style>
+</head>
+
+<body data-page-title="Tableau de bord">
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">               <!-- Start Container Fluid -->
+                    <div id="dashboard-shop-picker-wrapper" class="row mb-3" style="display:none;">
+                         <div class="col-md-4">
+                              <label class="form-label">Magasin</label>
+                              <select id="dashboard-shop-select" class="form-select"></select>
+                         </div>
+                    </div>
+
+                    <style>
+                         .kpi-card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+                         .kpi-card .card-body { padding: 1rem 1.1rem .75rem; }
+                         .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+                         .kpi-icon iconify-icon { font-size: 22px; }
+                         .kpi-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; margin: .35rem 0 0; }
+                         .kpi-label { font-size: .78rem; color: var(--bs-secondary-color, #6c757d); margin: 0; }
+                         .kpi-footer { padding: .5rem 1.1rem; font-size: .72rem; border-top: 1px solid var(--bs-border-color-translucent, rgba(0,0,0,.06)); color: var(--bs-secondary-color, #6c757d); }
+                         .kpi-footer a { color: inherit; font-weight: 600; }
+                    </style>
+
+                    <div class="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-1">
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-primary-subtle">
+                                             <iconify-icon icon="solar:cart-check-bold-duotone" class="text-primary"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Articles proposés</p>
+                                             <h3 class="kpi-value" id="stat-proposal-count">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-proposal-status">Proposition du jour</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-primary-subtle">
+                                             <iconify-icon icon="solar:box-minimalistic-bold-duotone" class="text-primary"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Commandes en préparation</p>
+                                             <h3 class="kpi-value" id="stat-orders-pending">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer"><a href="/purchase-list">Voir l'historique</a></div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-success-subtle">
+                                             <iconify-icon icon="solar:double-check-bold-duotone" class="text-success"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux de conformité</p>
+                                             <h3 class="kpi-value" id="stat-conformity">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-conformity-detail">Propositions validées sans modification</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-danger-subtle">
+                                             <iconify-icon icon="solar:danger-triangle-bold-duotone" class="text-danger"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux de rupture</p>
+                                             <h3 class="kpi-value" id="stat-stockout">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-stockout-detail">Articles déjà en rupture</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-danger-subtle">
+                                             <iconify-icon icon="solar:box-bold-duotone" class="text-danger"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux de surstock</p>
+                                             <h3 class="kpi-value" id="stat-overstock">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-overstock-detail">Quantités au-delà du besoin</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-info-subtle">
+                                             <iconify-icon icon="solar:target-bold-duotone" class="text-info"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Précision des prévisions</p>
+                                             <h3 class="kpi-value" id="stat-forecast-accuracy">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-forecast-accuracy-detail">Quantité prévue vs réellement vendue</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-primary-subtle">
+                                             <iconify-icon icon="solar:shop-bold-duotone" class="text-primary"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Magasin</p>
+                                             <h3 class="kpi-value" id="stat-shop-ref" style="font-size: 1.15rem;">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="stat-shop-name">—</div>
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="row">
+                         <div class="col-12">
+                              <div class="card">
+                                   <div class="card-header">
+                                        <h4 class="card-title">Dernières commandes fournisseur</h4>
+                                   </div>
+                                   <div class="card-body p-0">
+                                        <div class="table-responsive">
+                                             <table class="table align-middle mb-0 table-hover table-centered">
+                                                  <thead class="bg-light-subtle">
+                                                       <tr>
+                                                            <th>Référence</th>
+                                                            <th>Libellé</th>
+                                                            <th>Date commande</th>
+                                                            <th>Statut</th>
+                                                       </tr>
+                                                  </thead>
+                                                  <tbody id="dashboard-orders-tbody">
+                                                       <tr><td colspan="4" class="text-center text-muted py-4">Chargement...</td></tr>
+                                                  </tbody>
+                                             </table>
+                                        </div>
+                                   </div>
+                                   <div class="card-footer text-end">
+                                        <a href="/purchase-list" class="fw-semibold">Voir tout l'historique →</a>
+                                   </div>
+                              </div>
+                         </div>
+                    </div>
+
+                    <script>
+                         (function () {
+                              const currentUser = window.reassortGetUser();
+                              const shopPickerWrapper = document.getElementById('dashboard-shop-picker-wrapper');
+                              const shopSelect = document.getElementById('dashboard-shop-select');
+
+                              const STATUS_BADGE = {
+                                   'en préparation': 'bg-secondary-subtle text-secondary',
+                                   'en attente de livraison': 'bg-warning-subtle text-warning',
+                                   'livrée partiellement': 'bg-info-subtle text-info',
+                                   'finalisée et partielle': 'bg-info-subtle text-info',
+                                   'complète': 'bg-success-subtle text-success',
+                                   'annulée': 'bg-danger-subtle text-danger',
+                              };
+
+                              function selectedShopId() {
+                                   if (currentUser.role !== 'STORE') return shopSelect.value || '';
+                                   return currentUser.rposShopId;
+                              }
+
+                              function selectedPosId() {
+                                   if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
+                                   return currentUser.rposPosId;
+                              }
+
+                              async function initShopPicker() {
+                                   if (currentUser.role === 'STORE') {
+                                        document.getElementById('stat-shop-ref').textContent = currentUser.rposShopReference || '—';
+                                        document.getElementById('stat-shop-name').textContent = currentUser.rposShopName || '—';
+                                        return;
+                                   }
+                                   shopPickerWrapper.style.display = '';
+                                   shopSelect.innerHTML = '<option value="">Chargement...</option>';
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/shops');
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        const byPos = {};
+                                        json.data.forEach(function (s) {
+                                             if (!byPos[s.posId]) byPos[s.posId] = [];
+                                             byPos[s.posId].push(s);
+                                        });
+                                        shopSelect.innerHTML = Object.keys(byPos).sort(function (a, b) { return parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10); }).map(function (posId) {
+                                             const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference||'').localeCompare(b.reference||''); });
+                                             const options = shops.map(function (s) {
+                                                  return '<option value="' + s.id + '" data-pos-id="' + s.posId + '" data-reference="' + s.reference + '" data-name="' + s.name + '">' + s.reference + ' - ' + s.name + '</option>';
+                                             }).join('');
+                                             return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
+                                        }).join('');
+                                        shopSelect.addEventListener('change', loadDashboard);
+                                        window.reassortMakeShopPickerSearchable(shopSelect);
+                                        updateShopCard();
+                                   } catch (err) {
+                                        shopSelect.innerHTML = '<option value="">Erreur: ' + err.message + '</option>';
+                                   }
+                              }
+
+                              function updateShopCard() {
+                                   if (currentUser.role !== 'STORE' && shopSelect.selectedOptions.length) {
+                                        document.getElementById('stat-shop-ref').textContent = shopSelect.selectedOptions[0].dataset.reference;
+                                        document.getElementById('stat-shop-name').textContent = shopSelect.selectedOptions[0].dataset.name;
+                                   }
+                              }
+
+                              async function loadDashboard() {
+                                   updateShopCard();
+                                   const shopId = selectedShopId();
+                                   if (!shopId) return;
+                                   const posId = selectedPosId();
+                                   const qs = 'shop=' + encodeURIComponent(shopId) + (posId ? '&pos=' + encodeURIComponent(posId) : '');
+
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/proposal/pending?' + qs);
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             const p = json.data;
+                                             document.getElementById('stat-proposal-count').textContent = p ? p.lines.length : '0';
+                                             document.getElementById('stat-proposal-status').textContent = p
+                                                  ? 'Générée le ' + new Date(p.generatedAt).toLocaleString('fr-FR')
+                                                  : 'Aucune proposition en attente';
+                                        }
+                                   } catch (err) {
+                                        document.getElementById('stat-proposal-count').textContent = '—';
+                                   }
+
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/conformity?' + qs);
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             const c = json.data;
+                                             document.getElementById('stat-conformity').textContent = c.rate === null ? 'N/A' : Math.round(c.rate * 100) + '%';
+                                             document.getElementById('stat-conformity-detail').textContent = c.rate === null
+                                                  ? 'Pas encore de commande validée'
+                                                  : c.unchangedLines + ' / ' + c.totalLines + ' lignes non modifiées';
+                                        }
+                                   } catch (err) {
+                                        document.getElementById('stat-conformity').textContent = '—';
+                                   }
+
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/stockout-rate?' + qs);
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             const s = json.data;
+                                             document.getElementById('stat-stockout').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
+                                             document.getElementById('stat-stockout-detail').textContent = s.rate === null
+                                                  ? 'Pas encore de commande validée'
+                                                  : s.stockoutLines + ' / ' + s.totalLines + ' article(s) déjà en rupture';
+                                        }
+                                   } catch (err) {
+                                        document.getElementById('stat-stockout').textContent = '—';
+                                   }
+
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/overstock-rate?' + qs);
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             const s = json.data;
+                                             document.getElementById('stat-overstock').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
+                                             document.getElementById('stat-overstock-detail').textContent = s.rate === null
+                                                  ? 'Pas encore de commande validée'
+                                                  : s.overstockLines + ' / ' + s.totalLines + ' article(s) en surstock';
+                                        }
+                                   } catch (err) {
+                                        document.getElementById('stat-overstock').textContent = '—';
+                                   }
+
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/forecast-accuracy?' + qs);
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             const s = json.data;
+                                             document.getElementById('stat-forecast-accuracy').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
+                                             document.getElementById('stat-forecast-accuracy-detail').textContent = s.rate === null
+                                                  ? 'Pas encore de ligne mesurable (fenêtre de ' + s.windowDays + ' j après validation)'
+                                                  : s.accurateLines + ' / ' + s.evaluatedLines + ' article(s) précis (±' + s.thresholdPct + '%)';
+                                        }
+                                   } catch (err) {
+                                        document.getElementById('stat-forecast-accuracy').textContent = '—';
+                                   }
+
+                                   const tbody = document.getElementById('dashboard-orders-tbody');
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/orders?' + qs);
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+
+                                        const orders = json.data.orders.slice(0, 8);
+                                        const pendingCount = orders.filter(function (o) { return o.status_display === 'en préparation'; }).length;
+                                        document.getElementById('stat-orders-pending').textContent = pendingCount;
+
+                                        if (!orders.length) {
+                                             tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Aucune commande.</td></tr>';
+                                             return;
+                                        }
+                                        tbody.innerHTML = orders.map(function (o) {
+                                             const badgeClass = STATUS_BADGE[o.status_display] || 'bg-secondary-subtle text-secondary';
+                                             return '<tr>' +
+                                                  '<td><strong>' + o.reference + '</strong></td>' +
+                                                  '<td>' + (o.external_reference || '—') + '</td>' +
+                                                  '<td>' + new Date(o.date).toLocaleDateString('fr-FR') + '</td>' +
+                                                  '<td><span class="badge ' + badgeClass + ' py-1 px-2">' + o.status_display + '</span></td>' +
+                                                  '</tr>';
+                                        }).join('');
+                                   } catch (err) {
+                                        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+                                   }
+                              }
+
+                              initShopPicker().then(loadDashboard);
+                         })();
+                    </script>
+
+               <!-- ========== Footer Start ========== -->
+               <footer class="footer">
+                   <div class="container-fluid">
+                       <div class="row">
+                           <div class="col-12 text-center">
+                               <script>document.write(new Date().getFullYear())</script> &copy; Réassort Automatique.
+                           </div>
+                       </div>
+                   </div>
+               </footer>
+               <!-- ========== Footer End ========== -->
+          </div>
+          <!-- /container-xxl -->
+     </div>
+     <!-- /py-4 -->
+     </main>
+     <!-- ========== /Volt main content ========== -->
+
+     <!-- Volt vendor JS (Require in all Page) -->
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+</body>
+
+</html>
