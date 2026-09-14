@@ -22,26 +22,50 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    # Réseau hôte (demande du 14/09/2026) : avec des ports publiés classiques, Docker masque
+    # l'IP réelle du poste derrière du NAT (passerelle 172.x vue côté backend) — inutilisable
+    # pour le journal d'audit (Qui/Où). En mode host, le backend voit la vraie IP LAN du poste
+    # (ex: 10.10.9.x). Contrepartie : plus d'isolation réseau du conteneur backend (ports
+    # ignorés — 3001 exposé directement), et la base est jointe via 127.0.0.1:5433 (port publié
+    # par le service postgres) au lieu du nom DNS interne "postgres".
+    network_mode: host
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@127.0.0.1:5433/${POSTGRES_DB:-stock_auto_reappro}?schema=public
       PORT: 3001
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ./backend/pareto_050.csv:/app/pareto_050.csv:ro
-    # Le DNS interne Docker (127.0.0.11) ne résout pas pos1-prod-prosuma.prosuma.pos, contrairement
-    # au réseau Wi-Fi d'entreprise PROSUMADSI (DNS interne au domaine PROSUMA) : sans cette entrée,
+    # Le DNS interne Docker (127.0.0.11) ne résout pas *.prod-prosuma.prosuma.pos, contrairement
+    # au réseau Wi-Fi d'entreprise PROSUMADSI (DNS interne au domaine PROSUMA) : sans ces entrées,
     # le conteneur backend ne peut jamais joindre RPOS même quand la machine hôte le peut très bien.
-    # ATTENTION : 172.26.50.1 a été résolue depuis le poste de dev un jour donné — si RPOS change
-    # d'adresse IP côté réseau Prosuma, cette entrée doit être mise à jour (revalider avec
-    # `getent hosts pos1-prod-prosuma.prosuma.pos` sur la machine hôte connectée au bon réseau).
+    # ATTENTION : 172.26.50.1 a été résolue depuis le poste de dev un jour donné (les 18 serveurs
+    # pos1..pos18 partagent la même IP) — si RPOS change d'adresse IP côté réseau Prosuma, ces
+    # entrées doivent être mises à jour (revalider avec
+    # `for i in $(seq 1 18); do getent hosts pos${i}-prod-prosuma.prosuma.pos; done`
+    # sur la machine hôte connectée au bon réseau).
     extra_hosts:
       - "pos1-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos2-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos3-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos4-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos5-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos6-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos7-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos8-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos9-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos10-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos11-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos12-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos13-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos14-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos15-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos16-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos17-prod-prosuma.prosuma.pos:172.26.50.1"
+      - "pos18-prod-prosuma.prosuma.pos:172.26.50.1"
 
   frontend:
     build: ./frontend

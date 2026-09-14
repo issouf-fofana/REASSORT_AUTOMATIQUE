@@ -32,10 +32,25 @@
          .validation-step { transition: background-color .3s ease, opacity .3s ease; opacity: .55; }
          .validation-step.state-active, .validation-step.state-done, .validation-step.state-error { opacity: 1; }
          .validation-step.state-active { background-color: rgba(35, 97, 206, .06); }
-         /* Volt attend des libellés de menu courts (nowrap) ; les nôtres sont plus longs
-            ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
-            le débordement horizontal du panneau latéral. */
-         .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          /* Volt attend des libellés de menu courts (nowrap) ; les nôtres sont plus longs
+             ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
+             le débordement horizontal du panneau latéral. */
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          /* Pastilles de sous-navigation par section (voir buildSectionChips) : compactes,
+             retour à la ligne autorisé, FIGÉES en haut au scroll (demande du 14/09/2026),
+             ancre visible sous la barre lors du saut. */
+          /* Volt impose .content { overflow: hidden }, ce qui casse le position: sticky
+             (la barre ne se fige jamais) : on restaure un overflow visible sur cette page
+             pour que .sec-chips reste figée en haut au scroll. */
+          main.content { overflow: visible; }
+          .sec-chips { position: sticky; top: 0; z-index: 1020; box-shadow: 0 2px 8px rgba(0,0,0,.08); max-width: 100%; }
+          /* Barre compacte : UNE seule ligne scrollable horizontalement (pas un pavé de boutons
+             empilés), pastilles resserrées. min-width:0 + shrink:0 : la barre défile en interne
+             au lieu de déborder la page (responsive, y compris mobile). */
+          .sec-chips .card-body { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: thin; min-width: 0; -webkit-overflow-scrolling: touch; }
+          .sec-chips .btn { white-space: nowrap; padding: 0.15rem 0.5rem; font-size: 0.78rem; flex-shrink: 0; }
+          .sec-chips .fw-bold { white-space: nowrap; font-size: 0.85rem; flex-shrink: 0; }
+          [id^="sec-"] { scroll-margin-top: 76px; }
     </style>
 </head>
 
@@ -52,7 +67,11 @@
           <div class="py-4">
                <div class="container-xxl">               <!-- Start Container Fluid -->
 
-                    <ul class="nav nav-tabs nav-bordered mb-4" role="tablist">
+                     <!-- Barre d'onglets masquée : la navigation par section vit dans la sidebar
+                          (/settings#tab-xxx) depuis le 14/09/2026 — gardée dans le DOM (display:none)
+                          pour la commutation par hash (openTabFromHash), remplacée visuellement par
+                          les pastilles de sections ci-dessous (buildSectionChips). -->
+                     <ul class="nav nav-tabs nav-bordered mb-4" role="tablist" style="display:none;">
                          <li class="nav-item">
                               <a class="nav-link active" data-bs-toggle="tab" href="#tab-reassort" role="tab">
                                    <iconify-icon icon="solar:tuning-2-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
@@ -1094,6 +1113,36 @@
 
                          <div class="card mt-3">
                               <div class="card-header">
+                                   <h5 class="card-title mb-0">Détection d'anomalies</h5>
+                              </div>
+                              <div class="card-body">
+                                   <div class="alert alert-light border small">
+                                        <strong>À quoi ça sert :</strong> le système signale automatiquement les comportements
+                                        anormaux (explosion ou chute brutale des ventes, stock disponible mais silence total
+                                        des ventes = rupture invisible possible). Un article signalé voit son score de
+                                        confiance pénalisé, pour éviter de commander sur une base douteuse.
+                                   </div>
+                                   <div class="mb-3">
+                                        <label class="form-label fw-semibold">Vente habituelle min. pour signaler une rupture invisible</label>
+                                        <div class="input-group" style="max-width: 220px;">
+                                             <input type="number" id="anomaly-min-daily-sales" class="form-control" min="0" step="0.5">
+                                             <span class="input-group-text">u/jour</span>
+                                        </div>
+                                        <div class="form-text">
+                                             Exemple : avec 1, un article qui vend habituellement au moins 1 unité/jour mais
+                                             n'a rien vendu sur les 3 derniers jours malgré un stock disponible est signalé.
+                                             Baissez à 0.5 pour surveiller aussi les articles lents (plus de faux positifs
+                                             sur les intermittents).
+                                        </div>
+                                   </div>
+                                   <button type="button" id="anomaly-min-daily-sales-save" class="btn btn-primary btn-sm">Enregistrer</button>
+                                   <div id="anomaly-min-daily-sales-error" class="alert alert-danger mt-3" style="display:none;"></div>
+                                   <div id="anomaly-min-daily-sales-success" class="alert alert-success mt-3" style="display:none;"></div>
+                              </div>
+                         </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
                                    <h5 class="card-title mb-0">Prompt d'analyse IA</h5>
                               </div>
                               <div class="card-body">
@@ -1129,6 +1178,27 @@
                                    <button type="button" class="btn btn-primary btn-sm mt-2" id="chatbot-suggested-questions-save">Enregistrer</button>
                                    <div id="chatbot-suggested-questions-error" class="alert alert-danger mt-2" style="display:none;"></div>
                                    <div id="chatbot-suggested-questions-success" class="alert alert-success mt-2" style="display:none;"></div>
+                              </div>
+                         </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
+                                   <h5 class="card-title mb-0">Chien de garde — prompt d'analyse IA</h5>
+                              </div>
+                              <div class="card-body">
+                                   <p class="text-muted small">
+                                        Consignes envoyées au LLM pour analyser chaque constat du Conseiller
+                                        d'amélioration IA (page Améliorations IA). Placeholders disponibles :
+                                        <code>{{title}}</code>, <code>{{detail}}</code>, <code>{{evidence}}</code>
+                                        (preuves JSON), <code>{{files}}</code> (fichiers réels du projet). La réponse
+                                        doit garder les lignes <code>EXPLOITATION:</code>, <code>DEV:</code> et
+                                        <code>CONFIANCE:</code> — les supprimer casse l'enregistrement des recos.
+                                        Sans <code>{{title}}</code>, le prompt codé en dur est utilisé.
+                                   </p>
+                                   <textarea id="improvements-prompt-template" class="form-control font-monospace small" rows="12"></textarea>
+                                   <button type="button" class="btn btn-primary btn-sm mt-2" id="improvements-prompt-save">Enregistrer</button>
+                                   <div id="improvements-prompt-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                                   <div id="improvements-prompt-success" class="alert alert-success mt-2" style="display:none;"></div>
                               </div>
                          </div>
                     </div>
@@ -2343,14 +2413,49 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                         document.getElementById('ai-prompt-template').value = json.data.AI_ANALYSIS_PROMPT_TEMPLATE || '';
                                         document.getElementById('ai-quantity-adjustment-enabled').checked = json.data.AI_QUANTITY_ADJUSTMENT_ENABLED === 'true';
                                         document.getElementById('chatbot-suggested-questions').value = json.data.CHATBOT_SUGGESTED_QUESTIONS || '';
+                                        document.getElementById('improvements-prompt-template').value = json.data.IMPROVEMENTS_PROMPT_TEMPLATE || '';
+                                        document.getElementById('anomaly-min-daily-sales').value = json.data.ANOMALY_MIN_DAILY_SALES || '1';
                                    } catch (err) {
                                         document.getElementById('ai-prompt-error').textContent = 'Erreur: ' + err.message;
                                         document.getElementById('ai-prompt-error').style.display = 'block';
                                    }
                               }
 
-                              document.getElementById('chatbot-suggested-questions-save').addEventListener('click', async function () {
-                                   const errBox = document.getElementById('chatbot-suggested-questions-error');
+                              document.getElementById('anomaly-min-daily-sales-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('anomaly-min-daily-sales-error');
+                                   const okBox = document.getElementById('anomaly-min-daily-sales-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        const raw = parseFloat(document.getElementById('anomaly-min-daily-sales').value);
+                                        if (!Number.isFinite(raw) || raw < 0) throw new Error('Saisissez un nombre positif ou nul (ex: 1, 0.5, 0).');
+                                        await saveSystemConfigKey('ANOMALY_MIN_DAILY_SALES', String(raw));
+                                        okBox.textContent = 'Seuil enregistré — appliqué dès la prochaine génération.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
+
+                              document.getElementById('improvements-prompt-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('improvements-prompt-error');
+                                   const okBox = document.getElementById('improvements-prompt-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        const value = document.getElementById('improvements-prompt-template').value;
+                                        if (value && !value.includes('{{title}}')) throw new Error('Le modèle doit contenir {{title}} (sinon le prompt codé en dur sera utilisé).');
+                                        await saveSystemConfigKey('IMPROVEMENTS_PROMPT_TEMPLATE', value);
+                                        okBox.textContent = 'Prompt enregistré — appliqué dès la prochaine analyse.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
+
+                              document.getElementById('chatbot-suggested-questions-save').addEventListener('click', async function () {                                   const errBox = document.getElementById('chatbot-suggested-questions-error');
                                    const okBox = document.getElementById('chatbot-suggested-questions-success');
                                    errBox.style.display = 'none';
                                    okBox.style.display = 'none';
@@ -2530,15 +2635,120 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                               function openTabFromHash() {
                                    const hash = window.location.hash;
                                    if (!hash || !hash.startsWith('#tab-')) return;
-                                   const tabLink = document.querySelector('a.nav-link[href="' + hash + '"]');
-                                   const tabPane = document.querySelector(hash);
+                                   const tabLink = document.querySelector('.nav-tabs a.nav-link[href="' + hash + '"]');
+                                   const tabPane = document.querySelector('.tab-content ' + hash);
                                    if (!tabLink || !tabPane) return;
+                                   // Onglet masqué pour ce rôle (ex: #tab-ai pour un compte STORE) : ne
+                                   // pas activer un onglet invisible, rester sur l'onglet courant.
+                                   const tabItem = tabLink.closest('li');
+                                   if (tabItem && tabItem.style.display === 'none') return;
                                    document.querySelectorAll('.nav-tabs .nav-link').forEach(function (l) { l.classList.remove('active'); });
                                    document.querySelectorAll('.tab-content .tab-pane').forEach(function (p) { p.classList.remove('show', 'active'); });
                                    tabLink.classList.add('active');
                                    tabPane.classList.add('show', 'active');
                               }
 
+                              // Clic sidebar vers un autre onglet ALORS QU'ON EST DÉJÀ sur /settings :
+                              // seul le hash change (pas de rechargement de page), donc sans cet
+                              // écouteur l'onglet ne commutait jamais et le lien semblait "mort".
+                              window.addEventListener('hashchange', openTabFromHash);
+
+                              // Sous-navigation par sections : la barre d'onglets en haut est masquée
+                              // (navigation via la sidebar), chaque onglet affiche à la place des
+                              // pastilles COURTES vers ses sections (champs de l'onglet Réassort/
+                              // Fichiers, cartes pour les autres onglets). Textes raccourcis via
+                              // SHORT_LABELS pour rester compacts (demande du 14/09/2026).
+                              const TAB_TITLES = {
+                                   'tab-reassort': 'Réassort', 'tab-files': 'Fichiers de ventes',
+                                   'tab-rpos': 'RPOS & Sécurité', 'tab-cron': 'Planification',
+                                   'tab-sync': 'Synchronisation des ventes', 'tab-ai': 'IA',
+                              };
+                              const PANE_MODE = {
+                                   'tab-reassort': 'fields', 'tab-files': 'fields', 'tab-rpos': 'cards',
+                                   'tab-cron': 'cards', 'tab-sync': 'cards', 'tab-ai': 'cards',
+                              };
+                              const SHORT_LABELS = {
+                                   'Seuil Pareto (analyse 20/80)': 'Pareto',
+                                   "Période d'analyse des ventes": 'Période analyse',
+                                   'Génération sans réseau Prosuma': 'Hors réseau',
+                                   'Ignorer les commandes RPOS de plus de': 'Ancienneté commandes',
+                                   'Prévision de vente (lissage exponentiel)': 'Prévision',
+                                   'Période de référence pour le % du CA magasin': '% CA',
+                                   'Seuil de surstock (KPI Tableau de bord)': 'Surstock',
+                                   'Séparation des commandes par rayon': 'Commandes / rayon',
+                                   'Précision des prévisions - fenêtre de mesure': 'Fenêtre précision',
+                                   'Précision des prévisions - seuil de tolérance': 'Tolérance précision',
+                                   "Nombre d'années en arrière": 'Années comparées',
+                                   "Seuil de déclenchement de l'ajustement": 'Seuil ajustement',
+                                   'Délai de réception des commandes': 'Délai réception',
+                                   'Utiliser le délai dans le calcul du besoin': 'Délai au calcul',
+                                   'Exclure les articles génériques en dessous de': 'Génériques exclus',
+                                   'Chemin du dossier des exports de ventes': 'Dossier exports',
+                                   'Fiabilité des appels RPOS': 'Fiabilité RPOS',
+                                   'Limite de volume par génération': 'Volume max',
+                                   'Cache dernier achat / dernière vente': 'Cache achats',
+                                   'Vue globale (admin)': 'Vue globale',
+                                   'Planification du job nocturne': 'Job nocturne',
+                                   'Réajustement quotidien du réassort': 'Réajustement',
+                                   'Évaluation des prédictions': 'Évaluation',
+                                   'Synchronisation automatique': 'Synchro auto',
+                                   "Récupération initiale d'un magasin": 'Récup. initiale',
+                                   'Purger les ventes synchronisées': 'Purge ventes',
+                                   'Clés API IA': 'Clés IA',
+                                   'Ajustement IA à la génération': 'Ajustement IA',
+                                   "Détection d'anomalies": 'Anomalies',
+                                   "Chien de garde - prompt d'analyse IA": 'Prompt watchdog',
+                                   "Prompt d'analyse IA": 'Prompt IA',
+                                   'Assistant IA - questions suggérées': 'Questions chatbot',
+                              };
+                              function shortLabel(full) {
+                                   const nf = full.replace(/[’‘`]/g, "'").replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+                                   if (SHORT_LABELS[nf]) return SHORT_LABELS[nf];
+                                   return nf.length > 26 ? nf.slice(0, 25) + '…' : nf;
+                              }
+                              function buildSectionChips() {
+                                   Object.keys(PANE_MODE).forEach(function (paneId) {
+                                        const pane = document.getElementById(paneId);
+                                        if (!pane || pane.querySelector(':scope > .sec-chips')) return;
+                                        let targets;
+                                        if (PANE_MODE[paneId] === 'cards') {
+                                             // Cartes de premier niveau uniquement (pas les cartes imbriquées).
+                                             targets = Array.from(pane.querySelectorAll('.card')).filter(function (c) {
+                                                  return !c.parentElement || !c.parentElement.closest('.card');
+                                             });
+                                        } else {
+                                             targets = Array.from(pane.querySelectorAll('label.form-label.fw-semibold'));
+                                        }
+                                        if (!targets.length) return;
+                                        const bar = document.createElement('div');
+                                        bar.className = 'card mb-3 sec-chips';
+                                        const body = document.createElement('div');
+                                        body.className = 'card-body py-2 d-flex flex-wrap align-items-center gap-2';
+                                        const title = document.createElement('span');
+                                        title.className = 'fw-bold me-1';
+                                        title.textContent = (TAB_TITLES[paneId] || '') + ' :';
+                                        body.appendChild(title);
+                                        targets.forEach(function (t, i) {
+                                             const anchor = t.closest('.mb-3') || t;
+                                             if (!anchor.id) anchor.id = 'sec-' + paneId + '-' + i;
+                                             const full = PANE_MODE[paneId] === 'cards'
+                                                  ? ((t.querySelector('.card-title') || {}).textContent || t.textContent)
+                                                  : t.textContent;
+                                             const a = document.createElement('a');
+                                             a.className = 'btn btn-sm btn-outline-primary';
+                                             a.href = '#' + anchor.id;
+                                             a.textContent = shortLabel(full);
+                                             body.appendChild(a);
+                                        });
+                                        bar.appendChild(body);
+                                        pane.insertBefore(bar, pane.firstChild);
+                                   });
+                              }
+                              buildSectionChips();
+                              // Ouverture immédiate (sans attendre la fin du chargement des magasins,
+                              // qui peut prendre plusieurs secondes si RPOS est lent), puis à nouveau
+                              // une fois les onglets ADMIN révélés.
+                              openTabFromHash();
                               initShopPicker().then(function () {
                                    loadReassortConfig();
                                    openTabFromHash();

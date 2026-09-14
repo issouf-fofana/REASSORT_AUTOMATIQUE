@@ -61,8 +61,10 @@
     }
     // Sous-liens Paramètres réservés ADMIN (mêmes onglets que settings.html masque pour un compte
     // STORE/SUPERVISOR — cf. initShopPicker) : révélés ici pour rester coordonné, jamais en dur.
+    // Idem pour les pages admin du debug global (Améliorations IA, Journal d'audit : API 403
+    // pour les autres rôles) : masquées par défaut dans la sidebar, révélées ici.
     if (user && user.role === 'ADMIN') {
-      ['settings-menu-files', 'settings-menu-rpos', 'settings-menu-cron', 'settings-menu-sync', 'settings-menu-ai'].forEach(function (id) {
+      ['settings-menu-files', 'settings-menu-rpos', 'settings-menu-cron', 'settings-menu-sync', 'settings-menu-ai', 'menu-item-ai-improvements', 'menu-item-audit-errors'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) el.style.display = '';
       });

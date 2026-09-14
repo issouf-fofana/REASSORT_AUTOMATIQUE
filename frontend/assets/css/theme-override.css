@@ -88,6 +88,34 @@ a:not(.sidebar *),
      color: #ffffff !important;
 }
 
+/* Sidebar plate par sections (demande du 14/09/2026) : intitulés de section discrets et
+   sous-liens Paramètres légèrement indentés pour marquer la hiérarchie sans groupe repliable. */
+.sidebar-heading {
+     color: #8a8a8a !important;
+     font-size: 0.68rem;
+     font-weight: 600;
+     letter-spacing: 0.1em;
+     text-transform: uppercase;
+     padding: 1rem 0.5rem 0.25rem;
+     list-style: none;
+}
+.sidebar .nav-link.sidebar-sub {
+     padding-left: 2.75rem;
+     font-size: 0.9rem;
+}
+
+/* Sidebar masquable sur desktop (bouton topbar, demande du 14/09/2026) : menu escamoté et
+   contenu en pleine largeur. Desktop uniquement (≥992px, là où .content a sa marge de 260px)
+   — sur mobile, le hamburger en overlay reste le mécanisme. */
+@media (min-width: 992px) {
+     body.sidebar-hidden .sidebar {
+          display: none !important;
+     }
+     body.sidebar-hidden .content {
+          margin-left: 0;
+     }
+}
+
 /* Onglets (nav-tabs) : volt.css définit plusieurs règles concurrentes pour l'état actif, dont le
    résultat final dépendait de l'ordre d'apparition plutôt que d'être garanti — on fixe
    explicitement un contraste fort (fond noir, texte blanc) sur l'onglet actif, quelle que soit la

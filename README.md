@@ -27,6 +27,17 @@ de valider puis d'envoyer les commandes directement à RPOS, rayon par rayon.
 
 Détail complet langage par langage, fichier par fichier : voir **[TECH_STACK.md](TECH_STACK.md)**.
 
+> **UX Paramètres (14/09/2026)** : la navigation par section vit dans la sidebar
+> (`/settings#tab-xxx`, règle : toute fonctionnalité = lien sidebar + page dédiée, pastilles
+> versionnées dans `layout.js`) — la barre d'onglets en haut est masquée et remplacée par des
+> pastilles courtes par section (champs pour Réassort/Fichiers, cartes pour les autres onglets,
+> libellés raccourcis via `SHORT_LABELS` dans `settings.html`, barre figée `sticky` — nécessite
+> `main.content { overflow: visible }` car Volt impose `overflow: hidden` qui casse le sticky).
+>
+> **UX sidebar (14/09/2026)** : menu plat par sections (Pilotage/Réassort/Administration, aucun
+> groupe repliable), état actif suivi par hash, bouton topbar pour masquer/afficher le menu sur
+> desktop (état mémorisé en `localStorage`, hamburger overlay inchangé sur mobile).
+
 ## 🧭 Montée en autonomie IA — suivi d'avancement
 
 Plan complet en 14 étapes défini dans **[CAHIER_DES_CHARGES.md](CAHIER_DES_CHARGES.md)** (§71),
@@ -50,7 +61,10 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   courant) et `GET /reassort/weekly-plan/:id/history`. Purement une lecture de ce qui est déjà
   persisté à chaque génération (aucun appel RPOS, aucun recalcul). Pas encore d'affichage frontend
   à cette étape — API testée directement. Voir `getWeeklyPlanHistory`/`findWeeklyPlanForDate` dans
-  `weeklyPlanService.js`.
+  `weeklyPlanService.js`. Corrigé le 14/09/2026 : chaque point d'historique porte désormais
+  `changeVsPrevious` (écart vs révision précédente) et chaque article `maxStepVariation` (plus
+  gros saut d'une révision à l'autre) — le tri retient le max entre variation globale et plus
+  gros saut, pour que les allers-retours (100 → 200 → 100, variation globale 0) remontent aussi.
 - ✅ **Étape 3 — Réajustement quotidien continu** (§15-16) : nouveau job `dailyReplenishmentReviewJob`
   (planifié via `DAILY_REVIEW_CRON`, 6h30 par défaut) qui, pour chaque plan hebdomadaire dont la
   dernière révision n'est pas encore validée, recalcule la proposition et ne crée une nouvelle
@@ -75,7 +89,10 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   données pour permettre la comparaison prédiction/réalité de l'étape 5 : aucun changement de
   comportement visible, pas encore d'affichage frontend. Route de lecture ajoutée :
   `GET /reassort/predictions/:proposalId`. Voir `AIPrediction` dans `schema.prisma` et
-  l'écriture dans `generateAndSaveProposal` (`proposalService.js`).
+  l'écriture dans `generateAndSaveProposal` (`proposalService.js`). Corrigé le 14/09/2026 : si le
+  rattachement au plan échoue, alerte `ALERTE` explicite dans les logs (nightly + génération
+  manuelle) + flag `weeklyPlanAttached` retourné — sans plan, les prédictions sont écrites avec
+  une semaine cible null et ignorées silencieusement par l'évaluation, il fallait un signal.
 - ✅ **Étape 5 — Résultat réel vs prédiction** (§22) : nouveau modèle `AIPredictionOutcome` et
   job planifié `predictionOutcomeJob` (`PREDICTION_OUTCOME_CRON`, 7h par défaut) qui, pour chaque
   `AIPrediction` (étape 4) dont la semaine cible est terminée et pas encore évaluée, calcule les
@@ -101,14 +118,75 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   casser ce qui existe déjà. Renseigne `AIPrediction.confidenceScore` (colonne posée mais vide
   depuis l'étape 4) et enrichit `reasoning` avec le détail par signal. Testé avec une génération
   réelle sur le magasin 110. Voir `backend/src/services/confidenceService.js`.
-- ⬜ Étape 7 — Détection d'anomalies (§30-31)
+- ✅ **Étape 7 — Détection d'anomalies** (§30-31) : nouveau service `anomalyService.js`
+  (`detectAnomalies`), signaux explosion/chute de ventes + stock incohérent + tendance
+  (GROWING/DECLINING/STABLE/VOLATILE/UNKNOWN), branché sur le moteur de confiance
+  (`confidenceService.js`, pénalité qualité de données) et persisté par ligne
+  (`trendCategory`, `anomalies`). Corrigé le 11/09/2026 : intention chatbot “CA”
+  (`chatbotService.js`) ne matche plus les salutations (“comment ça va ?”).
+  Corrigé le 14/09/2026 : seuil “rupture invisible” paramétrable (`ANOMALY_MIN_DAILY_SALES`,
+  défaut 1 unité/jour, champ dédié dans Paramètres > IA, validation serveur incluse) —
+  baissable à 0.5 pour surveiller aussi les articles lents. Tests : `npm test` (jest,
+  26 tests `proposalService`/`forecastService`/`anomalyService` verts).
 - ⬜ Étape 8 — Moteur de recommandation IA typée (§18-19)
-- ⬜ Étape 9 — AI Center (dashboard de performance IA, §44-46)
+- ⬜ Étape 9 — AI Center (dashboard de performance IA, §44-46) — première brique posée le
+  14/09/2026 : **Conseiller d'amélioration IA** (`improvementService.js`, modèle
+  `AIImprovement`, page `Améliorations IA` dans sidebar > Réassort). Chien de garde à
+  8 détecteurs déterministes (jobs en échec, prédictions non évaluables, précision/biais par
+  magasin, propositions périmées, synchro en retard, questions chatbot sans réponse, anomalies
+  récurrentes) + enrichissement LLM (action exploitation + reco dev, repli déterministe sans IA).
+  Boucle d'apprentissage : métrique figée au constat, statut `APPLIED` posé par l'humain,
+  évaluation auto `IMPROVED`/`NO_EFFECT`. Routes `GET /improvements`, `POST
+  /improvements/generate`, `POST /improvements/:id/status` (ADMIN). Vérifié en prod : 2 vrais
+  problèmes silencieux détectés dès le premier run (synchro ventes coupée + 71h de retard).
+  Transparence (14/09/2026) : prompt exact envoyé au LLM (`aiPrompt`) et erreur
+  d'enrichissement (`aiError`) persistés et visibles sur chaque carte (déroulant "Voir le
+  prompt"). Barrière anti-doublons sur type+périmètre+métrique.
+  Traçabilité complète (14/09/2026) : priorités Critique/Élevée/Moyenne/Faible (tri par
+  priorité), message d'erreur exact (`errorMessage`, jamais reformulé), confiance IA
+  (`aiConfidence`), statuts En cours/À vérifier/Appliqué(+note de la correction réelle)/Ignoré
+  (+motif obligatoire)/Rouvrir — IMPROVED/NO_EFFECT réservés au système. Timeline par
+  recommandation (`AIImprovementEvent` : Détection → Analyse IA → Recommandation → Validation
+  → Correction → Vérification → Résultat, avec acteur et note), contexte Qui/Où/Quand
+  (`detectedBy`, IP, version, environnement). Routes `GET /improvements?priority=&sort=`,
+  `GET /improvements/:id` (détail + timeline). Page : filtres, modale de détail, modale de
+  note. Rien ne disparaît : les ignorées/appliquées restent consultables avec leur historique.
+  Chien de garde planifié quotidiennement (7h30, `IMPROVEMENTS_CRON`, `IMPROVEMENTS_ENABLED`).
+  Debug global (14/09/2026) : table `ErrorReport` alimentée par TOUTES les pages frontend
+  (`layout.js` : `onerror` + promesses rejetées, dédup 60s, plafond 20/page) et TOUTES les
+  réponses API 5xx (hook `server.js`, quel que soit le chemin de code) — oui, toutes les vues
+  sont couvertes. Détecteur `APP_ERROR` : regroupe par signature normalisée (nombres/EAN/UUID
+  → #), seuil ≥3 occurrences, message exact conservé, métrique `app_error_max_count`.
+  Rétention 30j + plafond 5000 (élagage à chaque run). Page dédiée **Journal d'audit**
+  (sidebar > Réassort, ADMIN) : les 100 dernières erreurs brutes avec filtre source — règle
+  : toute fonctionnalité = lien sidebar + page dédiée. Vraie IP LAN (14/09/2026) : backend en
+  `network_mode: host` dans `docker-compose.yml` (le NAT Docker masquait les postes derrière la
+  passerelle 172.x) + `trust proxy` pour les déploiements derrière reverse proxy. Vérifié :
+  4 erreurs page groupées en 1 constat (35/35 tests jest verts).
+  Robustesse (14/09/2026) : page blindée anti cache-mixte (vieux HTML + JS neuf ne tue plus
+  tout le script — chaque liaison est gardée), enrichissement IA en parallèle ×3 (fini les
+  minutes de bouton figé), journal d'audit visible sur la page (100 dernières erreurs brutes
+  avec contexte : base preuve que chaque bug est sauvé avant analyse).
 - ⬜ Étape 10 — LDAP + RBAC étendu (§39-42)
-- ⬜ Étape 11 — Chatbot IA (§34-38)
+- ✅ **Étape 11 — Chatbot IA** (§34-38) : `chatbotService.js` (intent déterministe par
+  mots-clés → outils → LLM, jamais d'accès direct base, §35) + `chatbotToolsService.js`
+  (stock, ventes, CA, Pareto recalculé depuis `SalesLine`, ruptures, surstock, précision IA,
+  commandes), conversations persistées (`ChatbotConversation/Message`), page
+  `ai-assistant.html` + widget flottant sur toutes les pages. Vérifié en prod : 4
+  conversations, réponse Pareto réelle (1316 articles = 80% CA).
 - ⬜ Étape 12 — Shadow Mode (§50)
 - ⬜ Étape 13 — Réassort automatique contrôlé (§26-29)
 - ⬜ Étape 14 — Réassort automatique complet
+
+> **Correctifs transverses du 14/09/2026** : client Prisma unique partagé
+> (`backend/src/utils/prisma.js`, 25 fichiers migrés — avant, chaque fichier ouvrait son propre
+> pool de connexions, risque d'épuisement sous charge concurrente) ; `npm test` ajouté
+> (jest, `computeParetoFromLines` ré-exporté car les tests existants l'attendaient).
+> Limites assumées restantes (chantiers d'étapes ultérieures, pas des bugs) : distinction
+> `recommendedQuantity`/`orderedQuantity` du §14 (requiert schéma + tunnel de validation —
+> `actualOrders` de l'évaluation reprend donc la quantité recommandée) et `percentageError`
+> à null quand les ventes réelles sont nulles (§22, exclues du score plutôt que pénalisées —
+> un zéro peut aussi venir d'une rupture, pas d'une mauvaise prévision).
 
 ## 📦 Installation
 
