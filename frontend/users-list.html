@@ -139,6 +139,36 @@
                          </div>
                     </div>
 
+                    <!-- Réinitialisation du mot de passe (ADMIN uniquement) : le formulaire de création ne
+                         permet de saisir un mot de passe qu'à la création du compte — sans ce modal, un
+                         admin n'avait aucun moyen de dépanner un utilisateur ayant oublié le sien (pas
+                         d'email, pas de "mot de passe oublié" côté appli). Réutilise PUT /users/:id qui
+                         acceptait déjà un `password` optionnel côté backend, jusqu'ici jamais exposé ici. -->
+                    <div class="modal fade" id="reset-password-modal" tabindex="-1" aria-hidden="true">
+                         <div class="modal-dialog">
+                              <div class="modal-content">
+                                   <div class="modal-header">
+                                        <h5 class="modal-title">Réinitialiser le mot de passe</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                   </div>
+                                   <form id="reset-password-form">
+                                        <div class="modal-body">
+                                             <p class="text-muted" id="reset-password-target"></p>
+                                             <div id="reset-password-error" class="alert alert-danger" style="display:none;"></div>
+                                             <div class="mb-3">
+                                                  <label class="form-label">Nouveau mot de passe</label>
+                                                  <input type="password" id="reset-password-value" class="form-control" required minlength="6">
+                                             </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                             <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+                                             <button type="submit" id="reset-password-submit" class="btn btn-primary">Réinitialiser</button>
+                                        </div>
+                                   </form>
+                              </div>
+                         </div>
+                    </div>
+
                     <script>
                          (function () {
                               const currentUser = window.reassortGetUser();
@@ -287,9 +317,14 @@
                                                   '<td>' + shopLabel + '</td>' +
                                                   '<td>' + statusBadge + '</td>' +
                                                   '<td>' +
+                                                       '<div class="d-flex gap-1">' +
                                                        '<button class="btn btn-sm btn-outline-secondary toggle-user-btn" data-id="' + u.id + '" data-active="' + u.isActive + '">' +
                                                             (u.isActive ? 'Désactiver' : 'Réactiver') +
                                                        '</button>' +
+                                                       '<button class="btn btn-sm btn-outline-primary reset-password-btn" data-id="' + u.id + '" data-email="' + u.email + '" data-name="' + u.name + '">' +
+                                                            'Réinitialiser le mot de passe' +
+                                                       '</button>' +
+                                                       '</div>' +
                                                   '</td>' +
                                                   '</tr>';
                                         }).join('');
@@ -311,10 +346,59 @@
                                                   }
                                              });
                                         });
+
+                                        document.querySelectorAll('.reset-password-btn').forEach(function (btn) {
+                                             btn.addEventListener('click', function () {
+                                                  resetPasswordTargetId = btn.dataset.id;
+                                                  resetPasswordError.style.display = 'none';
+                                                  resetPasswordForm.reset();
+                                                  resetPasswordTargetLabel.textContent = 'Compte : ' + btn.dataset.name + ' (' + btn.dataset.email + ')';
+                                                  getResetPasswordModal().show();
+                                             });
+                                        });
                                    } catch (err) {
                                         usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                    }
                               }
+
+                              // Modal de réinitialisation de mot de passe : un admin dépanne ainsi un
+                              // utilisateur qui a oublié le sien (aucun flux "mot de passe oublié" côté
+                              // appli — pas d'envoi d'email — donc ça passe nécessairement par un admin).
+                              let resetPasswordTargetId = null;
+                              let resetPasswordModal = null;
+                              // Instancié à la demande : `bootstrap` (vendor JS) n'est chargé qu'en bas
+                              // de la page, après ce script inline (même pattern que settings.html).
+                              function getResetPasswordModal() {
+                                   if (!resetPasswordModal) {
+                                        resetPasswordModal = new bootstrap.Modal(document.getElementById('reset-password-modal'));
+                                   }
+                                   return resetPasswordModal;
+                              }
+                              const resetPasswordForm = document.getElementById('reset-password-form');
+                              const resetPasswordError = document.getElementById('reset-password-error');
+                              const resetPasswordTargetLabel = document.getElementById('reset-password-target');
+                              const resetPasswordSubmit = document.getElementById('reset-password-submit');
+
+                              resetPasswordForm.addEventListener('submit', async function (e) {
+                                   e.preventDefault();
+                                   resetPasswordError.style.display = 'none';
+                                   resetPasswordSubmit.disabled = true;
+                                   try {
+                                        const res = await window.reassortFetch('/users/' + resetPasswordTargetId, {
+                                             method: 'PUT',
+                                             headers: { 'Content-Type': 'application/json' },
+                                             body: JSON.stringify({ password: document.getElementById('reset-password-value').value }),
+                                        });
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        getResetPasswordModal().hide();
+                                   } catch (err) {
+                                        resetPasswordError.textContent = err.message;
+                                        resetPasswordError.style.display = 'block';
+                                   } finally {
+                                        resetPasswordSubmit.disabled = false;
+                                   }
+                              });
 
                               refreshBtn.addEventListener('click', loadUsers);
                               loadShops();
