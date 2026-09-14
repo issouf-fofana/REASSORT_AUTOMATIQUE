@@ -3,15 +3,11 @@
 # déploiement Dockploy soit utilisable immédiatement sans étape manuelle dans la console/SSH.
 set -e
 
-# --accept-data-loss : nécessaire pour un démarrage non-interactif (sinon `db push` attend une
-# confirmation au clavier et bloque indéfiniment le conteneur). Ce projet n'a pas de migrations
-# Prisma formelles (cf. absence de prisma/migrations/) : tout changement de schéma passe par ce
-# `db push` — un changement de type de colonne incompatible avec les données existantes serait donc
-# appliqué sans confirmation manuelle. Acceptable ici car chaque évolution de schéma de ce projet a
-# été additive jusqu'à présent (nouvelles colonnes/tables) ; à surveiller si un futur changement
-# devient réellement destructif (suppression de colonne encore utilisée, par ex.).
-echo "[docker-entrypoint] Synchronisation du schéma de base de données (prisma db push)..."
-npx prisma db push --skip-generate --accept-data-loss
+# Le schéma est versionné dans prisma/migrations/ (baseline 0000_baseline + évolutions).
+# Le démarrage applique ces migrations via `prisma migrate deploy` (non-interactif,
+# jamais destructif sans migration explicite) avant de vérifier le compte admin.
+echo "[docker-entrypoint] Application des migrations de base de données (prisma migrate deploy)..."
+npx prisma migrate deploy
 
 echo "[docker-entrypoint] Vérification du compte administrateur..."
 node prisma/create-admin.js

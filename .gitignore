@@ -11,7 +11,9 @@ yarn-error.log*
 .claude
 
 # Prisma
-prisma/migrations/
+# NOTE : prisma/migrations/ est VOLONTAIREMENT versionné (baseline + évolutions
+# traçables, appliquées via `prisma migrate deploy` dans docker-entrypoint.sh).
+# Ne jamais y ajouter de règle d'ignorance.
 
 # Build
 dist/
@@ -37,3 +39,8 @@ docker-compose.override.yml
 # Temporary
 tmp/
 temp/
+
+# Fichiers de travail locaux (notes, brouillons, swaps d'éditeur) — jamais versionnés
+reassort
+commede.text
+*.kate-swp

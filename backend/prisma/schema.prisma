@@ -1093,3 +1093,142 @@ model ChatbotMessage {
   @@index([conversationId, createdAt])
   @@map("chatbot_messages")
 }
+
+// Conseiller d'amélioration IA (première brique de l'AI Center, §44) : chaque ligne = un constat
+// du chien de garde (détecteurs déterministes d'improvementService.js) + la recommandation qui
+// va avec (réglage d'exploitation et/ou reco dev, enrichie par LLM quand disponible).
+// Boucle d'apprentissage : metricName/metricBefore figent la mesure au constat ; quand la reco
+// est marquée APPLIED, une évaluation ultérieure recalcule la métrique (metricAfter) et statue
+// IMPROVED (baisse ≥10%) ou NO_EFFECT — le système apprend ce qui marche vraiment.
+model AIImprovement {
+  id String @id @default(cuid())
+
+  // SILENT_ANOMALY (anomalie silencieuse : prédiction non évaluable, job qui dérive...),
+  // ACCURACY (précision/biais par magasin), JOB_HEALTH, DATA_QUALITY, CHATBOT_GAP, WORKFLOW.
+  type String
+  // INFO | WARNING | CRITICAL
+  severity String
+  title    String
+  // Recommandation d'exploitation (texte déterministe, éventuellement enrichi par LLM).
+  detail String
+  // Recommandation dev (fichiers/pistes de correctif), si le constat relève du code.
+  devRecommendation String? @map("dev_recommendation")
+  // Preuve chiffrée (JSON) : effectifs, exemples, paramètres de recalcule de la métrique.
+  evidence String?
+  // Périmètre : "global" ou rposShopId.
+  scope String @default("global")
+  // PROPOSED -> IN_PROGRESS -> TO_VERIFY -> APPLIED, puis IMPROVED | NO_EFFECT après
+  // évaluation ; DISMISSED à tout moment (avec motif). Voir AIImprovementEvent pour la timeline.
+  status    String    @default("PROPOSED") // PROPOSED | IN_PROGRESS | TO_VERIFY | APPLIED | DISMISSED | IMPROVED | NO_EFFECT
+  appliedAt DateTime? @map("applied_at")
+
+  // Priorité de traitement : CRITICAL (bloquant) | HIGH (intervention rapide) |
+  // MEDIUM (à traiter, non bloquant) | LOW (amélioration mineure). Dérivée de la sévérité
+  // à la création.
+  priority String @default("MEDIUM")
+  // Message d'erreur EXACT constaté (ex: dernière erreur du job) — jamais reformulé, pour
+  // vérification précise sans interprétation de l'IA.
+  errorMessage String? @map("error_message")
+  // Confiance de l'analyse IA (0-100) quand enrichie par LLM, null sinon.
+  aiConfidence Int? @map("ai_confidence")
+
+  metricName   String? @map("metric_name")
+  metricBefore Float?  @map("metric_before")
+  metricAfter  Float?  @map("metric_after")
+
+  providerUsed String? @map("provider_used")
+
+  // Transparence IA (demande du 14/09/2026) : le prompt exact envoyé au LLM (comportement
+  // décrit + preuves) est conservé pour audit, ainsi que le message d'erreur quand
+  // l'enrichissement a échoué (pas de clé, quota, réseau) et que la reco est restée déterministe.
+  aiPrompt String? @map("ai_prompt")
+  aiError  String? @map("ai_error")
+
+  // Contexte de détection (traçabilité Qui/Où/Quand) : qui a lancé l'analyse (email ou
+  // "system/cron"), IP source, version appli, environnement.
+  detectedBy  String? @map("detected_by")
+  detectedIp  String? @map("detected_ip")
+  appVersion  String? @map("app_version")
+  environment String? @default("production")
+  // Suivi humain : qui a appliqué, ce qui a réellement été fait, pourquoi ignoré.
+  appliedBy       String? @map("applied_by")
+  appliedNote     String? @map("applied_note")
+  dismissedBy     String? @map("dismissed_by")
+  dismissedReason String? @map("dismissed_reason")
+
+  events AIImprovementEvent[]
+
+  // Erreurs du journal regroupées dans ce constat (clic journal → correctif).
+  errorReports ErrorReport[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([type, scope, status])
+  @@index([priority, status])
+  @@map("ai_improvements")
+}
+
+// Timeline d'une recommandation (traçabilité complète : Détection → Analyse IA →
+// Recommandation → Validation → Correction → Vérification → Résultat). Chaque transition de
+// statut et chaque évaluation y laisse une trace horodatée avec son acteur.
+model AIImprovementEvent {
+  id String @id @default(cuid())
+
+  improvementId String         @map("improvement_id")
+  improvement   AIImprovement  @relation(fields: [improvementId], references: [id], onDelete: Cascade)
+
+  at DateTime @default(now())
+  // Email de l'utilisateur, ou "system" pour les actions automatiques (détection, évaluation).
+  actor String @default("system")
+  // DETECTED | ENRICHED | STATUS_CHANGED | EVALUATED
+  action String
+  fromStatus String? @map("from_status")
+  toStatus   String? @map("to_status")
+  // Détail libre : motif d'ignorance, correction réellement effectuée, mesure avant→après...
+  note String?
+
+  @@index([improvementId, at])
+  @@map("ai_improvement_events")
+}
+
+// Journal des erreurs applicatives (debug global) : TOUTES les erreurs 5xx de l'API et TOUTES
+// les erreurs JS non capturées de CHAQUE page frontend y sont persistées avec leur contexte
+// (Qui/Où/Quand spec §5). Le détecteur du chien de garde les regroupe (même signature) et en
+// fait des recommandations avec le message exact — comme un debug qui ratisse tout le système.
+// Rétention : 30 jours + plafond 5000 lignes (élagué à chaque run du watchdog).
+model ErrorReport {
+  id String @id @default(cuid())
+
+  // "backend" (erreur API 5xx) | "frontend" (erreur JS page).
+  source String
+  // Page frontend (ex: "/purchase-order") pour source frontend, null côté backend.
+  page String?
+  // URL/méthode API côté backend (ex: "POST /api/reassort/proposal/generate").
+  url    String?
+  method String?
+  // Code HTTP côté backend (500...), null côté frontend.
+  statusCode Int? @map("status_code")
+  // Message EXACT, jamais reformulé.
+  message String
+  // Stack (tronquée) quand disponible.
+  stack String?
+  // Contexte Qui/Où (spec §5) : email, périmètre magasin, IP, navigateur, version appli.
+  userEmail String? @map("user_email")
+  shopRef   String? @map("shop_ref")
+  ip        String?
+  userAgent String? @map("user_agent")
+
+  // Recommandation liée (clic journal → correctif) : posée quand le chien de garde regroupe
+  // cette erreur dans un constat. Null = pas (encore) de reco — occurrences insuffisantes
+  // (seuil ≥3) ou erreur non reproductible : toutes les erreurs ne sont pas des bugs code.
+  improvementId String?         @map("improvement_id")
+  improvement   AIImprovement?  @relation(fields: [improvementId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([source, createdAt])
+  @@index([createdAt])
+  @@map("error_reports")
+}
