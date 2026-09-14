@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const {
   generateProposal,
@@ -35,6 +34,8 @@ const aiForecastService = require('../services/aiForecastService');
 const cryptoService = require('../services/cryptoService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const jobHealthService = require('../services/jobHealthService');
+const improvementService = require('../services/improvementService');
+const errorReportService = require('../services/errorReportService');
 const multer = require('multer');
 const path = require('path');
 const fsPromises = require('fs/promises');
@@ -823,7 +824,10 @@ router.post('/proposal/generate', async (req, res) => {
           }).catch(() => {}); // une mise à jour de progression manquée ne doit jamais interrompre la génération elle-même
         };
 
-        const { proposal } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress });
+        const { proposal, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress });
+        if (!weeklyPlanAttached) {
+          console.warn(`[proposal/generate] ALERTE ${shopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+        }
 
         await prisma.proposalGenerationRun.update({
           where: { id: run.id },
@@ -1525,6 +1529,13 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       }
     }
 
+    if (key === systemConfig.KEYS.ANOMALY_MIN_DAILY_SALES) {
+      const threshold = parseFloat(value);
+      if (!Number.isFinite(threshold) || threshold < 0) {
+        return res.status(400).json({ success: false, message: 'Seuil invalide : nombre positif ou nul, en unités/jour (ex: 1, 0.5, 0)' });
+      }
+    }
+
     const ENABLED_KEYS = [
       systemConfig.KEYS.NIGHTLY_PROPOSAL_ENABLED,
       systemConfig.KEYS.RECEPTION_SYNC_ENABLED,
@@ -2075,6 +2086,142 @@ router.put('/proposal/:proposalId/line-quantity', async (req, res) => {
     res.json({ success: true, data: { ean: updated.ean, quantitySuggested: updated.quantitySuggested } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/error-reports - capteur frontend du debug global : chaque page interne
+// remonte ses erreurs JS non capturées (layout.js, TOUTES les pages/vues couvertes).
+// Authentifié mais pas forcément ADMIN (les erreurs des comptes STORE sont précieuses aussi) —
+// le regroupement et la déduplication se font côté chien de garde, ici on journalise juste
+// (plafond anti-spam côté client : 20 envois + dédup 60s par page chargée).
+router.post('/error-reports', async (req, res) => {
+  try {
+    const { page, message, stack } = req.body;
+    if (!message) return res.status(400).json({ success: false, message: 'message requis' });
+    await errorReportService.reportError({
+      source: 'frontend',
+      page: page || null,
+      message,
+      stack: stack || null,
+      userEmail: (req.user && req.user.email) || null,
+      shopRef: (req.user && req.user.rposShopReference) || null,
+      ip: req.ip || null,
+      userAgent: req.get('User-Agent') || null,
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/error-reports/recent - journal d'audit des erreurs (base du debug global) :
+// les 100 dernières erreurs capturées (toutes pages frontend + toutes API 5xx), les plus
+// récentes d'abord. Réservé ADMIN. Prouve que les bugs sont bien sauvés avant analyse.
+router.get('/error-reports/recent', requireAdmin, async (req, res) => {
+  try {
+    const rows = await prisma.errorReport.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
+    const total = await prisma.errorReport.count();
+    res.json({ success: true, data: { total, rows } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/improvements - Conseiller d'amélioration IA (première brique AI Center,
+// §44) : constats persistés avec priorité, statut et timeline.
+// ?status= & ?priority= pour filtrer, ?sort=priority (défaut, critiques d'abord) ou recent.
+// Réservé ADMIN : pilotage global du système, pas par magasin.
+router.get('/improvements', requireAdmin, async (req, res) => {
+  try {
+    const where = {};
+    if (req.query.status) where.status = req.query.status;
+    if (req.query.priority) where.priority = req.query.priority;
+    const rows = await prisma.aIImprovement.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
+    const rank = improvementService.PRIORITY_RANK;
+    if ((req.query.sort || 'priority') === 'priority') {
+      rows.sort((a, b) => (rank[a.priority] ?? 9) - (rank[b.priority] ?? 9) || b.createdAt - a.createdAt);
+    }
+    res.json({ success: true, data: rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(r.evidence) : null })) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/improvements/health - constats ACTUELS du chien de garde, sans rien
+// persister : aperçu instantané avant de lancer une génération.
+router.get('/improvements/health', requireAdmin, async (req, res) => {
+  try {
+    res.json({ success: true, data: await improvementService.collectFindings() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/improvements/:id - détail complet + timeline des événements
+// (Détection → Analyse IA → Recommandation → Validation → Correction → Vérification → Résultat).
+router.get('/improvements/:id', requireAdmin, async (req, res) => {
+  try {
+    const row = await prisma.aIImprovement.findUnique({
+      where: { id: req.params.id },
+      include: { events: { orderBy: { at: 'asc' } } },
+    });
+    if (!row) return res.status(404).json({ success: false, message: 'Recommandation introuvable' });
+    res.json({ success: true, data: { ...row, evidence: row.evidence ? JSON.parse(row.evidence) : null } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+// POST /api/reassort/improvements/generate - lance le cycle complet : détection des anomalies
+// silencieuses, persistance (dédupliquée), enrichissement IA des priorités, puis évaluation
+// d'effet des recommandations précédemment appliquées (boucle d'apprentissage). Le contexte
+// Qui/Où (email, IP, version, environnement) est figé sur chaque constat pour traçabilité.
+router.post('/improvements/generate', requireAdmin, async (req, res) => {
+  try {
+    let appVersion = null;
+    try { appVersion = require('../../package.json').version || null; } catch { appVersion = null; }
+    const data = await improvementService.generateImprovements({
+      actor: (req.user && req.user.email) || 'admin',
+      ip: req.ip || null,
+      appVersion,
+      environment: process.env.NODE_ENV || 'production',
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('[improvements/generate]', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/improvements/:id - ajuste la proposition IA (recommandation, reco dev,
+// priorité). La proposition de l'IA est modifiable par l'humain avant application ; chaque
+// modification est tracée dans la timeline (action EDITED). Interdit sur APPLIED/IMPROVED
+// (clôturées : rouvrir d'abord).
+router.put('/improvements/:id', requireAdmin, async (req, res) => {
+  try {
+    const { detail, devRecommendation, priority } = req.body;
+    const data = await improvementService.updateImprovement(req.params.id, { detail, devRecommendation, priority }, {
+      actor: (req.user && req.user.email) || 'admin',
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+});
+// POST /api/reassort/improvements/:id/status - { status, note? } : l'humain reste décisionnaire.
+// Statuts : IN_PROGRESS (en cours), TO_VERIFY (à vérifier), APPLIED (appliqué + note de ce qui
+// a réellement été fait), DISMISSED (ignoré + motif obligatoire), PROPOSED (rouvrir).
+// IMPROVED/NO_EFFECT sont posés par le système seul (évaluation), jamais à la main.
+// Chaque transition est tracée (acteur, note) dans la timeline — rien ne disparaît.
+router.post('/improvements/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { status, note } = req.body;
+    const data = await improvementService.setImprovementStatus(req.params.id, status, {
+      actor: (req.user && req.user.email) || 'admin',
+      note: (note || '').slice(0, 2000) || null,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 });
 

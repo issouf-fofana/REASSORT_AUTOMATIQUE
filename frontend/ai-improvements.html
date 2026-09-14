@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Améliorations IA | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          .sev-CRITICAL { background-color: #dc3545; }
+          .sev-WARNING { background-color: #fd7e14; }
+          .sev-INFO { background-color: #0d6efd; }
+          .imp-detail { white-space: pre-line; }
+     </style>
+</head>
+
+<body data-page-title="Améliorations IA">
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> le chien de garde surveille en continu les
+                                   anomalies <em>silencieuses</em> (prédictions jamais évaluables, jobs en échec,
+                                   biais de précision par magasin, synchro en retard, questions chatbot sans
+                                   réponse...), propose un correctif (réglage + reco dev, enrichi par l'IA pour
+                                   les priorités), puis <strong>vérifie après coup</strong> si le correctif appliqué
+                                   a vraiment amélioré la métrique (IMPROVED) ou non (NO_EFFECT). Vous restez
+                                   décisionnaire : rien n'est appliqué automatiquement.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                              <button type="button" id="imp-generate" class="btn btn-primary">Analyser maintenant</button>
+                              <select id="imp-filter" class="form-select" style="max-width: 200px;">
+                                   <option value="">Tous statuts</option>
+                                   <option value="PROPOSED">Proposées</option>
+                                   <option value="IN_PROGRESS">En cours</option>
+                                   <option value="TO_VERIFY">À vérifier</option>
+                                   <option value="APPLIED">Appliquées</option>
+                                   <option value="IMPROVED">Améliorées ✓</option>
+                                   <option value="NO_EFFECT">Sans effet</option>
+                                   <option value="DISMISSED">Ignorées</option>
+                              </select>
+                              <select id="imp-priority" class="form-select" style="max-width: 180px;">
+                                   <option value="">Toutes priorités</option>
+                                   <option value="CRITICAL">Critique</option>
+                                   <option value="HIGH">Élevée</option>
+                                   <option value="MEDIUM">Moyenne</option>
+                                   <option value="LOW">Faible</option>
+                              </select>
+                              <select id="imp-sort" class="form-select" style="max-width: 180px;">
+                                   <option value="priority">Tri : priorité</option>
+                                   <option value="recent">Tri : récent</option>
+                              </select>
+                              <span id="imp-summary" class="small text-muted ms-auto"></span>
+                         </div>
+                    </div>
+
+                    <div id="imp-list"></div>
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-improvements.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+     <!-- Modale : note d'action (correction effectuée / motif d'ignorance / note libre) -->
+     <div class="modal fade" id="imp-note-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title" id="imp-note-title">Changer de statut</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body">
+                         <label class="form-label fw-semibold" id="imp-note-label">Note</label>
+                         <textarea id="imp-note-text" class="form-control" rows="3"></textarea>
+                         <div id="imp-note-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                    </div>
+                    <div class="modal-footer">
+                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                         <button type="button" class="btn btn-primary" id="imp-note-confirm">Confirmer</button>
+                    </div>
+               </div>
+          </div>
+     </div>
+
+     <!-- Modale : détail complet + timeline de l'incident (large + corps scrollable :
+          la timeline peut être longue, la modale reste à l'écran) -->
+     <div class="modal fade" id="imp-detail-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Détail de la recommandation</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body" id="imp-detail-body"></div>
+               </div>
+          </div>
+     </div>
+
+     <!-- Modale : modifier la proposition IA (recommandation, reco dev, priorité) -->
+     <div class="modal fade" id="imp-edit-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Modifier la proposition IA</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body">
+                         <input type="hidden" id="imp-edit-id">
+                         <label class="form-label fw-semibold">Recommandation</label>
+                         <textarea id="imp-edit-detail" class="form-control mb-3" rows="4"></textarea>
+                         <label class="form-label fw-semibold">Recommandation dev</label>
+                         <textarea id="imp-edit-dev" class="form-control mb-3" rows="3" placeholder="Vide = aucune"></textarea>
+                         <label class="form-label fw-semibold">Priorité</label>
+                         <select id="imp-edit-priority" class="form-select" style="max-width: 220px;">
+                              <option value="CRITICAL">Critique</option>
+                              <option value="HIGH">Élevée</option>
+                              <option value="MEDIUM">Moyenne</option>
+                              <option value="LOW">Faible</option>
+                         </select>
+                         <div id="imp-edit-error" class="alert alert-danger mt-3" style="display:none;"></div>
+                    </div>
+                    <div class="modal-footer">
+                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                         <button type="button" class="btn btn-primary" id="imp-edit-confirm">Enregistrer</button>
+                    </div>
+               </div>
+          </div>
+     </div>
+
+</body>
+
+</html>

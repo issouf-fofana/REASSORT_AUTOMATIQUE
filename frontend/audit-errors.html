@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Journal d'audit | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+     </style>
+</head>
+
+<body data-page-title="Journal d'audit">
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>Base audit :</strong> chaque bug/erreur du site y est sauvé avec son
+                                   contexte (toutes les pages + toutes les API : qui, où, quand, poste, IP,
+                                   navigateur, URL, erreur exacte). La page Améliorations IA regroupe ces lignes
+                                   en recommandations. Rétention 30 jours, plafond 5000 lignes.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card">
+                         <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                              <h4 class="card-title mb-0">Erreurs journalisées</h4>
+                              <div class="d-flex gap-2 align-items-center">
+                                   <select id="err-source" class="form-select form-select-sm" style="max-width: 160px;">
+                                        <option value="">Toutes sources</option>
+                                        <option value="frontend">Frontend</option>
+                                        <option value="backend">Backend</option>
+                                   </select>
+                                   <button type="button" class="btn btn-sm btn-outline-secondary" id="err-refresh">Actualiser</button>
+                              </div>
+                         </div>
+                         <div class="card-body">
+                              <div class="small text-muted mb-2" id="err-summary"></div>
+                              <div class="table-responsive">
+                                   <table class="table table-sm align-middle mb-0">
+                                        <thead class="bg-light-subtle">
+                                             <tr>
+                                                  <th>Date</th>
+                                                  <th>Source</th>
+                                                  <th>Page / API</th>
+                                                  <th>Message exact</th>
+                                                  <th>Utilisateur</th>
+                                                  <th>IP</th>
+                                             </tr>
+                                        </thead>
+                                        <tbody id="err-tbody">
+                                             <tr><td colspan="6" class="text-center text-muted py-3">Chargement...</td></tr>
+                                        </tbody>
+                                   </table>
+                              </div>
+                         </div>
+                    </div>
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/audit-errors.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+</body>
+
+</html>
