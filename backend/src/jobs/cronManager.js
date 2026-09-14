@@ -6,6 +6,7 @@ const { runSalesSync } = require('./salesSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
+const { runImprovementWatchdog } = require('./improvementWatchdogJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -15,6 +16,7 @@ let currentSalesSyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
+let currentImprovementWatchdogTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -25,6 +27,7 @@ const salesSyncLock = createJobLock('Synchronisation des ventes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
+const improvementWatchdogLock = createJobLock('Chien de garde améliorations IA');
 
 /** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
 async function isJobEnabled(enabledKey) {
@@ -206,6 +209,35 @@ async function startOrRestartPredictionOutcomeJob() {
   console.log(`⏰ Évaluation des prédictions planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme le chien de garde du Conseiller d'amélioration IA (première brique AI Center). */
+async function startOrRestartImprovementWatchdogJob() {
+  if (currentImprovementWatchdogTask) {
+    currentImprovementWatchdogTask.stop();
+    currentImprovementWatchdogTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.IMPROVEMENTS_ENABLED))) {
+    console.log('⏸️  Chien de garde améliorations IA désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.IMPROVEMENTS_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), chien de garde améliorations IA non planifié`);
+    return;
+  }
+
+  currentImprovementWatchdogTask = cron.schedule(cronSchedule, () => {
+    improvementWatchdogLock(async () => {
+      console.log('[cron] Démarrage du chien de garde améliorations IA...');
+      await trackJobRun('improvementWatchdog', runImprovementWatchdog);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Chien de garde améliorations IA planifié: ${cronSchedule}`);
+}
+
 module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
@@ -213,4 +245,5 @@ module.exports = {
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,
+  startOrRestartImprovementWatchdogJob,
 };

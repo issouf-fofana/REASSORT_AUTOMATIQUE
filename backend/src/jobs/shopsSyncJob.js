@@ -5,11 +5,10 @@
  * jusqu'à 15-20s de latence sur cache-miss). La liste des magasins change très rarement (ajout ou
  * fermeture manuelle), donc une synchro toutes les heures suffit largement.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const rposServers = require('../services/rposServersService');
 
-const prisma = new PrismaClient();
 
 async function runShopsSync() {
   const servers = await rposServers.listServers();

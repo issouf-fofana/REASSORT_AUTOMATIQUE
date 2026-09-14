@@ -72,8 +72,10 @@ function detectSalesSpikeOrDrop(dailyHistory) {
  * Stock incohérent : l'article a un stock RPOS positif significatif mais n'a enregistré aucune
  * vente récente alors qu'il vend habituellement — signale une rupture invisible (article mal
  * rangé, erreur de caisse, code-barre non scanné) plutôt qu'une vraie absence de demande.
+ * minAvgDailySales (unité/jour, configurable via ANOMALY_MIN_DAILY_SALES) : en dessous de ce
+ * rythme habituel, le silence des ventes n'est pas jugé incohérent (article lent ou intermittent).
  */
-function detectStockInconsistency(stock, avgWeeklySales, dailyHistory) {
+function detectStockInconsistency(stock, avgWeeklySales, dailyHistory, minAvgDailySales = 1) {
   if (!dailyHistory || dailyHistory.length < MIN_DAYS_FOR_TREND) return null;
   if (!(stock > 0) || !(avgWeeklySales > 0)) return null;
 
@@ -83,7 +85,7 @@ function detectStockInconsistency(stock, avgWeeklySales, dailyHistory) {
   // L'article vend normalement plusieurs unités par jour en moyenne, mais rien sur les derniers
   // jours malgré un stock disponible : incohérent, à vérifier plutôt qu'à prendre pour argent
   // comptant (§30 "rupture invisible").
-  if (recentTotal === 0 && avgDailySales >= 1) {
+  if (recentTotal === 0 && avgDailySales >= minAvgDailySales) {
     return { type: 'STOCK_INCONSISTENCY', message: `Stock disponible (${stock}) mais aucune vente sur les ${RECENT_WINDOW_DAYS} derniers jours, alors que l'article vend habituellement ~${avgDailySales.toFixed(1)}/jour — rupture invisible possible (article mal positionné, EAN non scanné).` };
   }
   return null;
@@ -115,12 +117,14 @@ function computeTrendScore(dailyHistory) {
 /**
  * Point d'entrée : calcule tous les signaux d'anomalie + la tendance pour un article. Ne fait
  * aucun appel réseau/base — synchrone, appelable en masse sur toutes les lignes d'une génération.
+ * minAvgDailySales : seuil "rupture invisible" (voir detectStockInconsistency), transmis par
+ * l'appelant (proposalService le lit en config une fois par génération).
  */
-function detectAnomalies({ stock, avgWeeklySales, dailyHistory }) {
+function detectAnomalies({ stock, avgWeeklySales, dailyHistory, minAvgDailySales = 1 }) {
   const anomalies = [];
   const spikeOrDrop = detectSalesSpikeOrDrop(dailyHistory);
   if (spikeOrDrop) anomalies.push(spikeOrDrop);
-  const stockInconsistency = detectStockInconsistency(stock, avgWeeklySales, dailyHistory);
+  const stockInconsistency = detectStockInconsistency(stock, avgWeeklySales, dailyHistory, minAvgDailySales);
   if (stockInconsistency) anomalies.push(stockInconsistency);
 
   const trend = computeTrendScore(dailyHistory);

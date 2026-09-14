@@ -9,13 +9,12 @@
  * large (cf. runInitialBackfillForShop) sous peine de repartir de "maintenant" et de ne jamais
  * couvrir l'historique passé.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const rposServers = require('../services/rposServersService');
 const systemConfig = require('../services/systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
-const prisma = new PrismaClient();
 
 // Marge de recouvrement : on resynchronise toujours un peu avant la dernière date connue, pour
 // couvrir les ventes qui seraient arrivées en retard côté RPOS (ex: caisse hors-ligne synchronisée

@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 const { getConfig } = require('./configService');
 const { resolvePeriod } = require('./periodService');
@@ -11,7 +11,6 @@ const { computeConfidenceScore } = require('./confidenceService');
 const { detectAnomalies } = require('./anomalyService');
 const aiForecastService = require('./aiForecastService');
 
-const prisma = new PrismaClient();
 
 // En dessous de cette tolérance (heures), un léger décalage entre le début réel des données
 // locales et le début de période demandé est considéré normal (la toute première synchro d'une
@@ -732,11 +731,17 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // Détection d'anomalies (§30-31, étape 7) : calculée ICI, avant le score de confiance, pour que
   // celui-ci puisse pénaliser un article présentant un signal anormal (explosion/chute de ventes,
   // stock incohérent) — synchrone et sans appel réseau, donc aucun impact sur le temps de génération.
+  // Le seuil "rupture invisible" (ANOMALY_MIN_DAILY_SALES, Paramètres) est lu une seule fois par
+  // génération — pas à chaque article — car chaque lecture frappe la base via systemConfig.
+  const anomalyMinDailyRaw = await systemConfig.getValue(systemConfig.KEYS.ANOMALY_MIN_DAILY_SALES);
+  const anomalyMinDailyParsed = parseFloat(anomalyMinDailyRaw);
+  const anomalyMinDailySales = Number.isFinite(anomalyMinDailyParsed) && anomalyMinDailyParsed >= 0 ? anomalyMinDailyParsed : 1;
   for (const p of result.proposals) {
     const { anomalies, trend } = detectAnomalies({
       stock: p.stock,
       avgWeeklySales: p.avgWeeklySales,
       dailyHistory: p.dailyHistory,
+      minAvgDailySales: anomalyMinDailySales,
     });
     p.anomalies = anomalies;
     p.trendCategory = trend.category;
@@ -945,6 +950,11 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     proposal.weeklyPlanId = plan.id;
   } catch (weeklyPlanError) {
     console.error(`[proposalService] Rattachement au plan hebdomadaire échoué pour ${shopReference}:`, weeklyPlanError.message);
+    // ALERTE : sans plan, les AIPrediction de cette génération sont écrites avec une semaine
+    // cible null et ne seront jamais évaluées par predictionOutcomeJob (qui ignore
+    // silencieusement les targetPeriodEnd null) — le magasin perd sa mesure de précision IA
+    // pour cette semaine sans aucun autre signal. D'où le warn explicite + le flag retourné.
+    console.warn(`[proposalService] ALERTE ${shopReference} : proposition ${proposal.id} sans plan hebdomadaire — ${result.proposals.length} prédiction(s) sans semaine cible, exclues de l'évaluation de précision.`);
   }
 
   // Historique des prédictions (CAHIER_DES_CHARGES.md §21, étape 4), avec score de confiance par
@@ -984,7 +994,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     console.error(`[proposalService] Enregistrement de l'historique des prédictions échoué pour ${shopReference}:`, predictionError.message);
   }
 
-  return { proposal, stats: result.stats };
+  return { proposal, stats: result.stats, weeklyPlanAttached: !!plan };
 }
 
 /** Dernière proposition en attente de validation pour un magasin (status GENERATED). */
@@ -1501,6 +1511,7 @@ async function getForecastAccuracy(shopId) {
 module.exports = {
   generateProposal,
   computeQuantityToOrder,
+  computeParetoFromLines,
   generateAndSaveProposal,
   getPendingProposal,
   startProposalValidation,

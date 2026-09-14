@@ -3,13 +3,12 @@
  * pour qu'elle soit déjà prête quand le responsable magasin se connecte le matin (phase pilote,
  * cf. readme section 9-10).
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const { generateAndSaveProposal } = require('../services/proposalService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { runAiForecast } = require('../services/aiForecastService');
 const { MIN_DAYS_FOR_SMOOTHING } = require('../services/forecastService');
 
-const prisma = new PrismaClient();
 
 // L'analyse IA n'est lancée automatiquement QUE sur ce job nocturne (une fois par jour par
 // magasin), jamais sur une génération manuelle/forcée en journée : chaque analyse consomme un
@@ -36,7 +35,7 @@ async function runNightlyProposalGeneration() {
 
   await mapWithConcurrency(shops, SHOP_CONCURRENCY, async (shop) => {
     try {
-      const { proposal, stats } = await generateAndSaveProposal({
+      const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({
         posId: shop.rposPosId,
         shopId: shop.rposShopId,
         shopReference: shop.rposShopReference,
@@ -44,6 +43,9 @@ async function runNightlyProposalGeneration() {
       });
 
       console.log(`[nightlyProposalJob] ${shop.rposShopReference} (${shop.rposShopName}): ${stats.proposalsGenerated} proposition(s)`);
+      if (!weeklyPlanAttached) {
+        console.warn(`[nightlyProposalJob] ALERTE ${shop.rposShopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+      }
 
       const periodDays = (new Date(stats.periodEnd) - new Date(stats.periodStart)) / (24 * 60 * 60 * 1000);
       if (periodDays >= MIN_DAYS_FOR_AI_FORECAST && stats.proposalsGenerated > 0) {

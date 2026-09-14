@@ -8,13 +8,12 @@
  * plus haute priorité échoue (quota épuisé, erreur d'authentification, timeout), on retente avec
  * la suivante, sans intervention de l'utilisateur.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
 const systemConfig = require('./systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const shopActivityService = require('./shopActivityService');
 
-const prisma = new PrismaClient();
 
 // Un seul prompt géant avec tous les articles Pareto d'un magasin (jusqu'à 1000+) risquait de
 // dépasser les limites de tokens du modèle ou de prendre plusieurs dizaines de secondes en un seul
@@ -214,6 +213,26 @@ async function fetchWithTimeout(url, options) {
   }
 }
 
+/**
+ * Traduit les erreurs brutes de l'API Gemini en message actionnable (testé unitairement) :
+ * le 400 "API_KEY_INVALID" ne vient jamais d'un bug applicatif mais d'une clé rejetée par
+ * Google (supprimée, mal copiée, restreinte) — autant le dire clairement plutôt que de
+ * renvoyer le JSON brut d'erreur.
+ */
+function geminiErrorMessage(status, bodyText) {
+  const body = bodyText || '';
+  if (body.includes('API_KEY_INVALID') || body.includes('API key not valid')) {
+    return 'Gemini : clé API invalide (API_KEY_INVALID). Recréez une clé sur Google AI Studio (Get API Key), collez-la en entier sans espace avant/après, et sans restriction bloquant "Generative Language API".';
+  }
+  if (status === 404 || body.includes('NOT_FOUND')) {
+    return `Gemini : modèle introuvable (${status}). Vérifiez le champ "modèle" de la clé (ex: gemini-2.0-flash). Détail : ${body.slice(0, 200)}`;
+  }
+  if (status === 429 || body.includes('RESOURCE_EXHAUSTED')) {
+    return 'Gemini : quota épuisé (429). Attendez ou augmentez le quota dans Google AI Studio.';
+  }
+  return `Gemini ${status}: ${body.slice(0, 500)}`;
+}
+
 async function callGemini(apiKey, model, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:generateContent?key=${apiKey}`;
   const res = await fetchWithTimeout(url, {
@@ -226,7 +245,7 @@ async function callGemini(apiKey, model, prompt) {
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText);
-    throw new Error(`Gemini ${res.status}: ${errText}`);
+    throw new Error(geminiErrorMessage(res.status, errText));
   }
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -749,4 +768,4 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   return { answer: fullText.trim(), providerUsed };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, geminiErrorMessage };

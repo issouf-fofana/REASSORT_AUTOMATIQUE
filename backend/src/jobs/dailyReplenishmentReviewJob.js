@@ -14,12 +14,11 @@
  * séparée, plus complexe (distinction recommendedQuantity / orderedQuantity), qui ne modifie pas
  * encore computeQuantityToOrder à ce stade.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const { generateProposal, generateAndSaveProposal } = require('../services/proposalService');
 const systemConfig = require('../services/systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
-const prisma = new PrismaClient();
 
 // Un plan par magasin par semaine (contrainte @@unique) : traiter plusieurs magasins en parallèle
 // reste raisonnable, chacun interrogeant un serveur RPOS potentiellement différent (même principe

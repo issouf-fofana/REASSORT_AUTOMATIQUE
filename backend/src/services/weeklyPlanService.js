@@ -5,9 +5,8 @@
  * pour que les étapes suivantes (révisions explicites, réajustement quotidien) aient une base
  * sur laquelle s'appuyer sans devoir la reconstruire après coup.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -103,14 +102,20 @@ async function getWeeklyPlanHistory(weeklyPlanId) {
   // Regroupe par EAN la quantité proposée à chaque révision où l'article apparaît (un article peut
   // être absent d'une révision, ex: sorti du Pareto entre-temps — pas d'entrée pour cette révision
   // plutôt qu'une quantité à 0, pour ne pas laisser croire qu'une baisse à 0 a été calculée).
+  // Chaque point porte aussi l'écart vs la révision précédente où l'article apparaissait
+  // (changeVsPrevious, null au premier point) : un aller-retour (100 → 200 → 100) a une variation
+  // globale de 0 mais a bien bougé entre-temps — sans ce détail, il restait invisible en bas du tri.
   const byEan = new Map();
   plan.revisions.forEach((rev, index) => {
     for (const line of rev.lines) {
       if (!byEan.has(line.ean)) byEan.set(line.ean, { ean: line.ean, label: line.label, history: [] });
-      byEan.get(line.ean).history.push({
+      const entry = byEan.get(line.ean);
+      const previous = entry.history.length ? entry.history[entry.history.length - 1].quantitySuggested : null;
+      entry.history.push({
         revisionNumber: index + 1,
         proposalId: rev.id,
         quantitySuggested: line.quantitySuggested,
+        changeVsPrevious: previous === null ? null : line.quantitySuggested - previous,
       });
     }
   });
@@ -118,16 +123,23 @@ async function getWeeklyPlanHistory(weeklyPlanId) {
   const articles = Array.from(byEan.values()).map((art) => {
     const first = art.history[0];
     const last = art.history[art.history.length - 1];
+    const maxStepVariation = art.history.reduce(
+      (max, h) => (h.changeVsPrevious === null ? max : Math.max(max, Math.abs(h.changeVsPrevious))),
+      0
+    );
     return {
       ean: art.ean,
       label: art.label,
       history: art.history,
       variation: art.history.length > 1 ? last.quantitySuggested - first.quantitySuggested : 0,
+      maxStepVariation,
     };
   });
-  // Les articles dont la quantité a le plus bougé entre la première et la dernière révision
-  // intéressent en premier (c'est ce qu'un responsable veut voir : "qu'est-ce qui a changé ?").
-  articles.sort((a, b) => Math.abs(b.variation) - Math.abs(a.variation));
+  // Les articles dont la quantité a le plus bougé intéressent en premier (c'est ce qu'un responsable
+  // veut voir : "qu'est-ce qui a changé ?") — en retenant le plus fort entre l'écart global
+  // (première → dernière révision) et le plus gros saut d'une révision à l'autre, pour que les
+  // allers-retours (fort mouvement puis retour au point de départ) remontent aussi.
+  articles.sort((a, b) => Math.max(Math.abs(b.variation), b.maxStepVariation) - Math.max(Math.abs(a.variation), a.maxStepVariation));
 
   return {
     id: plan.id,

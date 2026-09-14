@@ -17,11 +17,10 @@
  * Seule exception fiable : l'annulation. Le statut RPOS 6 (annulée) reste vérifié, car une
  * commande annulée n'a par définition jamais pu être livrée.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
-const prisma = new PrismaClient();
 
 const TERMINAL_STATUSES = new Set(['RECUE_ESTIMEE', 'ANNULEE']);
 

@@ -9,9 +9,8 @@
  * validée. N'écrit qu'un résultat de mesure : ne modifie ni la proposition, ni le plan, ni aucun
  * comportement de calcul existant.
  */
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 // Nombre de prédictions évaluées par lot : une table pouvant grossir vite (une ligne par article
 // et par génération), on évite de tout charger en mémoire d'un coup.

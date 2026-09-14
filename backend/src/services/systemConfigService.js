@@ -1,6 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../utils/prisma');
 
-const prisma = new PrismaClient();
 
 const KEYS = {
   SALES_FILES_DIR: 'SALES_FILES_DIR',
@@ -23,9 +22,17 @@ const KEYS = {
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
   REVISION_CHANGE_THRESHOLD: 'REVISION_CHANGE_THRESHOLD',
+  // Seuil "rupture invisible" de la détection d'anomalies (anomalyService.js, étape 7) : vente
+  // moyenne journalière habituelle (unités/jour) à partir de laquelle un silence total des ventes
+  // sur les derniers jours, malgré un stock disponible, est jugé incohérent. Baissable (ex: 0.5)
+  // pour surveiller aussi les articles lents, au prix de plus de faux positifs sur les intermittents.
+  ANOMALY_MIN_DAILY_SALES: 'ANOMALY_MIN_DAILY_SALES',
   // Évaluation des prédictions passées (CAHIER_DES_CHARGES.md §22, étape 5) : compare prédiction
   // et réalité une fois la période cible terminée.
   PREDICTION_OUTCOME_CRON: 'PREDICTION_OUTCOME_CRON',
+  // Chien de garde du Conseiller d'amélioration IA (première brique AI Center, §44) : détection
+  // quotidienne des anomalies silencieuses + évaluation d'effet des recos appliquées.
+  IMPROVEMENTS_CRON: 'IMPROVEMENTS_CRON',
   // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
   // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
   // expression cron qui ne se déclenche jamais pour le "désactiver").
@@ -41,6 +48,7 @@ const KEYS = {
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
+  IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
   // Si "true", chaque génération de proposition (nocturne, manuelle, réajustement quotidien)
   // envoie ses articles à l'IA pour ajuster la quantité calculée classiquement avant de
   // l'enregistrer comme "Qté proposée" — au lieu de laisser cette étape à un appel manuel séparé
@@ -57,6 +65,11 @@ const KEYS = {
   // pour indiquer au magasin ce que l'assistant sait réellement faire quand une question posée sort
   // du périmètre couvert (cf. buildChatbotPrompt, dataSection de repli).
   CHATBOT_SUGGESTED_QUESTIONS: 'CHATBOT_SUGGESTED_QUESTIONS',
+  // Prompt du chien de garde (improvementService.js) : modèle d'analyse des constats, avec
+  // placeholders {{title}} {{detail}} {{evidence}} {{files}}. Éditable depuis Paramètres > IA
+  // (admin), sans redéploiement — permet d'ajuster le comportement de l'IA (ton, format,
+  // fichiers de référence) sans toucher au code.
+  IMPROVEMENTS_PROMPT_TEMPLATE: 'IMPROVEMENTS_PROMPT_TEMPLATE',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -97,6 +110,13 @@ const ENV_FALLBACK = {
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
+  // Quotidien à 7h30 par défaut, après l'évaluation des prédictions (7h) pour bénéficier des
+  // mesures les plus fraîches. Actif par défaut : une exécution sans nouveau constat ne coûte
+  // rien (ni LLM, ni écriture grâce à la déduplication).
+  [KEYS.IMPROVEMENTS_CRON]: () => process.env.IMPROVEMENTS_CRON || '30 7 * * *',
+  // 1 unité/jour par défaut : en dessous de ce rythme habituel, un silence récent des ventes
+  // n'est pas signalé comme rupture invisible (cf. ANOMALY_MIN_DAILY_SALES ci-dessus).
+  [KEYS.ANOMALY_MIN_DAILY_SALES]: () => '1',
   [KEYS.AI_ANALYSIS_PROMPT_TEMPLATE]: () => `Tu es un analyste de la demande pour un magasin de grande distribution ({{shopReference}} {{shopName}}).
 
 Pour chaque article ci-dessous, procède dans cet ordre précis — n'inverse pas les étapes :
@@ -142,6 +162,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
+  [KEYS.IMPROVEMENTS_ENABLED]: () => 'true',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
@@ -155,6 +176,17 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
     'Quels articles dois-je commander aujourd\'hui ?',
     'Quelles commandes ont été passées récemment ?',
   ].join('\n'),
+  [KEYS.IMPROVEMENTS_PROMPT_TEMPLATE]: () => `Tu es un expert maintenance d'une plateforme de réassort (backend Node.js/Express/Prisma/Postgres, frontend HTML/Bootstrap vanilla, intégration ERP RPOS).
+Fichiers réels du projet (ne cite QUE ceux-ci) : {{files}}
+Constat automatique du chien de garde :
+- Titre : {{title}}
+- Détail : {{detail}}
+- Preuves : {{evidence}}
+
+Réponds en français, 5 lignes max, format STRICT (rien d'autre) :
+EXPLOITATION: <1 action concrète côté réglages ou exploitation (nommer la clé de config ou la page Paramètres si pertinent)>
+DEV: <1 correctif code avec les fichiers concernés (chemins backend/src/... ou frontend/...), ou "RAS" si le constat ne relève pas du code>
+CONFIANCE: <0-100, ton niveau de confiance dans cette analyse vu les preuves fournies>`,
 };
 
 async function getValue(key) {
