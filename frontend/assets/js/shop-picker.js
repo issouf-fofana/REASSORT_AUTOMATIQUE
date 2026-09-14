@@ -150,12 +150,33 @@
       if (selectEl.value || !window.reassortGetActiveShop) return;
       const activeShop = window.reassortGetActiveShop();
       if (!activeShop) return;
-      const matchingOption = options.find(function (o) { return o.value === activeShop.id; });
+      applyShop(activeShop);
+    }
+
+    function applyShop(shop) {
+      if (!shop || selectEl.value === shop.id) return; // déjà à jour, évite un dispatch inutile
+      const matchingOption = options.find(function (o) { return o.value === shop.id; });
       if (!matchingOption) return;
       selectEl.value = matchingOption.value;
       selectEl.dispatchEvent(new Event('change'));
       button.textContent = matchingOption.textContent;
       updateShopContext(matchingOption);
+    }
+
+    // Un autre picker (ou le bouton global de la topbar) vient de changer le magasin actif : ce
+    // picker-ci se resynchronise en direct, sans attendre un rechargement de page (bug observé :
+    // deux pickers sur la même page affichaient chacun un magasin différent après un changement
+    // fait via l'un d'eux, cf. demande du 14/09/2026 "je dois voir le magasin sur chaque vue").
+    // syncToGlobalShop plus bas déclenche aussi ce callback pour le picker qui a émis le
+    // changement ; applyShop() est un no-op dans ce cas précis (valeur déjà à jour), donc pas de
+    // boucle ni de double dispatch.
+    // Un seul abonnement par <select> (pas un de plus à chaque reconstruction du picker, ex:
+    // global-shop-selector.js qui rappelle reassortMakeShopPickerSearchable à chaque ouverture) :
+    // sans ce garde-fou, les abonnements s'empilaient et resynchronisaient le même select plusieurs
+    // fois par changement.
+    if (window.reassortOnActiveShopChange && !selectEl.dataset.activeShopListenerWired) {
+      selectEl.dataset.activeShopListenerWired = '1';
+      window.reassortOnActiveShopChange(applyShop);
     }
 
     searchInput.addEventListener('input', function () { renderRows(searchInput.value); });
