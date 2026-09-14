@@ -104,6 +104,16 @@ a:not(.sidebar *),
      font-size: 0.9rem;
 }
 
+/* Logo en haut de la sidebar (demande du 14/09/2026) : léger séparateur pour le distinguer du
+   menu, sans fond additionnel (la sidebar est déjà sombre, le logo ressort naturellement). */
+.sidebar-brand {
+     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sidebar-brand img {
+     max-width: 80%;
+     object-fit: contain;
+}
+
 /* Sidebar masquable sur desktop (bouton topbar, demande du 14/09/2026) : menu escamoté et
    contenu en pleine largeur. Desktop uniquement (≥992px, là où .content a sa marge de 260px)
    — sur mobile, le hamburger en overlay reste le mécanisme. */

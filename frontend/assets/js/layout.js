@@ -27,7 +27,7 @@
   // nouveau lien sidebar (ex: Améliorations IA) reste invisible tant que l'utilisateur ne vide
   // pas son cache manuellement. Incrémenter PARTIALS_VERSION à chaque modification de
   // sidebar.html/topbar.html (règle : toute fonctionnalité = lien sidebar + page dédiée).
-  const PARTIALS_VERSION = '2026-09-14-4';
+  const PARTIALS_VERSION = '2026-09-14-5';
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
 
@@ -115,4 +115,9 @@
       send((reason && (reason.message || String(reason))) || 'Promesse rejetée non capturée', reason && reason.stack);
     });
   })();
+
+  // Sidebar/topbar injectées, page prête à s'afficher : retire l'écran de chargement (cf.
+  // loading-overlay.js, chargé avant ce script dans chaque page). Un léger délai laisse le temps
+  // au navigateur de peindre le DOM injecté avant de révéler la page, pour éviter un flash brut.
+  if (window.hideLoadingOverlay) setTimeout(window.hideLoadingOverlay, 100);
 })();
