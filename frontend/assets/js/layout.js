@@ -27,7 +27,7 @@
   // nouveau lien sidebar (ex: Améliorations IA) reste invisible tant que l'utilisateur ne vide
   // pas son cache manuellement. Incrémenter PARTIALS_VERSION à chaque modification de
   // sidebar.html/topbar.html (règle : toute fonctionnalité = lien sidebar + page dédiée).
-  const PARTIALS_VERSION = '2026-09-14-5';
+  const PARTIALS_VERSION = '2026-09-14-6';
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
 
@@ -60,6 +60,17 @@
   // Titre de page (topbar) : fourni par chaque page via <body data-page-title="...">.
   const pageTitleEl = document.getElementById('page-title');
   if (pageTitleEl) pageTitleEl.textContent = document.body.dataset.pageTitle || '';
+
+  // Contexte magasin sous le titre de page (style RPOS "Serveur X : NOM MAGASIN (CODE)", demande
+  // du 14/09/2026) : appelé par shop-picker.js à chaque sélection, pour ne pas dupliquer cette
+  // logique sur chaque page qui a un sélecteur de magasin.
+  window.reassortSetShopContext = function (posLabel, shopName, shopReference) {
+    const el = document.getElementById('page-shop-context');
+    if (!el) return;
+    if (!shopName) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
+    el.style.display = '';
+  };
 
   // Masquer/afficher la sidebar sur desktop (bouton #sidebar-visibility-btn de la topbar,
   // demande du 14/09/2026) : état mémorisé en localStorage, appliqué avant le premier rendu

@@ -20,6 +20,24 @@
     return div.innerHTML;
   }
 
+  // Les <option> ne portent pas toujours data-reference/data-name explicites : le texte affiché
+  // est déjà au format "{reference} - {name}" (cf. ai-predictions.js et pages similaires), donc on
+  // le déduit de là plutôt que de dépendre d'attributs jamais posés par certaines pages.
+  function parseShopOption(opt) {
+    const groupLabel = opt.parentElement && opt.parentElement.tagName === 'OPTGROUP' ? opt.parentElement.label : (opt.dataset.posId || '');
+    const text = opt.textContent || '';
+    const dashIndex = text.indexOf(' - ');
+    const reference = opt.dataset.reference || (dashIndex !== -1 ? text.slice(0, dashIndex).trim() : '');
+    const name = opt.dataset.name || (dashIndex !== -1 ? text.slice(dashIndex + 3).trim() : text.trim());
+    return { posLabel: groupLabel, reference: reference, name: name };
+  }
+
+  function updateShopContext(opt) {
+    if (!window.reassortSetShopContext) return;
+    const parsed = parseShopOption(opt);
+    window.reassortSetShopContext(parsed.posLabel, parsed.name, parsed.reference);
+  }
+
   function buildPicker(selectEl) {
     const existingWrapper = selectEl.parentElement.querySelector('.shop-picker-wrapper');
     if (existingWrapper) existingWrapper.remove();
@@ -107,6 +125,7 @@
           selectEl.value = opt.value;
           selectEl.dispatchEvent(new Event('change'));
           button.textContent = opt.textContent;
+          updateShopContext(opt);
           const bsModal = bootstrap.Modal.getInstance(modal);
           if (bsModal) bsModal.hide();
         });
@@ -121,8 +140,16 @@
     });
 
     selectEl.addEventListener('change', function () {
-      if (selectEl.selectedOptions.length) button.textContent = selectEl.selectedOptions[0].textContent;
+      if (selectEl.selectedOptions.length) {
+        button.textContent = selectEl.selectedOptions[0].textContent;
+        updateShopContext(selectEl.selectedOptions[0]);
+      }
     });
+
+    // Sélection déjà présente au moment où le picker est construit (ex: magasin restauré depuis
+    // l'URL ou le localStorage) : affiche le contexte dès le départ, pas seulement au prochain
+    // changement.
+    if (selectEl.selectedOptions.length && selectEl.value) updateShopContext(selectEl.selectedOptions[0]);
   }
 
   window.reassortMakeShopPickerSearchable = function (selectEl) {
