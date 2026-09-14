@@ -3,18 +3,18 @@
 <nav class="navbar navbar-top navbar-expand navbar-dashboard navbar-dark ps-0 pe-2 pb-0">
      <div class="container-fluid px-0">
           <div class="d-flex justify-content-between w-100">
-               <div class="d-flex align-items-center">
-                    <button class="navbar-toggler d-lg-none collapsed me-2" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarMenu" aria-controls="sidebarMenu" aria-expanded="false" aria-label="Toggle navigation">
+               <div class="d-flex align-items-center" style="min-width:0; flex:1 1 auto;">
+                    <button class="navbar-toggler d-lg-none collapsed me-2 flex-shrink-0" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarMenu" aria-controls="sidebarMenu" aria-expanded="false" aria-label="Toggle navigation">
                          <span class="navbar-toggler-icon"></span>
                     </button>
                     <!-- Masquer/afficher la sidebar sur desktop (état mémorisé, cf. layout.js).
                          Sur mobile, le bouton hamburger ci-dessus reste le mécanisme (overlay). -->
-                    <button id="sidebar-visibility-btn" class="btn btn-sm btn-outline-secondary d-none d-lg-inline-block me-2" type="button" title="Masquer/afficher le menu latéral" aria-label="Masquer/afficher le menu latéral">
+                    <button id="sidebar-visibility-btn" class="btn btn-sm btn-outline-secondary d-none d-lg-inline-block me-2 flex-shrink-0" type="button" title="Masquer/afficher le menu latéral" aria-label="Masquer/afficher le menu latéral">
                          <svg class="icon icon-xs" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"></path></svg>
                     </button>
-                    <div class="d-none d-md-block">
-                         <h4 class="fw-bold text-uppercase mb-0 text-gray-800" id="page-title"></h4>
-                         <div class="small text-muted" id="page-shop-context" style="display:none;"></div>
+                    <div class="d-none d-md-block text-truncate" style="min-width:0;">
+                         <h4 class="fw-bold text-uppercase mb-0 text-gray-800 text-truncate" id="page-title"></h4>
+                         <div class="small text-muted text-truncate" id="page-shop-context" style="display:none;"></div>
                     </div>
                </div>
                <ul class="navbar-nav align-items-center">

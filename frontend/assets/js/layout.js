@@ -27,7 +27,7 @@
   // nouveau lien sidebar (ex: Améliorations IA) reste invisible tant que l'utilisateur ne vide
   // pas son cache manuellement. Incrémenter PARTIALS_VERSION à chaque modification de
   // sidebar.html/topbar.html (règle : toute fonctionnalité = lien sidebar + page dédiée).
-  const PARTIALS_VERSION = '2026-09-14-6';
+  const PARTIALS_VERSION = '2026-09-14-7';
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
 
