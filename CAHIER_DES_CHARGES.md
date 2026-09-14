@@ -2303,9 +2303,9 @@ Le système doit être conçu pour évoluer progressivement vers l'autonomie.
 
 ---
 
-# 72. État d'avancement (vérifié le 11/09/2026)
+# 72. État d'avancement (vérifié le 14/09/2026)
 
-Point de suivi par rapport à l'ordre recommandé §71 — à mettre à jour au fil de l'avancement, pas figé.
+Point de suivi par rapport à l'ordre recommandé §71 — à mettre à jour au fil de l'avancement, pas figé. Deux agents ont contribué à ce projet ; cette section consolide leur travail respectif après vérification croisée (tests, lint, démarrage du serveur).
 
 ## Fait / en place
 
@@ -2315,24 +2315,28 @@ Point de suivi par rapport à l'ordre recommandé §71 — à mettre à jour au 
 * STEP 5 — Prediction Outcome (`AIPredictionOutcome`) ;
 * Périodes d'analyse, Pareto, calcul déterministe, exclusions (`ExcludedArticle`), synchro des ventes locale (§4-10) ;
 * Séparation calcul backend / interprétation IA respectée (§53) ;
-* STEP 6 — Confidence Engine (`confidenceService.js`) : score 0-100 pondéré sur 4 signaux réels (longueur d'historique, volatilité/coefficient de variation, précision historique passée via `AIPredictionOutcome`, qualité des données/rupture de stock), avec repli neutre (jamais optimiste) quand un signal manque. Il ne reste à y intégrer que les signaux anomalie et saisonnalité (dépendent de STEP 7, non fait) et le "comportement magasin/article" distinct (pas encore modélisé séparément).
+* STEP 6 — Confidence Engine (`confidenceService.js`) : score 0-100 pondéré sur 4 signaux réels (longueur d'historique, volatilité/coefficient de variation, précision historique passée via `AIPredictionOutcome`, qualité des données/rupture de stock, désormais aussi anomalies détectées), avec repli neutre (jamais optimiste) quand un signal manque. Il reste à y intégrer la saisonnalité et le "comportement magasin/article" distinct (pas encore modélisé séparément) ;
+* STEP 7 — Anomaly Detection (`anomalyService.js`) : détecte explosion/chute de ventes (comparaison 3 derniers jours vs reste de la période), stock incohérent/rupture invisible (stock disponible mais 0 vente récente sur un article qui vend habituellement, seuil `minAvgDailySales` désormais configurable), et catégorise la tendance générale (`trendCategory` : GROWING/DECLINING/STABLE/VOLATILE/UNKNOWN, §31). Intégré au Confidence Engine et transmis à l'IA (prompt étape 0bis) pour privilégier la prudence plutôt qu'une extrapolation aveugle (§69). Nécessite au moins 7 jours d'historique local pour se déclencher ;
+* STEP 9 — AI Center, première brique (`improvementService.js`, page `ai-improvements.html`) : "Conseiller d'amélioration IA" qui détecte de façon déterministe des problèmes silencieux (prédictions jamais évaluées, jobs en échec répété, biais systématiques, questions chatbot sans réponse utile), demande au LLM une recommandation d'action pour les constats importants (§53 respecté : le backend mesure, l'IA interprète), et vérifie l'effet réel après application (`metricBefore`/`metricAfter`, statut IMPROVED/NO_EFFECT) — une vraie boucle d'apprentissage plutôt qu'une pile de recommandations jamais vérifiées. Job planifié quotidien (`improvementWatchdogJob.js`). Reste à faire pour un AI Center complet : dashboard consolidé multi-magasin, KPI §23 agrégés (MAE, WAPE, taux d'acceptation) ;
+* STEP 11 — AI Chatbot (`chatbotService.js`, `chatbotToolsService.js`, page `ai-assistant.html` + widget flottant) : architecture Intent Detection -> Tools -> LLM (§35) respectée — détection d'intention par mots-clés (déterministe), 9 outils dédiés lisant uniquement les vraies données en base (stock, ventes, CA, Pareto/§7, ruptures, surstock, précision IA, commandes), jamais d'accès direct base pour le LLM. Sécurisé par `resolveShopId` (§43). Mémoire de conversation persistée (`ChatbotConversation`/`ChatbotMessage`), questions suggérées configurables (Paramètres > IA), sélection magasin/rayon/sous-rayon, rendu graphique/tableau automatique selon la forme des données retournées par l'outil.
+
+## Infrastructure (hors plan §71, mais consolide sa base)
+
+* Routes API découpées de `reassort.js` (2228 lignes) en 8 sous-routeurs par domaine (`backend/src/routes/reassort/*.js`) ;
+* Migrations Prisma versionnées (`prisma/migrations/`), remplaçant le `db push` au démarrage — meilleure traçabilité des changements de schéma ;
+* Client Prisma unique partagé (`utils/prisma.js`) au lieu d'une instance par fichier de service ;
+* Logger structuré (`utils/logger.js`) en remplacement des `console.error` bruts ;
+* ESLint configuré (garde-fous minimaux : variables inutilisées, `debugger` oublié) ;
+* Tests unitaires Jest (35 tests, `npm test`) sur les services critiques (confiance, anomalies, prévision IA, rapports d'erreur).
 
 ## Partiel / à vérifier
 
 * §16 — `REVISION_CHANGE_THRESHOLD` existe en configuration, mais son application réelle dans le job de révision quotidienne n'a pas été revérifiée récemment ;
 * §18 — l'IA ne produit aujourd'hui qu'une quantité + un texte de raisonnement libre, pas un type d'action structuré (`ORDER_NOW`, `WAIT`, `ANOMALY`, etc.).
 
-## Fait / en place (suite)
-
-* STEP 7 — Anomaly Detection (`anomalyService.js`) : détecte explosion/chute de ventes (comparaison 3 derniers jours vs reste de la période), stock incohérent/rupture invisible (stock disponible mais 0 vente récente sur un article qui vend habituellement), et catégorise la tendance générale (`trendCategory` : GROWING/DECLINING/STABLE/VOLATILE/UNKNOWN, §31). Intégré au Confidence Engine (pénalise `dataQuality`) et transmis à l'IA (prompt étape 0bis) pour privilégier la prudence plutôt qu'une extrapolation aveugle (§69). Nécessite au moins 7 jours d'historique local pour se déclencher — sans effet tant que la couverture de données réelle est plus courte (ex: après une purge récente).
-
-## Fait / en place (suite 2)
-
-* STEP 11 — AI Chatbot (`chatbotService.js`, `chatbotToolsService.js`, page `ai-assistant.html`) : architecture Intent Detection -> Tools -> LLM (§35) respectée — détection d'intention par mots-clés (déterministe, pas d'appel LLM pour router), 8 outils dédiés lisant uniquement les vraies données en base (stock, ventes, ruptures, surstock, précision IA, commandes), jamais d'accès direct base pour le LLM. Sécurisé par `resolveShopId` (§43, un utilisateur ne peut interroger que son propre magasin). Mémoire de conversation, questions suggérées, sélection magasin/rayon/sous-rayon.
-
 ## Pas commencé
 
-* STEP 9 — AI Center (dashboard dédié précision/KPI) ;
+* STEP 9 — AI Center complet (dashboard consolidé, KPI §23 agrégés par magasin/article/période) — première brique faite, voir ci-dessus ;
 * STEP 10 — LDAP + RBAC (rôles fins) ;
 * §32 — saisonnalité par jour de semaine ;
 * §47-48 — `AIDecisionLog` / traçabilité complète ;
