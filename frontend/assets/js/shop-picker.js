@@ -70,13 +70,19 @@
     button.setAttribute('data-bs-target', '#' + modalId);
     button.textContent = selectEl.selectedOptions.length ? selectEl.selectedOptions[0].textContent : 'Sélectionner un magasin';
 
-    // NE PAS masquer ce bouton pour ADMIN/SUPERVISOR (essayé le 14/09/2026, abandonné) : certaines
-    // pages (ex: Paramètres > Synchronisation, "Récupération initiale"/"Purger les ventes") sont
-    // des actions ADMIN indépendantes qui doivent pouvoir cibler N'IMPORTE QUEL magasin, pas
-    // forcément celui actif dans la topbar — masquer leur sélecteur les rendait inutilisables
-    // (plus aucun moyen de choisir un magasin différent). Ce bouton reste synchronisé EN DIRECT
-    // avec le magasin global (applyGlobalShopIfAny / reassortOnActiveShopChange ci-dessous), qui
-    // ne fait que le PRÉ-remplir par défaut, jamais l'imposer.
+    // Le sélecteur global de la topbar (ADMIN/SUPERVISOR, cf. global-shop-selector.js) est l'UNIQUE
+    // point de choix du magasin de travail sur la plupart des pages (demande du 15/09/2026 : "le
+    // seul filtre qui doit exister sur ces pages") — ce bouton local est donc masqué par défaut
+    // pour ne pas dupliquer ce choix.
+    // Exception explicite : certaines actions ADMIN ponctuelles (Paramètres > Synchronisation,
+    // "Récupération initiale"/"Purger les ventes") doivent pouvoir cibler un magasin DIFFÉRENT du
+    // magasin de travail actif, sans devoir changer ce dernier — la page pose data-independent-shop
+    // sur son <select> pour signaler ce besoin et garder son propre sélecteur visible.
+    const user = window.reassortGetUser && window.reassortGetUser();
+    const isIndependentSelector = selectEl.dataset.independentShop === '1';
+    const hideForGlobalSelector = user && user.role !== 'STORE' && window.reassortGetActiveShop && !isIndependentSelector;
+    if (hideForGlobalSelector) wrapper.style.display = 'none';
+
     wrapper.appendChild(button);
     selectEl.insertAdjacentElement('afterend', wrapper);
 
@@ -143,7 +149,10 @@
           selectEl.dispatchEvent(new Event('change'));
           button.textContent = opt.textContent;
           updateShopContext(opt);
-          syncToGlobalShop(opt);
+          // Un sélecteur "indépendant" (Récupération initiale/Purger) ne doit jamais changer le
+          // magasin de travail global : choisir un magasin ici sert UNIQUEMENT cette action
+          // ponctuelle, pas la navigation sur le reste de l'application.
+          if (!isIndependentSelector) syncToGlobalShop(opt);
           const bsModal = bootstrap.Modal.getInstance(modal);
           if (bsModal) bsModal.hide();
         });
@@ -160,7 +169,10 @@
     // toujours la présélection automatique du magasin global (bug observé le 14/09/2026 : le
     // magasin actif de la topbar n'était jamais répercuté sur Paramètres > Synchronisation).
     function applyGlobalShopIfAny() {
-      if (selectEl.dataset.preselected || !window.reassortGetActiveShop) return;
+      // Un sélecteur "indépendant" (Récupération initiale/Purger, cf. plus haut) ne suit jamais le
+      // magasin global : il doit rester sur le dernier choix explicite de l'utilisateur sur CETTE
+      // page précise, pas se faire écraser par le magasin de travail actif ailleurs.
+      if (selectEl.dataset.preselected || isIndependentSelector || !window.reassortGetActiveShop) return;
       const activeShop = window.reassortGetActiveShop();
       if (!activeShop) return;
       applyShop(activeShop);
@@ -187,7 +199,7 @@
     // global-shop-selector.js qui rappelle reassortMakeShopPickerSearchable à chaque ouverture) :
     // sans ce garde-fou, les abonnements s'empilaient et resynchronisaient le même select plusieurs
     // fois par changement.
-    if (window.reassortOnActiveShopChange && !selectEl.dataset.activeShopListenerWired) {
+    if (window.reassortOnActiveShopChange && !selectEl.dataset.activeShopListenerWired && !isIndependentSelector) {
       selectEl.dataset.activeShopListenerWired = '1';
       window.reassortOnActiveShopChange(applyShop);
     }
