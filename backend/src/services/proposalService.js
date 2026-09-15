@@ -19,6 +19,15 @@ const aiForecastService = require('./aiForecastService');
 // les premières heures) — pas la peine de déclencher un appel RPOS de complément pour ça.
 const COVERAGE_GAP_TOLERANCE_HOURS = 24;
 
+// Types d'action structurés (CAHIER_DES_CHARGES.md §18) : validés strictement contre cette liste
+// avant d'être persistés — une valeur hors liste renvoyée par l'IA (hallucination, faute de frappe)
+// est traitée comme absente (null) plutôt que stockée telle quelle, pour ne jamais introduire une
+// valeur imprévue dans une colonne censée être un enum fermé.
+const VALID_AI_ACTIONS = new Set([
+  'ORDER_NOW', 'ORDER_MORE', 'ORDER_LESS', 'WAIT', 'STOCK_RISK', 'OVERSTOCK',
+  'DEMAND_INCREASE', 'DEMAND_DECREASE', 'ANOMALY', 'VERIFY_STOCK', 'NO_ACTION',
+]);
+
 /**
  * Récupère les lignes de vente d'un magasin sur une période, dans l'ordre de préférence :
  * 1. Fichier d'export local (le plus rapide, zéro appel réseau) si disponible pour la période.
@@ -798,9 +807,13 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           p.quantityProposed = Math.max(0, Number(suggestion.quantity) || 0);
           p.aiAdjusted = true;
           p.aiReasoning = suggestion.reasoning || null;
+          // §18 : type d'action structuré, jamais inventé si l'IA ne l'a pas renvoyé (validation
+          // stricte contre l'enum plutôt que d'accepter une valeur hors liste ou hallucinée).
+          p.aiAction = VALID_AI_ACTIONS.has(suggestion.action) ? suggestion.action : null;
         } else {
           p.aiAdjusted = false;
           p.aiReasoning = null;
+          p.aiAction = null;
         }
       }
       // Le modal de progression affichait "Analyse IA des quantités ✓ Terminé" même quand l'IA
@@ -822,6 +835,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
         p.classicQuantitySuggested = p.quantityProposed;
         p.aiAdjusted = false;
         p.aiReasoning = null;
+        p.aiAction = null;
       }
       reportProgress({
         step: 'AI_ADJUSTMENT',
@@ -837,6 +851,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
       p.classicQuantitySuggested = p.quantityProposed;
       p.aiAdjusted = false;
       p.aiReasoning = null;
+      p.aiAction = null;
     }
   }
 
@@ -881,6 +896,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           classicQuantitySuggested: p.classicQuantitySuggested,
           aiAdjusted: p.aiAdjusted,
           aiReasoning: p.aiReasoning,
+          aiAction: p.aiAction || null,
           stockAtGeneration: p.stock,
           avgWeeklySales: p.avgWeeklySales,
           daysUntilStockout: p.daysUntilStockout,
@@ -986,6 +1002,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           model: p.forecastMethod === 'flat' ? 'flat' : 'smoothing',
           confidenceScore,
           reasoning: p.aiAdjusted ? `${baseReasoning} Ajusté par IA : ${p.aiReasoning || '—'}` : baseReasoning,
+          action: p.aiAction || null,
         };
       });
 

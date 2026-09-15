@@ -136,6 +136,41 @@
       .sort(function (a, b) { return a.department.localeCompare(b.department); });
   }
 
+  // Type d'action structuré (§18 du cahier des charges) : badge coloré par famille sémantique
+  // (urgence/alerte en rouge-orange, réduction/attente en gris, augmentation en vert, neutre en
+  // bleu clair) — jamais de bleu comme accent principal de l'appli, ici uniquement une nuance
+  // sémantique parmi d'autres, cohérent avec les badges déjà utilisés ailleurs (ruptures, etc.).
+  const AI_ACTION_LABELS = {
+    ORDER_NOW: 'À commander',
+    ORDER_MORE: 'Commande insuffisante',
+    ORDER_LESS: 'Réduire la commande',
+    WAIT: 'Attendre',
+    STOCK_RISK: 'Risque de rupture',
+    OVERSTOCK: 'Surstock',
+    DEMAND_INCREASE: 'Demande en hausse',
+    DEMAND_DECREASE: 'Demande en baisse',
+    ANOMALY: 'Anomalie détectée',
+    VERIFY_STOCK: 'Vérifier le stock',
+    NO_ACTION: 'Rien à signaler',
+  };
+  const AI_ACTION_BADGE_CLASS = {
+    ORDER_NOW: 'bg-dark',
+    ORDER_MORE: 'bg-warning text-dark',
+    ORDER_LESS: 'bg-secondary',
+    WAIT: 'bg-light text-dark border',
+    STOCK_RISK: 'bg-danger',
+    OVERSTOCK: 'bg-warning text-dark',
+    DEMAND_INCREASE: 'bg-success',
+    DEMAND_DECREASE: 'bg-secondary',
+    ANOMALY: 'bg-danger',
+    VERIFY_STOCK: 'bg-danger',
+    NO_ACTION: 'bg-light text-dark border',
+  };
+  function aiActionBadgeHtml(action) {
+    if (!action || !AI_ACTION_LABELS[action]) return '<span class="text-muted small">—</span>';
+    return '<span class="badge ' + AI_ACTION_BADGE_CLASS[action] + '">' + AI_ACTION_LABELS[action] + '</span>';
+  }
+
   function predictionRowHtml(p) {
     const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
     const outcome = p.outcome;
@@ -156,6 +191,7 @@
         '</div>' +
       '</td>' +
       '<td class="small text-muted">' + (p.model === 'flat' ? 'Moyenne simple' : 'Lissage exponentiel') + '</td>' +
+      '<td>' + aiActionBadgeHtml(p.aiAction) + '</td>' +
       '</tr>';
   }
 
@@ -201,6 +237,7 @@
           classicQuantitySuggested: prediction.classicQuantitySuggested,
           generationAiAdjusted: prediction.aiAdjusted,
           generationAiReasoning: prediction.aiReasoningAtGeneration,
+          generationAiAction: prediction.aiAction,
           hasRecentOrder: prediction.hasRecentOrder,
           recentOrderReference: prediction.recentOrderReference,
           recentOrderDate: prediction.recentOrderDate,

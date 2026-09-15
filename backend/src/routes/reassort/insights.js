@@ -71,7 +71,7 @@ router.get('/predictions', async (req, res) => {
       }),
       prisma.proposalLine.findMany({
         where: { proposalId },
-        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true, excludedAsAlreadyOrderedRpos: true, rposOrderReference: true, rposOrderDate: true, rposOrderCount: true, orderingUnit: true, avgWeeklySales: true, daysUntilStockout: true },
+        select: { ean: true, stockAtGeneration: true, currentOrderedQuantity: true, dailyHistory: true, revenueSharePct: true, forecastMethod: true, department: true, sector: true, classicQuantitySuggested: true, aiAdjusted: true, aiReasoning: true, aiAction: true, excludedAsAlreadyOrderedRpos: true, rposOrderReference: true, rposOrderDate: true, rposOrderCount: true, orderingUnit: true, avgWeeklySales: true, daysUntilStockout: true },
       }),
     ]);
 
@@ -89,6 +89,7 @@ router.get('/predictions', async (req, res) => {
         classicQuantitySuggested: line?.classicQuantitySuggested ?? null,
         aiAdjusted: line?.aiAdjusted ?? false,
         aiReasoningAtGeneration: line?.aiReasoning ?? null,
+        aiAction: line?.aiAction ?? null,
         hasRecentOrder: line?.excludedAsAlreadyOrderedRpos ?? false,
         recentOrderReference: line?.rposOrderReference ?? null,
         recentOrderDate: line?.rposOrderDate ?? null,

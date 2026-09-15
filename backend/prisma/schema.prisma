@@ -513,6 +513,9 @@ model AIPrediction {
   // dès maintenant pour ne pas devoir migrer AIPrediction une seconde fois.
   confidenceScore Float?  @map("confidence_score")
   reasoning       String? // explication humaine courte, ex: "lissage exponentiel sur 42 jours d'historique"
+  // Type d'action structuré (§18), copie de ProposalLine.aiAction au moment de la génération —
+  // null si l'IA n'a pas tourné pour cette ligne (repli sur le calcul classique).
+  action          String?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -683,6 +686,11 @@ model ProposalLine {
   // dans "Pourquoi ?" pour ne jamais faire croire à une analyse IA qui n'a pas eu lieu.
   aiAdjusted        Boolean @default(false) @map("ai_adjusted")
   aiReasoning       String? @map("ai_reasoning") // explication de l'IA pour cette quantité finale, si aiAdjusted=true
+  // Type d'action structuré (CAHIER_DES_CHARGES.md §18) : ORDER_NOW | ORDER_MORE | ORDER_LESS |
+  // WAIT | STOCK_RISK | OVERSTOCK | DEMAND_INCREASE | DEMAND_DECREASE | ANOMALY | VERIFY_STOCK |
+  // NO_ACTION. Renseigné uniquement si aiAdjusted=true (l'IA a réellement tourné) — jamais déduit
+  // ou inventé côté backend si l'IA n'a pas répondu ce champ.
+  aiAction          String? @map("ai_action")
 
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).

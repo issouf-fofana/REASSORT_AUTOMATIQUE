@@ -150,9 +150,23 @@ Si hasRecentOrder est false, ignore cette étape.
 Articles (JSON) :
 {{articles}}
 
+ÉTAPE 6 — Choisis l'action qui résume le mieux ta décision, parmi EXACTEMENT ces valeurs (jamais une autre) :
+  - "ORDER_NOW" : commander la quantité indiquée, situation normale (besoin réel identifié, rien de particulier à signaler).
+  - "ORDER_MORE" : la commande déjà en cours (hasRecentOrder=true) ne suffit pas, quantity est la quantité SUPPLÉMENTAIRE nécessaire (cf. étape 4).
+  - "ORDER_LESS" : le calcul système (systemSuggestedQuantity) est réduit car ta propre analyse indique un besoin réel plus faible (tendance à la baisse confirmée, saisonnalité défavorable...).
+  - "WAIT" : quantity=0, la commande déjà en cours ou le stock actuel suffisent largement, rien à commander maintenant.
+  - "STOCK_RISK" : rupture proche ou déjà là (daysUntilStockout bas ou nul) malgré une quantité proposée — signale l'urgence en plus de la quantité.
+  - "OVERSTOCK" : le stock actuel dépasse largement le besoin réel, quantity=0 même si systemSuggestedQuantity est positif.
+  - "DEMAND_INCREASE" : la tendance de fond est clairement haussière et justifie une quantité au-dessus de systemSuggestedQuantity.
+  - "DEMAND_DECREASE" : la tendance de fond est clairement baissière et justifie une quantité en dessous de systemSuggestedQuantity.
+  - "ANOMALY" : un signal anormal (anomalies non vide, ou incohérence détectée toi-même) rend la décision incertaine — reste sur une quantité prudente et explique le doute.
+  - "VERIFY_STOCK" : stock RPOS incohérent avec les ventes observées (ex: STOCK_INCONSISTENCY dans anomalies) — recommande une vérification physique plutôt qu'une décision ferme.
+  - "NO_ACTION" : rien à signaler, situation stable, quantity proche de 0 par absence de besoin réel (pas par anomalie).
+Une seule action par article, celle qui correspond le mieux à ta décision réelle — ne choisis jamais "ORDER_NOW" par défaut si un autre type décrit mieux la situation.
+
 Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, au format exact :
-[{"ean": "...", "quantity": 0, "reasoning": "2-4 phrases en français : le statut d'activité du magasin s'il n'est pas ACTIVE et son influence sur la décision, la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
-Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit.`,
+[{"ean": "...", "quantity": 0, "action": "ORDER_NOW", "reasoning": "2-4 phrases en français : le statut d'activité du magasin s'il n'est pas ACTIVE et son influence sur la décision, la tendance observée dans l'historique, comment elle compare à systemSuggestedQuantity, l'analyse de la commande récente si hasRecentOrder=true (suffisante ou non, et pourquoi), et la décision finale"}]
+Une entrée par article fourni, dans le même ordre. quantity doit être un entier positif ou nul, multiple de orderingUnit. action doit être EXACTEMENT une des valeurs listées à l'étape 6, jamais une autre chaîne.`,
   // Tous les jobs sont actifs par défaut (comportement historique, avant l'ajout de ces
   // interrupteurs) : seul un changement explicite depuis Paramètres les désactive.
   [KEYS.NIGHTLY_PROPOSAL_ENABLED]: () => 'true',
