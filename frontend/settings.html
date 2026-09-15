@@ -23,6 +23,7 @@
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
     <script src="assets/js/reassort-auth.js"></script>
+    <script src="assets/js/reassort-toast.js"></script>
     <script src="assets/js/shop-picker.js"></script>
 
     <style>
@@ -1536,7 +1537,7 @@
                                         try {
                                              await saveSystemConfigKey(configKey, this.checked ? 'true' : 'false');
                                         } catch (err) {
-                                             alert('Erreur: ' + err.message);
+                                             window.reassortToast('Erreur : ' + err.message, 'error');
                                              this.checked = !this.checked; // annule visuellement si l'enregistrement a échoué
                                         }
                                    });
@@ -2551,10 +2552,10 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                              const res = await window.reassortFetch('/reassort/ai/keys/' + testBtn.dataset.id + '/test', { method: 'POST' });
                                              const json = await res.json();
                                              if (!json.success) throw new Error(json.message);
-                                             alert('✅ Clé valide — réponse reçue en ' + json.data.durationMs + ' ms.');
+                                             window.reassortToast('Clé valide — réponse reçue en ' + json.data.durationMs + ' ms.', 'success');
                                              loadAiKeys();
                                         } catch (err) {
-                                             alert('❌ Échec du test :\n' + err.message);
+                                             window.reassortToast('Échec du test : ' + err.message, 'error');
                                              loadAiKeys();
                                         } finally {
                                              testBtn.disabled = false;
@@ -2581,7 +2582,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                              if (!json.success) throw new Error(json.message);
                                              loadAiKeys();
                                         } catch (err) {
-                                             alert('Erreur: ' + err.message);
+                                             window.reassortToast('Erreur : ' + err.message, 'error');
                                         }
                                    }
                               });
@@ -2597,7 +2598,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
                                    } catch (err) {
-                                        alert('Erreur: ' + err.message);
+                                        window.reassortToast('Erreur : ' + err.message, 'error');
                                         loadAiKeys();
                                    }
                               });
@@ -2611,7 +2612,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                    const priority = parseInt(document.getElementById('ai-key-priority').value, 10) || 0;
 
                                    if (!label || (!id && !apiKey)) {
-                                        alert('Le nom et la clé API sont requis.');
+                                        window.reassortToast('Le nom et la clé API sont requis.', 'error');
                                         return;
                                    }
                                    try {
@@ -2629,7 +2630,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                         getAiKeyModal().hide();
                                         loadAiKeys();
                                    } catch (err) {
-                                        alert('Erreur: ' + err.message);
+                                        window.reassortToast('Erreur : ' + err.message, 'error');
                                    }
                               });
 
