@@ -12,6 +12,7 @@ const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
 const systemConfig = require('./systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { enqueueAiRequest } = require('../utils/aiRequestQueue');
 const shopActivityService = require('./shopActivityService');
 
 
@@ -402,7 +403,7 @@ const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: 
  * (annuler un flux partiellement affiché à l'utilisateur pour le recommencer ailleurs serait plus
  * déroutant qu'un message d'erreur clair à ce stade).
  */
-async function streamWithFallback(prompt, onChunk) {
+async function streamWithFallbackImpl(prompt, onChunk) {
   const keys = await prisma.aiProviderKey.findMany({
     where: { isActive: true },
     orderBy: { priority: 'asc' },
@@ -442,12 +443,20 @@ async function streamWithFallback(prompt, onChunk) {
   throw new Error(`Toutes les clés IA ont échoué :\n${errors.join('\n')}`);
 }
 
+// File d'attente globale (demande du 15/09/2026) : chaque appel IA passe par enqueueAiRequest plutôt
+// que d'appeler le fournisseur directement, pour qu'un pic de demandes simultanées (plusieurs
+// utilisateurs sur le chatbot, génération de proposition en cours) ne parte pas toutes en parallèle
+// sur la même clé API sans coordination — voir utils/aiRequestQueue.js pour le principe complet.
+function streamWithFallback(prompt, onChunk) {
+  return enqueueAiRequest(() => streamWithFallbackImpl(prompt, onChunk));
+}
+
 /**
  * Essaie chaque clé API active par ordre de priorité jusqu'à ce qu'une réponde avec succès.
  * Journalise l'échec (lastError/lastErrorAt) sur la clé fautive pour visibilité côté UI, sans
  * bloquer l'essai des clés suivantes.
  */
-async function callWithFallback(prompt) {
+async function callWithFallbackImpl(prompt) {
   const keys = await prisma.aiProviderKey.findMany({
     where: { isActive: true },
     orderBy: { priority: 'asc' },
@@ -480,6 +489,12 @@ async function callWithFallback(prompt) {
     }
   }
   throw new Error(`Toutes les clés IA ont échoué :\n${errors.join('\n')}`);
+}
+
+// Même file d'attente globale que streamWithFallback (voir son commentaire ci-dessus) — les deux
+// fonctions sont les deux seuls points d'entrée réels vers un fournisseur IA dans tout le backend.
+function callWithFallback(prompt) {
+  return enqueueAiRequest(() => callWithFallbackImpl(prompt));
 }
 
 /**
@@ -755,14 +770,17 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   const prompt =
     `Tu es un analyste de la demande pour un magasin de grande distribution (${shopReference || ''} ${shopName || ''}). ` +
     'Tu as déjà analysé un article et recommandé une quantité à commander. Le magasin te pose maintenant une question de suivi sur cette recommandation. ' +
-    'Réponds UNIQUEMENT à partir des données réelles ci-dessous (jamais d\'invention ni de généralité) : cite des chiffres précis tirés de ces données à chaque fois que c\'est pertinent (moyenne exacte, nombre de jours de couverture calculé, tendance chiffrée...). ' +
-    'Reste TRÈS bref et direct (1-2 phrases COURTES maximum, ou 3 puces maximum si plusieurs éléments distincts à lister — jamais les deux à la fois), en français, sans réintroduire toute l\'analyse depuis le début ni ajouter de récapitulatif final — le magasin a déjà vu ta première explication et veut juste la réponse à sa question précise.\n\n' +
+    'Réponds UNIQUEMENT à partir des données réelles ci-dessous (jamais d\'invention ni de généralité). ' +
+    'Pour une question de type "pourquoi" : construis une vraie explication CAUSALE ("parce que X, donc Y"), pas une liste de chiffres juxtaposés sans lien entre eux — le magasin voit déjà ces chiffres à l\'écran (stock, vente moyenne, colisage), ce qu\'il veut c\'est comprendre le RAISONNEMENT qui les relie à cette quantité précise, comme s\'il demandait à un collègue expérimenté de lui expliquer sa décision à voix haute. Cite les chiffres seulement à l\'appui de ce raisonnement, jamais comme une simple récitation de données déjà visibles. ' +
+    'Reste TRÈS bref et direct (1-3 phrases COURTES maximum formant un raisonnement suivi), en français, sans réintroduire toute l\'analyse depuis le début ni ajouter de récapitulatif final — le magasin a déjà vu ta première explication et veut juste la réponse à sa question précise. ' +
+    'N\'utilise une liste à puces QUE si la question porte explicitement sur plusieurs éléments distincts et sans lien causal entre eux (ex: "donne-moi 3 dates" ou "compare ces 2 quantités") — jamais pour une question "pourquoi", qui appelle un raisonnement suivi, pas une énumération. ' +
+    'Une durée inférieure à 1 jour (ex: 0,7 jour) est un chiffre abstrait pour le magasin : convertis-la toujours en heures approximatives ("environ 17h", "moins d\'une journée") au lieu de la laisser en fraction de jour brute.\n\n' +
     `Données de l'article (JSON) :\n${JSON.stringify(summary, null, 2)}\n\n` +
     `Ta recommandation précédente : ${previousQuantity} unité(s).\n` +
     `Ton explication précédente : ${previousReasoning || '(aucune)'}\n\n` +
     (historyText ? `Échanges précédents dans cette conversation :\n${historyText}\n\n` : '') +
     `Nouvelle question du magasin : ${question}\n\n` +
-    'Réponds directement à cette question, sans préambule. Format Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés, puces ("- ") uniquement si la réponse liste plusieurs éléments distincts (plusieurs raisons, plusieurs dates, plusieurs quantités à comparer) — sinon un paragraphe simple suffit, ne force jamais une liste sur une réponse à une seule idée.';
+    'Réponds directement à cette question, sans préambule. Format Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés uniquement.';
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);

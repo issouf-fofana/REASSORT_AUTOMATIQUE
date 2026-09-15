@@ -13,15 +13,36 @@
     .aip-detail-panel {
       position: fixed; top: 0; right: 0; bottom: 0; width: 720px; max-width: 92vw;
       background-color: #ffffff; z-index: 1045; box-shadow: -4px 0 16px rgba(0,0,0,.15);
-      transform: translateX(100%); transition: transform .25s ease;
+      transform: translateX(100%); transition: transform .25s ease, width .2s ease;
       display: flex; flex-direction: column;
     }
+    /* Panneau élargi une fois la recommandation IA prête (vue à deux colonnes, demande du
+       15/09/2026 : "afficher en grand pour voir toutes les données d'un coup", recommandation
+       séparée du reste plutôt que tout empilé verticalement) — reste étroit pendant le chargement
+       et sur les vues qui n'ont pas besoin de cette largeur (streaming, erreur). */
+    .aip-detail-panel.aip-wide { width: 1180px; }
     .aip-detail-panel.show { transform: translateX(0); }
     .aip-detail-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; flex-shrink: 0; }
     .aip-detail-panel-body { padding: 1.25rem; overflow-y: auto; flex-grow: 1; }
     .aip-period-btn.active { background-color: #000000 !important; color: #ffffff !important; border-color: #000000 !important; }
 
     .aip-simple-view { display: flex; flex-direction: column; gap: 1.25rem; }
+    /* Vue à deux colonnes : la carte recommandation reste fixe et visible à gauche pendant que le
+       reste (raisonnement, impact, ventes) défile indépendamment à droite — sur écran étroit,
+       repasse en une seule colonne empilée (recommandation d'abord). */
+    .aip-simple-view.aip-two-col {
+      flex-direction: row; align-items: flex-start; gap: 1.75rem;
+    }
+    .aip-simple-view.aip-two-col > .aip-reco-column {
+      flex: 0 0 340px; position: sticky; top: 0;
+    }
+    .aip-simple-view.aip-two-col > .aip-details-column {
+      flex: 1 1 auto; min-width: 0;
+    }
+    @media (max-width: 900px) {
+      .aip-simple-view.aip-two-col { flex-direction: column; }
+      .aip-simple-view.aip-two-col > .aip-reco-column { position: static; flex-basis: auto; width: 100%; }
+    }
     .aip-reco-card { background-color: #000000; color: #ffffff; padding: 1.75rem 1.5rem; text-align: center; }
     .aip-reco-card .aip-reco-eyebrow { font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: #999999; margin-bottom: .75rem; }
     .aip-reco-card .aip-reco-eyebrow iconify-icon { vertical-align: -2px; margin-right: .35rem; }
@@ -363,44 +384,57 @@
     });
   }
 
-  function aiReadyHtml(d, showReasoningInline) {
-    return comparisonBannerHtml(currentItem ? currentItem.predictedQuantity : null, d.quantity) +
-      '<div class="aip-reco-card">' +
-        '<div class="aip-reco-eyebrow"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon>Recommandation IA' + (d.fromCache ? ' <span class="text-muted" style="text-transform:none;letter-spacing:normal;">(déjà calculée à la génération)</span>' : '') + '</div>' +
-        '<div class="aip-reco-headline">Pour cet article, l\'IA recommande de commander <strong>' + d.quantity + ' unité(s)</strong> pour la semaine à venir.</div>' +
-        '<div class="aip-reco-quantity">' + d.quantity + '</div>' +
-        '<div class="aip-reco-quantity-unit">unités recommandées</div>' +
-      '</div>' +
-      (showReasoningInline
-        ? '<div class="aip-detail-section"><h6>Raisonnement</h6><div class="aip-reasoning-block">' + markdownLiteToHtml(d.reasoning || '') + '</div></div>' +
-          '<div class="aip-detail-section">' +
-            '<h6>Dernière commande &amp; impact</h6>' +
-            buildRecentOrderBlock(currentItem || {}) +
-            '<div id="aip-impact-container"></div>' +
-          '</div>' +
-          '<div class="aip-detail-section">' +
-            '<div class="d-flex align-items-center justify-content-between mb-2">' +
-              '<h6 class="mb-0">Évolution des ventes</h6>' +
-              '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
-            '</div>' +
-            '<div id="aip-sparkline-container"><p class="text-muted small">Chargement...</p></div>' +
-            '<div id="aip-stats-container" class="mt-3"></div>' +
-          '</div>' +
-          '<div class="aip-detail-section">' +
-            '<h6>Détail des ventes par jour</h6>' +
-            '<div id="aip-history-table-container"><p class="text-muted small">Chargement...</p></div>' +
-          '</div>'
-        : '<button type="button" class="aip-why-btn" id="aip-why-btn">Pourquoi ?</button>') +
-      (d.fromCache ? '<button type="button" class="btn btn-link btn-sm p-0 mt-2" id="aip-reanalyze-btn">Relancer une analyse à jour (nouvel appel IA)</button>' : '') +
-      askQuestionSectionHtml() +
-      '<div class="aip-order-qty-card">' +
-        '<label for="aip-order-qty-input">Quantité à commander</label>' +
-        '<div class="input-group">' +
-          '<input type="number" min="0" step="1" class="form-control" id="aip-order-qty-input" value="' + d.quantity + '">' +
-          '<button type="button" class="btn btn-dark" id="aip-order-qty-save">Appliquer</button>' +
+  // Deux colonnes une fois la recommandation prête (demande du 15/09/2026 : "afficher en grand...
+  // séparé en deux, Recommandation IA à part et l'autre à part à droite") : colonne gauche =
+  // recommandation + action (quantité à commander), toujours visible sans scroller ; colonne droite
+  // = tout le reste (raisonnement, impact, ventes, questions), qui défile indépendamment. Le mode
+  // "Pourquoi ?" (bouton, ancien affichage replié) disparaît : le raisonnement est maintenant
+  // toujours visible directement dans la colonne de droite, plus besoin de le révéler au clic.
+  function aiReadyHtml(d) {
+    const leftColumn =
+      '<div class="aip-reco-column">' +
+        comparisonBannerHtml(currentItem ? currentItem.predictedQuantity : null, d.quantity) +
+        '<div class="aip-reco-card">' +
+          '<div class="aip-reco-eyebrow"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon>Recommandation IA' + (d.fromCache ? ' <span class="text-muted" style="text-transform:none;letter-spacing:normal;">(déjà calculée à la génération)</span>' : '') + '</div>' +
+          '<div class="aip-reco-headline">Pour cet article, l\'IA recommande de commander <strong>' + d.quantity + ' unité(s)</strong> pour la semaine à venir.</div>' +
+          '<div class="aip-reco-quantity">' + d.quantity + '</div>' +
+          '<div class="aip-reco-quantity-unit">unités recommandées</div>' +
         '</div>' +
-        '<div class="aip-order-qty-hint" id="aip-order-qty-hint">L\'IA recommande ' + d.quantity + ' — vous pouvez commander moins ou plus selon votre jugement.</div>' +
+        (d.fromCache ? '<button type="button" class="btn btn-link btn-sm p-0 mt-2" id="aip-reanalyze-btn">Relancer une analyse à jour (nouvel appel IA)</button>' : '') +
+        '<div class="aip-order-qty-card mt-3">' +
+          '<label for="aip-order-qty-input">Quantité à commander</label>' +
+          '<div class="input-group">' +
+            '<input type="number" min="0" step="1" class="form-control" id="aip-order-qty-input" value="' + d.quantity + '">' +
+            '<button type="button" class="btn btn-dark" id="aip-order-qty-save">Appliquer</button>' +
+          '</div>' +
+          '<div class="aip-order-qty-hint" id="aip-order-qty-hint">L\'IA recommande ' + d.quantity + ' — vous pouvez commander moins ou plus selon votre jugement.</div>' +
+        '</div>' +
       '</div>';
+
+    const rightColumn =
+      '<div class="aip-details-column">' +
+        '<div class="aip-detail-section"><h6>Raisonnement</h6><div class="aip-reasoning-block">' + markdownLiteToHtml(d.reasoning || '') + '</div></div>' +
+        '<div class="aip-detail-section">' +
+          '<h6>Dernière commande &amp; impact</h6>' +
+          buildRecentOrderBlock(currentItem || {}) +
+          '<div id="aip-impact-container"></div>' +
+        '</div>' +
+        '<div class="aip-detail-section">' +
+          '<div class="d-flex align-items-center justify-content-between mb-2">' +
+            '<h6 class="mb-0">Évolution des ventes</h6>' +
+            '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
+          '</div>' +
+          '<div id="aip-sparkline-container"><p class="text-muted small">Chargement...</p></div>' +
+          '<div id="aip-stats-container" class="mt-3"></div>' +
+        '</div>' +
+        '<div class="aip-detail-section">' +
+          '<h6>Détail des ventes par jour</h6>' +
+          '<div id="aip-history-table-container"><p class="text-muted small">Chargement...</p></div>' +
+        '</div>' +
+        askQuestionSectionHtml() +
+      '</div>';
+
+    return leftColumn + rightColumn;
   }
 
   function wireSimpleViewEvents(item) {
@@ -560,7 +594,10 @@
       currentAiResult = finalResult;
       const box = document.getElementById('aip-simple-view');
       if (box) {
-        box.innerHTML = aiReadyHtml(finalResult, true);
+        box.classList.add('aip-two-col');
+        const panelEl = document.getElementById('aip-detail-panel');
+        if (panelEl) panelEl.classList.add('aip-wide');
+        box.innerHTML = aiReadyHtml(finalResult);
         wireSimpleViewEvents(item);
       }
     } catch (err) {
@@ -1015,6 +1052,10 @@
     document.getElementById('aip-detail-body').innerHTML =
       '<div id="aip-simple-view" class="aip-simple-view"></div>' +
       '<div id="aip-detail-view" class="aip-detail-view"></div>';
+    // Panneau étroit par défaut à l'ouverture (chargement) : élargi (aip-wide/aip-two-col)
+    // seulement une fois la recommandation effectivement prête à afficher, ci-dessous.
+    document.getElementById('aip-detail-panel').classList.remove('aip-wide');
+    document.getElementById('aip-simple-view').classList.remove('aip-two-col');
     showPanel();
 
     const existing = existingResultFor(item);
@@ -1025,7 +1066,9 @@
       // directement même pour un résultat déjà calculé à la génération (pas seulement juste après un
       // streaming en direct) : un "Pourquoi ?" à cliquer en plus masquait ces détails sans raison,
       // alors que le magasin veut voir stock/moyenne/tendance dès l'ouverture du panneau.
-      box.innerHTML = aiReadyHtml(existing, true);
+      box.classList.add('aip-two-col');
+      document.getElementById('aip-detail-panel').classList.add('aip-wide');
+      box.innerHTML = aiReadyHtml(existing);
       wireSimpleViewEvents(item);
     } else {
       document.getElementById('aip-simple-view').innerHTML = aiLoadingHtml();

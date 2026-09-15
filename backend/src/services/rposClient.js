@@ -222,6 +222,37 @@ async function getProductByEan(posId, shopId, ean) {
   return results[0] || null;
 }
 
+/**
+ * Historique des changements de prix d'un article (prix de vente, prix promo, prix d'achat...) —
+ * miroir de l'écran admin RPOS "Log changements de prix" (demande du 15/09/2026 : "quand est-ce que
+ * l'article a changé de prix de vente ou prix promo"). Chaque entrée porte la date, le type de prix
+ * modifié, l'ancien/nouveau prix, le contexte (ex: "maj auto prix", tâche planifiée) et l'utilisateur
+ * ou processus à l'origine du changement.
+ */
+async function getPriceChangeHistory(posId, shopId, ean, { limit = 50 } = {}) {
+  const data = await rposGet(posId, '/api/product_price_change_log/', {
+    ean__startswith: ean,
+    shop: shopId,
+    is_deleted: false,
+    page_size: limit,
+    ordering: '-date',
+  });
+  return (data.results || []).map((r) => ({
+    date: r.date,
+    ean: r.ean,
+    label: r.label_1 || null,
+    // *_display_name déjà en français lisible côté RPOS (ex: "prix d'achat", "prix de vente",
+    // "prix promo" / "maj auto prix", "modification manuelle"...) : pas besoin de retraduire des
+    // codes numériques nous-mêmes (confirmé par test direct le 15/09/2026).
+    priceType: r.price_type_display_name || null,
+    oldPrice: r.old_price !== undefined && r.old_price !== null ? Number(r.old_price) : null,
+    newPrice: r.new_price !== undefined && r.new_price !== null ? Number(r.new_price) : null,
+    isPriceIncrease: !!r.is_price_increase,
+    context: r.context_display_name || null,
+    user: r.username || null,
+  }));
+}
+
 // Filtre ean__in supporté par /api/product/ (confirmé par test direct) : sur un magasin à cache
 // froid (1000+ articles Pareto), un appel par lot de ~200 EAN remplace ~200 appels individuels,
 // principal goulot de la génération de proposition (audit performance). page_size doit couvrir la
@@ -848,6 +879,7 @@ async function getProductLinesForPeriod(posId, shopId, dateStart, dateEnd, onPro
 module.exports = {
   getShops,
   getProductByEan,
+  getPriceChangeHistory,
   getProductsByEans,
   getDepartmentRootName,
   getDepartmentHierarchy,

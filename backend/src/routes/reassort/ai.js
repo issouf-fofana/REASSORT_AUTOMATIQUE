@@ -386,6 +386,7 @@ router.post('/chatbot/ask-stream', async (req, res) => {
 
     const result = await chatbotService.askAssistant({
       rposShopId: shopId,
+      posId: shop.rposPosId,
       shopReference: shop.reference,
       shopName: shop.name,
       department: department || conversation.department,

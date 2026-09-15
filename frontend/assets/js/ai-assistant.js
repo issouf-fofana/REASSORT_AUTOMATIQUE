@@ -5,6 +5,7 @@
   const chatWindow = document.getElementById('aia-chat-window');
   const emptyHint = document.getElementById('aia-empty-hint');
   const suggestionsContainer = document.getElementById('aia-suggestions-container');
+  const suggestionsToggleBtn = document.getElementById('aia-suggestions-toggle');
   const input = document.getElementById('aia-input');
   const sendBtn = document.getElementById('aia-send-btn');
   const newConvBtn = document.getElementById('aia-new-conv-btn');
@@ -200,6 +201,22 @@
     });
   }
 
+  // Masquer/afficher les suggestions (demande du 15/09/2026) : la liste prend de la place en
+  // permanence au-dessus du champ de saisie — état mémorisé par utilisateur pour rester replié
+  // d'une session à l'autre si c'est le choix fait une fois.
+  const SUGGESTIONS_HIDDEN_KEY = 'aia-suggestions-hidden';
+  function applySuggestionsVisibility() {
+    const hidden = localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === '1';
+    suggestionsContainer.style.display = hidden ? 'none' : '';
+    suggestionsToggleBtn.textContent = hidden ? 'Afficher' : 'Masquer';
+  }
+  suggestionsToggleBtn.addEventListener('click', function () {
+    const hidden = localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === '1';
+    localStorage.setItem(SUGGESTIONS_HIDDEN_KEY, hidden ? '0' : '1');
+    applySuggestionsVisibility();
+  });
+  applySuggestionsVisibility();
+
   async function loadConversations() {
     try {
       const res = await window.reassortFetch('/reassort/chatbot/conversations');
@@ -315,17 +332,35 @@
     loadDepartments(shopSelect.value);
   }
 
+  // Contrôleur de la génération en cours (permet de l'interrompre via le bouton "Arrêter" —
+  // demande du 15/09/2026 : "comment je fais pour couper la réflexion en cas d'erreur", ex: une
+  // réponse qui part visiblement de travers, comme un dump JSON brut au lieu d'un texte reformulé).
+  let currentAbortController = null;
+
+  function setSendingState(isSending) {
+    input.disabled = isSending;
+    if (isSending) {
+      sendBtn.textContent = 'Arrêter';
+      sendBtn.classList.remove('btn-dark');
+      sendBtn.classList.add('btn-outline-danger');
+    } else {
+      sendBtn.textContent = 'Envoyer';
+      sendBtn.classList.remove('btn-outline-danger');
+      sendBtn.classList.add('btn-dark');
+    }
+  }
+
   async function sendQuestion() {
     const question = input.value.trim();
     if (!question || !shopSelect.value) return;
     input.value = '';
-    sendBtn.disabled = true;
-    input.disabled = true;
+    setSendingState(true);
     emptyHint.style.display = 'none';
 
     const answerEl = appendTurn(question, '<span class="aia-stream-cursor">▍</span>');
     chatWindow.scrollTop = chatWindow.scrollHeight;
     let streamedAnswer = '';
+    currentAbortController = new AbortController();
 
     try {
       const res = await window.reassortFetch('/reassort/chatbot/ask-stream?shop=' + encodeURIComponent(shopSelect.value), {
@@ -337,6 +372,7 @@
           subDepartment: subDepartmentInput.value.trim() || null,
           question: question,
         }),
+        signal: currentAbortController.signal,
       });
       if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
 
@@ -364,13 +400,23 @@
       if (isNewConversation) await loadConversations();
       else renderConversationList();
     } catch (err) {
-      answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(err.message) + '</span>';
+      if (err.name === 'AbortError') {
+        // Interruption volontaire (bouton "Arrêter") : le texte déjà reçu reste affiché tel quel,
+        // avec une mention explicite, plutôt qu'un message d'erreur qui laisserait croire à un bug.
+        answerEl.innerHTML = markdownLiteToHtml(streamedAnswer) + '<div class="text-muted small mt-1">(réponse interrompue)</div>';
+      } else {
+        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(err.message) + '</span>';
+      }
     } finally {
-      sendBtn.disabled = false;
-      input.disabled = false;
+      currentAbortController = null;
+      setSendingState(false);
       input.focus();
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
+  }
+
+  function stopGeneration() {
+    if (currentAbortController) currentAbortController.abort();
   }
 
   shopSelect.addEventListener('change', function () {
@@ -379,9 +425,12 @@
   });
 
   newConvBtn.addEventListener('click', startNewConversation);
-  sendBtn.addEventListener('click', sendQuestion);
+  sendBtn.addEventListener('click', function () {
+    if (currentAbortController) stopGeneration();
+    else sendQuestion();
+  });
   input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') sendQuestion();
+    if (e.key === 'Enter' && !currentAbortController) sendQuestion();
   });
 
   loadShopList();

@@ -9,6 +9,7 @@
  * dans la route qui appelle ces outils, jamais ici.
  */
 const prisma = require('../utils/prisma');
+const rpos = require('./rposClient');
 
 
 async function getLatestProposal(rposShopId) {
@@ -325,9 +326,105 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
   return { found: orders.length > 0, days, count: orders.length, orders };
 }
 
+/**
+ * getArticleDetails(posId, shopId, ean) — fiche complète d'un article en direct depuis RPOS
+ * (demande du 15/09/2026 : un admin doit pouvoir demander "où se trouve cet article", "quel est
+ * son prix actuel", "a-t-il une promo" et toute autre info produit). Distinct de getArticleStock
+ * (qui ne lit que la dernière proposition, donc jamais l'emplacement/prix/promo) — ici l'appel RPOS
+ * direct donne la fiche produit réelle et à jour, quel que soit l'état de la dernière génération.
+ */
+function toNum(v) {
+  return v !== undefined && v !== null && v !== '' ? Number(v) : null;
+}
+
+async function getArticleDetails(posId, shopId, ean) {
+  const product = await rpos.getProductByEan(posId, shopId, ean);
+  if (!product) return { found: false, message: `Article ${ean} introuvable côté RPOS pour ce magasin.` };
+
+  const hasPromo = !!(product.promo_price || (product.promotions && Object.keys(product.promotions).length));
+  const address = (product.addresses && product.addresses[0]) || null;
+
+  // Fiche complète calquée sur l'écran produit RPOS (demande du 15/09/2026 : "tout les champ
+  // disponible... il doit avoir tout") — chaque section de cet écran (identification, prix, stock,
+  // conditionnement, options caisse, fidélité, fournisseur) mappée en un champ exploitable par l'IA,
+  // plutôt que le sous-ensemble prix/emplacement/promo initial.
+  return {
+    found: true,
+    // Identification
+    ean: product.ean,
+    shortCode: product.short_code || null,
+    label1: product.label_1 || null,
+    label2: product.label_2 || null,
+    label3: product.label_3 || null,
+    department: product.department ? { name: product.department.name, code: product.department.code } : null,
+    productType: product.product_type || null,
+    linkedCodes: (product.linked_codes || []).map((c) => c.ean).filter(Boolean),
+    // Emplacement rayon physique (adresse RPOS) : ce que le magasin appelle "où se trouve l'article".
+    location: address ? { name: address.name, code: address.code } : null,
+    // Prix
+    sellingPrice: toNum(product.selling_price),
+    shopPrice: toNum(product.shop_price),
+    promoPrice: toNum(product.promo_price),
+    hasPromo,
+    priceExclTax: toNum(product.price_excl_tax),
+    buyingPrice: toNum(product.buying_price),
+    pamp: toNum(product.pamp),
+    marginRate: toNum(product.margin_rate),
+    shippingCost: toNum(product.shipping_cost),
+    vat: product.vat ? { name: product.vat.name, ratePct: toNum(product.vat.value) } : null,
+    lastSellingDate: product.last_selling_date || null,
+    // Stock
+    stock: toNum(product.stock),
+    endOfLifeStock: toNum(product.end_of_life_stock),
+    lowStockAlert: toNum(product.low_stock_alert),
+    handleStock: !!product.handle_stock,
+    blocked: !!product.blocked,
+    orderable: !!product.orderable,
+    currentOrderedQuantity: toNum(product.current_ordered_quantity),
+    nextDeliveryQuantity: toNum(product.next_delivery_quantity),
+    // Conditionnement / unités
+    inputMethod: product.input_method ? product.input_method.display_name : null,
+    sellingUnit: product.selling_unit ? product.selling_unit.display_name : null,
+    orderingUnit: toNum(product.ordering_unit),
+    packagingUnit: product.packaging_unit ? product.packaging_unit.display_name : null,
+    packagedQuantity: toNum(product.packaged_quantity),
+    maxOrderQuantity: toNum(product.max_quantity),
+    internalPackaging: product.internal_packaging || null,
+    // Options caisse
+    autoPosButton: !!product.auto_pos_button,
+    gridSearchFlag: !!product.grid_search_flag,
+    discountAllowed: !!product.discount_allowed,
+    manualDiscountAllowed: !!product.manual_discount_allowed,
+    forcedPriceAllowed: !!product.forced_price_allowed,
+    isComponent: !!product.is_component,
+    qualifiesForTicketResto: !!product.qualifies_for_ticket_resto,
+    // Fidélité / origine
+    countryOrigin: product.country_origin || null,
+    supplierReference: product.supplier_reference || null,
+    // Magasin / fournisseurs
+    shop: product.shop ? { reference: product.shop.reference, name: product.shop.name } : null,
+    defaultSupplier: product.default_supplier || null,
+    suppliers: (product.suppliers || []).map((s) => ({ name: s.name, code: s.code, deliveryTimeDays: s.delivery_time_days })),
+  };
+}
+
+/**
+ * getPriceChangeHistory(posId, shopId, ean) — historique des changements de prix (vente, promo,
+ * achat) d'un article, en direct depuis RPOS (demande du 15/09/2026 : "quand est-ce que l'article a
+ * changé de prix de vente ou prix promo, je veux les détails"). Miroir de l'écran admin RPOS "Log
+ * changements de prix".
+ */
+async function getPriceChangeHistory(posId, shopId, ean) {
+  const history = await rpos.getPriceChangeHistory(posId, shopId, ean, { limit: 30 });
+  if (!history.length) return { found: false, message: `Aucun changement de prix enregistré pour l'article ${ean}.` };
+  return { found: true, ean, label: history[0].label, changeCount: history.length, history };
+}
+
 module.exports = {
   getStoreStock,
   getArticleStock,
+  getArticleDetails,
+  getPriceChangeHistory,
   getRevenue,
   getSalesHistory,
   getCurrentProposal,
