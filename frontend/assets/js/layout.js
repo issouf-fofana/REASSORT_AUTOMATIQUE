@@ -31,6 +31,13 @@
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
 
+  // Le sélecteur de magasin global (global-shop-selector.js) est chargé en <head>, avant que la
+  // topbar ci-dessus n'injecte #global-shop-selector-btn dans le DOM : son tout premier rendu
+  // échoue donc silencieusement (élément introuvable). On le redéclenche explicitement maintenant
+  // que la topbar existe réellement — sans ce rappel, le bouton restait invisible sur toute page
+  // où aucune sélection de magasin n'avait encore eu lieu ailleurs (bug observé le 15/09/2026).
+  if (window.reassortRenderShopSelector) window.reassortRenderShopSelector();
+
   // Item de navigation actif : correspondance sur le nom de fichier de la page courante. Les
   // data-nav-item/data-nav-group gardent le suffixe ".html" (valeur historique, encore utilisée
   // par purchase-order.html pour son propre routage interne) — on normalise donc les deux côtés

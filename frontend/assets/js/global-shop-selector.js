@@ -46,6 +46,14 @@
   window.reassortSetActiveShop = setActiveShop;
   window.reassortOnActiveShopChange = function (cb) { changeListeners.push(cb); };
 
+  // Exposée pour que layout.js puisse la rappeler explicitement une fois la topbar injectée dans
+  // le DOM : ce script est chargé en <head> (avant <body>), donc son tout premier appel à
+  // renderButton() ci-dessous échoue silencieusement (#global-shop-selector-btn n'existe pas
+  // encore) — sans ce rappel explicite, le bouton restait invisible tant qu'aucune sélection
+  // n'avait jamais eu lieu ailleurs pour déclencher setActiveShop (qui, lui, rappelle
+  // renderButton en interne). Bug découvert le 15/09/2026 : "le filtre magasin ne s'affiche pas".
+  window.reassortRenderShopSelector = renderButton;
+
   function renderButton() {
     const btn = document.getElementById('global-shop-selector-btn');
     const readOnlyEl = document.getElementById('page-shop-context');
