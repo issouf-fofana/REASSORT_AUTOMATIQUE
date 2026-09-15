@@ -157,8 +157,12 @@ async function runSalesSync() {
 }
 
 function toSalesLineRows(lines, posId, shopId) {
+  // Ne filtre plus les EAN non-numériques (ex: "D10130999999" - articles génériques RPOS) : ces
+  // ventes sont réelles et doivent être stockées pour que le CA total du magasin reste exact (même
+  // correctif que salesBackfillService.js, cf. son commentaire). Le filtre EAN numérique reste
+  // appliqué au moment du calcul Pareto/réassort (proposalService.js).
   return lines
-    .filter((l) => l.ean && /^\d+$/.test(String(l.ean).trim()))
+    .filter((l) => l.ean)
     .map((l) => {
       const ean = String(l.ean).trim();
       const date = new Date(l.date).toISOString();

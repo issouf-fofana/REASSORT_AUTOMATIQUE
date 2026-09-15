@@ -12,6 +12,11 @@
   let groupedByDepartment = []; // [{ department, predictions: [...] }], trié par nb d'articles décroissant
   let currentPage = 1;
   let currentProposalId = null;
+  // Jeton de requête : un changement rapide de magasin peut faire partir plusieurs chargements en
+  // parallèle dont les réponses reviennent dans le désordre — sans ce garde-fou, la réponse d'un
+  // magasin déjà quitté pouvait écraser l'affichage après coup (même bug que sales-history.html,
+  // corrigé le 15/09/2026).
+  let loadToken = 0;
 
   async function loadShopList() {
     try {
@@ -52,6 +57,7 @@
 
   async function loadProposalList() {
     const shopId = shopSelect.value;
+    const token = ++loadToken;
     proposalSelect.innerHTML = '<option value="">—</option>';
     proposalSelect.disabled = true;
     if (!shopId) return;
@@ -59,6 +65,7 @@
     try {
       const res = await window.reassortFetch('/reassort/predictions/proposals?shop=' + encodeURIComponent(shopId));
       const json = await res.json();
+      if (token !== loadToken) return; // un changement de magasin plus récent a déjà démarré, réponse ignorée
       if (!json.success) throw new Error(json.message);
       if (!json.data.length) {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
@@ -72,6 +79,7 @@
       proposalSelect.disabled = false;
       loadPredictions();
     } catch (err) {
+      if (token !== loadToken) return;
       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
     }
   }
@@ -89,12 +97,14 @@
       infoBox.textContent = '';
       return;
     }
+    const token = ++loadToken;
     tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Chargement...</td></tr>';
     try {
       const proposalId = proposalSelect.value;
       const url = '/reassort/predictions?shop=' + encodeURIComponent(shopId) + (proposalId ? '&proposalId=' + encodeURIComponent(proposalId) : '');
       const res = await window.reassortFetch(url);
       const json = await res.json();
+      if (token !== loadToken) return; // un changement de magasin plus récent a déjà démarré, réponse ignorée
       if (!json.success) throw new Error(json.message);
       const d = json.data;
 
@@ -116,6 +126,7 @@
       currentPage = 1;
       renderPage();
     } catch (err) {
+      if (token !== loadToken) return;
       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
     }
   }

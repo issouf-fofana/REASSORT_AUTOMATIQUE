@@ -333,6 +333,10 @@
                                                   showOrderDetail(row.dataset.orderId, row.dataset.orderReference, row.dataset.orderStatus);
                                              });
 
+                                             // Jeton de requête : un changement rapide de magasin peut faire revenir les réponses dans
+                                             // le désordre — sans ce garde-fou, la réponse d'un magasin déjà quitté pouvait écraser
+                                             // l'affichage après coup (même bug que sales-history.html, corrigé le 15/09/2026).
+                                             let ordersLoadToken = 0;
                                              async function loadOrders() {
                                                   updateTitle();
                                                   const shopId = selectedShopId();
@@ -340,21 +344,24 @@
                                                        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
                                                        return;
                                                   }
+                                                  const token = ++ordersLoadToken;
                                                   status.textContent = 'Chargement...';
                                                   refreshBtn.disabled = true;
                                                   try {
                                                        const posId = selectedPosId();
                                                        const res = await window.reassortFetch('/reassort/orders?shop=' + encodeURIComponent(shopId) + (posId ? '&pos=' + encodeURIComponent(posId) : ''));
                                                        const json = await res.json();
+                                                       if (token !== ordersLoadToken) return;
                                                        if (!json.success) throw new Error(json.message);
                                                        lastLoadedOrders = json.data.orders;
                                                        renderRows(lastLoadedOrders);
                                                        status.textContent = json.data.count + ' commande(s) au total';
                                                   } catch (err) {
+                                                       if (token !== ordersLoadToken) return;
                                                        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                                        status.textContent = '';
                                                   } finally {
-                                                       refreshBtn.disabled = false;
+                                                       if (token === ordersLoadToken) refreshBtn.disabled = false;
                                                   }
                                              }
 

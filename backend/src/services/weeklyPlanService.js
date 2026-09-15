@@ -114,6 +114,10 @@ async function getWeeklyPlanHistory(weeklyPlanId) {
       entry.history.push({
         revisionNumber: index + 1,
         proposalId: rev.id,
+        // Date/heure de CETTE révision (demande du 15/09/2026 : "il faut mettre plus de détail,
+        // les date heure" dans l'historique par article — jusqu'ici seule la liste des révisions
+        // en haut du modal portait generatedAt, pas chaque point de l'historique par article).
+        generatedAt: rev.generatedAt,
         quantitySuggested: line.quantitySuggested,
         changeVsPrevious: previous === null ? null : line.quantitySuggested - previous,
       });

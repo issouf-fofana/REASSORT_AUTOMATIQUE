@@ -266,6 +266,63 @@ router.get('/product/:productId/last-purchase', async (req, res) => {
   }
 });
 
+// GET /api/reassort/product/:productId/proposal-history?ean= - pour un article, l'historique des
+// quantités PROPOSÉES (à commander) à chaque génération récente du magasin, avec date/heure, ET la
+// quantité déjà VENDUE entre deux générations successives — demande du 15/09/2026 ("un tab en bas
+// pour montrer le détail" avec "les date heure" et "les quantités déjà vendues"), distinct de
+// l'historique par plan hebdomadaire (weekly-plan/:id/history) qui ne couvre qu'un plan précis.
+router.get('/product/:productId/proposal-history', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const { ean } = req.query;
+    if (!ean) {
+      return res.status(400).json({ success: false, message: 'ean requis' });
+    }
+
+    const lines = await prisma.proposalLine.findMany({
+      where: { ean, proposal: { rposShopId: shopId } },
+      orderBy: { proposal: { generatedAt: 'desc' } },
+      take: 20,
+      select: {
+        quantitySuggested: true,
+        quantityValidated: true,
+        aiAdjusted: true,
+        proposal: { select: { id: true, generatedAt: true, status: true, analysisPeriodStart: true, analysisPeriodEnd: true } },
+      },
+    });
+
+    const chronological = lines.slice().reverse();
+    const history = [];
+    for (let i = 0; i < chronological.length; i++) {
+      const current = chronological[i];
+      const previous = i > 0 ? chronological[i - 1] : null;
+      const soldSince = previous
+        ? await prisma.salesLine.aggregate({
+            where: { ean, rposShopId: shopId, date: { gt: previous.proposal.generatedAt, lte: current.proposal.generatedAt } },
+            _sum: { quantity: true },
+          })
+        : null;
+      history.push({
+        proposalId: current.proposal.id,
+        generatedAt: current.proposal.generatedAt,
+        status: current.proposal.status,
+        quantitySuggested: current.quantitySuggested,
+        quantityValidated: current.quantityValidated,
+        aiAdjusted: current.aiAdjusted,
+        quantitySoldSincePrevious: soldSince ? (soldSince._sum.quantity || 0) : null,
+      });
+    }
+
+    res.json({ success: true, data: history });
+  } catch (error) {
+    console.error('Product proposal-history error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/product/:productId/analytics?ean=&dateStart=&dateEnd= - évolution d'un article
 // sur une période choisie : courbe de ventes (granularité adaptée à la durée), historique de
 // commandes, indicateurs de comportement (tendance, fréquence de commande), et prédiction de la

@@ -60,7 +60,11 @@ async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, d
     return { lines: rposLines, source: 'rpos' };
   }
 
-  const mappedDbLines = dbLines.map((l) => ({ ean: l.ean, label_1: l.label, quantity: l.quantity, total_excl_tax: l.revenueExclTax, date: l.date.toISOString() }));
+  // total_incl_tax manquant ici jusqu'au 15/09/2026 (mappedDbLines ne portait que le HT) : le calcul
+  // du CA TTC magasin (shopTotalRevenueInclTax) tombait systématiquement à 0 pour toute génération
+  // basée sur la base locale — la quasi-totalité des cas en pratique — au lieu du vrai TTC déjà
+  // stocké en base (SalesLine.revenueInclTax, alimenté par salesBackfillService/salesSyncJob).
+  const mappedDbLines = dbLines.map((l) => ({ ean: l.ean, label_1: l.label, quantity: l.quantity, total_excl_tax: l.revenueExclTax, total_incl_tax: l.revenueInclTax, date: l.date.toISOString() }));
 
   // Couverture réelle vs période demandée : la première vente locale dans la fenêtre peut être
   // largement postérieure à dateStart si le backfill initial n'a jamais couvert le début de la
@@ -430,9 +434,16 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   // seul cas où ça ne tiendrait pas serait une config de revenueSharePeriodDays absurdement plus
   // longue que la période Pareto elle-même). On filtre donc `lines` en mémoire par date au lieu de
   // refaire un second appel (RPOS ou base) qui redemanderait exactement les mêmes ventes.
+  // La fenêtre de référence s'aligne sur des jours CALENDAIRES pleins (00:00 → 23:59:59), pas sur
+  // une simple soustraction de millisecondes depuis period.end : sinon "1 jour" glissant depuis une
+  // vente à 10:42 donnait une fenêtre à cheval sur deux jours (ex: 14/09 10:42 → 15/09 10:42) au
+  // lieu du vrai "hier" 00:00-23:59 attendu par l'utilisateur (demande du 15/09/2026).
   const revenueShareDays = config.revenueSharePeriodDays || 1;
-  const revenueShareEnd = period.end;
-  const revenueShareStart = new Date(new Date(period.end).getTime() - revenueShareDays * 24 * 60 * 60 * 1000).toISOString();
+  const periodEndDate = new Date(period.end);
+  const revenueShareEndDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate(), 23, 59, 59));
+  const revenueShareStartDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate() - (revenueShareDays - 1), 0, 0, 0));
+  const revenueShareEnd = revenueShareEndDay.toISOString().slice(0, 19);
+  const revenueShareStart = revenueShareStartDay.toISOString().slice(0, 19);
 
   let revenueShareLines = lines;
   if (revenueShareDays !== periodDays) {
@@ -451,14 +462,34 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   }
 
   const revenueByEan = new Map();
+  // paretoRevenueTotal : dénominateur du % CA par article affiché dans les cartes secteurs/rayons —
+  // exclut volontairement les articles à EAN non-numérique (génériques, jamais commandables
+  // individuellement) ET les lignes à CA négatif/nul (retours, annulations — non attribuables à un
+  // article "vendeur" dans le classement Pareto), pour rester cohérent avec ce que ces cartes
+  // montrent réellement.
+  let paretoRevenueTotal = 0;
+  // shopTotalRevenue/InclTax : CA RÉEL et COMPLET du magasin (NET des retours, tous articles y
+  // compris génériques), affiché tel quel à l'utilisateur — doit correspondre exactement à ce que
+  // montre RPOS. Deux bugs trouvés et corrigés le 15/09/2026 : (1) le total excluait à tort les
+  // génériques (écart de 14 775 CFA/jour, alors que "Reste du CA magasin" les affiche déjà séparément
+  // comme non-Pareto, pas comme absents du CA) ; (2) le total excluait aussi les lignes à CA négatif
+  // (retours/annulations, écart de 18 882 CFA/jour) alors que RPOS calcule un CA NET qui les intègre
+  // déjà — un retour de -X CFA doit bien réduire le CA magasin total, pas en être exclu.
+  // TTC affiché à côté du HT : le rapport de caisse RPOS raisonne en TTC (ce que le client paye
+  // réellement), le % CA par article reste en HT (plus pertinent pour l'analyse achats/marge).
   let shopTotalRevenue = 0;
+  let shopTotalRevenueInclTax = 0;
   for (const line of revenueShareLines) {
     const ean = (line.ean || '').trim();
-    if (!ean || !/^\d+$/.test(ean)) continue;
+    if (!ean) continue;
     const caHt = toFloat(line.total_excl_tax);
-    if (caHt <= 0) continue;
-    revenueByEan.set(ean, (revenueByEan.get(ean) || 0) + caHt);
     shopTotalRevenue += caHt;
+    if (line.total_incl_tax !== undefined && line.total_incl_tax !== null) {
+      shopTotalRevenueInclTax += toFloat(line.total_incl_tax);
+    }
+    if (caHt <= 0 || !/^\d+$/.test(ean)) continue;
+    revenueByEan.set(ean, (revenueByEan.get(ean) || 0) + caHt);
+    paretoRevenueTotal += caHt;
   }
 
   // Mode "sans réseau Prosuma" (config.ignoreRposStockInCalculation) : tous les appels RPOS
@@ -480,7 +511,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 
   const proposals = [];
   const skipped = { notFound: [], notOrderable: [], negativeStock: [], alreadyOrdered: [], genericArticle: [] };
-  const revenueSharePctFor = (ean) => shopTotalRevenue > 0 ? ((revenueByEan.get(ean) || 0) / shopTotalRevenue) * 100 : null;
+  const revenueSharePctFor = (ean) => paretoRevenueTotal > 0 ? ((revenueByEan.get(ean) || 0) / paretoRevenueTotal) * 100 : null;
 
   // Pré-chauffe le cache produit par lots de ~200 EAN via le filtre RPOS ean__in (confirmé
   // supporté par test direct), au lieu d'un appel getProductByEan par article : sur un magasin à
@@ -615,7 +646,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     // null si l'article ne se vend pas (pas de risque de rupture calculable).
     const daysUntilStockout = avgDailySales > 0 ? stock / avgDailySales : null;
 
-    const revenueSharePct = shopTotalRevenue > 0 ? ((revenueByEan.get(ean) || 0) / shopTotalRevenue) * 100 : null;
+    const revenueSharePct = paretoRevenueTotal > 0 ? ((revenueByEan.get(ean) || 0) / paretoRevenueTotal) * 100 : null;
 
     return {
       hadNegativeStockSkip,
@@ -719,6 +750,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       revenueShareStart,
       revenueShareEnd,
       shopTotalRevenue,
+      shopTotalRevenueInclTax,
     },
   };
 }
@@ -872,6 +904,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
       revenueShareStart: new Date(result.stats.revenueShareStart),
       revenueShareEnd: new Date(result.stats.revenueShareEnd),
       shopTotalRevenue: result.stats.shopTotalRevenue,
+      shopTotalRevenueInclTax: result.stats.shopTotalRevenueInclTax,
       analysisPeriodStart: new Date(result.stats.periodStart),
       analysisPeriodEnd: new Date(result.stats.periodEnd),
       analysisPeriodMode: result.stats.periodMode,

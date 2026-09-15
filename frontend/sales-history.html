@@ -265,12 +265,19 @@
                               }
                               document.getElementById('sh-group-by-department').addEventListener('change', renderCurrentLines);
 
+                              // Jeton de requête : un changement rapide de magasin (ou de filtre) peut faire partir
+                              // plusieurs recherches en parallèle dont les réponses reviennent dans le désordre —
+                              // sans ce garde-fou, une réponse plus lente mais lancée pour un magasin déjà quitté
+                              // pouvait écraser l'affichage après coup avec les données du mauvais magasin (bug
+                              // observé le 15/09/2026 : changement de magasin, mais l'ancien magasin restait affiché).
+                              let searchToken = 0;
                               async function search(page) {
                                    const shopId = shopSelect.value;
                                    if (!shopId) {
                                         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>';
                                         return;
                                    }
+                                   const token = ++searchToken;
                                    currentPage = page || 1;
                                    const dateStart = document.getElementById('sh-date-start').value;
                                    const dateEnd = document.getElementById('sh-date-end').value;
@@ -285,6 +292,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-lines?' + params.toString());
                                         const json = await res.json();
+                                        if (token !== searchToken) return; // une recherche plus récente a déjà démarré, on ignore cette réponse tardive
                                         if (!json.success) throw new Error(json.message);
                                         const d = json.data;
                                         lastTotal = d.total;
@@ -298,12 +306,14 @@
 
                                         lastLoadedLines = d.lines;
                                         await renderCurrentLines();
+                                        if (token !== searchToken) return;
 
                                         const totalPages = Math.max(1, Math.ceil(d.total / pageSize));
                                         document.getElementById('sh-page-label').textContent = 'Page ' + currentPage + ' / ' + totalPages;
                                         document.getElementById('sh-prev-page').disabled = currentPage <= 1;
                                         document.getElementById('sh-next-page').disabled = currentPage >= totalPages;
                                    } catch (err) {
+                                        if (token !== searchToken) return;
                                         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                    }
                               }

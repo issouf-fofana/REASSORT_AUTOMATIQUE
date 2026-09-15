@@ -367,6 +367,11 @@ model Proposal {
   revenueShareStart   DateTime? @map("revenue_share_start")
   revenueShareEnd     DateTime? @map("revenue_share_end")
   shopTotalRevenue    Float?    @map("shop_total_revenue")
+  // CA TTC équivalent, affiché à côté du HT ci-dessus (demande du 15/09/2026) : le rapport de
+  // caisse RPOS raisonne en TTC, alors que shopTotalRevenue (HT) sert au calcul Pareto/% CA par
+  // article — afficher les deux évite de faire croire à tort à un écart de données entre l'appli
+  // et RPOS quand ce n'est qu'une différence HT/TTC.
+  shopTotalRevenueInclTax Float? @map("shop_total_revenue_incl_tax")
 
   // Période d'analyse des ventes utilisée pour le classement Pareto et le calcul de la vente
   // moyenne (distincte de revenueShareStart/End ci-dessus, qui sert uniquement à la colonne "% CA

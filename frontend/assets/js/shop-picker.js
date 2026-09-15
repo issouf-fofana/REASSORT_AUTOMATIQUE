@@ -215,7 +215,10 @@
       if (selectEl.selectedOptions.length) {
         button.textContent = selectEl.selectedOptions[0].textContent;
         updateShopContext(selectEl.selectedOptions[0]);
-        syncToGlobalShop(selectEl.selectedOptions[0]);
+        // Même garde qu'au clic dans la modale (ligne ~155) : un select "indépendant" ne doit
+        // jamais répercuter son choix sur le magasin de travail global (bug trouvé le 15/09/2026 —
+        // ce listener-ci n'avait pas le garde-fou, contrairement au clic dans la modale).
+        if (!isIndependentSelector) syncToGlobalShop(selectEl.selectedOptions[0]);
       }
     });
 

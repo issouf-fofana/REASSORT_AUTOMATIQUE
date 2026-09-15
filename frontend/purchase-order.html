@@ -41,6 +41,58 @@
             ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
             le débordement horizontal du panneau latéral. */
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+
+         /* Tuiles Secteurs/Rayons (demande du 15/09/2026 : % CA + montant réel + barre de progression,
+            style "plus soft et pro" après un premier essai jugé trop brut — accents adoucis en gris
+            plutôt qu'en noir plein, transitions plus discrètes, plus de respiration). Le poids du
+            secteur dans le CA magasin reste visible via --tile-accent (posé en style inline par tile),
+            mais sur une palette resserrée pour ne jamais paraître criard. */
+         .reassort-dept-tile {
+              border: 1px solid #eef0f2;
+              border-top: 3px solid var(--tile-accent, #444444);
+              border-radius: 10px;
+              transition: box-shadow .2s ease, border-color .2s ease;
+         }
+         .reassort-dept-tile:hover {
+              box-shadow: 0 4px 16px rgba(20, 20, 20, .06);
+              border-color: #e2e4e7;
+         }
+         .reassort-dept-tile .card-title {
+              font-size: .95rem;
+              font-weight: 600;
+              letter-spacing: .01em;
+         }
+         .reassort-dept-tile .tile-pct {
+              font-size: 1.85rem;
+              font-weight: 600;
+              line-height: 1.1;
+              color: #1a1a1a;
+              letter-spacing: -.01em;
+         }
+         .reassort-dept-tile .tile-progress {
+              height: 4px;
+              border-radius: 2px;
+              background-color: #f0f1f3;
+              overflow: hidden;
+              margin: .65rem 0 .9rem;
+         }
+         .reassort-dept-tile .tile-progress-fill {
+              height: 100%;
+              background-color: var(--tile-accent, #444444);
+              border-radius: 2px;
+              opacity: .75;
+              transition: width .3s ease;
+         }
+         .reassort-dept-tile .tile-revenue {
+              font-weight: 500;
+              color: #3a3a3a;
+              font-size: .92rem;
+         }
+         .reassort-dept-tile .tile-proposed {
+              color: #a8adb3;
+              font-size: .78rem;
+              margin-top: .1rem;
+         }
     </style>
 </head>
 
@@ -385,8 +437,29 @@
                                                             </div>
                                                        </div>
 
-                                                       <div id="pa-content">
-                                                            <p class="text-muted text-center py-4">Chargement...</p>
+                                                       <ul class="nav nav-tabs mb-3" role="tablist">
+                                                            <li class="nav-item" role="presentation">
+                                                                 <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pa-tab-overview" type="button" role="tab">Vue d'ensemble</button>
+                                                            </li>
+                                                            <li class="nav-item" role="presentation">
+                                                                 <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pa-tab-history" type="button" role="tab" id="pa-tab-history-btn">Historique des propositions</button>
+                                                            </li>
+                                                       </ul>
+                                                       <div class="tab-content">
+                                                            <div class="tab-pane fade show active" id="pa-tab-overview" role="tabpanel">
+                                                                 <div id="pa-content">
+                                                                      <p class="text-muted text-center py-4">Chargement...</p>
+                                                                 </div>
+                                                            </div>
+                                                            <!-- Onglet "Historique des propositions" (demande du 15/09/2026) : pour l'article ouvert,
+                                                                 quantité PROPOSÉE (à commander) et quantité déjà VENDUE à chaque génération de la
+                                                                 semaine, avec date/heure précise — distinct de la courbe globale de l'onglet
+                                                                 "Vue d'ensemble" qui porte sur la période choisie, pas sur les révisions successives. -->
+                                                            <div class="tab-pane fade" id="pa-tab-history" role="tabpanel">
+                                                                 <div id="pa-history-content">
+                                                                      <p class="text-muted text-center py-4">Chargement...</p>
+                                                                 </div>
+                                                            </div>
                                                        </div>
                                                   </div>
                                              </div>
@@ -677,18 +750,21 @@
                                                        return;
                                                   }
                                                   const start = new Date(proposal.revenueShareStart);
-                                                  // La borne de fin est minuit pile (exclusive) : n'inclut jamais la journée affichée par
-                                                  // end, seulement les jours entre start et end. On l'affiche donc comme la veille de end
-                                                  // pour ne pas laisser croire qu'un jour de plus est compté (ex: "du 25/08 au 26/08" alors
-                                                  // que seul le 25/08 est réellement dans la fenêtre de calcul).
                                                   const end = new Date(proposal.revenueShareEnd);
-                                                  const lastIncludedDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-                                                  const periodLabel = lastIncludedDay.getTime() === start.getTime()
+                                                  // Comparaison par jour CALENDAIRE (revenueShareStart/End sont désormais des bornes de jours
+                                                  // pleins 00:00:00 → 23:59:59, cf. proposalService.js) plutôt que par soustraction de 24h à
+                                                  // end, qui donnait une date de fin antérieure à la date de début (bug corrigé le 15/09/2026).
+                                                  const periodLabel = start.toDateString() === end.toDateString()
                                                        ? start.toLocaleDateString('fr-FR')
-                                                       : 'du ' + start.toLocaleDateString('fr-FR') + ' au ' + lastIncludedDay.toLocaleDateString('fr-FR');
+                                                       : 'du ' + start.toLocaleDateString('fr-FR') + ' au ' + end.toLocaleDateString('fr-FR');
+                                                  // HT et TTC côte à côte : le rapport de caisse RPOS raisonne en TTC, notre % CA par
+                                                  // article en HT (demande du 15/09/2026, pour éviter de confondre l'écart HT/TTC avec un
+                                                  // vrai écart de données entre l'appli et RPOS).
+                                                  const revenueLabel = proposal.shopTotalRevenue.toLocaleString('fr-FR') + ' CFA HT' +
+                                                       (proposal.shopTotalRevenueInclTax ? ' (' + proposal.shopTotalRevenueInclTax.toLocaleString('fr-FR') + ' CFA TTC)' : '');
                                                   box.innerHTML = '<strong>Contexte "% CA magasin" :</strong> chiffre d\'affaires total du magasin ' +
-                                                       (lastIncludedDay.getTime() === start.getTime() ? 'le ' : '') + periodLabel + ' — ' +
-                                                       proposal.shopTotalRevenue.toLocaleString('fr-FR') + ' CFA. ' +
+                                                       (start.toDateString() === end.toDateString() ? 'le ' : '') + periodLabel + ' — ' +
+                                                       revenueLabel + '. ' +
                                                        'Le % de chaque article ci-dessous représente sa part dans ce total.';
                                                   box.style.display = '';
                                              }
@@ -753,14 +829,31 @@
                                              // cartes représentent par rapport au total (le reste couvre tout ce qui n'est pas proposé :
                                              // hors Pareto 80/20, stock négatif, déjà commandé, génériques exclus, non commandable...).
                                              function renderTileGrid(groups, rawGroups, exclusionStats, proposalForRevenue) {
+                                                  // Montant CA réel (pas le montant proposé à la commande) correspondant au % CA affiché,
+                                                  // dérivé de shopTotalRevenue comme pour "Reste du CA magasin" ci-dessous — sans lui,
+                                                  // le pourcentage seul ne dit pas "8% de quoi" en valeur absolue (demande du 15/09/2026).
+                                                  const shopTotalRevenue = proposalForRevenue && proposalForRevenue.shopTotalRevenue;
+                                                  // Accent visuel proportionnel au poids du secteur dans le CA — palette resserrée en gris
+                                                  // graphite (jamais de noir pur ni de bleu vif), plus douce que le premier essai jugé trop
+                                                  // brut (demande du 15/09/2026 : "un style plus soft et pro").
+                                                  function accentColorFor(pct) {
+                                                       if (pct >= 40) return '#3a3f47';
+                                                       if (pct >= 15) return '#6b7178';
+                                                       if (pct >= 5) return '#9ba1a8';
+                                                       return '#c9ccd1';
+                                                  }
                                                   const tilesHtml = groups.map(function ([name, d, href]) {
+                                                       const revenueAmount = shopTotalRevenue ? Math.round(shopTotalRevenue * d.revenuePct / 100) : null;
+                                                       const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
                                                        return '<div class="col-md-4 col-lg-3">' +
-                                                            '<a href="' + href + '" class="card text-decoration-none h-100 reassort-dept-tile">' +
+                                                            '<a href="' + href + '" class="card text-decoration-none h-100 reassort-dept-tile" style="--tile-accent: ' + accentColorFor(d.revenuePct) + ';">' +
                                                             '<div class="card-body">' +
                                                             '<h5 class="card-title mb-1">' + name + '</h5>' +
                                                             '<div class="text-muted small mb-2">' + d.count + ' article(s)</div>' +
-                                                            '<div class="fs-20 fw-semibold text-primary">' + d.revenuePct.toFixed(1) + ' % CA</div>' +
-                                                            '<div class="text-muted small">' + d.value.toLocaleString('fr-FR') + ' CFA proposé</div>' +
+                                                            '<div class="tile-pct">' + d.revenuePct.toFixed(1) + '<span class="fs-14 fw-normal text-muted"> % CA</span></div>' +
+                                                            '<div class="tile-progress"><div class="tile-progress-fill" style="width: ' + pctClamped + '%;"></div></div>' +
+                                                            (revenueAmount !== null ? '<div class="tile-revenue">' + revenueAmount.toLocaleString('fr-FR') + ' CFA de CA</div>' : '') +
+                                                            '<div class="tile-proposed">' + d.value.toLocaleString('fr-FR') + ' CFA proposé</div>' +
                                                             '</div></a></div>';
                                                   }).join('');
 
@@ -802,13 +895,15 @@
                                                             }
                                                        }
 
+                                                       const remainderPctClamped = Math.max(0, Math.min(100, remainderPct));
                                                        remainderHtml = '<div class="col-md-4 col-lg-3">' +
-                                                            '<div class="card h-100 border-dashed" style="border-style: dashed; opacity: 0.85;">' +
+                                                            '<div class="card h-100 reassort-dept-tile" style="--tile-accent: #c9ccd1; border-style: dashed; opacity: 0.92;">' +
                                                             '<div class="card-body">' +
                                                             '<h5 class="card-title mb-1 text-muted">Reste du CA magasin</h5>' +
                                                             '<div class="text-muted small mb-2">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>' +
-                                                            '<div class="fs-20 fw-semibold text-secondary">' + remainderPct.toFixed(1) + ' % CA</div>' +
-                                                            (remainderValue !== null ? '<div class="text-muted small">' + remainderValue.toLocaleString('fr-FR') + ' CFA</div>' : '') +
+                                                            '<div class="tile-pct text-secondary">' + remainderPct.toFixed(1) + '<span class="fs-14 fw-normal text-muted"> % CA</span></div>' +
+                                                            '<div class="tile-progress"><div class="tile-progress-fill" style="width: ' + remainderPctClamped + '%;"></div></div>' +
+                                                            (remainderValue !== null ? '<div class="tile-revenue">' + remainderValue.toLocaleString('fr-FR') + ' CFA</div>' : '') +
                                                             breakdownHtml +
                                                             '</div></div></div>';
                                                   }
@@ -840,12 +935,19 @@
                                                   }
                                                   const start = new Date(proposal.analysisPeriodStart);
                                                   const end = new Date(proposal.analysisPeriodEnd);
-                                                  const lastIncludedDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-                                                  const periodLabel = lastIncludedDay.getTime() === start.getTime()
+                                                  // Comparaison par jour CALENDAIRE plutôt que par soustraction de 24h : le mode YESTERDAY
+                                                  // renvoie désormais des bornes de jour plein (00:00:00 → 23:59:59, cf. periodService.js),
+                                                  // pas une fin exclusive à minuit — l'ancien calcul (end - 24h) donnait alors une date de
+                                                  // fin antérieure à la date de début pour ce mode (demande du 15/09/2026).
+                                                  const periodLabel = start.toDateString() === end.toDateString()
                                                        ? start.toLocaleDateString('fr-FR')
-                                                       : 'du ' + start.toLocaleDateString('fr-FR') + ' au ' + lastIncludedDay.toLocaleDateString('fr-FR');
+                                                       : 'du ' + start.toLocaleDateString('fr-FR') + ' au ' + end.toLocaleDateString('fr-FR');
+                                                  // HT et TTC affichés côte à côte (demande du 15/09/2026) : le rapport de caisse RPOS
+                                                  // raisonne en TTC, notre calcul Pareto/% CA par article en HT — les deux sont corrects
+                                                  // mais mesurent des choses différentes, d'où une confusion possible si un seul est montré.
                                                   const revenueLabel = proposal.shopTotalRevenue
-                                                       ? proposal.shopTotalRevenue.toLocaleString('fr-FR') + ' CFA'
+                                                       ? proposal.shopTotalRevenue.toLocaleString('fr-FR') + ' CFA HT' +
+                                                            (proposal.shopTotalRevenueInclTax ? ' (' + proposal.shopTotalRevenueInclTax.toLocaleString('fr-FR') + ' CFA TTC)' : '')
                                                        : '—';
                                                   // ATTENTION : le CA magasin ci-dessous porte sur une fenêtre DISTINCTE de la période
                                                   // d'analyse Pareto (revenueShareStart/End, configurable indépendamment — 1 jour par défaut,
@@ -856,9 +958,14 @@
                                                   // laquelle, semble alors anormalement bas).
                                                   let revenuePeriodLabel = '';
                                                   if (proposal.revenueShareStart && proposal.revenueShareEnd) {
+                                                       // revenueShareStart/End sont maintenant des bornes de jours CALENDAIRES pleins
+                                                       // (00:00:00 → 23:59:59, cf. proposalService.js) : comparer les dates calendaires
+                                                       // directement plutôt que de soustraire 24h à revenueShareEnd (ancien calcul, qui
+                                                       // supposait une fenêtre glissante exclusive-minuit — demande du 15/09/2026 : "hier"
+                                                       // doit afficher une seule date, pas une plage de deux jours).
                                                        const revStart = new Date(proposal.revenueShareStart);
-                                                       const revEnd = new Date(new Date(proposal.revenueShareEnd).getTime() - 24 * 60 * 60 * 1000);
-                                                       revenuePeriodLabel = revEnd.getTime() === revStart.getTime()
+                                                       const revEnd = new Date(proposal.revenueShareEnd);
+                                                       revenuePeriodLabel = revStart.toDateString() === revEnd.toDateString()
                                                             ? ' (' + revStart.toLocaleDateString('fr-FR') + ')'
                                                             : ' (du ' + revStart.toLocaleDateString('fr-FR') + ' au ' + revEnd.toLocaleDateString('fr-FR') + ')';
                                                   }
@@ -1360,9 +1467,49 @@
                                                   document.getElementById('pa-modal-title').textContent = 'Évolution — ' + paCurrentArticle.label;
                                                   document.getElementById('pa-period-preset').value = '30';
                                                   document.querySelectorAll('.pa-custom-dates').forEach(function (el) { el.style.display = 'none'; });
+                                                  paHistoryLoadedForEan = null;
+                                                  document.getElementById('pa-history-content').innerHTML = '<p class="text-muted text-center py-4">Chargement...</p>';
                                                   getPaModal().show();
                                                   loadProductAnalytics();
                                              });
+
+                                             // Onglet "Historique des propositions" (demande du 15/09/2026) : quantité proposée à chaque
+                                             // génération + quantité déjà vendue entre deux générations, avec date/heure — chargé
+                                             // paresseusement au premier affichage de l'onglet, pas à l'ouverture du modal (évite un appel
+                                             // réseau inutile si l'utilisateur ne consulte que la vue d'ensemble).
+                                             let paHistoryLoadedForEan = null;
+                                             async function loadProductProposalHistory() {
+                                                  if (!paCurrentArticle || paHistoryLoadedForEan === paCurrentArticle.ean) return;
+                                                  paHistoryLoadedForEan = paCurrentArticle.ean;
+                                                  const content = document.getElementById('pa-history-content');
+                                                  content.innerHTML = '<p class="text-muted text-center py-4">Chargement...</p>';
+                                                  try {
+                                                       const params = new URLSearchParams({ ean: paCurrentArticle.ean, ...Object.fromEntries(new URLSearchParams(shopQueryParam())) });
+                                                       const res = await window.reassortFetch('/reassort/product/' + encodeURIComponent(paCurrentArticle.productId) + '/proposal-history?' + params.toString());
+                                                       const json = await res.json();
+                                                       if (!json.success) throw new Error(json.message);
+                                                       const items = json.data;
+                                                       if (!items.length) {
+                                                            content.innerHTML = '<p class="text-muted text-center py-4">Aucune génération n\'a encore inclus cet article.</p>';
+                                                            return;
+                                                       }
+                                                       content.innerHTML = '<div class="table-responsive"><table class="table table-sm table-hover">' +
+                                                            '<thead><tr><th>Date / heure</th><th>Statut</th><th class="text-end">Qté proposée</th><th class="text-end">Qté validée</th><th class="text-end">Vendu depuis la génération précédente</th></tr></thead><tbody>' +
+                                                            items.slice().reverse().map(function (it) {
+                                                                 const dateLabel = new Date(it.generatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                                                 const statusBadge = '<span class="badge bg-' + (it.status === 'VALIDATED' ? 'success' : it.status === 'REJECTED' ? 'secondary' : 'warning') + '-subtle text-' + (it.status === 'VALIDATED' ? 'success' : it.status === 'REJECTED' ? 'secondary' : 'warning') + '">' + it.status + '</span>';
+                                                                 return '<tr><td>' + dateLabel + (it.aiAdjusted ? ' <span class="badge bg-dark-subtle text-dark" title="Ajusté par IA">IA</span>' : '') + '</td>' +
+                                                                      '<td>' + statusBadge + '</td>' +
+                                                                      '<td class="text-end fw-semibold">' + it.quantitySuggested + '</td>' +
+                                                                      '<td class="text-end">' + (it.quantityValidated !== null && it.quantityValidated !== undefined ? it.quantityValidated : '—') + '</td>' +
+                                                                      '<td class="text-end">' + (it.quantitySoldSincePrevious !== null ? it.quantitySoldSincePrevious : '—') + '</td></tr>';
+                                                            }).join('') +
+                                                            '</tbody></table></div>';
+                                                  } catch (err) {
+                                                       content.innerHTML = '<div class="alert alert-danger">Erreur: ' + err.message + '</div>';
+                                                  }
+                                             }
+                                             document.getElementById('pa-tab-history-btn').addEventListener('shown.bs.tab', loadProductProposalHistory);
 
                                              // Charge le dernier achat de chaque ligne automatiquement, avec une limite de
                                              // requêtes simultanées pour ne pas saturer le serveur sur une grosse proposition.
@@ -1419,6 +1566,10 @@
                                                   window.reassortFetch('/reassort/shop-activity/warm?' + shopQueryParam(), { method: 'POST' }).catch(function () {});
                                              }
 
+                                             // Jeton de requête : un changement rapide de magasin peut faire revenir les réponses dans
+                                             // le désordre — sans ce garde-fou, la réponse d'un magasin déjà quitté pouvait écraser
+                                             // l'affichage après coup (même bug que sales-history.html, corrigé le 15/09/2026).
+                                             let pendingProposalToken = 0;
                                              async function loadPendingProposal() {
                                                   updateTitle();
                                                   const shopId = selectedShopId();
@@ -1426,6 +1577,7 @@
                                                        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
                                                        return;
                                                   }
+                                                  const token = ++pendingProposalToken;
                                                   warmShopActivity();
                                                   status.textContent = 'Chargement...';
                                                   refreshBtn.disabled = true;
@@ -1436,6 +1588,7 @@
                                                   try {
                                                        const res = await window.reassortFetch('/reassort/proposal/pending?' + shopQueryParam());
                                                        const json = await res.json();
+                                                       if (token !== pendingProposalToken) return;
                                                        if (!json.success) throw new Error(json.message);
                                                        renderRows(json.data);
                                                        status.textContent = json.data ? json.data.lines.length + ' article(s) proposé(s)' : 'Aucune proposition';
@@ -1443,12 +1596,13 @@
                                                        // en attente : une génération manuelle rejetterait sinon la proposition existante.
                                                        generateBtn.style.display = json.data ? 'none' : '';
                                                   } catch (err) {
+                                                       if (token !== pendingProposalToken) return;
                                                        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                                        status.textContent = '';
                                                   } finally {
-                                                       refreshBtn.disabled = false;
+                                                       if (token === pendingProposalToken) refreshBtn.disabled = false;
                                                   }
-                                                  loadGenerationHistory();
+                                                  if (token === pendingProposalToken) loadGenerationHistory();
                                              }
 
                                              // --- Consultation d'une génération passée (REJECTED, ou déjà VALIDATED) : jusqu'ici la page
@@ -1623,9 +1777,20 @@
                                                                  ? '<p class="text-muted">Aucun changement de quantité entre les révisions.</p>'
                                                                  : '<h6 class="mb-2">Évolution par article (première → dernière révision)</h6>' +
                                                                    '<div class="table-responsive"><table class="table table-sm table-hover">' +
-                                                                   '<thead><tr><th>EAN</th><th>Article</th><th class="text-end">Historique</th><th class="text-end">Variation</th></tr></thead><tbody>' +
+                                                                   '<thead><tr><th>EAN</th><th>Article</th><th class="text-end">Historique (qté — date/heure)</th><th class="text-end">Variation</th></tr></thead><tbody>' +
                                                                    articlesWithChange.map(function (a) {
-                                                                        const historyStr = a.history.map(function (pt) { return pt.quantitySuggested; }).join(' → ');
+                                                                        // Chaque point porte désormais sa quantité ET sa date/heure de génération (demande du
+                                                                        // 15/09/2026 : "il faut mettre plus de détail, les date heure") — plus une simple
+                                                                        // chaîne de nombres, chaque révision affiche son horodatage complet en dessous.
+                                                                        const historyStr = a.history.map(function (pt) {
+                                                                             const dateLabel = pt.generatedAt
+                                                                                  ? new Date(pt.generatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                                                                  : '—';
+                                                                             return '<span class="d-inline-block text-center mx-1">' +
+                                                                                  '<span class="fw-semibold">' + pt.quantitySuggested + '</span>' +
+                                                                                  '<br><span class="text-muted" style="font-size:.7rem;">' + dateLabel + '</span>' +
+                                                                                  '</span>';
+                                                                        }).join('<span class="text-muted mx-1">→</span>');
                                                                         const variationLabel = (a.variation > 0 ? '+' : '') + a.variation;
                                                                         return '<tr><td>' + a.ean + '</td><td>' + (a.label || '—') + '</td>' +
                                                                              '<td class="text-end">' + historyStr + '</td>' +

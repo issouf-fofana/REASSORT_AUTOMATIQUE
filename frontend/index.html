@@ -274,16 +274,25 @@
                                    }
                               }
 
+                              // Jeton de requête : un changement rapide de magasin peut faire partir plusieurs appels
+                              // séquentiels dont les réponses (surtout les plus lentes, en fin de fonction) reviennent
+                              // après qu'un nouvel appel loadDashboard() pour un autre magasin ait déjà mis à jour
+                              // l'affichage — sans ce garde-fou, la réponse tardive du magasin quitté écrasait après
+                              // coup les chiffres du nouveau magasin (même bug que sales-history.html, corrigé le
+                              // 15/09/2026).
+                              let dashboardToken = 0;
                               async function loadDashboard() {
                                    updateShopCard();
                                    const shopId = selectedShopId();
                                    if (!shopId) return;
+                                   const token = ++dashboardToken;
                                    const posId = selectedPosId();
                                    const qs = 'shop=' + encodeURIComponent(shopId) + (posId ? '&pos=' + encodeURIComponent(posId) : '');
 
                                    try {
                                         const res = await window.reassortFetch('/reassort/proposal/pending?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (json.success) {
                                              const p = json.data;
                                              document.getElementById('stat-proposal-count').textContent = p ? p.lines.length : '0';
@@ -298,6 +307,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/conformity?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (json.success) {
                                              const c = json.data;
                                              document.getElementById('stat-conformity').textContent = c.rate === null ? 'N/A' : Math.round(c.rate * 100) + '%';
@@ -312,6 +322,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/stockout-rate?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (json.success) {
                                              const s = json.data;
                                              document.getElementById('stat-stockout').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
@@ -326,6 +337,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/overstock-rate?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (json.success) {
                                              const s = json.data;
                                              document.getElementById('stat-overstock').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
@@ -340,6 +352,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/forecast-accuracy?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (json.success) {
                                              const s = json.data;
                                              document.getElementById('stat-forecast-accuracy').textContent = s.rate === null ? 'N/A' : Math.round(s.rate * 100) + '%';
@@ -355,6 +368,7 @@
                                    try {
                                         const res = await window.reassortFetch('/reassort/orders?' + qs);
                                         const json = await res.json();
+                                        if (token !== dashboardToken) return;
                                         if (!json.success) throw new Error(json.message);
 
                                         const orders = json.data.orders.slice(0, 8);

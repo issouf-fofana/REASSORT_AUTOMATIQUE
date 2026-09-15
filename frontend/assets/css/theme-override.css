@@ -104,6 +104,28 @@ a:not(.sidebar *),
      font-size: 0.9rem;
 }
 
+/* Espace un peu plus marqué entre sections + séparateur discret, pour que le regroupement
+   (Pilotage / Réassort / Administration) se voie mieux qu'un simple changement de couleur de
+   texte (demande du 15/09/2026 : "bien afficher les truc en ordre, regroupe par section"). */
+.sidebar-heading {
+     margin-top: 0.5rem;
+     border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sidebar-heading:first-of-type {
+     margin-top: 0;
+     border-top: none;
+}
+
+/* Ascenseur de la sidebar (simplebar) : gris clair discret au lieu du noir par défaut de
+   volt.css (invisible sur fond noir, demande du 15/09/2026 : "le scroll est affiché" /
+   pas assez visible pour indiquer qu'on peut défiler). */
+.sidebar .simplebar-scrollbar:before {
+     background: rgba(255, 255, 255, 0.35);
+}
+.sidebar .simplebar-track.simplebar-vertical {
+     width: 6px;
+}
+
 /* Logo en haut de la sidebar (demande du 14/09/2026) : léger séparateur pour le distinguer du
    menu, sans fond additionnel (la sidebar est déjà sombre, le logo ressort naturellement). */
 .sidebar-brand {

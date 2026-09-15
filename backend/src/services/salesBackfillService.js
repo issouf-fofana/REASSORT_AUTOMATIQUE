@@ -170,8 +170,14 @@ async function processChunk(posId, shopId, chunk) {
       const pageResult = await rpos.fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, PAGE_SIZE);
       expectedLines = pageResult.count;
 
+      // Ne filtre plus les EAN non-numériques (ex: "D10130999999" - articles génériques RPOS) : ces
+      // ventes sont réelles et doivent être stockées pour que le CA total du magasin reste exact
+      // (écart de 51 lignes/2,5% trouvé le 15/09/2026 en comparant avec RPOS). Le filtre EAN
+      // numérique reste appliqué plus loin, au moment du calcul Pareto/réassort (proposalService.js)
+      // — un article générique n'est jamais commandable individuellement, mais sa vente compte bien
+      // dans le CA magasin.
       const rows = pageResult.results
-        .filter((l) => l.ean && /^\d+$/.test(String(l.ean).trim()))
+        .filter((l) => l.ean)
         .map((l) => toSalesLineRow(l, posId, shopId));
 
       if (rows.length > 0) {

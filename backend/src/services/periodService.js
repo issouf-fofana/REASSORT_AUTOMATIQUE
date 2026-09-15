@@ -41,6 +41,25 @@ async function resolvePeriod(posId, shopId, config) {
     throw new Error('Aucune vente trouvée pour ce magasin, impossible de déterminer une période');
   }
 
+  // "YESTERDAY" doit correspondre au jour CALENDAIRE précédant celui de la dernière vente (00:00 →
+  // 23:59:59 de la veille), pas au jour de la dernière vente lui-même ni à une fenêtre glissante de
+  // 24h se terminant à l'heure exacte de cette vente (ex: 14/09 10:42 → 15/09 10:42) — un
+  // utilisateur qui choisit "hier" un 15/09 attend le CA du 14/09 entier, pas celui du 15/09 (bug
+  // trouvé le 15/09/2026 : la dernière vente connue étant déjà d'aujourd'hui après un backfill
+  // récent, "hier" affichait à tort la journée du jour). LAST_7_DAYS/LAST_30_DAYS restent glissants
+  // sur la dernière vente réelle (comportement voulu pour rester pertinent sur un magasin fermé/en
+  // retard).
+  if (config.periodMode === 'YESTERDAY') {
+    const lastSale = new Date(lastSaleDate);
+    const dayStart = new Date(Date.UTC(lastSale.getUTCFullYear(), lastSale.getUTCMonth(), lastSale.getUTCDate() - 1, 0, 0, 0));
+    const dayEnd = new Date(Date.UTC(lastSale.getUTCFullYear(), lastSale.getUTCMonth(), lastSale.getUTCDate() - 1, 23, 59, 59));
+    return {
+      start: dayStart.toISOString().slice(0, 19),
+      end: dayEnd.toISOString().slice(0, 19),
+      referenceDate: lastSaleDate,
+    };
+  }
+
   const days = MODE_DAYS[config.periodMode] || MODE_DAYS.LAST_30_DAYS;
   const end = new Date(lastSaleDate);
   const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
