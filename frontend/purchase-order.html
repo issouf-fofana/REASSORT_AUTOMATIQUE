@@ -633,22 +633,22 @@
                                              const shopSelect = document.getElementById('reassort-shop-select');
 
                                              function selectedShopId() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.value || '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.value || '';
                                                   return currentUser.rposShopId;
                                              }
 
                                              function selectedPosId() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
                                                   return currentUser.rposPosId;
                                              }
 
                                              function selectedShopReference() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.reference : '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.reference : '';
                                                   return currentUser.rposShopReference;
                                              }
 
                                              function selectedShopName() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.name : '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.name : '';
                                                   return currentUser.rposShopName;
                                              }
 
@@ -662,7 +662,7 @@
                                              const listShopSelect = document.getElementById('reassort-dept-list-shop-select');
 
                                              async function initShopPicker() {
-                                                  if (currentUser.role !== 'STORE') {
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) {
                                                        shopSelect.style.display = '';
                                                        shopSelect.innerHTML = '<option value="">Chargement...</option>';
                                                        listShopSelect.style.display = '';
@@ -732,7 +732,7 @@
                                              function updateTitle() {
                                                   let shopName = currentUser.rposShopName;
                                                   let shopRef = currentUser.rposShopReference;
-                                                  if (currentUser.role !== 'STORE' && shopSelect.selectedOptions.length) {
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role) && shopSelect.selectedOptions.length) {
                                                        shopName = shopSelect.selectedOptions[0].dataset.name;
                                                        shopRef = shopSelect.selectedOptions[0].dataset.reference;
                                                   }
@@ -1362,6 +1362,42 @@
                                                   }
                                              }
 
+                                             // Mouvements de stock hors ventes/réceptions (casse, cession entre rayons, retour fournisseur,
+                                             // inventaire...) sur la même période — demande du 16/09/2026, à partir de l'écran admin RPOS
+                                             // "Mouvements de stock". N'affiche une section que s'il y a quelque chose d'inhabituel à signaler
+                                             // (Vente/Arrivage sont déjà couverts par la courbe principale, donc jamais répétés ici) : le but
+                                             // est de faire ressortir une anomalie (casse, vol...), pas de dupliquer une info déjà visible.
+                                             function renderStockMovesSection(stockMoves) {
+                                                  if (!stockMoves || !stockMoves.totalMoves) return '';
+                                                  const notable = (stockMoves.byType || []).filter(function (t) { return t.typeLabel !== 'Vente' && t.typeLabel !== 'Arrivage'; });
+                                                  if (!notable.length) return '';
+
+                                                  const rows = notable.map(function (t) {
+                                                       const sign = t.totalQuantity > 0 ? '+' : '';
+                                                       const badge = t.isScrap ? '<span class="badge bg-danger-subtle text-danger ms-1">perte</span>' : '';
+                                                       return '<tr>' +
+                                                            '<td>' + t.typeLabel + badge + '</td>' +
+                                                            '<td class="text-center">' + t.count + '</td>' +
+                                                            '<td class="text-end">' + sign + t.totalQuantity.toLocaleString('fr-FR') + '</td>' +
+                                                            '<td class="text-muted small">' + new Date(t.lastDate).toLocaleString('fr-FR') + '</td>' +
+                                                       '</tr>';
+                                                  }).join('');
+
+                                                  const scrapNote = stockMoves.scrapQuantity > 0
+                                                       ? '<p class="text-danger small mb-2"><strong>' + stockMoves.scrapQuantity.toLocaleString('fr-FR') + '</strong> unité(s) perdues (casse) sur la période — à considérer avant d\'ajuster la quantité proposée : une baisse de stock due à la casse n\'est pas de la demande client.</p>'
+                                                       : '';
+
+                                                  return '<div class="border rounded p-3 mt-3 bg-light-subtle">' +
+                                                       '<div class="fw-semibold small mb-2">Mouvements de stock hors ventes/réceptions</div>' +
+                                                       scrapNote +
+                                                       '<div class="table-responsive"><table class="table table-sm mb-0">' +
+                                                            '<thead><tr><th>Type</th><th class="text-center">Nb</th><th class="text-end">Quantité cumulée</th><th>Dernier mouvement</th></tr></thead>' +
+                                                            '<tbody>' + rows + '</tbody>' +
+                                                       '</table></div>' +
+                                                       (stockMoves.truncated ? '<p class="text-muted small mt-2 mb-0">Liste limitée aux mouvements les plus récents.</p>' : '') +
+                                                  '</div>';
+                                             }
+
                                              function renderProductAnalytics(data) {
                                                   const content = document.getElementById('pa-content');
                                                   const s = data.stats;
@@ -1404,7 +1440,8 @@
                                                                  '<span class="fw-bold">=</span>' +
                                                                  '<span class="border rounded px-2 py-1 bg-success-subtle text-success">Qté à commander<br><strong>' + p.predictedQuantity + '</strong></span>' +
                                                             '</div>' +
-                                                       '</div>';
+                                                       '</div>' +
+                                                       renderStockMovesSection(data.stockMoves);
 
                                                   const categories = data.series.map(function (b) { return paFormatBucketLabel(b.date, data.granularity); });
                                                   const salesData = data.series.map(function (b) { return b.quantity; });
@@ -2324,23 +2361,39 @@
                                                                  modalCloseBtn.style.display = '';
 
                                                                  const orders = s.orders || [];
+                                                                 // Commande(s) réellement créée(s) sur RPOS (avec un vrai numéro) vs échec total de création
+                                                                 // (ex: RPOS a refusé la requête elle-même, 0 numéro, jamais "envoyé" à proprement parler) —
+                                                                 // ces deux cas doivent être visuellement distincts, pas la même alerte verte "succès"
+                                                                 // affichée même quand aucune commande n'existe côté RPOS (bug trouvé le 15/09/2026 :
+                                                                 // "0 article(s) envoyé(s), 1 échec(s)" affiché comme un succès, sans numéro ni raison).
+                                                                 const anyOrderCreated = orders.some(function (o) { return o.rposOrderReference; }) || s.rposOrderReference;
+                                                                 const alertClass = anyOrderCreated ? 'alert-success' : 'alert-danger';
                                                                  let ordersDetail = '';
                                                                  if (orders.length > 1) {
                                                                       ordersDetail = '<ul class="mb-0 mt-2 small">' + orders.map(function (o) {
                                                                            const badge = o.status === 'DONE' ? '✅' : '❌';
-                                                                           return '<li>' + badge + ' <strong>' + o.department + '</strong> — commande ' + (o.rposOrderReference || '—') +
+                                                                           const label = o.rposOrderReference
+                                                                                ? 'commande <strong>' + o.rposOrderReference + '</strong>'
+                                                                                : '<span class="text-danger">échec de création' + (o.errorMessage ? ' — ' + o.errorMessage : '') + '</span>';
+                                                                           return '<li>' + badge + ' <strong>' + o.department + '</strong> — ' + label +
                                                                                 ' (' + (o.linesTotal - o.linesFailed) + '/' + o.linesTotal + ' article(s))</li>';
                                                                       }).join('') + '</ul>';
                                                                  }
+                                                                 const singleOrder = orders[0];
+                                                                 const singleOrderErrorHtml = (!anyOrderCreated && singleOrder && singleOrder.errorMessage)
+                                                                      ? '<div class="small mt-1">Raison : ' + singleOrder.errorMessage + '</div>' : '';
 
-                                                                 resultBox.innerHTML = '<div class="alert alert-success">' +
+                                                                 resultBox.innerHTML = '<div class="alert ' + alertClass + '">' +
                                                                       (orders.length > 1
-                                                                           ? '<strong>' + orders.length + ' commande(s) créée(s) sur RPOS</strong> (une par rayon) — ' +
+                                                                           ? '<strong>' + orders.length + ' commande(s) traitée(s) sur RPOS</strong> (une par rayon) — ' +
                                                                                 s.linesProcessed + ' article(s) envoyé(s)' +
                                                                                 (s.linesFailed ? ', ' + s.linesFailed + ' échec(s)' : '') + validationNote + '.' + ordersDetail
-                                                                           : 'Commande <strong>' + (s.rposOrderReference || '') + '</strong> créée sur RPOS — ' +
-                                                                                s.linesProcessed + ' article(s) envoyé(s)' +
-                                                                                (s.linesFailed ? ', ' + s.linesFailed + ' échec(s)' : '') + validationNote + '.'
+                                                                           : (anyOrderCreated
+                                                                                ? 'Commande <strong>' + (s.rposOrderReference || '') + '</strong> créée sur RPOS — ' +
+                                                                                  s.linesProcessed + ' article(s) envoyé(s)' +
+                                                                                  (s.linesFailed ? ', ' + s.linesFailed + ' échec(s)' : '') + validationNote + '.'
+                                                                                : '<strong>Échec de création de la commande sur RPOS</strong> — aucun numéro de commande généré, ' +
+                                                                                  s.linesProcessed + ' article(s) traité(s), ' + s.linesFailed + ' échec(s).' + singleOrderErrorHtml)
                                                                       ) +
                                                                       '</div>';
                                                                  tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Proposition validée. La prochaine sera disponible demain matin.</td></tr>';

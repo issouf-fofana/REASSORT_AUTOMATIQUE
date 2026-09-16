@@ -115,6 +115,41 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Filet de sécurité process : sans handler, une exception non catchée QUELQUE PART (même hors
+// d'une route Express, ex: dans un job planifié ou une Promise oubliée) fait tomber TOUT le process
+// Node immédiatement — Docker le relance ensuite (restart: unless-stopped), mais toute connexion en
+// cours (notamment un flux SSE de l'Assistant IA) se ferme sans jamais avoir pu écrire d'event
+// "error"/"done", ce qui apparaît côté client comme "Flux terminé sans réponse exploitable." sans
+// aucune trace exploitable une fois le conteneur recréé (les logs du process mort ne survivent pas
+// à `docker compose up --build`, seulement à un `restart` simple) — bug observé le 16/09/2026 sans
+// pouvoir en identifier la cause exacte faute de ce filet. Journalise ici AVANT de laisser Node
+// terminer le process normalement (ne PAS avaler l'exception : au-delà de ce point, l'état du
+// process peut être corrompu de façon imprévisible, mieux vaut un redémarrage propre par Docker
+// qu'un process qui continue à tourner dans un état indéterminé).
+process.on('uncaughtException', (err) => {
+  logger.error('uncaughtException — le process va se terminer', { message: err.message, stack: err.stack });
+  require('./services/errorReportService').reportError({
+    source: 'backend',
+    message: `uncaughtException: ${err.message}`,
+    stack: err.stack || null,
+  }).finally(() => process.exit(1));
+});
+process.on('unhandledRejection', (reason) => {
+  const message = (reason && reason.message) || String(reason);
+  const stack = (reason && reason.stack) || null;
+  logger.error('unhandledRejection', { message, stack });
+  require('./services/errorReportService').reportError({
+    source: 'backend',
+    message: `unhandledRejection: ${message}`,
+    stack,
+  });
+  // Pas de process.exit ici : contrairement à uncaughtException, une Promise rejetée sans handler
+  // ne laisse pas le process dans un état forcément corrompu (le code qui l'a émise a déjà géré son
+  // propre échec de façon incomplète, pas le process entier) — journaliser suffit, un exit ici
+  // serait une régression (transformerait une erreur locale isolée en interruption totale du
+  // service pour tous les magasins, bien plus grave que l'erreur d'origine).
+});
+
 // =============================================
 // START SERVER
 // =============================================

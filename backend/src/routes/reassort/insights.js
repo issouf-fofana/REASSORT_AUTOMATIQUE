@@ -16,6 +16,23 @@ const {
 const { getConfig } = require('../../services/configService');
 const productInsightCache = require('../../services/productInsightCacheService');
 const productAnalyticsService = require('../../services/productAnalyticsService');
+const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
+const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
+
+// Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
+// son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
+// un article précis via ?ean= (pas une liste déjà filtrée en amont). Retourne true si l'accès est
+// autorisé (rôles non restreints par département toujours autorisés, cf. filterProposalLinesForUser).
+async function isEanInUserScope(req, shopId, ean) {
+  const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+  const latestLineForEan = await prisma.proposalLine.findFirst({
+    where: { ean, proposal: { rposShopId: shopId } },
+    orderBy: { proposal: { generatedAt: 'desc' } },
+    select: { department: true },
+  });
+  if (!latestLineForEan) return true; // article jamais proposé : rien à restreindre ici
+  return filterProposalLinesForUser([latestLineForEan], currentUser).length > 0;
+}
 
 router.get('/predictions/proposals', async (req, res) => {
   try {
@@ -102,7 +119,14 @@ router.get('/predictions', async (req, res) => {
       };
     });
 
-    res.json({ success: true, data: { proposalId, generatedAt: proposal.generatedAt, predictions: enriched } });
+    // Même restriction par département/rayon que GET /proposal/pending (plan de rôles, étape 3) :
+    // sans ce filtre, un Rayonniste voyait ici les prédictions IA de TOUS les rayons du magasin,
+    // contournant la restriction déjà appliquée sur la page "Proposition de commande" — bug trouvé
+    // le 16/09/2026 lors de l'audit des routes non couvertes par le premier passage.
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    const filteredPredictions = filterProposalLinesForUser(enriched, currentUser);
+
+    res.json({ success: true, data: { proposalId, generatedAt: proposal.generatedAt, predictions: filteredPredictions } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -119,6 +143,9 @@ router.get('/predictions/history', async (req, res) => {
     const { ean } = req.query;
     if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+    if (!(await isEanInUserScope(req, shopId, ean))) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+    }
 
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     const dateEnd = new Date();
@@ -258,6 +285,9 @@ router.get('/product/:productId/last-purchase', async (req, res) => {
     if (!shopId || !posId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
+    if (req.query.ean && !(await isEanInUserScope(req, shopId, req.query.ean))) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+    }
     const data = await productInsightCache.getProductInsight(posId, shopId, req.params.productId, req.query.ean);
     res.json({ success: true, data });
   } catch (error) {
@@ -280,6 +310,10 @@ router.get('/product/:productId/proposal-history', async (req, res) => {
     const { ean } = req.query;
     if (!ean) {
       return res.status(400).json({ success: false, message: 'ean requis' });
+    }
+
+    if (!(await isEanInUserScope(req, shopId, ean))) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
     }
 
     const lines = await prisma.proposalLine.findMany({
@@ -338,6 +372,9 @@ router.get('/product/:productId/analytics', async (req, res) => {
     if (!ean || !dateStart || !dateEnd) {
       return res.status(400).json({ success: false, message: 'ean, dateStart et dateEnd sont requis' });
     }
+    if (!(await isEanInUserScope(req, shopId, ean))) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+    }
 
     const config = await getConfig(shopId);
     let currentStock;
@@ -361,7 +398,19 @@ router.get('/product/:productId/analytics', async (req, res) => {
       currentStock,
       currentOrderedQuantity,
     });
-    res.json({ success: true, data });
+
+    // Mouvements de stock (casse, cession entre rayons, retour fournisseur...) sur la même période :
+    // best-effort, ne doit jamais faire échouer l'analyse principale si RPOS est indisponible ou si
+    // l'article n'a aucun mouvement hors vente/réception (demande du 16/09/2026, à partir de l'écran
+    // admin RPOS "Mouvements de stock").
+    let stockMoves = null;
+    try {
+      stockMoves = await stockMoveAnalysis.getStockMoveSummary(posId, shopId, ean, dateStart, dateEnd);
+    } catch (err) {
+      console.error('[product analytics] Échec de lecture des mouvements de stock RPOS:', err.message);
+    }
+
+    res.json({ success: true, data: { ...data, stockMoves } });
   } catch (error) {
     console.error('Product analytics error:', error);
     res.status(500).json({ success: false, message: error.message });

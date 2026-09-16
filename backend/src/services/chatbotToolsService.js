@@ -10,6 +10,7 @@
  */
 const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
+const stockMoveAnalysis = require('./stockMoveAnalysisService');
 
 
 async function getLatestProposal(rposShopId) {
@@ -70,19 +71,46 @@ async function getArticleStock(rposShopId, ean) {
  * calculé depuis SalesLine.revenueExclTax. Distinct de getSalesHistory (quantités vendues) : une
  * question sur "le CA" porte sur un montant en CFA, jamais une quantité d'unités.
  */
-async function getRevenue(rposShopId, { date, days, department } = {}) {
+async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
   let dateStart;
   let dateEnd;
   if (date) {
     dateStart = new Date(date + 'T00:00:00.000Z');
     dateEnd = new Date(date + 'T23:59:59.999Z');
+    // Une date extraite d'une question en langage libre peut être syntaxiquement plausible mais
+    // calendairement invalide de deux façons différentes, toutes deux trouvées le 16/09/2026 lors
+    // d'un test exhaustif de questions :
+    //  1) jour/mois hors plage absolue (ex: "32/13/2026") -> new Date() produit un "Invalid Date"
+    //     (NaN), que Prisma refusait ensuite avec une exception brute (stack trace complète
+    //     renvoyée telle quelle à l'utilisateur) ;
+    //  2) jour inexistant pour CE mois précis (ex: "30/02/2026" — février n'a jamais 30 jours,
+    //     "31/04/2026" — avril n'a que 30 jours) -> new Date() ne lève PAS de NaN, elle fait un
+    //     rollover silencieux vers le mois suivant (30/02 devient le 2 mars) : la requête tourne
+    //     sans erreur mais interroge une date DIFFÉRENTE de celle demandée, sans jamais le signaler
+    //     — plus trompeur qu'un crash, jamais acceptable pour du CA. Détecté en comparant le
+    //     jour/mois reconstruit après parsing à ceux demandés : un rollover les change forcément.
+    const [yStr, mStr, dStr] = date.split('-');
+    const rolledOver = dateStart.getUTCFullYear() !== Number(yStr)
+      || dateStart.getUTCMonth() + 1 !== Number(mStr)
+      || dateStart.getUTCDate() !== Number(dStr);
+    if (Number.isNaN(dateStart.getTime()) || Number.isNaN(dateEnd.getTime()) || rolledOver) {
+      return { found: false, message: `La date "${date}" n'est pas une date valide.` };
+    }
   } else {
     dateEnd = new Date();
     dateStart = new Date(Date.now() - (days || 1) * 24 * 60 * 60 * 1000);
   }
 
+  // Un article précis (EAN) prime sur un filtre par département — une question "le CA de cet
+  // article" ne doit jamais être diluée dans le CA de tout son rayon (bug trouvé le 16/09/2026 :
+  // l'EAN était déjà extrait de la question et utilisé pour choisir la capacité de permission
+  // requise — revenueArticle vs revenueShop, cf. aiPermissionsService.resolveRevenueCapability —
+  // mais jamais transmis jusqu'ici pour filtrer réellement les données, donc "le CA de l'article X"
+  // répondait en fait le CA de tout le magasin).
   let eanFilter = null;
-  if (department) {
+  if (ean) {
+    eanFilter = [ean];
+  } else if (department) {
     const proposal = await getLatestProposal(rposShopId);
     if (proposal) {
       const departmentLines = await prisma.proposalLine.findMany({ where: { proposalId: proposal.id, department }, select: { ean: true } });
@@ -93,18 +121,34 @@ async function getRevenue(rposShopId, { date, days, department } = {}) {
 
   const lines = await prisma.salesLine.findMany({
     where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart, lte: dateEnd } },
-    select: { revenueExclTax: true, revenueInclTax: true },
+    select: { revenueExclTax: true, revenueInclTax: true, receiptId: true },
   });
 
-  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période ${date || `des ${days || 1} derniers jours`}${department ? ` pour le rayon ${department}` : ''}.` };
+  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période ${date || `des ${days || 1} derniers jours`}${ean ? ` pour l'article ${ean}` : department ? ` pour le rayon ${department}` : ''}.` };
+
+  // Nombre de VENTES au sens tickets de caisse (receipt.id distincts, ajouté le 16/09/2026 —
+  // confirmé par test direct que ce comptage retombe exactement sur le "Nb de ventes" de l'écran
+  // RMaster). Distinct de articleLineCount (une ligne par article vendu, plusieurs lignes par
+  // ticket) : null si aucune ligne de la période n'a de receiptId (données synchronisées avant
+  // l'ajout de ce champ), jamais présenté comme "0 vente" qui serait faux.
+  const linesWithReceipt = lines.filter((l) => l.receiptId);
+  const salesCount = linesWithReceipt.length ? new Set(linesWithReceipt.map((l) => l.receiptId)).size : null;
 
   return {
     found: true,
     date: date || null,
     days: date ? null : (days || 1),
+    ean: ean || null,
     department: department || null,
     revenueExclTaxCfa: Math.round(lines.reduce((s, l) => s + l.revenueExclTax, 0)),
     revenueInclTaxCfa: lines.every((l) => l.revenueInclTax !== null) ? Math.round(lines.reduce((s, l) => s + (l.revenueInclTax || 0), 0)) : null,
+    // Nombre de VENTES (tickets de caisse distincts) — comparable au "Nb de ventes" de RMaster.
+    // null si non disponible (période antérieure à la synchro du champ receipt), jamais 0 à tort.
+    salesCount,
+    // Nommé explicitement "articleLineCount" (pas "salesCount"/"ticketCount") pour que le LLM ne le
+    // présente jamais comme "nombre de ventes"/"nombre de tickets" : c'est le nombre de LIGNES
+    // vendues (un article vendu = une ligne), une notion différente de salesCount ci-dessus.
+    articleLineCount: lines.length,
   };
 }
 
@@ -136,15 +180,26 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
 
   const lines = await prisma.salesLine.findMany({
     where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart } },
-    select: { date: true, quantity: true, ean: true, label: true },
+    select: { date: true, quantity: true, ean: true, label: true, receiptId: true },
     orderBy: { date: 'asc' },
   });
 
   const byDay = new Map();
+  // Tickets distincts par jour (ajouté le 16/09/2026, même donnée que getRevenue.salesCount — ici
+  // demandée typiquement par article, ex: "combien de ventes sur cet article le 14"), en plus de la
+  // quantité déjà suivie ci-dessous : deux notions différentes (une vente peut porter plusieurs
+  // unités du même article), toutes deux utiles selon la question posée.
+  const receiptsByDay = new Map();
   for (const line of lines) {
     const day = line.date.toISOString().slice(0, 10);
     byDay.set(day, (byDay.get(day) || 0) + line.quantity);
+    if (line.receiptId) {
+      if (!receiptsByDay.has(day)) receiptsByDay.set(day, new Set());
+      receiptsByDay.get(day).add(line.receiptId);
+    }
   }
+  const linesWithReceipt = lines.filter((l) => l.receiptId);
+  const totalSalesCount = linesWithReceipt.length ? new Set(linesWithReceipt.map((l) => l.receiptId)).size : null;
 
   // Détail par article seulement quand la question porte sur un rayon (plusieurs articles) plutôt
   // qu'un seul EAN précis : évite un doublon inutile de la même info pour une question ciblée.
@@ -165,7 +220,15 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
     ean: ean || null,
     department: department || null,
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
-    dailyHistory: Array.from(byDay.entries()).map(([date, quantity]) => ({ date, quantity })),
+    // Nombre de VENTES (tickets de caisse distincts) sur toute la période demandée — null si aucune
+    // ligne n'a de receiptId (données synchronisées avant l'ajout de ce champ), jamais 0 à tort.
+    // Distinct de totalQuantity (une vente peut porter plusieurs unités du même article).
+    totalSalesCount,
+    dailyHistory: Array.from(byDay.entries()).map(([date, quantity]) => ({
+      date,
+      quantity,
+      salesCount: receiptsByDay.has(date) ? receiptsByDay.get(date).size : null,
+    })),
     topArticles: byArticle,
   };
 }
@@ -420,6 +483,25 @@ async function getPriceChangeHistory(posId, shopId, ean) {
   return { found: true, ean, label: history[0].label, changeCount: history.length, history };
 }
 
+/**
+ * getStockMoveHistory(posId, shopId, ean, { days }) — pourquoi le stock d'un article a bougé, au-delà
+ * des seules ventes : casse, cession entre rayons, retour fournisseur, inventaire, consommation
+ * interne... (demande du 16/09/2026, à partir de /api/stock_move/ RPOS, écran admin "Mouvements de
+ * stock"). Une baisse de stock n'est pas toujours une vente — cet outil permet au chatbot de répondre
+ * avec la vraie cause plutôt que de supposer que tout écart vient de la demande client.
+ */
+async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
+  const dateEnd = new Date();
+  const dateStart = new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+  const summary = await stockMoveAnalysis.getStockMoveSummary(
+    posId, shopId, ean, dateStart.toISOString(), dateEnd.toISOString(),
+  );
+  if (!summary.totalMoves) {
+    return { found: false, message: `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours.` };
+  }
+  return { found: true, days, ...summary };
+}
+
 module.exports = {
   getStoreStock,
   getArticleStock,
@@ -433,4 +515,5 @@ module.exports = {
   getParetoArticles,
   getPredictionAccuracy,
   getOrders,
+  getStockMoveHistory,
 };

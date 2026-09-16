@@ -80,7 +80,7 @@
     // sur son <select> pour signaler ce besoin et garder son propre sélecteur visible.
     const user = window.reassortGetUser && window.reassortGetUser();
     const isIndependentSelector = selectEl.dataset.independentShop === '1';
-    const hideForGlobalSelector = user && user.role !== 'STORE' && window.reassortGetActiveShop && !isIndependentSelector;
+    const hideForGlobalSelector = user && !window.reassortIsSingleShopRole(user.role) && window.reassortGetActiveShop && !isIndependentSelector;
     if (hideForGlobalSelector) wrapper.style.display = 'none';
 
     wrapper.appendChild(button);

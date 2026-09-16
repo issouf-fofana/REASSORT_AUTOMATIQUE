@@ -11,6 +11,18 @@ const aiForecastService = require('../../services/aiForecastService');
 const cryptoService = require('../../services/cryptoService');
 const improvementService = require('../../services/improvementService');
 const errorReportService = require('../../services/errorReportService');
+const { filterProposalLinesForUser, getCapabilityGuide, getPlatformGuide } = require('../../services/aiPermissionsService');
+
+// Un Rayonniste/Chef de département ne doit pas pouvoir faire analyser par l'IA (ou poser une
+// question de suivi sur) un article hors de son rayon simplement en connaissant son EAN dans cette
+// proposition — même famille de faille que le chatbot général (trouvée le 16/09/2026 : le contrôle
+// de shop existait déjà sur ces routes mais jamais celui de département).
+async function assertLineInUserScope(req, res, line) {
+  const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (filterProposalLinesForUser([line], currentUser).length > 0) return true;
+  res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+  return false;
+}
 
 router.get('/ai/keys', requireAdmin, async (req, res) => {
   try {
@@ -149,6 +161,7 @@ router.post('/proposal/:proposalId/ai-analyze-article', async (req, res) => {
 
     const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
     if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans cette proposition' });
+    if (!(await assertLineInUserScope(req, res, line))) return;
 
     const result = await aiForecastService.analyzeArticleRealtime({
       shopReference: proposal.rposShopReference,
@@ -195,6 +208,11 @@ router.post('/proposal/:proposalId/ai-analyze-article-stream', async (req, res) 
 
     const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
     if (!line) { send('error', { message: 'Article introuvable dans cette proposition' }); return res.end(); }
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!filterProposalLinesForUser([line], currentUser).length) {
+      send('error', { message: 'Cet article n\'est pas dans votre périmètre.' });
+      return res.end();
+    }
 
     const result = await aiForecastService.analyzeArticleRealtimeStream({
       shopReference: proposal.rposShopReference,
@@ -245,6 +263,11 @@ router.post('/proposal/:proposalId/ai-ask-followup-stream', async (req, res) => 
 
     const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
     if (!line) { send('error', { message: 'Article introuvable dans cette proposition' }); return res.end(); }
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!filterProposalLinesForUser([line], currentUser).length) {
+      send('error', { message: 'Cet article n\'est pas dans votre périmètre.' });
+      return res.end();
+    }
 
     const result = await aiForecastService.askFollowUpQuestion({
       shopReference: proposal.rposShopReference,
@@ -272,6 +295,32 @@ router.post('/proposal/:proposalId/ai-ask-followup-stream', async (req, res) => 
 // Paramètres > IA (CHATBOT_SUGGESTED_QUESTIONS, une par ligne) sans redéploiement.
 router.get('/chatbot/suggested-questions', async (req, res) => {
   res.json({ success: true, data: await chatbotService.getSuggestedQuestions() });
+});
+
+// GET /api/reassort/chatbot/capability-guide - "Ce que je peux vous demander" (demande du 16/09/2026
+// : "créer une vue qui guide les questions que chaque profil peut poser") — reflète les permissions
+// RÉELLEMENT appliquées à l'utilisateur connecté (rôle + personnalisation aiPermissionsJson
+// éventuelle), pas une liste générique identique pour tout le monde : un Rayonniste ne voit pas les
+// mêmes exemples qu'un Directeur, et voit explicitement ce qui lui est refusé et pourquoi.
+router.get('/chatbot/capability-guide', async (req, res) => {
+  try {
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    res.json({ success: true, data: getCapabilityGuide(currentUser) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/platform-guide - "Ce que je peux faire sur la plateforme" (demande du 16/09/2026
+// : "chaque user dois voir ce quil peux faire sur la plaforme", au-delà des seules questions du
+// chatbot) — pages accessibles et actions clés pour le rôle de l'utilisateur connecté.
+router.get('/platform-guide', async (req, res) => {
+  try {
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    res.json({ success: true, data: getPlatformGuide(currentUser) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 // GET /api/reassort/chatbot/conversations - liste des conversations de l'utilisateur connecté
@@ -348,6 +397,21 @@ router.post('/chatbot/ask-stream', async (req, res) => {
     const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId } });
     if (!shop) { send('error', { message: 'Magasin introuvable' }); return res.end(); }
 
+    // Permissions IA (rôle + personnalisation éventuelle) lues depuis la base, jamais depuis le JWT
+    // (payload figé à la connexion — un ajustement de permission par un admin doit s'appliquer
+    // immédiatement, sans attendre l'expiration du token, même logique que requireSupervisedShop).
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!currentUser) { send('error', { message: 'Utilisateur introuvable' }); return res.end(); }
+
+    // DEPARTMENT_HEAD/SHELF_STOCKER : le département/rayon assigné s'impose TOUJOURS, ignorant
+    // toute valeur envoyée par le client (sinon un rayonniste pourrait interroger n'importe quel
+    // autre rayon simplement en changeant le paramètre "department" de sa requête — la restriction
+    // de périmètre doit être appliquée côté serveur, jamais faire confiance à l'input client ici).
+    const RESTRICTED_ROLES = new Set(['DEPARTMENT_HEAD', 'SHELF_STOCKER']);
+    const effectiveDepartment = RESTRICTED_ROLES.has(currentUser.role)
+      ? currentUser.assignedDepartment
+      : department;
+
     let conversation = conversationId
       ? await prisma.chatbotConversation.findUnique({ where: { id: conversationId }, include: { messages: { orderBy: { createdAt: 'asc' } } } })
       : null;
@@ -361,7 +425,7 @@ router.post('/chatbot/ask-stream', async (req, res) => {
           userId: req.user.id,
           rposShopId: shopId,
           title: question.slice(0, 80),
-          department: department || null,
+          department: effectiveDepartment || null,
           subDepartment: subDepartment || null,
         },
         include: { messages: true },
@@ -389,11 +453,12 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       posId: shop.rposPosId,
       shopReference: shop.reference,
       shopName: shop.name,
-      department: department || conversation.department,
+      department: effectiveDepartment || conversation.department,
       subDepartment: subDepartment || conversation.subDepartment,
       conversationHistory,
       question,
       onTextChunk: (text) => send('chunk', { text }),
+      user: currentUser,
     });
 
     await Promise.all([
@@ -436,6 +501,7 @@ router.put('/proposal/:proposalId/line-quantity', async (req, res) => {
 
     const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
     if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans cette proposition' });
+    if (!(await assertLineInUserScope(req, res, line))) return;
 
     const updated = await prisma.proposalLine.update({
       where: { id: line.id },

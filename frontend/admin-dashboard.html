@@ -186,6 +186,87 @@
                          </div>
                     </div>
 
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                         <h4 class="mb-0">Précision des prévisions IA <span class="text-muted small fw-normal">(§23)</span></h4>
+                    </div>
+
+                    <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-3 mb-3">
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-success-subtle">
+                                             <iconify-icon icon="solar:like-bold-duotone" class="text-success"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux d'acceptation</p>
+                                             <h3 class="kpi-value" id="admin-stat-acceptance">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer">acceptée telle quelle par l'utilisateur</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-warning-subtle">
+                                             <iconify-icon icon="solar:pen-2-bold-duotone" class="text-warning"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux de modification</p>
+                                             <h3 class="kpi-value" id="admin-stat-modification">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer">quantité changée par l'utilisateur</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-danger-subtle">
+                                             <iconify-icon icon="solar:close-circle-bold-duotone" class="text-danger"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Taux de rejet</p>
+                                             <h3 class="kpi-value" id="admin-stat-rejection">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer">article décoché par l'utilisateur</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-primary-subtle">
+                                             <iconify-icon icon="solar:ruler-cross-pen-bold-duotone" class="text-primary"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Erreur moy. (MAE)</p>
+                                             <h3 class="kpi-value" id="admin-stat-mae">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="admin-stat-mae-footer">écart absolu moyen prévu / réel</div>
+                              </div>
+                         </div>
+
+                         <div class="col">
+                              <div class="card kpi-card h-100 mb-0">
+                                   <div class="card-body d-flex align-items-start gap-2">
+                                        <div class="kpi-icon bg-info-subtle">
+                                             <iconify-icon icon="solar:scale-bold-duotone" class="text-info"></iconify-icon>
+                                        </div>
+                                        <div>
+                                             <p class="kpi-label">Biais / WAPE</p>
+                                             <h3 class="kpi-value" id="admin-stat-bias">—</h3>
+                                        </div>
+                                   </div>
+                                   <div class="kpi-footer" id="admin-stat-wape-footer">— WAPE</div>
+                              </div>
+                         </div>
+                    </div>
+
                     <div class="row">
                          <div class="col-12">
                               <div class="card">
@@ -219,13 +300,15 @@
                                                             <th class="text-end">En attente</th>
                                                             <th class="text-end">Validées</th>
                                                             <th class="text-end">Conformité</th>
+                                                            <th class="text-end">Rejet</th>
                                                             <th class="text-end">Rupture</th>
                                                             <th class="text-end">Surstock</th>
+                                                            <th class="text-end">MAE</th>
                                                             <th>Dernière validation</th>
                                                        </tr>
                                                   </thead>
                                                   <tbody id="admin-per-shop-tbody">
-                                                       <tr><td colspan="8" class="text-center text-muted py-4">Chargement...</td></tr>
+                                                       <tr><td colspan="10" class="text-center text-muted py-4">Chargement...</td></tr>
                                                   </tbody>
                                              </table>
                                         </div>
@@ -248,6 +331,10 @@
 
                               function pct(rate) {
                                    return rate === null || rate === undefined ? '—' : Math.round(rate * 100) + '%';
+                              }
+
+                              function num(value, decimals) {
+                                   return value === null || value === undefined ? '—' : value.toFixed(decimals === undefined ? 1 : decimals);
                               }
 
                               function formatDate(iso) {
@@ -278,8 +365,18 @@
                                         document.getElementById('admin-stat-overstock').textContent = pct(d.globalOverstockRate);
                                         document.getElementById('admin-stat-shops-with-pending').textContent = d.shopsWithPendingProposal;
 
+                                        document.getElementById('admin-stat-acceptance').textContent = pct(d.globalAcceptanceRate);
+                                        document.getElementById('admin-stat-modification').textContent = pct(d.globalModificationRate);
+                                        document.getElementById('admin-stat-rejection').textContent = pct(d.globalRejectionRate);
+                                        document.getElementById('admin-stat-mae').textContent = num(d.globalForecastMAE, 1);
+                                        document.getElementById('admin-stat-mae-footer').textContent = d.globalForecastEvaluatedCount
+                                             ? 'écart absolu moyen (' + d.globalForecastEvaluatedCount + ' prévisions évaluées)'
+                                             : 'aucune prévision évaluée sur la période';
+                                        document.getElementById('admin-stat-bias').textContent = num(d.globalForecastBias, 1);
+                                        document.getElementById('admin-stat-wape-footer').textContent = pct(d.globalForecastWAPE) + ' WAPE — biais > 0 : sur-prévision';
+
                                         if (!d.perShop.length) {
-                                             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Aucun magasin avec un compte actif pour le moment.</td></tr>';
+                                             tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">Aucun magasin avec un compte actif pour le moment.</td></tr>';
                                         } else {
                                              tbody.innerHTML = d.perShop.map(function (s) {
                                                   const stockoutClass = s.stockoutRate !== null && s.stockoutRate > stockoutAlertThreshold ? 'text-danger fw-semibold' : '';
@@ -289,8 +386,10 @@
                                                        '<td class="text-end">' + s.pendingProposals + '</td>' +
                                                        '<td class="text-end">' + s.validatedProposals + '</td>' +
                                                        '<td class="text-end">' + pct(s.conformityRate) + '</td>' +
+                                                       '<td class="text-end">' + pct(s.rejectionRate) + '</td>' +
                                                        '<td class="text-end ' + stockoutClass + '">' + pct(s.stockoutRate) + '</td>' +
                                                        '<td class="text-end">' + pct(s.overstockRate) + '</td>' +
+                                                       '<td class="text-end">' + num(s.forecastMAE, 1) + '</td>' +
                                                        '<td>' + formatDate(s.lastValidatedAt) + '</td>' +
                                                        '</tr>';
                                              }).join('');

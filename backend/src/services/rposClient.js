@@ -259,6 +259,75 @@ async function getPriceChangeHistory(posId, shopId, ean, { limit = 50 } = {}) {
 // taille du lot pour ne pas tronquer silencieusement la réponse.
 const PRODUCT_BATCH_SIZE = 200;
 
+// Référentiel /api/stock_move_type/ (81 entrées confirmées par test direct le 16/09/2026) : chaque
+// mouvement de stock (vente, réception, casse, cession entre rayons, retour fournisseur, inventaire,
+// consommation interne...) a un type précis avec son sens (recording.display_name: Entrée/Sortie/
+// Aucune/Initialisation) et si c'est une perte physique (is_scrap). Peu de types par magasin en
+// pratique (Vente/Arrivage dominent très largement), les autres se concentrent sur des articles à
+// problème (péremption, vol) — donc utile pour DÉTECTER une anomalie plutôt qu'à agréger en routine.
+// Quasi-statique (label/is_scrap ne changent pas en usage normal) : caché longtemps par serveur.
+const stockMoveTypeCache = new Map(); // posId -> { byId: Map<number,type>, cachedAt }
+const STOCK_MOVE_TYPE_CACHE_TTL_MS = 60 * 60 * 1000; // 1h
+
+async function getStockMoveTypes(posId) {
+  const cached = stockMoveTypeCache.get(posId);
+  if (cached && Date.now() - cached.cachedAt < STOCK_MOVE_TYPE_CACHE_TTL_MS) return cached.byId;
+
+  const data = await rposGet(posId, '/api/stock_move_type/', { page_size: 250 });
+  const byId = new Map();
+  // stock_move_type sur /api/stock_move/ est un entier séquentiel (1, 2, 45...) qui n'apparaît pas
+  // explicitement sur /api/stock_move_type/ (qui expose un UUID `id` + son label texte) — la seule
+  // correspondance fiable observée est par label exact (confirmé par test direct : stock_move_type=1
+  // -> "Vente", stock_move_type=2 -> "Arrivage", label déjà renvoyé tel quel par /api/stock_move/
+  // dans stock_move_type_label, donc on indexe le référentiel par label plutôt que par id numérique).
+  for (const t of data.results || []) {
+    byId.set(t.label, {
+      label: t.label,
+      recording: t.recording ? t.recording.display_name : null,
+      isScrap: !!t.is_scrap,
+      isDeleted: !!t.iso_deleted_at,
+    });
+  }
+  stockMoveTypeCache.set(posId, { byId, cachedAt: Date.now() });
+  return byId;
+}
+
+/**
+ * Mouvements de stock d'un article précis sur une période (ventes, réceptions, casse, cessions
+ * entre rayons, retours fournisseur, inventaires, consommation interne...) — permet d'expliquer une
+ * variation de stock qui n'est PAS une vente (ex: 8 unités disparues en casse plutôt qu'en vente),
+ * utile au chatbot ("pourquoi le stock a baissé") et pour fiabiliser les quantités proposées (une
+ * baisse de stock due à la casse ne doit pas être comptée comme de la demande client).
+ * `product__ean` confirmé par test direct comme le seul filtre EAN qui fonctionne réellement sur cet
+ * endpoint (ean/ean__startswith/product_ean__startswith ignorent silencieusement le filtre et
+ * renvoient TOUS les mouvements du magasin — piège vérifié le 16/09/2026, jamais utiliser ces noms).
+ */
+async function getStockMovesForProduct(posId, shopId, ean, dateStart, dateEnd, { limit = 250 } = {}) {
+  const [data, typesByLabel] = await Promise.all([
+    rposGet(posId, '/api/stock_move/', {
+      product__ean: ean,
+      shop: shopId,
+      date_0: dateStart,
+      date_1: dateEnd,
+      page_size: limit,
+      ordering: '-date',
+    }),
+    getStockMoveTypes(posId).catch(() => new Map()), // référentiel best-effort : un échec n'empêche pas de renvoyer les mouvements bruts
+  ]);
+
+  return (data.results || []).map((r) => {
+    const typeInfo = typesByLabel.get(r.stock_move_type_label) || null;
+    return {
+      date: r.date,
+      typeLabel: r.stock_move_type_label,
+      recording: typeInfo ? typeInfo.recording : null, // 'Entrée' | 'Sortie' | 'Aucune' | 'Initialisation' | null si type inconnu du référentiel
+      isScrap: typeInfo ? typeInfo.isScrap : false,
+      quantity: Number(r.quantity),
+      previousQuantity: r.previous_quantity != null ? Number(r.previous_quantity) : null,
+    };
+  });
+}
+
 async function getProductsByEans(posId, shopId, eans) {
   const byEan = new Map();
   for (let i = 0; i < eans.length; i += PRODUCT_BATCH_SIZE) {
@@ -299,6 +368,50 @@ async function getDepartmentRootName(posId, departmentId) {
   return rootName;
 }
 
+// Liste des rayons réels d'un magasin (§ assignation d'un compte Rayonniste/Chef de département à
+// la création — demande du 16/09/2026 : le champ était jusque-là du texte libre, ce qui laissait
+// passer une faute de frappe rendant silencieusement le filtre par département inopérant, cf.
+// filterProposalLinesForUser). Rayons quasi-statiques (changent très rarement) : caché longtemps.
+const shopRayonsCache = new Map(); // `${posId}:${shopId}` -> { rayons: string[], cachedAt }
+const SHOP_RAYONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Liste des rayons (niveau 2 de la hiérarchie /api/department/, le même niveau que
+ * ProposalLine.department — cf. getDepartmentHierarchy ci-dessous, path[1]) réellement utilisés
+ * dans ce magasin. RPOS n'expose aucun filtre serveur pour isoler un niveau de la hiérarchie
+ * (parent__isnull, level, depth : tous ignorés silencieusement, testés le 16/09/2026) — mais un
+ * département racine (secteur, path.length===1) a bien `parent: null`, et il y en a très peu par
+ * magasin (moins de 10, confirmé par test direct) : on les récupère un par un par leur code court
+ * connu (10, 20, 30... jusqu'à 95, plage observée), puis on liste les enfants directs de chaque
+ * racine via `parent=<id>` (seul filtre qui fonctionne réellement sur cet endpoint).
+ */
+async function getShopRayons(posId, shopId) {
+  const cacheKey = `${posId}:${shopId}`;
+  const cached = shopRayonsCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < SHOP_RAYONS_CACHE_TTL_MS) return cached.rayons;
+
+  const ROOT_CODES = ['10', '20', '30', '40', '45', '50', '60', '90', '95'];
+  const roots = [];
+  for (const code of ROOT_CODES) {
+    const data = await rposGet(posId, '/api/department/', { code, shop: shopId, page_size: 5 });
+    for (const d of data.results || []) {
+      if (!d.parent) roots.push(d.id);
+    }
+  }
+
+  const rayons = new Set();
+  await Promise.all(roots.map(async (rootId) => {
+    const data = await rposGet(posId, '/api/department/', { parent: rootId, page_size: 250 });
+    for (const child of data.results || []) {
+      if (child.name) rayons.add(child.name.trim());
+    }
+  }));
+
+  const sorted = [...rayons].sort((a, b) => a.localeCompare(b, 'fr'));
+  shopRayonsCache.set(cacheKey, { rayons: sorted, cachedAt: Date.now() });
+  return sorted;
+}
+
 // Cache mémoire distinct pour la hiérarchie secteur+rayon (2 premiers niveaux), utilisée par la
 // vue "secteur > rayon" de la page Proposition de commande — même principe que
 // departmentRootCache mais garde aussi le niveau intermédiaire (path[1]).
@@ -329,6 +442,30 @@ async function getDepartmentHierarchy(posId, departmentId) {
 
   departmentHierarchyCache.set(cacheKey, { sector, rayon, cachedAt: Date.now() });
   return { sector, rayon };
+}
+
+// Cache mémoire courte durée : le fournisseur "central" d'un magasin ne change jamais en pratique,
+// pas la peine de le réinterroger à chaque commande créée dans la même session serveur.
+const supplierByCodeCache = new Map();
+const SUPPLIER_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Résout l'UUID RPOS d'un fournisseur par son CODE (ex: "000000" pour FOURNISSEUR CENTRALE), pour
+ * UN magasin précis — bug critique trouvé le 15/09/2026 : cet UUID est DIFFÉRENT sur chaque
+ * magasin/serveur RPOS (une entité fournisseur distincte par shop, confirmé par test direct), alors
+ * que le frontend utilisait un UUID unique codé en dur (valable sur un seul serveur) pour tous les
+ * magasins — toute commande créée sur un autre serveur échouait avec "clé primaire invalide - l'objet
+ * n'existe pas". Doit être appelé à chaque commande (jamais un ID mémorisé côté client).
+ */
+async function getSupplierByCode(posId, shopId, code) {
+  const cacheKey = `${posId}|${shopId}|${code}`;
+  const cached = supplierByCodeCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < SUPPLIER_CACHE_TTL_MS) return cached.supplier;
+
+  const data = await rposGet(posId, '/api/supplier/', { code, shop: shopId, page_size: 5 });
+  const supplier = (data.results || [])[0] || null;
+  supplierByCodeCache.set(cacheKey, { supplier, cachedAt: Date.now() });
+  return supplier;
 }
 
 async function createSupplierOrder(posId, { shopId, supplierId, date, deliveryDate, externalReference, comment }) {
@@ -824,7 +961,12 @@ async function fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, pa
     date_1: dateEnd,
     page_size: pageSize,
     page,
-    fields: 'ean,label_1,quantity,total_incl_tax,total_excl_tax,date',
+    // receipt.id ajouté le 16/09/2026 : seul moyen de compter le vrai nombre de VENTES (tickets de
+    // caisse distincts), demande explicite après constat que la base locale ne pouvait donner que
+    // le nombre de lignes d'articles (une notion différente, cf. chatbotToolsService.js) — confirmé
+    // par test direct que le comptage de receipt.id distincts sur une journée retombe exactement
+    // sur le "Nb de ventes" de l'écran RMaster (260/260 vérifié).
+    fields: 'ean,label_1,quantity,total_incl_tax,total_excl_tax,date,receipt',
   });
   return { results: data.results || [], count: data.count || 0, nextPage: data.next_page || null };
 }
@@ -846,7 +988,11 @@ async function getProductLinesForPeriod(posId, shopId, dateStart, dateEnd, onPro
       date_1: dateEnd,
       page_size: pageSize,
       page,
-      fields: 'ean,label_1,quantity,total_incl_tax,total_excl_tax,date',
+      // receipt.id ajouté le 16/09/2026 (même raison que fetchProductLinesPage ci-dessus) : cette
+      // fonction est celle RÉELLEMENT utilisée par la synchro de production (salesSyncJob.js), pas
+      // fetchProductLinesPage — oublié une première fois, provoquant un salesCount toujours null
+      // malgré la migration, jusqu'à ce test direct qui l'a révélé.
+      fields: 'ean,label_1,quantity,total_incl_tax,total_excl_tax,date,receipt',
     });
     total = data.count || 0;
 
@@ -880,6 +1026,7 @@ module.exports = {
   getShops,
   getProductByEan,
   getPriceChangeHistory,
+  getSupplierByCode,
   getProductsByEans,
   getDepartmentRootName,
   getDepartmentHierarchy,
@@ -902,5 +1049,8 @@ module.exports = {
   getSalesQuantityForProductInPeriod,
   getSalesHistoryForProduct,
   getMonthlySalesCount,
+  getStockMoveTypes,
+  getStockMovesForProduct,
+  getShopRayons,
   invalidateRposConfigCache,
 };

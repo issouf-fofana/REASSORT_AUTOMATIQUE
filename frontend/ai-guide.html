@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Mon accès | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+     <link rel="icon" type="image/png" href="assets/images/logo-reassort.png">
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+    <script src="assets/js/backend-config.js"></script>
+    <script src="assets/js/reassort-auth.js"></script>
+    <script src="assets/js/shop-picker.js"></script>
+
+    <style>
+         .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+
+         .aig-section-title { font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #666666; margin-bottom: 1rem; }
+
+         .aig-page-card { border: 1px solid #e5e5e5; border-radius: .5rem; padding: 1rem 1.25rem; height: 100%; }
+         .aig-page-name { font-weight: 600; margin-bottom: .3rem; }
+         .aig-page-desc { font-size: .85rem; color: #6c757d; margin-bottom: 0; }
+
+         .aig-action-list { margin: 0; padding-left: 1.2rem; }
+         .aig-action-list li { margin-bottom: .5rem; }
+         .aig-action-list li:last-child { margin-bottom: 0; }
+
+         .aig-capability-card { border: 1px solid #e5e5e5; border-radius: .5rem; padding: 1rem 1.25rem; height: 100%; }
+         .aig-capability-card.allowed { border-left: 4px solid #198754; }
+         .aig-capability-card.denied { border-left: 4px solid #dc3545; opacity: .85; }
+         .aig-capability-title { font-weight: 600; display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+         .aig-example-list { margin: 0; padding-left: 1.1rem; }
+         .aig-example-list li { margin-bottom: .35rem; font-size: .88rem; }
+         .aig-example-list li:last-child { margin-bottom: 0; }
+         .aig-denied-reason { font-size: .85rem; color: #6c757d; margin-top: .5rem; margin-bottom: 0; }
+    </style>
+</head>
+
+<body data-page-title="Mon accès">
+
+     <script src="assets/js/loading-overlay.js"></script>
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+          <script src="assets/js/global-shop-selector.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
+                         <div>
+                              <h2 class="mb-1">Mon accès</h2>
+                              <p class="text-muted mb-0">
+                                   <span id="aig-role-label-plural" class="fw-semibold">Ce compte</span>
+                                   peuvent faire ceci sur la plateforme, et demander cela à l'Assistant IA.
+                              </p>
+                         </div>
+                    </div>
+
+                    <div id="aig-loading" class="text-center text-muted py-5">Chargement...</div>
+                    <div id="aig-error" class="alert alert-danger" style="display:none;"></div>
+
+                    <div id="aig-content" style="display:none;">
+
+                         <!-- Section 1 : ce que le compte peut faire sur la plateforme (pages + actions) -->
+                         <div class="mb-5">
+                              <h3 class="aig-section-title">Sur la plateforme</h3>
+
+                              <p class="fw-semibold mb-2">Pages accessibles</p>
+                              <div id="aig-pages-grid" class="row g-3 mb-4"></div>
+
+                              <p class="fw-semibold mb-2">Actions possibles</p>
+                              <ul id="aig-actions-list" class="aig-action-list"></ul>
+                         </div>
+
+                         <!-- Section 2 : ce que le compte peut demander à l'Assistant IA -->
+                         <div>
+                              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                                   <h3 class="aig-section-title mb-0">Assistant IA</h3>
+                                   <a href="/ai-assistant" class="btn btn-outline-dark btn-sm">Ouvrir l'Assistant IA →</a>
+                              </div>
+
+                              <div class="alert alert-light border small mb-4">
+                                   <strong>Comment ça marche :</strong> l'Assistant IA ne répond jamais avec un chiffre
+                                   inventé. Pour chaque question, il identifie d'abord la donnée réelle demandée
+                                   (ventes, stock, chiffre d'affaires, commandes...), va la chercher dans les données
+                                   du magasin, puis reformule la réponse en langage naturel. Si votre compte n'a pas
+                                   le droit de consulter une donnée précise, l'IA le dit explicitement plutôt que de
+                                   deviner.
+                              </div>
+
+                              <p class="fw-semibold mb-2">Vous pouvez demander</p>
+                              <div id="aig-allowed-grid" class="row g-3 mb-4"></div>
+
+                              <div id="aig-denied-section" style="display:none;">
+                                   <p class="fw-semibold mb-2">Hors de votre périmètre</p>
+                                   <div id="aig-denied-grid" class="row g-3"></div>
+                              </div>
+                         </div>
+
+                    </div>
+
+               </div>
+          </div>
+     </main>
+
+     <script>
+          (function () {
+               // Icônes et texte d'accompagnement par capacité — reflète la même segmentation que le
+               // backend (aiPermissionsService.js CAPABILITIES). Demande du 16/09/2026 : "chaque user
+               // dois voir ce quil peux faire sur la plaforme" — cette page couvre désormais la
+               // plateforme entière (pages + actions), pas seulement l'Assistant IA.
+               const CAPABILITY_META = {
+                    revenueShop: { icon: 'solar:wallet-money-bold-duotone', deniedReason: 'Réservé aux comptes ayant une vision globale du magasin (Directeur, Superviseur, Administrateur) ou aux Chefs de département pour leur seul rayon.' },
+                    revenueArticle: { icon: 'solar:tag-price-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à voir le chiffre d\'affaires d\'un article ou d\'un rayon précis.' },
+                    articleDetails: { icon: 'solar:box-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à consulter la fiche complète d\'un article.' },
+                    stock: { icon: 'solar:archive-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à consulter le stock et les ruptures.' },
+                    sales: { icon: 'solar:chart-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à consulter les ventes et tendances.' },
+                    orders: { icon: 'solar:cart-check-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à consulter les commandes et propositions.' },
+                    accuracy: { icon: 'solar:target-bold-duotone', deniedReason: 'Réservé aux comptes autorisés à consulter la fiabilité de l\'IA.' },
+                    unclassified: { icon: 'solar:question-circle-bold-duotone', deniedReason: 'Fonctionnalité non couverte par votre compte.' },
+               };
+
+               function escapeHtml(str) {
+                    const div = document.createElement('div');
+                    div.textContent = str;
+                    return div.innerHTML;
+               }
+
+               function renderCapabilityCard(entry, allowed) {
+                    const meta = CAPABILITY_META[entry.capability] || CAPABILITY_META.unclassified;
+                    const examplesHtml = entry.examples.length
+                         ? '<ul class="aig-example-list">' + entry.examples.map(function (ex) { return '<li>' + escapeHtml(ex) + '</li>'; }).join('') + '</ul>'
+                         : '<p class="text-muted small mb-0">Aucun exemple disponible.</p>';
+                    const deniedNote = allowed ? '' : '<p class="aig-denied-reason">' + escapeHtml(meta.deniedReason) + '</p>';
+                    return (
+                         '<div class="col-md-6 col-lg-4">' +
+                              '<div class="aig-capability-card ' + (allowed ? 'allowed' : 'denied') + '">' +
+                                   '<div class="aig-capability-title">' +
+                                        '<iconify-icon icon="' + meta.icon + '" style="font-size:1.3rem;"></iconify-icon>' +
+                                        '<span>' + escapeHtml(entry.label) + '</span>' +
+                                   '</div>' +
+                                   (allowed ? examplesHtml : '') +
+                                   deniedNote +
+                              '</div>' +
+                         '</div>'
+                    );
+               }
+
+               function renderPageCard(page) {
+                    return (
+                         '<div class="col-md-6 col-lg-4">' +
+                              '<div class="aig-page-card">' +
+                                   '<div class="aig-page-name">' + escapeHtml(page.name) + '</div>' +
+                                   '<p class="aig-page-desc">' + escapeHtml(page.description) + '</p>' +
+                              '</div>' +
+                         '</div>'
+                    );
+               }
+
+               async function loadPlatformGuide() {
+                    const res = await window.reassortFetch('/reassort/platform-guide');
+                    const json = await res.json();
+                    if (!json.success) throw new Error(json.message);
+
+                    // roleLabel ("Les Directeurs", "Les Rayonnistes"...) nomme explicitement le rôle
+                    // plutôt qu'une formulation neutre en "vous" (demande du 16/09/2026 : "si il est
+                    // directeur ... on lui [dit] les directeur peuvent faire").
+                    document.getElementById('aig-role-label-plural').textContent = json.data.roleLabel || 'Ce compte';
+
+                    document.getElementById('aig-pages-grid').innerHTML = json.data.pages.map(renderPageCard).join('');
+                    document.getElementById('aig-actions-list').innerHTML = json.data.actions.map(function (a) {
+                         return '<li>' + escapeHtml(a) + '</li>';
+                    }).join('');
+               }
+
+               async function loadCapabilityGuide() {
+                    const res = await window.reassortFetch('/reassort/chatbot/capability-guide');
+                    const json = await res.json();
+                    if (!json.success) throw new Error(json.message);
+
+                    const allowedGrid = document.getElementById('aig-allowed-grid');
+                    const deniedGrid = document.getElementById('aig-denied-grid');
+                    const deniedSection = document.getElementById('aig-denied-section');
+
+                    allowedGrid.innerHTML = json.data.allowed.length
+                         ? json.data.allowed.map(function (c) { return renderCapabilityCard(c, true); }).join('')
+                         : '<div class="col-12"><p class="text-muted">Aucune capacité disponible pour ce compte.</p></div>';
+
+                    if (json.data.denied.length) {
+                         deniedGrid.innerHTML = json.data.denied.map(function (c) { return renderCapabilityCard(c, false); }).join('');
+                         deniedSection.style.display = '';
+                    }
+               }
+
+               async function loadGuide() {
+                    const loadingEl = document.getElementById('aig-loading');
+                    const errorEl = document.getElementById('aig-error');
+                    const contentEl = document.getElementById('aig-content');
+                    try {
+                         await Promise.all([loadPlatformGuide(), loadCapabilityGuide()]);
+
+                         loadingEl.style.display = 'none';
+                         contentEl.style.display = '';
+                    } catch (err) {
+                         loadingEl.style.display = 'none';
+                         errorEl.textContent = 'Erreur : ' + err.message;
+                         errorEl.style.display = 'block';
+                    }
+               }
+
+               loadGuide();
+          })();
+     </script>
+</body>
+
+</html>

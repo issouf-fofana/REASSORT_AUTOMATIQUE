@@ -3,10 +3,22 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAdmin, resolveShopId, resolvePosId } = require('../../middleware/auth');
+const { requireAdmin, resolveShopId, resolvePosId, SINGLE_SHOP_ROLES } = require('../../middleware/auth');
 const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const rposServers = require('../../services/rposServersService');
+const { DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
+
+// Un Rayonniste/Chef de département ne voit que les commandes de SON rayon — les commandes RPOS
+// sont créées une par rayon (readme §11, ProposalOrder.department) donc chaque commande a un
+// périmètre précis. `user.assignedDepartment` peut contenir plusieurs rayons séparés par une
+// virgule (comparaison insensible à la casse, même logique que filterProposalLinesForUser).
+function isDepartmentAllowedForUser(department, user) {
+  if (!user || !DEPARTMENT_SCOPED_ROLES.has(user.role)) return true;
+  if (!user.assignedDepartment) return false;
+  const allowed = new Set(user.assignedDepartment.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean));
+  return !!department && allowed.has(String(department).trim().toLowerCase());
+}
 
 router.get('/servers', requireAdmin, async (req, res) => {
   try {
@@ -102,6 +114,21 @@ router.get('/shops', async (req, res) => {
         })),
       });
     }
+    // Compte à un seul magasin fixe (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE) : renvoie
+    // directement SON magasin (liste à un seul élément), plutôt qu'un 403 générique. Bug trouvé le
+    // 15/09/2026 lors de l'audit de robustesse (test réel via /api/auth/login + appel HTTP) : cette
+    // route restait bloquée pour ces rôles malgré la correction côté frontend (qui évite déjà de
+    // l'appeler pour eux) — un composant qui l'appellerait quand même (widget IA, sélecteur de
+    // magasin sur une page non encore auditée) recevait un 403 au lieu du magasin attendu.
+    if (SINGLE_SHOP_ROLES.has(req.user.role)) {
+      if (!req.user.rposShopId) {
+        return res.json({ success: true, data: [] });
+      }
+      return res.json({
+        success: true,
+        data: [{ id: req.user.rposShopId, reference: req.user.rposShopReference, name: req.user.rposShopName, posId: req.user.rposPosId }],
+      });
+    }
     if (req.user.role !== 'ADMIN') {
       return res.status(403).json({ success: false, message: 'Réservé aux administrateurs et superviseurs' });
     }
@@ -155,6 +182,25 @@ router.get('/shops', async (req, res) => {
 // GET /api/reassort/orders?page=<n> - liste les commandes fournisseur du magasin de l'utilisateur
 // (ou ?shop=<id>&pos=<posId> pour un ADMIN consultant un magasin précis). Inclut aussi les
 // commandes que notre plateforme a créées mais qui ont depuis été supprimées côté RPOS.
+// GET /api/reassort/shops/:shopId/rayons - liste des rayons réels (niveau ProposalLine.department)
+// d'un magasin, pour le champ "Rayon(s) assigné(s)" de la création/édition d'un compte Rayonniste/
+// Chef de département (users-list.html) — remplace un champ texte libre où une faute de frappe
+// rendait silencieusement le filtre par département inopérant (aucune ligne ne matcherait jamais le
+// nom mal orthographié, cf. filterProposalLinesForUser). Réservé ADMIN : seul rôle qui crée/édite
+// des comptes.
+router.get('/shops/:shopId/rayons', requireAdmin, async (req, res) => {
+  try {
+    const shop = await prisma.shop.findUnique({ where: { rposShopId: req.params.shopId } });
+    if (!shop) return res.status(404).json({ success: false, message: 'Magasin introuvable' });
+
+    const rayons = await rpos.getShopRayons(shop.rposPosId, shop.rposShopId);
+    res.json({ success: true, data: rayons });
+  } catch (error) {
+    console.error('Shop rayons error:', error);
+    res.status(502).json({ success: false, message: error.message });
+  }
+});
+
 router.get('/orders', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -197,11 +243,27 @@ router.get('/orders', async (req, res) => {
         deletedOnRpos: true,
       }));
 
+    // Un Rayonniste/Chef de département ne doit voir que les commandes de SON rayon — chaque
+    // commande RPOS créée par ce système correspond à un rayon précis (ProposalOrder.department),
+    // retrouvé ici via son rposOrderId pour filtrer la liste ; une commande créée hors de ce système
+    // (donc sans département connu) est masquée par prudence pour un rôle restreint plutôt que
+    // montrée par défaut (faille trouvée le 16/09/2026 : /orders retournait TOUTES les commandes du
+    // magasin, tous rayons confondus, à n'importe quel rôle).
+    let allOrders = [...orders, ...deletedOrders];
+    let restrictedTotalAdjustment = 0;
+    if (DEPARTMENT_SCOPED_ROLES.has(req.user.role)) {
+      const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+      const departmentByOrderId = new Map(proposalOrders.map((o) => [o.rposOrderId, o.department]));
+      const before = allOrders.length;
+      allOrders = allOrders.filter((o) => isDepartmentAllowedForUser(departmentByOrderId.get(o.id), currentUser));
+      restrictedTotalAdjustment = allOrders.length - before;
+    }
+
     res.json({
       success: true,
       data: {
-        orders: [...orders, ...deletedOrders],
-        count: (data.count || 0) + deletedOrders.length,
+        orders: allOrders,
+        count: (data.count || 0) + deletedOrders.length + restrictedTotalAdjustment,
         nextPage: data.next_page || null,
       },
     });
@@ -227,6 +289,16 @@ router.get('/orders/:rposOrderId/detail', async (req, res) => {
     });
 
     if (proposalOrder) {
+      // Une commande créée par ce système appartient à UN rayon précis (ou "Toutes lignes" pour un
+      // magasin non scindé) — un Rayonniste/Chef de département ne doit accéder au détail QUE de la
+      // commande de son propre rayon, jamais à celle d'un autre en devinant/itérant son rposOrderId
+      // (faille trouvée le 16/09/2026, même famille que le filtre déjà en place sur /orders).
+      if (DEPARTMENT_SCOPED_ROLES.has(req.user.role)) {
+        const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (!isDepartmentAllowedForUser(proposalOrder.department, currentUser)) {
+          return res.status(403).json({ success: false, message: 'Cette commande n\'est pas dans votre périmètre.' });
+        }
+      }
       const isSplit = proposalOrder.department !== 'Toutes lignes';
       const lines = isSplit
         ? proposalOrder.proposal.lines.filter((l) => (l.department || 'Sans rayon') === proposalOrder.department)
@@ -234,7 +306,11 @@ router.get('/orders/:rposOrderId/detail', async (req, res) => {
       return res.json({ success: true, data: { ...proposalOrder.proposal, lines } });
     }
 
-    // Repli : anciennes commandes créées avant l'introduction de ProposalOrder.
+    // Repli : anciennes commandes créées avant l'introduction de ProposalOrder — pas de département
+    // connu par commande (magasin entier), donc jamais montrée à un rôle borné à un rayon.
+    if (DEPARTMENT_SCOPED_ROLES.has(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Cette commande n\'est pas dans votre périmètre.' });
+    }
     const proposal = await prisma.proposal.findFirst({
       where: { rposShopId: shopId, rposOrderId: req.params.rposOrderId, status: 'VALIDATED' },
       include: { lines: { where: { wasExcluded: false } } },

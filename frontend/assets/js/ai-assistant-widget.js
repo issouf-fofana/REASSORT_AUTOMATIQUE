@@ -30,9 +30,11 @@
     #aiw-window.show { display: flex; }
     #aiw-header { padding: .75rem 1rem; background-color: #000000; color: #ffffff; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
     #aiw-header .aiw-title { font-weight: 600; font-size: .95rem; }
+    #aiw-header-actions { display: flex; align-items: center; gap: .5rem; }
+    #aiw-guide-btn { background: none; border: 1px solid #ffffff; color: #ffffff; font-size: .75rem; font-weight: 600; cursor: pointer; line-height: 1; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; text-decoration: none; }
     #aiw-close-btn { background: none; border: none; color: #ffffff; font-size: 1.2rem; cursor: pointer; line-height: 1; }
     #aiw-context-bar { padding: .5rem .75rem; border-bottom: 1px solid #e5e5e5; flex-shrink: 0; }
-    #aiw-context-bar select { font-size: .8rem; }
+    #aiw-shop-context { display: block; }
     #aiw-messages { flex-grow: 1; overflow-y: auto; padding: .85rem; }
     .aiw-turn { margin-bottom: 1rem; }
     .aiw-turn:last-child { margin-bottom: 0; }
@@ -127,8 +129,13 @@
     const win = document.createElement('div');
     win.id = 'aiw-window';
     win.innerHTML =
-      '<div id="aiw-header"><span class="aiw-title">Assistant IA</span><button type="button" id="aiw-close-btn" aria-label="Fermer">&times;</button></div>' +
-      '<div id="aiw-context-bar"><select id="aiw-shop" class="form-select form-select-sm"><option value="">Chargement...</option></select></div>' +
+      '<div id="aiw-header"><span class="aiw-title">Assistant IA</span>' +
+        '<div class="aiw-header-actions">' +
+          '<a href="/ai-guide" id="aiw-guide-btn" aria-label="Ce que je peux vous demander" title="Ce que je peux vous demander">?</a>' +
+          '<button type="button" id="aiw-close-btn" aria-label="Fermer">&times;</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="aiw-context-bar"><span id="aiw-shop-context" class="text-muted small"></span></div>' +
       '<div id="aiw-messages"><div class="aiw-empty-hint">Posez une question sur les ventes, le stock ou les ruptures de ce magasin.</div></div>' +
       '<div id="aiw-input-bar"><div class="input-group"><input type="text" class="form-control" id="aiw-input" placeholder="Votre question..." disabled><button type="button" class="btn btn-dark" id="aiw-send-btn" disabled>Envoyer</button></div></div>' +
       '<div id="aiw-footer-link"><a href="/ai-assistant">Ouvrir en plein écran &amp; voir l\'historique</a></div>';
@@ -140,8 +147,9 @@
 
   function init() {
     if (!window.reassortFetch) { setTimeout(init, 200); return; } // attend reassort-auth.js
+    if (!window.reassortGetActiveShop) { setTimeout(init, 200); return; } // attend global-shop-selector.js
     const { toggleBtn, win } = buildDom();
-    const shopSelect = win.querySelector('#aiw-shop');
+    const shopContextEl = win.querySelector('#aiw-shop-context');
     const messagesEl = win.querySelector('#aiw-messages');
     const input = win.querySelector('#aiw-input');
     const sendBtn = win.querySelector('#aiw-send-btn');
@@ -149,31 +157,79 @@
 
     let currentConversationId = null;
 
-    async function loadShopList() {
-      try {
-        const res = await window.reassortFetch('/reassort/shops');
-        const json = await res.json();
-        if (!json.success) throw new Error(json.message);
-        shopSelect.innerHTML = json.data
-          .sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); })
-          .map(function (s) { return '<option value="' + s.id + '">' + s.reference + ' - ' + s.name + '</option>'; })
-          .join('');
-        if (shopSelect.value) { input.disabled = false; sendBtn.disabled = false; }
-      } catch (err) {
-        shopSelect.innerHTML = '<option value="">Erreur</option>';
-      }
+    // Le widget suit désormais le SÉLECTEUR DE MAGASIN GLOBAL de la topbar (demande du 16/09/2026 :
+    // un ADMIN/SUPERVISOR voyait "308" en haut de page mais le widget répondait pour un autre
+    // magasin resté sélectionné dans son propre <select> indépendant, jamais synchronisé — deux
+    // sources de vérité pour "quel magasin" sur la même page). Pour un rôle à magasin unique
+    // (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE), reassortGetActiveShop() renvoie toujours
+    // null (pas de sélecteur affiché pour eux) : le magasin effectif est alors déterminé côté
+    // serveur par resolveShopId (req.user.rposShopId), jamais par ce paramètre.
+    function currentShopId() {
+      const user = window.reassortGetUser && window.reassortGetUser();
+      if (user && window.reassortIsSingleShopRole(user.role)) return user.rposShopId || null;
+      const shop = window.reassortGetActiveShop();
+      return shop ? shop.id : null;
     }
 
-    shopSelect.addEventListener('change', function () {
+    function refreshContextDisplay() {
+      const user = window.reassortGetUser && window.reassortGetUser();
+      let label;
+      if (user && window.reassortIsSingleShopRole(user.role)) {
+        label = user.rposShopName ? user.rposShopReference + ' - ' + user.rposShopName : null;
+      } else {
+        const shop = window.reassortGetActiveShop();
+        label = shop ? shop.reference + ' - ' + shop.name : null;
+      }
+      shopContextEl.textContent = label || 'Sélectionnez un magasin (en haut de page)';
+      const hasShop = !!currentShopId();
+      input.disabled = !hasShop;
+      sendBtn.disabled = !hasShop;
+    }
+
+    // Changer de magasin en haut de page pendant que le widget est ouvert doit repartir sur une
+    // conversation neuve (une conversation est rattachée à un magasin précis côté serveur) — même
+    // logique que l'ancien shopSelect.addEventListener('change', ...) qu'il remplace.
+    window.reassortOnActiveShopChange(function () {
       currentConversationId = null;
       messagesEl.innerHTML = '<div class="aiw-empty-hint">Posez une question sur les ventes, le stock ou les ruptures de ce magasin.</div>';
-      input.disabled = !shopSelect.value;
-      sendBtn.disabled = !shopSelect.value;
+      refreshContextDisplay();
     });
+    refreshContextDisplay();
+
+    // Une tentative d'appel + streaming (sans gestion d'erreur ni retry) : isolée pour être rejouable
+    // telle quelle par sendQuestion en cas de coupure réseau en cours de flux (cf. plus bas).
+    async function attemptQuestion(question, answerEl) {
+      let streamedAnswer = '';
+      const res = await window.reassortFetch('/reassort/chatbot/ask-stream?shop=' + encodeURIComponent(currentShopId() || ''), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: currentConversationId, question: question }),
+      });
+      if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
+
+      let finalResult = null;
+      await consumeSseStream(res, function (eventName, data) {
+        if (eventName === 'chunk') {
+          streamedAnswer += data.text;
+          answerEl.textContent = streamedAnswer;
+          const cursor = document.createElement('span');
+          cursor.className = 'aiw-stream-cursor';
+          cursor.textContent = '▍';
+          answerEl.appendChild(cursor);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else if (eventName === 'error') {
+          throw new Error(data.message);
+        } else if (eventName === 'done') {
+          finalResult = data;
+        }
+      });
+      if (!finalResult) throw new Error('Flux terminé sans réponse exploitable.');
+      return finalResult;
+    }
 
     async function sendQuestion() {
       const question = input.value.trim();
-      if (!question || !shopSelect.value) return;
+      if (!question || !currentShopId()) return;
       input.value = '';
       sendBtn.disabled = true;
       input.disabled = true;
@@ -187,43 +243,41 @@
       messagesEl.appendChild(turnEl);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       const answerEl = turnEl.querySelector('.aiw-answer');
-      let streamedAnswer = '';
 
-      try {
-        const res = await window.reassortFetch('/reassort/chatbot/ask-stream?shop=' + encodeURIComponent(shopSelect.value), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId: currentConversationId, question: question }),
-        });
-        if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
-
-        let finalResult = null;
-        await consumeSseStream(res, function (eventName, data) {
-          if (eventName === 'chunk') {
-            streamedAnswer += data.text;
-            answerEl.textContent = streamedAnswer;
-            const cursor = document.createElement('span');
-            cursor.className = 'aiw-stream-cursor';
-            cursor.textContent = '▍';
-            answerEl.appendChild(cursor);
-            messagesEl.scrollTop = messagesEl.scrollHeight;
-          } else if (eventName === 'error') {
-            throw new Error(data.message);
-          } else if (eventName === 'done') {
-            finalResult = data;
+      // Une coupure réseau brève (latence, micro-déconnexion) peut interrompre le flux SSE avant
+      // l'event "done" alors que le serveur a bien traité la question — observé en usage réel sans
+      // jamais avoir pu être reproduit ni côté serveur (curl direct systématiquement correct) ni dans
+      // un navigateur automatisé en local, ce qui pointe vers l'environnement réseau du poste plutôt
+      // qu'un bug de code (ajouté le 16/09/2026). Une seule retentative automatique, jamais en
+      // boucle : si la deuxième tentative échoue aussi, il s'agit d'un vrai problème (réseau coupé,
+      // serveur down) à signaler, pas à masquer par des tentatives indéfinies.
+      let finalResult = null;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          finalResult = await attemptQuestion(question, answerEl);
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (attempt === 1) {
+            answerEl.innerHTML = '<span class="aiw-stream-cursor">▍</span>';
           }
-        });
-        if (!finalResult) throw new Error('Flux terminé sans réponse exploitable.');
+        }
+      }
+
+      if (finalResult) {
         answerEl.innerHTML = markdownLiteToHtml(finalResult.answer);
         currentConversationId = finalResult.conversationId;
-      } catch (err) {
-        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(err.message) + '</span>';
-      } finally {
-        sendBtn.disabled = false;
-        input.disabled = false;
-        input.focus();
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else {
+        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(lastErr.message) + '</span>';
+        if (window.reassortReportError) window.reassortReportError('Widget Assistant IA (après 2 tentatives): ' + lastErr.message, lastErr.stack);
       }
+
+      sendBtn.disabled = false;
+      input.disabled = false;
+      input.focus();
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
     toggleBtn.addEventListener('click', function () {
@@ -233,8 +287,6 @@
     closeBtn.addEventListener('click', function () { win.classList.remove('show'); });
     sendBtn.addEventListener('click', sendQuestion);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendQuestion(); });
-
-    loadShopList();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

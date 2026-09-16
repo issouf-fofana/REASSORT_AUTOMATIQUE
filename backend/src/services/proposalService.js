@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
 const { detectAnomalies } = require('./anomalyService');
+const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { PRIORITY_RANK } = require('./improvementService');
 const aiForecastService = require('./aiForecastService');
 
@@ -790,6 +791,34 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     p.trendChangePct = trend.changePct;
   }
 
+  // Casse/perte récurrente (§30-31, ajout du 16/09/2026, à partir de /api/stock_move/ RPOS) : une
+  // baisse de stock n'est pas toujours de la demande client — un article en SALES_DROP/stock
+  // incohérent peut en réalité perdre du stock par casse/péremption/vol, ce qui fausserait la
+  // quantité proposée si on l'attribuait à tort à une baisse de la demande. Un appel RPOS
+  // supplémentaire PAR ARTICLE serait trop coûteux sur une génération de plusieurs centaines
+  // d'articles (le reste de la détection d'anomalies est volontairement sans appel réseau) — donc
+  // limité aux quelques articles DÉJÀ signalés en anomalie, où le coût est marginal et l'utilité
+  // maximale (décision validée le 16/09/2026). Best-effort : un échec RPOS ne bloque jamais la
+  // génération, l'article garde simplement son anomalie d'origine sans enrichissement.
+  const anomalousProposals = result.proposals.filter((p) => p.anomalies && p.anomalies.length > 0);
+  if (anomalousProposals.length) {
+    const STOCK_MOVE_CONCURRENCY = 5;
+    await mapWithConcurrency(anomalousProposals, STOCK_MOVE_CONCURRENCY, async (p) => {
+      try {
+        const summary = await stockMoveAnalysis.getStockMoveSummary(posId, shopId, p.ean, result.stats.periodStart, result.stats.periodEnd);
+        if (summary.scrapQuantity > 0) {
+          p.anomalies.push({
+            type: 'SCRAP_LOSS',
+            changePct: null,
+            message: `${summary.scrapQuantity} unité(s) perdues en casse sur la période analysée — une partie de la baisse de stock ne vient pas de la demande client.`,
+          });
+        }
+      } catch (err) {
+        console.warn(`[proposalService] Lecture des mouvements de stock RPOS échouée pour ${p.ean} (${shopId}), anomalie non enrichie: ${err.message}`);
+      }
+    });
+  }
+
   // Score de confiance (§20, étape 6) calculé ICI, avant l'ajustement IA ci-dessous, pour pouvoir
   // le transmettre à l'IA comme donnée d'entrée (elle doit savoir si sa propre base de départ est
   // déjà peu fiable avant de décider d'un ajustement) — réutilisé tel quel plus loin pour
@@ -1065,7 +1094,7 @@ async function getPendingProposal(shopId) {
  * @param {string} params.proposalId
  * @param {string} params.shopId
  * @param {string} params.userEmail
- * @param {Array<{lineId: string, quantity: number, excluded: boolean}>} params.decisions
+ * @param {Array<{lineId: string, quantity: number, excluded: boolean, outOfScope?: boolean}>} params.decisions
  * @param {object} params.orderHeader - { supplierId, orderDate, deliveryDate, externalReference, comment }
  */
 async function startProposalValidation({ proposalId, posId, shopId, userEmail, decisions, orderHeader, validateAfterCreate }) {
@@ -1080,11 +1109,12 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
   for (const line of proposal.lines) {
     const decision = decisionByLineId.get(line.id);
     const excluded = decision ? !!decision.excluded : false;
+    const outOfScope = excluded && decision ? !!decision.outOfScope : false;
     const quantity = decision && decision.quantity != null ? decision.quantity : line.quantitySuggested;
 
     await prisma.proposalLine.update({
       where: { id: line.id },
-      data: { quantityValidated: excluded ? null : quantity, wasExcluded: excluded },
+      data: { quantityValidated: excluded ? null : quantity, wasExcluded: excluded, excludedOutOfScope: outOfScope },
     });
 
     if (!excluded && quantity > 0) {
@@ -1127,14 +1157,32 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
  * la séparation par rayon est désactivée), et y ajoute chaque ligne. Retourne un résumé pour le
  * suivi de progression et l'historisation (ProposalOrder).
  */
+// Code fournisseur "FOURNISSEUR CENTRALE", tel qu'affiché dans l'en-tête de commande côté UI —
+// utilisé pour résoudre dynamiquement le VRAI UUID RPOS de ce magasin (voir getSupplierByCode).
+const SUPPLIER_CENTRAL_CODE = '000000';
+
 async function createOrderForLines(posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate) {
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const referenceSuffix = department ? ` — ${department}` : '';
 
+  // L'UUID RPOS du fournisseur "central" est PROPRE À CHAQUE MAGASIN (une entité fournisseur
+  // distincte par shop côté RPOS, confirmé par test direct le 15/09/2026) — jamais un ID unique
+  // valable partout. Résolu ici par son code stable (000000), plutôt que de faire confiance à
+  // orderHeader.supplierId envoyé par le frontend (qui ne peut connaître cet UUID par magasin sans
+  // dupliquer cette logique côté client). Repli sur orderHeader.supplierId uniquement si la
+  // résolution échoue, pour ne jamais bloquer totalement une commande sur un aléa réseau RPOS.
+  let supplierId = orderHeader.supplierId;
+  try {
+    const supplier = await rpos.getSupplierByCode(posId, shopId, SUPPLIER_CENTRAL_CODE);
+    if (supplier) supplierId = supplier.id;
+  } catch (err) {
+    console.warn(`[validateProposal] Résolution du fournisseur central échouée pour ${shopId}, repli sur supplierId fourni: ${err.message}`);
+  }
+
   const order = await rpos.createSupplierOrder(posId, {
     shopId,
-    supplierId: orderHeader.supplierId,
+    supplierId,
     date: orderHeader.orderDate || now.toISOString().slice(0, 19),
     deliveryDate: orderHeader.deliveryDate || tomorrow.toISOString().slice(0, 10),
     externalReference: (orderHeader.externalReference || 'Proposition réassort') + referenceSuffix,
@@ -1239,10 +1287,15 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
       totalFailed += failed;
       overallValidated = overallValidated === false ? false : rposOrderValidated;
     } catch (err) {
-      console.error(`[validateProposal] Échec de création de la commande pour le rayon ${department}:`, err.message);
+      // err.body (réponse RPOS complète, ex: détail du champ en erreur) était jusqu'ici perdu — seul
+      // "-> 400" sans aucun détail apparaissait dans les logs, rendant tout échec de création de
+      // commande indiagnosticable (bug trouvé le 15/09/2026 : "0 article(s) envoyé(s), 1 échec(s)"
+      // sans savoir pourquoi RPOS avait refusé la commande).
+      const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+      console.error(`[validateProposal] Échec de création de la commande pour le rayon ${department}: ${err.message} — ${detail}`);
       await prisma.proposalOrder.update({
         where: { id: proposalOrder.id },
-        data: { status: 'FAILED', linesFailed: lines.length, errorMessage: err.message },
+        data: { status: 'FAILED', linesFailed: lines.length, errorMessage: detail.slice(0, 500) },
       });
       totalFailed += lines.length;
       overallValidated = false;
@@ -1305,11 +1358,16 @@ async function getProposalStatus(proposalId) {
  * Sert à décider quand basculer un magasin/article en validation automatique (readme section 17).
  */
 async function getConformityRate(shopId) {
-  const lines = await prisma.proposalLine.findMany({
+  const allLines = await prisma.proposalLine.findMany({
     where: {
       proposal: { rposShopId: shopId, status: 'VALIDATED' },
     },
   });
+
+  // Une ligne exclue par le filtrage de sécurité par périmètre de rayon ne reflète aucune décision
+  // humaine réelle sur cette ligne : l'inclure fausserait le taux de conformité (cf. même correctif
+  // dans getAdminDashboard, KPI §23).
+  const lines = allLines.filter((l) => !l.excludedOutOfScope);
 
   if (lines.length === 0) return { rate: null, totalLines: 0, unchangedLines: 0 };
 
@@ -1385,15 +1443,20 @@ async function getOverstockRate(shopId) {
 
 /**
  * Vue globale multi-magasins pour le tableau de bord administrateur (readme §32) : agrège les
- * propositions de tous les magasins ayant un compte STORE actif, sans exposer le détail des
- * lignes (juste des compteurs), pour ne pas alourdir la requête sur un grand nombre de magasins.
+ * propositions de TOUS les magasins connus (table Shop, synchronisée par shopsSyncJob.js), sans
+ * exposer le détail des lignes (juste des compteurs), pour ne pas alourdir la requête sur un grand
+ * nombre de magasins. Lu depuis Shop et non depuis les comptes User (bug trouvé le 15/09/2026, même
+ * cause que nightlyProposalJob.js : filtrer par "role: 'STORE'" faisait disparaître tous les
+ * magasins de ce dashboard après la migration des rôles vers DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER
+ * — un magasin existe indépendamment des comptes qui lui sont éventuellement assignés).
  */
 async function getAdminDashboard() {
-  const shops = await prisma.user.findMany({
-    where: { role: 'STORE', isActive: true, rposShopId: { not: null } },
-    distinct: ['rposShopId'],
-    select: { rposShopId: true, rposShopReference: true, rposShopName: true, rposPosId: true },
+  const shopRows = await prisma.shop.findMany({
+    select: { rposShopId: true, reference: true, name: true, rposPosId: true },
   });
+  const shops = shopRows.map((s) => ({
+    rposShopId: s.rposShopId, rposShopReference: s.reference, rposShopName: s.name, rposPosId: s.rposPosId,
+  }));
 
   const shopIds = shops.map((s) => s.rposShopId);
 
@@ -1404,7 +1467,7 @@ async function getAdminDashboard() {
   // un historique complet).
   const dashboardWindowStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  const [pendingCounts, validatedProposals, allValidatedLines, openImprovements] = await Promise.all([
+  const [pendingCounts, validatedProposals, allValidatedLines, openImprovements, predictionOutcomes] = await Promise.all([
     prisma.proposal.groupBy({
       by: ['rposShopId'],
       where: { rposShopId: { in: shopIds }, status: 'GENERATED' },
@@ -1420,6 +1483,7 @@ async function getAdminDashboard() {
       select: {
         proposal: { select: { rposShopId: true } },
         wasExcluded: true,
+        excludedOutOfScope: true,
         quantitySuggested: true,
         quantityValidated: true,
         daysUntilStockout: true,
@@ -1434,6 +1498,19 @@ async function getAdminDashboard() {
       orderBy: { createdAt: 'desc' },
       select: { id: true, type: true, severity: true, priority: true, title: true, scope: true, status: true, createdAt: true },
       take: 30,
+    }),
+    // KPI §23 (MAE, biais, WAPE) — calculés depuis AIPredictionOutcome, déjà persisté par
+    // predictionOutcomeJob.js (étape 5) : forecastError/absoluteError existent depuis le tout début,
+    // jamais agrégés jusqu'ici pour un vrai dashboard (AI Center, étape 9). Même fenêtre de 90 jours
+    // que le reste de ce tableau de bord, pour rester cohérent et rapide.
+    prisma.aIPredictionOutcome.findMany({
+      where: { evaluatedAt: { gte: dashboardWindowStart } },
+      select: {
+        forecastError: true,
+        absoluteError: true,
+        actualSales: true,
+        prediction: { select: { rposShopId: true } },
+      },
     }),
   ]);
 
@@ -1461,46 +1538,98 @@ async function getAdminDashboard() {
 
   let totalLines = 0;
   let unchangedLines = 0;
+  let modifiedLines = 0;
+  let rejectedLines = 0;
   let stockoutLines = 0;
   let stockoutEligible = 0;
   let overstockLines = 0;
   let overstockEligible = 0;
   const perShopLines = new Map();
 
+  // Toutes les lignes d'une proposition validée, exclues comprises (§23 : taux d'acceptation,
+  // de modification ET de rejet — jusqu'ici seule "acceptation sans modification" était calculée
+  // sous le nom historique "conformité", le rejet et la modification n'étaient jamais distingués).
   for (const line of allValidatedLines) {
+    // Une ligne exclue par le filtrage de sécurité par périmètre de rayon (Rayonniste/Chef de
+    // département validant hors de son rayon assigné, cf. routes/reassort/proposals.js) ne reflète
+    // aucune décision humaine sur CETTE ligne — l'inclure fausserait le taux de rejet métier avec
+    // du bruit purement lié aux permissions. Exclue du dénominateur entier, pas seulement du rejet.
+    if (line.excludedOutOfScope) continue;
+
     const shopId = line.proposal.rposShopId;
-    if (!perShopLines.has(shopId)) perShopLines.set(shopId, { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0 });
+    if (!perShopLines.has(shopId)) {
+      perShopLines.set(shopId, {
+        total: 0, unchanged: 0, modified: 0, rejected: 0,
+        stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0,
+      });
+    }
     const bucket = perShopLines.get(shopId);
 
-    if (!line.wasExcluded) {
-      totalLines += 1;
-      bucket.total += 1;
-      if (line.quantityValidated === line.quantitySuggested) {
-        unchangedLines += 1;
-        bucket.unchanged += 1;
+    totalLines += 1;
+    bucket.total += 1;
+
+    if (line.wasExcluded) {
+      rejectedLines += 1;
+      bucket.rejected += 1;
+      continue; // une ligne rejetée n'a pas de quantité validée à comparer, ni de risque rupture/surstock à mesurer
+    }
+
+    if (line.quantityValidated === line.quantitySuggested) {
+      unchangedLines += 1;
+      bucket.unchanged += 1;
+    } else {
+      modifiedLines += 1;
+      bucket.modified += 1;
+    }
+    if (line.daysUntilStockout !== null && line.daysUntilStockout !== undefined) {
+      stockoutEligible += 1;
+      bucket.stockoutEligible += 1;
+      if (line.daysUntilStockout <= 0) {
+        stockoutLines += 1;
+        bucket.stockout += 1;
       }
-      if (line.daysUntilStockout !== null && line.daysUntilStockout !== undefined) {
-        stockoutEligible += 1;
-        bucket.stockoutEligible += 1;
-        if (line.daysUntilStockout <= 0) {
-          stockoutLines += 1;
-          bucket.stockout += 1;
-        }
-      }
-      if (line.avgWeeklySales !== null && line.avgWeeklySales !== undefined && line.quantityValidated !== null) {
-        overstockEligible += 1;
-        bucket.overstockEligible += 1;
-        const theoreticalNeed = line.avgWeeklySales * (1 + DEFAULT_SAFETY_STOCK_RATIO);
-        if (theoreticalNeed > 0 && line.quantityValidated > theoreticalNeed * DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER) {
-          overstockLines += 1;
-          bucket.overstock += 1;
-        }
+    }
+    if (line.avgWeeklySales !== null && line.avgWeeklySales !== undefined && line.quantityValidated !== null) {
+      overstockEligible += 1;
+      bucket.overstockEligible += 1;
+      const theoreticalNeed = line.avgWeeklySales * (1 + DEFAULT_SAFETY_STOCK_RATIO);
+      if (theoreticalNeed > 0 && line.quantityValidated > theoreticalNeed * DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER) {
+        overstockLines += 1;
+        bucket.overstock += 1;
       }
     }
   }
 
+  // MAE (erreur absolue moyenne), biais (erreur moyenne signée : positif = l'IA sous-estime en
+  // moyenne, négatif = surestime) et WAPE (erreur absolue pondérée par le volume réel — plus
+  // pertinent que le MAPE classique quand actualSales peut être proche de 0, cf. §23 "MAPE / WAPE
+  // selon pertinence"). Une seule passe, global + par magasin, réutilisant forecastError/
+  // absoluteError déjà calculés et persistés par predictionOutcomeJob.js (étape 5) — jamais recalculé
+  // depuis les ventes brutes ici, uniquement agrégé.
+  let sumAbsError = 0;
+  let sumSignedError = 0;
+  let sumActual = 0;
+  const perShopOutcomes = new Map();
+  for (const o of predictionOutcomes) {
+    const shopId = o.prediction.rposShopId;
+    if (!perShopOutcomes.has(shopId)) perShopOutcomes.set(shopId, { count: 0, sumAbsError: 0, sumSignedError: 0, sumActual: 0 });
+    const bucket = perShopOutcomes.get(shopId);
+    bucket.count += 1;
+    bucket.sumAbsError += o.absoluteError;
+    bucket.sumSignedError += o.forecastError;
+    bucket.sumActual += o.actualSales;
+    sumAbsError += o.absoluteError;
+    sumSignedError += o.forecastError;
+    sumActual += o.actualSales;
+  }
+  const globalForecastCount = predictionOutcomes.length;
+
   const perShop = shops.map((s) => {
-    const bucket = perShopLines.get(s.rposShopId) || { total: 0, unchanged: 0, stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0 };
+    const bucket = perShopLines.get(s.rposShopId) || {
+      total: 0, unchanged: 0, modified: 0, rejected: 0,
+      stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0,
+    };
+    const forecastBucket = perShopOutcomes.get(s.rposShopId) || { count: 0, sumAbsError: 0, sumSignedError: 0, sumActual: 0 };
     const validated = validatedByShop.get(s.rposShopId) || [];
     return {
       rposShopId: s.rposShopId,
@@ -1511,8 +1640,20 @@ async function getAdminDashboard() {
       validatedProposals: validated.length,
       lastValidatedAt: validated[0]?.validatedAt || null,
       conformityRate: bucket.total > 0 ? bucket.unchanged / bucket.total : null,
+      // Détail §23 (acceptation/modification/rejet) — conformityRate reste tel quel (nom historique,
+      // déjà affiché ailleurs) mais ne couvrait jamais le rejet ni la modification séparément.
+      acceptanceRate: bucket.total > 0 ? bucket.unchanged / bucket.total : null,
+      modificationRate: bucket.total > 0 ? bucket.modified / bucket.total : null,
+      rejectionRate: bucket.total > 0 ? bucket.rejected / bucket.total : null,
       stockoutRate: bucket.stockoutEligible > 0 ? bucket.stockout / bucket.stockoutEligible : null,
       overstockRate: bucket.overstockEligible > 0 ? bucket.overstock / bucket.overstockEligible : null,
+      // MAE/biais/WAPE (§23) — null tant qu'aucune prédiction n'a encore de résultat évalué pour ce
+      // magasin (fenêtre cible pas encore écoulée, ou job d'évaluation jamais passé) : jamais 0, qui
+      // laisserait croire à tort à une prévision parfaite.
+      forecastMAE: forecastBucket.count > 0 ? forecastBucket.sumAbsError / forecastBucket.count : null,
+      forecastBias: forecastBucket.count > 0 ? forecastBucket.sumSignedError / forecastBucket.count : null,
+      forecastWAPE: forecastBucket.sumActual > 0 ? forecastBucket.sumAbsError / forecastBucket.sumActual : null,
+      forecastEvaluatedCount: forecastBucket.count,
     };
   });
 
@@ -1526,8 +1667,17 @@ async function getAdminDashboard() {
     totalPendingProposals: pendingCounts.reduce((sum, p) => sum + p._count, 0),
     totalValidatedProposals: validatedProposals.length,
     globalConformityRate: totalLines > 0 ? unchangedLines / totalLines : null,
+    globalAcceptanceRate: totalLines > 0 ? unchangedLines / totalLines : null,
+    globalModificationRate: totalLines > 0 ? modifiedLines / totalLines : null,
+    globalRejectionRate: totalLines > 0 ? rejectedLines / totalLines : null,
     globalStockoutRate: stockoutEligible > 0 ? stockoutLines / stockoutEligible : null,
     globalOverstockRate: overstockEligible > 0 ? overstockLines / overstockEligible : null,
+    // KPI §23 de fiabilité des prédictions (MAE/biais/WAPE), agrégés sur tous les magasins —
+    // AIPredictionOutcome existe depuis l'étape 5 mais n'était jamais consulté par ce dashboard.
+    globalForecastMAE: globalForecastCount > 0 ? sumAbsError / globalForecastCount : null,
+    globalForecastBias: globalForecastCount > 0 ? sumSignedError / globalForecastCount : null,
+    globalForecastWAPE: sumActual > 0 ? sumAbsError / sumActual : null,
+    globalForecastEvaluatedCount: globalForecastCount,
     stockoutAlertThreshold,
     perShop,
     // Constats ouverts du Conseiller d'amélioration (§44-46, AI Center) : donne une vue "santé du

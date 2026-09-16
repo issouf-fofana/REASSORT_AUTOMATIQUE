@@ -1,6 +1,10 @@
 <!-- Sidebar Volt partagée entre toutes les pages (injectée par assets/js/layout.js).
-     Organisation plate par sections (PILOTAGE / RÉASSORT / ADMINISTRATION) : aucun groupe
-     repliable, rien ne se referme au changement de page (demande du 14/09/2026).
+     Organisation par sections (PILOTAGE / RÉASSORT / ADMINISTRATION). PILOTAGE reste toujours
+     visible ; RÉASSORT et ADMINISTRATION sont repliables (data-collapse-heading + data-collapse-
+     group), état mémorisé en localStorage par layout.js pour survivre à la ré-injection de ce
+     partiel à chaque changement de page (le problème du 14/09 — un collapse Bootstrap classique se
+     "refermait" simplement parce que le DOM entier, avec son état, est reconstruit à chaque
+     navigation — est ainsi évité : l'état PERSISTE, il n'est jamais perdu). Demande du 16/09/2026.
      État actif : data-nav-item pour les pages (comparé à l'URL par layout.js),
      data-nav-href="tab-xxx" pour les sous-liens Paramètres (comparé au hash, suivi en live). -->
 <nav id="sidebarMenu" class="sidebar d-lg-block bg-gray-800 text-white collapse" data-simplebar>
@@ -46,8 +50,19 @@
                          <span class="sidebar-text">Assistant IA</span>
                     </a>
                </li>
-               <li class="sidebar-heading">Réassort</li>
-               <li class="nav-item" data-nav-item="purchase-order.html">
+               <li class="nav-item" data-nav-item="ai-guide.html">
+                    <a href="/ai-guide" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                         </span>
+                         <span class="sidebar-text">Mon accès</span>
+                    </a>
+               </li>
+               <li class="sidebar-heading sidebar-heading-collapsible" data-collapse-heading="reassort">
+                    <span>Réassort</span>
+                    <iconify-icon icon="solar:alt-arrow-down-linear" class="sidebar-collapse-caret"></iconify-icon>
+               </li>
+               <li class="nav-item" data-nav-item="purchase-order.html" data-collapse-group="reassort">
                     <a class="nav-link d-flex align-items-center" href="/purchase-order">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0z"></path></svg>
@@ -55,7 +70,7 @@
                          <span class="sidebar-text">Proposition de commande</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="purchase-list.html">
+               <li class="nav-item" data-nav-item="purchase-list.html" data-collapse-group="reassort">
                     <a class="nav-link d-flex align-items-center" href="/purchase-list">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path></svg>
@@ -63,7 +78,7 @@
                          <span class="sidebar-text">Historique</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="sales-history.html">
+               <li class="nav-item" data-nav-item="sales-history.html" data-collapse-group="reassort">
                     <a class="nav-link d-flex align-items-center" href="/sales-history">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"></path></svg>
@@ -71,7 +86,7 @@
                          <span class="sidebar-text">Ventes synchronisées</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="ai-predictions.html">
+               <li class="nav-item" data-nav-item="ai-predictions.html" data-collapse-group="reassort">
                     <a class="nav-link d-flex align-items-center" href="/ai-predictions">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
@@ -79,7 +94,7 @@
                          <span class="sidebar-text">IA &amp; Prédictions</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="ai-improvements.html" id="menu-item-ai-improvements" style="display:none;">
+               <li class="nav-item" data-nav-item="ai-improvements.html" data-collapse-group="reassort" id="menu-item-ai-improvements" style="display:none;">
                     <a class="nav-link d-flex align-items-center" href="/ai-improvements">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"></path></svg>
@@ -87,7 +102,7 @@
                          <span class="sidebar-text">Améliorations IA</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="audit-errors.html" id="menu-item-audit-errors" style="display:none;">
+               <li class="nav-item" data-nav-item="audit-errors.html" data-collapse-group="reassort" id="menu-item-audit-errors" style="display:none;">
                     <a class="nav-link d-flex align-items-center" href="/audit-errors">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0v3a1 1 0 102 0v-3zm2-3a1 1 0 011 1v5a1 1 0 11-2 0v-5a1 1 0 011-1zm4-1a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd"></path></svg>
@@ -95,8 +110,11 @@
                          <span class="sidebar-text">Journal d'audit</span>
                     </a>
                </li>
-               <li class="sidebar-heading">Administration</li>
-               <li class="nav-item" id="menu-item-users" data-nav-item="users-list.html" style="display:none;">
+               <li class="sidebar-heading sidebar-heading-collapsible" data-collapse-heading="admin">
+                    <span>Administration</span>
+                    <iconify-icon icon="solar:alt-arrow-down-linear" class="sidebar-collapse-caret"></iconify-icon>
+               </li>
+               <li class="nav-item" id="menu-item-users" data-nav-item="users-list.html" data-collapse-group="admin" style="display:none;">
                     <a href="/users-list" class="nav-link d-flex align-items-center">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"></path></svg>
@@ -104,34 +122,40 @@
                          <span class="sidebar-text">Utilisateurs</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-reassort">
+               <!-- Sous-en-tête interne (pas sidebar-heading : pas un nouveau groupe PILOTAGE/
+                    RÉASSORT/ADMINISTRATION, juste une séparation visuelle entre "Utilisateurs" et les
+                    6 liens de config technique ci-dessous — demande du 16/09/2026 : "j'ai l'impression
+                    que tout les melangé et fais long"). Masqué par défaut comme les liens qu'il
+                    introduit : un rôle non-ADMIN ne doit voir ni les 6 liens, ni cet en-tête vide. -->
+               <li class="sidebar-subheading" id="settings-menu-heading" data-collapse-group="admin" style="display:none;">Paramètres</li>
+               <li class="nav-item" data-nav-href="tab-reassort" data-collapse-group="admin" id="settings-menu-reassort" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-reassort">
-                         <span class="sidebar-text">Paramètres · Réassort</span>
+                         <span class="sidebar-text">Réassort</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-files" id="settings-menu-files" style="display:none;">
+               <li class="nav-item" data-nav-href="tab-files" data-collapse-group="admin" id="settings-menu-files" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-files">
-                         <span class="sidebar-text">Paramètres · Fichiers de ventes</span>
+                         <span class="sidebar-text">Fichiers de ventes</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-rpos" id="settings-menu-rpos" style="display:none;">
+               <li class="nav-item" data-nav-href="tab-rpos" data-collapse-group="admin" id="settings-menu-rpos" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-rpos">
-                         <span class="sidebar-text">Paramètres · RPOS &amp; Sécurité</span>
+                         <span class="sidebar-text">RPOS &amp; Sécurité</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-cron" id="settings-menu-cron" style="display:none;">
+               <li class="nav-item" data-nav-href="tab-cron" data-collapse-group="admin" id="settings-menu-cron" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-cron">
-                         <span class="sidebar-text">Paramètres · Planification</span>
+                         <span class="sidebar-text">Planification</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-sync" id="settings-menu-sync" style="display:none;">
+               <li class="nav-item" data-nav-href="tab-sync" data-collapse-group="admin" id="settings-menu-sync" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-sync">
-                         <span class="sidebar-text">Paramètres · Synchronisation</span>
+                         <span class="sidebar-text">Synchronisation</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-href="tab-ai" id="settings-menu-ai" style="display:none;">
+               <li class="nav-item" data-nav-href="tab-ai" data-collapse-group="admin" id="settings-menu-ai" style="display:none;">
                     <a class="nav-link sidebar-sub" href="/settings#tab-ai">
-                         <span class="sidebar-text">Paramètres · IA</span>
+                         <span class="sidebar-text">IA</span>
                     </a>
                </li>
           </ul>

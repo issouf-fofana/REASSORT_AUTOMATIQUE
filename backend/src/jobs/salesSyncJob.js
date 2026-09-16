@@ -182,9 +182,14 @@ function toSalesLineRows(lines, posId, shopId) {
         quantity,
         revenueExclTax,
         revenueInclTax,
-        // dedupKey inchangée (basée sur le HT uniquement) : ajouter le TTC la changerait pour
-        // toutes les lignes déjà synchronisées, cassant la déduplication au prochain passage
-        // (skipDuplicates ne reconnaîtrait plus les lignes existantes comme des doublons).
+        // Ticket de caisse (receipt.id) : ajouté le 16/09/2026 pour compter le vrai nombre de
+        // ventes (tickets distincts), pas juste le nombre de lignes d'articles — null si RPOS ne le
+        // renvoie pas (config/version de serveur différente), jamais une valeur inventée.
+        receiptId: l.receipt && l.receipt.id ? String(l.receipt.id) : null,
+        // dedupKey inchangée (basée sur le HT uniquement, receipt.id volontairement exclu) : ajouter
+        // un champ à cette clé la changerait pour toutes les lignes déjà synchronisées, cassant la
+        // déduplication au prochain passage (skipDuplicates ne reconnaîtrait plus les lignes
+        // existantes comme des doublons).
         dedupKey: `${shopId}|${ean}|${date}|${quantity}|${revenueExclTax}`,
       };
     });

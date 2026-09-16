@@ -7,10 +7,18 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 router.use(requireAuth, requireAdmin);
 
-const VALID_ROLES = ['ADMIN', 'SUPERVISOR', 'STORE'];
+// Hiérarchie de rôles (plan validé le 15/09/2026) : ADMIN reste l'alias historique de SUPERADMIN
+// (testé tel quel à ~27 endroits du code, jamais renommé pour limiter le risque de régression).
+// DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER remplacent l'ancien STORE unique, avec une granularité
+// magasin entier / département / rayon respectivement — cf. schema.prisma pour le détail.
+const VALID_ROLES = ['ADMIN', 'SUPERVISOR', 'DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER'];
+// Rôles à un seul magasin (rposShopId obligatoire) — remplace l'ancien test "role === 'STORE'".
+const SINGLE_SHOP_ROLES = new Set(['DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER']);
+// Rôles qui nécessitent en plus un département/rayon assigné.
+const DEPARTMENT_SCOPED_ROLES = new Set(['DEPARTMENT_HEAD', 'SHELF_STOCKER']);
 
 function normalizeRole(role) {
-  return VALID_ROLES.includes(role) ? role : 'STORE';
+  return VALID_ROLES.includes(role) ? role : 'DIRECTOR';
 }
 
 function toPublicUser(user) {
@@ -35,12 +43,15 @@ router.get('/', async (req, res) => {
 
 // POST /api/users - crée un compte
 // body: { email, password, name, role, rposShopId, rposShopReference, rposShopName, rposPosId,
+//         assignedDepartment (DEPARTMENT_HEAD/SHELF_STOCKER, nom(s) de département séparés par
+//         virgule pour un rayonniste multi-rayons), aiPermissionsJson (réglage fin optionnel),
 //         supervisedShops: [{ rposShopId, rposShopReference, rposShopName, rposPosId }, ...] }
 router.post('/', async (req, res) => {
   try {
     const {
       email, password, name, role,
       rposShopId, rposShopReference, rposShopName, rposPosId,
+      assignedDepartment, aiPermissionsJson,
       supervisedShops,
     } = req.body;
 
@@ -48,8 +59,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'email, password et name sont requis' });
     }
     const normalizedRole = normalizeRole(role);
-    if (normalizedRole === 'STORE' && (!rposShopId || !rposPosId)) {
-      return res.status(400).json({ success: false, message: 'Un compte STORE doit être rattaché à un magasin et son serveur (rposShopId, rposPosId)' });
+    if (SINGLE_SHOP_ROLES.has(normalizedRole) && (!rposShopId || !rposPosId)) {
+      return res.status(400).json({ success: false, message: 'Ce rôle doit être rattaché à un magasin et son serveur (rposShopId, rposPosId)' });
+    }
+    if (DEPARTMENT_SCOPED_ROLES.has(normalizedRole) && !assignedDepartment) {
+      return res.status(400).json({ success: false, message: 'Ce rôle doit avoir un département/rayon assigné (assignedDepartment)' });
     }
     if (normalizedRole === 'SUPERVISOR' && (!Array.isArray(supervisedShops) || supervisedShops.length === 0)) {
       return res.status(400).json({ success: false, message: 'Un compte SUPERVISOR doit superviser au moins un magasin' });
@@ -63,10 +77,12 @@ router.post('/', async (req, res) => {
         password: hashed,
         name,
         role: normalizedRole,
-        rposShopId: normalizedRole === 'STORE' ? rposShopId : null,
-        rposShopReference: normalizedRole === 'STORE' ? rposShopReference : null,
-        rposShopName: normalizedRole === 'STORE' ? rposShopName : null,
-        rposPosId: normalizedRole === 'STORE' ? rposPosId : null,
+        rposShopId: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposShopId : null,
+        rposShopReference: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposShopReference : null,
+        rposShopName: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposShopName : null,
+        rposPosId: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposPosId : null,
+        assignedDepartment: DEPARTMENT_SCOPED_ROLES.has(normalizedRole) ? assignedDepartment : null,
+        aiPermissionsJson: aiPermissionsJson ? JSON.stringify(aiPermissionsJson) : null,
         supervisedShops: normalizedRole === 'SUPERVISOR'
           ? { create: supervisedShops.map((s) => ({
               rposShopId: s.rposShopId, rposShopReference: s.rposShopReference,
@@ -88,12 +104,14 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/users/:id - met à jour un compte (magasin, rôle, actif, mot de passe optionnel,
-// liste des magasins supervisés pour un SUPERVISOR)
+// liste des magasins supervisés pour un SUPERVISOR, département/rayon assigné et permissions IA
+// personnalisées pour DEPARTMENT_HEAD/SHELF_STOCKER/DIRECTOR)
 router.put('/:id', async (req, res) => {
   try {
     const {
       email, name, role,
       rposShopId, rposShopReference, rposShopName, rposPosId,
+      assignedDepartment, aiPermissionsJson,
       supervisedShops, isActive, password,
     } = req.body;
 
@@ -103,17 +121,28 @@ router.put('/:id', async (req, res) => {
     if (role !== undefined) data.role = normalizeRole(role);
     if (isActive !== undefined) data.isActive = isActive;
     if (password) data.password = await bcrypt.hash(password, 10);
+    // aiPermissionsJson : réglage fin optionnel, jamais recalculé automatiquement — un champ omis
+    // du body (undefined) laisse la valeur existante intacte ; null l'efface explicitement pour
+    // revenir au défaut du rôle (cf. aiPermissionsService.getEffectivePermissions).
+    if (aiPermissionsJson !== undefined) data.aiPermissionsJson = aiPermissionsJson ? JSON.stringify(aiPermissionsJson) : null;
 
     if (data.role === 'ADMIN' || data.role === 'SUPERVISOR') {
       data.rposShopId = null;
       data.rposShopReference = null;
       data.rposShopName = null;
       data.rposPosId = null;
-    } else if (data.role === 'STORE') {
+      data.assignedDepartment = null;
+    } else if (SINGLE_SHOP_ROLES.has(data.role)) {
       if (rposShopId !== undefined) data.rposShopId = rposShopId;
       if (rposShopReference !== undefined) data.rposShopReference = rposShopReference;
       if (rposShopName !== undefined) data.rposShopName = rposShopName;
       if (rposPosId !== undefined) data.rposPosId = rposPosId;
+      data.assignedDepartment = DEPARTMENT_SCOPED_ROLES.has(data.role) ? (assignedDepartment ?? null) : null;
+    } else if (assignedDepartment !== undefined) {
+      // role non fourni dans cette requête (édition d'un autre champ) : on n'écrase
+      // assignedDepartment que si explicitement transmis, jamais par déduction du rôle actuel non
+      // reçu ici.
+      data.assignedDepartment = assignedDepartment;
     }
 
     // Remplace entièrement la liste des magasins supervisés si fournie (édition explicite),

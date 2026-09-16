@@ -60,6 +60,15 @@ const KEYS = {
   // Paramètres > IA (admin) sans redéploiement. Placeholders remplacés avant l'envoi au LLM :
   // {{shopReference}}, {{shopName}}, {{articles}} (JSON des articles à analyser).
   AI_ANALYSIS_PROMPT_TEMPLATE: 'AI_ANALYSIS_PROMPT_TEMPLATE',
+  // Persona/ton/consignes de format du chatbot (chatbotService.js buildChatbotPrompt) : éditable
+  // depuis Paramètres > IA (admin), demande du 16/09/2026 ("les prompts de configuration il ne faut
+  // pas mettre en dur dans le code"). Placeholders : {{context}} (magasin/rayon sélectionné),
+  // {{dataSection}} (données réelles récupérées ou liste des capacités — calculé par le code selon
+  // la question, jamais éditable ici), {{historySection}}, {{question}}. La règle anti-hallucination
+  // (§35 du cahier des charges — ne jamais inventer un chiffre) et le nom exact des champs
+  // salesCount/articleLineCount restent codés en dur dans buildChatbotPrompt, PAS dans ce template :
+  // une modification malheureuse depuis l'UI ne doit jamais pouvoir désactiver cette protection.
+  CHATBOT_PROMPT_TEMPLATE: 'CHATBOT_PROMPT_TEMPLATE',
   // Questions suggérées affichées dans l'Assistant IA (chatbotService.js) — une question par ligne.
   // Éditable depuis Paramètres > IA (admin), sans redéploiement. Sert aussi de liste de référence
   // pour indiquer au magasin ce que l'assistant sait réellement faire quand une question posée sort
@@ -70,6 +79,13 @@ const KEYS = {
   // (admin), sans redéploiement — permet d'ajuster le comportement de l'IA (ton, format,
   // fichiers de référence) sans toucher au code.
   IMPROVEMENTS_PROMPT_TEMPLATE: 'IMPROVEMENTS_PROMPT_TEMPLATE',
+  // Règles de détection d'intention du chatbot (chatbotService.js INTENT_RULES) — demande du
+  // 16/09/2026 : "rend la tab dynamique au cas ou je veux ajouter des mot ou corrigé". Stocké en
+  // JSON (tableau [{keywords: string[], tool: string}, ...]), édité via un formulaire structuré
+  // dans Paramètres > IA (pas un textarea JSON brut : une erreur de syntaxe ne doit jamais pouvoir
+  // casser le chatbot). L'ORDRE du tableau compte (la première règle qui matche gagne) — l'UI doit
+  // permettre de réordonner, pas seulement ajouter/supprimer.
+  CHATBOT_INTENT_RULES: 'CHATBOT_INTENT_RULES',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -180,6 +196,22 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
+  [KEYS.CHATBOT_PROMPT_TEMPLATE]: () => `Tu es l'Assistant IA Store d'un magasin de grande distribution. Tu réponds aux questions du responsable magasin sur le réassort, les ventes, les stocks et les prévisions.
+
+Contexte :
+{{context}}
+
+{{dataSection}}
+
+{{historySection}}Question du responsable magasin : {{question}}
+
+Réponds en français, de façon directe et concise, en Markdown léger (gras **mot** pour les chiffres clés). Ne résume jamais à l'excès une question vague : si les données ci-dessus contiennent plusieurs informations pertinentes pour répondre (ex: plusieurs types de mouvement, plusieurs jours, plusieurs sous-totaux), donne-les TOUTES même si la question ne les nomme pas explicitement une par une — l'utilisateur qui demande "combien de types de mouvement" attend le détail de chaque type avec sa quantité, pas seulement un nombre total de types. Règle de format selon le contenu de ta réponse :
+- Si la question porte sur "quels articles" (ruptures, surstock, à commander...) et que les données listent plusieurs articles : réponds avec UNE PUCE PAR ARTICLE nommé explicitement (label + chiffre clé, ex: "**LAMP BUR** : rupture dans **2 jours**, réassort suggéré **5** unités"), jamais un total agrégé seul qui masque quels articles précis sont concernés. Maximum 8 puces — au-delà, indique le nombre total et ne détaille que les plus urgents/importants.
+- Si la question porte sur les mouvements de stock d'un article (byType/recentMoves dans les données) : réponds avec UNE PUCE PAR TYPE DE MOUVEMENT (ex: "**Vente** : 12 mouvements, -45 unités", "**Casse** : 1 mouvement, -3 unités"), jamais juste "il y a eu 3 types de mouvement" sans les nommer.
+- Si la question porte sur une évolution/tendance globale (ventes, CA) sans lister d'articles : un court paragraphe avec les chiffres clés suffit, pas de liste forcée.
+- Sinon (réponse à une seule idée) : 1-2 phrases courtes.
+Ne réponds jamais par un seul chiffre agrégé quand la question demande explicitement "quels articles" — l'utilisateur veut toujours savoir lesquels, pas seulement combien.
+Si la question posée contient PLUSIEURS demandes distinctes (ex: "donne-moi le prix ET l'historique de rupture") et que les données ci-dessus ne couvrent qu'UNE seule de ces demandes : réponds à celle que tu peux avec ces données, PUIS indique explicitement en une phrase que l'autre partie de la question nécessite une question séparée (précise laquelle) — ne l'ignore jamais silencieusement.`,
   [KEYS.CHATBOT_SUGGESTED_QUESTIONS]: () => [
     'Quels articles risquent d\'être en rupture ?',
     'Quels articles sont en surstock ?',
@@ -201,6 +233,26 @@ Réponds en français, 5 lignes max, format STRICT (rien d'autre) :
 EXPLOITATION: <1 action concrète côté réglages ou exploitation (nommer la clé de config ou la page Paramètres si pertinent)>
 DEV: <1 correctif code avec les fichiers concernés (chemins backend/src/... ou frontend/...), ou "RAS" si le constat ne relève pas du code>
 CONFIANCE: <0-100, ton niveau de confiance dans cette analyse vu les preuves fournies>`,
+  // Copie exacte de l'ancien INTENT_RULES codé en dur dans chatbotService.js (migré le 16/09/2026).
+  // L'ORDRE compte : la première règle dont un mot-clé matche la question gagne — reproduit ici
+  // dans le même ordre que l'original pour ne rien changer au comportement existant au moment de
+  // la migration. La règle Pareto générique (X% du CA, n'importe quel X) reste codée en dur dans
+  // chatbotService.js (PARETO_PATTERN_REGEX, une vraie regex, pas un mot-clé exact) — hors de cette
+  // liste éditable, toujours vérifiée en premier.
+  [KEYS.CHATBOT_INTENT_RULES]: () => JSON.stringify([
+    { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', 'quand a-t-il changé de prix', 'quand est-ce que le prix', 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', "quand est-ce qu'il", 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
+    { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
+    { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', "détails de l'article", 'details de larticle', 'infos article', "informations sur l'article", 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
+    { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente'], tool: 'getParetoArticles' },
+    { keywords: ["chiffre d'affaires", 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
+    { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
+    { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
+    { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', 'lia se trompe', "l'ia se trompe", 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
+    { keywords: ['commande', 'commandes récentes', "qu'est-ce qui a été commandé", 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
+    { keywords: ['proposition', 'proposition en attente', "aujourd'hui", 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
+    { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
+    { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien'], tool: 'getArticleStock' },
+  ]),
 };
 
 async function getValue(key) {

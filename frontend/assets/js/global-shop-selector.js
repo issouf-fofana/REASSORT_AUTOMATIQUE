@@ -61,9 +61,10 @@
     const user = window.reassortGetUser && window.reassortGetUser();
     if (!user) return;
 
-    if (user.role === 'STORE') {
-      // Un seul magasin possible : pas de sélecteur, juste l'affichage déjà géré par
-      // shop-picker.js/purchase-order.html via #page-shop-context (lecture seule).
+    if (window.reassortIsSingleShopRole(user.role)) {
+      // Un seul magasin possible (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE) : pas de
+      // sélecteur, juste l'affichage déjà géré par shop-picker.js/purchase-order.html via
+      // #page-shop-context (lecture seule).
       btn.style.display = 'none';
       return;
     }

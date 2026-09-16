@@ -226,17 +226,17 @@
                               };
 
                               function selectedShopId() {
-                                   if (currentUser.role !== 'STORE') return shopSelect.value || '';
+                                   if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.value || '';
                                    return currentUser.rposShopId;
                               }
 
                               function selectedPosId() {
-                                   if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
+                                   if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
                                    return currentUser.rposPosId;
                               }
 
                               async function initShopPicker() {
-                                   if (currentUser.role === 'STORE') {
+                                   if (window.reassortIsSingleShopRole(currentUser.role)) {
                                         document.getElementById('stat-shop-ref').textContent = currentUser.rposShopReference || '—';
                                         document.getElementById('stat-shop-name').textContent = currentUser.rposShopName || '—';
                                         return;
@@ -268,7 +268,7 @@
                               }
 
                               function updateShopCard() {
-                                   if (currentUser.role !== 'STORE' && shopSelect.selectedOptions.length) {
+                                   if (!window.reassortIsSingleShopRole(currentUser.role) && shopSelect.selectedOptions.length) {
                                         document.getElementById('stat-shop-ref').textContent = shopSelect.selectedOptions[0].dataset.reference;
                                         document.getElementById('stat-shop-name').textContent = shopSelect.selectedOptions[0].dataset.name;
                                    }

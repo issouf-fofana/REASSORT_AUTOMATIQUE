@@ -85,10 +85,16 @@
                                                   </div>
                                                   <div class="mb-3">
                                                        <label class="form-label">Rôle</label>
+                                                       <!-- Hiérarchie à 5 niveaux (plan validé le 15/09/2026), du plus restreint au plus large :
+                                                            Rayonniste (un/plusieurs rayons), Chef de département (un département), Directeur (un
+                                                            magasin entier), Superviseur (plusieurs magasins), Administrateur (tous les magasins +
+                                                            configuration). ADMIN reste le nom technique historique (alias "Administrateur"). -->
                                                        <select id="new-user-role" class="form-select">
-                                                            <option value="STORE">Magasin (accès à un seul magasin)</option>
-                                                            <option value="SUPERVISOR">Superviseur (accès à plusieurs magasins choisis)</option>
-                                                            <option value="ADMIN">Administrateur (accès à tous les magasins)</option>
+                                                            <option value="SHELF_STOCKER">Rayonniste (un ou plusieurs rayons)</option>
+                                                            <option value="DEPARTMENT_HEAD">Chef de département (un département)</option>
+                                                            <option value="DIRECTOR" selected>Directeur (un magasin entier)</option>
+                                                            <option value="SUPERVISOR">Superviseur (plusieurs magasins choisis)</option>
+                                                            <option value="ADMIN">Administrateur (tous les magasins + configuration)</option>
                                                        </select>
                                                   </div>
                                                   <div class="mb-3" id="new-user-shop-wrapper">
@@ -97,11 +103,26 @@
                                                             <option value="">Chargement des magasins...</option>
                                                        </select>
                                                   </div>
+                                                  <div class="mb-3" id="new-user-department-wrapper" style="display:none;">
+                                                       <label class="form-label" id="new-user-department-label">Département assigné</label>
+                                                       <div id="new-user-department-checklist" class="border rounded p-2 small" style="max-height: 220px; overflow-y: auto;">
+                                                            <div class="text-muted small">Sélectionnez un magasin pour charger ses rayons...</div>
+                                                       </div>
+                                                       <div class="form-text">Rayons réels du magasin choisi ci-dessus (synchronisés depuis RPOS) — pour un Rayonniste couvrant plusieurs rayons, cochez-en plusieurs.</div>
+                                                  </div>
                                                   <div class="mb-3" id="new-user-supervised-wrapper" style="display:none;">
                                                        <label class="form-label">Magasins supervisés</label>
                                                        <div id="new-user-supervised-checklist" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
                                                             <div class="text-muted small">Chargement des magasins...</div>
                                                        </div>
+                                                  </div>
+                                                  <!-- Permissions IA personnalisées (plan §3 : réglage fin optionnel, part du défaut du rôle
+                                                       choisi ci-dessus — cf. aiPermissionsService.js côté backend). Affiché pour tous les rôles
+                                                       sauf ADMIN (toujours accès complet, jamais restreignable). -->
+                                                  <div class="mb-3" id="new-user-ai-permissions-wrapper">
+                                                       <label class="form-label">Permissions Assistant IA</label>
+                                                       <div id="new-user-ai-permissions-checklist" class="border rounded p-2 small"></div>
+                                                       <div class="form-text">Pré-cochées selon le rôle choisi — décochez pour restreindre davantage cet utilisateur précis.</div>
                                                   </div>
                                                   <button type="submit" id="create-user-submit" class="btn btn-primary w-100">Créer le compte</button>
                                              </form>
@@ -135,6 +156,62 @@
                                              </div>
                                         </div>
                                    </div>
+                              </div>
+                         </div>
+                    </div>
+
+                    <!-- Modification d'un compte existant (plan de rôles validé le 15/09/2026, étape 2) :
+                         rôle, magasin, département/rayon assigné et permissions IA personnalisées — jusqu'ici
+                         un rôle ne pouvait être défini qu'à la création, sans aucun moyen de le corriger
+                         ensuite (ex: promouvoir un Rayonniste en Chef de département) sans supprimer/recréer
+                         le compte. -->
+                    <div class="modal fade" id="edit-user-modal" tabindex="-1" aria-hidden="true">
+                         <div class="modal-dialog">
+                              <div class="modal-content">
+                                   <div class="modal-header">
+                                        <h5 class="modal-title">Modifier le compte</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                   </div>
+                                   <form id="edit-user-form">
+                                        <div class="modal-body">
+                                             <p class="text-muted" id="edit-user-target"></p>
+                                             <div id="edit-user-error" class="alert alert-danger" style="display:none;"></div>
+                                             <div class="mb-3">
+                                                  <label class="form-label">Rôle</label>
+                                                  <select id="edit-user-role" class="form-select">
+                                                       <option value="SHELF_STOCKER">Rayonniste (un ou plusieurs rayons)</option>
+                                                       <option value="DEPARTMENT_HEAD">Chef de département (un département)</option>
+                                                       <option value="DIRECTOR">Directeur (un magasin entier)</option>
+                                                       <option value="SUPERVISOR">Superviseur (plusieurs magasins choisis)</option>
+                                                       <option value="ADMIN">Administrateur (tous les magasins + configuration)</option>
+                                                  </select>
+                                             </div>
+                                             <div class="mb-3" id="edit-user-shop-wrapper">
+                                                  <label class="form-label">Magasin assigné</label>
+                                                  <select id="edit-user-shop" class="form-select" data-independent-shop="1">
+                                                       <option value="">Chargement des magasins...</option>
+                                                  </select>
+                                             </div>
+                                             <div class="mb-3" id="edit-user-department-wrapper" style="display:none;">
+                                                  <label class="form-label" id="edit-user-department-label">Département assigné</label>
+                                                  <div id="edit-user-department-checklist" class="border rounded p-2 small" style="max-height: 220px; overflow-y: auto;">
+                                                       <div class="text-muted small">Sélectionnez un magasin pour charger ses rayons...</div>
+                                                  </div>
+                                             </div>
+                                             <div class="mb-3" id="edit-user-supervised-wrapper" style="display:none;">
+                                                  <label class="form-label">Magasins supervisés</label>
+                                                  <div id="edit-user-supervised-checklist" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;"></div>
+                                             </div>
+                                             <div class="mb-3" id="edit-user-ai-permissions-wrapper">
+                                                  <label class="form-label">Permissions Assistant IA</label>
+                                                  <div id="edit-user-ai-permissions-checklist" class="border rounded p-2 small"></div>
+                                             </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                             <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+                                             <button type="submit" id="edit-user-submit" class="btn btn-primary">Enregistrer</button>
+                                        </div>
+                                   </form>
                               </div>
                          </div>
                     </div>
@@ -181,8 +258,47 @@
                               const roleSelect = document.getElementById('new-user-role');
                               const shopWrapper = document.getElementById('new-user-shop-wrapper');
                               const shopSelect = document.getElementById('new-user-shop');
+                              const departmentWrapper = document.getElementById('new-user-department-wrapper');
+                              const departmentLabel = document.getElementById('new-user-department-label');
+                              const departmentChecklist = document.getElementById('new-user-department-checklist');
                               const supervisedWrapper = document.getElementById('new-user-supervised-wrapper');
                               const supervisedChecklist = document.getElementById('new-user-supervised-checklist');
+                              const aiPermissionsWrapper = document.getElementById('new-user-ai-permissions-wrapper');
+                              const aiPermissionsChecklist = document.getElementById('new-user-ai-permissions-checklist');
+
+                              // Miroir des capacités/défauts par rôle côté backend (aiPermissionsService.js) — purement
+                              // pour l'affichage/pré-cochage ici, le backend reste seul juge de ce qui est réellement
+                              // appliqué (une modification de ce mapping ici ne change aucune sécurité, seulement l'UX).
+                              const AI_CAPABILITIES = [
+                                   { key: 'revenueShop', label: 'Chiffre d\'affaires du magasin (global)' },
+                                   { key: 'revenueArticle', label: 'Chiffre d\'affaires d\'un article / département' },
+                                   { key: 'articleDetails', label: 'Fiche article (prix, emplacement, promotions)' },
+                                   { key: 'stock', label: 'Stock, ruptures et surstock' },
+                                   { key: 'sales', label: 'Ventes et tendances' },
+                                   { key: 'orders', label: 'Commandes et propositions' },
+                                   { key: 'accuracy', label: 'Fiabilité de l\'IA' },
+                              ];
+                              const AI_ROLE_DEFAULTS = {
+                                   SHELF_STOCKER: { revenueShop: false, revenueArticle: false, articleDetails: true, stock: true, sales: true, orders: true, accuracy: true },
+                                   DEPARTMENT_HEAD: { revenueShop: false, revenueArticle: true, articleDetails: true, stock: true, sales: true, orders: true, accuracy: true },
+                                   DIRECTOR: { revenueShop: true, revenueArticle: true, articleDetails: true, stock: true, sales: true, orders: true, accuracy: true },
+                                   SUPERVISOR: { revenueShop: true, revenueArticle: true, articleDetails: true, stock: true, sales: true, orders: true, accuracy: true },
+                              };
+
+                              function renderAiPermissionsChecklist(role) {
+                                   if (role === 'ADMIN') {
+                                        aiPermissionsWrapper.style.display = 'none';
+                                        return;
+                                   }
+                                   aiPermissionsWrapper.style.display = '';
+                                   const defaults = AI_ROLE_DEFAULTS[role] || AI_ROLE_DEFAULTS.DIRECTOR;
+                                   aiPermissionsChecklist.innerHTML = AI_CAPABILITIES.map(function (cap) {
+                                        return '<div class="form-check">' +
+                                             '<input class="form-check-input ai-perm-check" type="checkbox" value="' + cap.key + '" id="ai-perm-' + cap.key + '"' + (defaults[cap.key] ? ' checked' : '') + '>' +
+                                             '<label class="form-check-label" for="ai-perm-' + cap.key + '">' + cap.label + '</label>' +
+                                             '</div>';
+                                   }).join('');
+                              }
                               const form = document.getElementById('create-user-form');
                               const errorBox = document.getElementById('create-user-error');
                               const submitBtn = document.getElementById('create-user-submit');
@@ -222,10 +338,67 @@
                                    }).join('');
                               }
 
+                              const SINGLE_SHOP_ROLES = new Set(['DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER']);
+                              const DEPARTMENT_SCOPED_ROLES = new Set(['DEPARTMENT_HEAD', 'SHELF_STOCKER']);
+
+                              // Rayons réels du magasin sélectionné, chargés depuis RPOS (remplace le champ texte libre
+                              // du 16/09/2026 : une faute de frappe y rendait silencieusement le filtre par département
+                              // inopérant, cf. filterProposalLinesForUser/aiPermissionsService.js — aucune ligne ne
+                              // matchait jamais un nom mal orthographié, et l'utilisateur voyait "aucun article" sans
+                              // comprendre pourquoi). Un jeton de requête évite qu'une réponse lente pour un ancien
+                              // magasin n'écrase la liste d'un magasin sélectionné entre-temps (même pattern que les
+                              // autres pages de ce projet contre les races sur changement de magasin).
+                              // Fonction générique réutilisée par les formulaires de création ET d'édition (mêmes
+                              // deux instances de champ, seul l'id du <select> magasin et du conteneur de checkboxes
+                              // diffère) — un jeton de requête par CONTENEUR (pas global) évite qu'une réponse lente
+                              // pour un ancien magasin n'écrase la liste d'un magasin sélectionné entre-temps, y
+                              // compris quand création et édition sont utilisées l'une après l'autre.
+                              const rayonsLoadTokens = new WeakMap();
+                              async function loadRayonsFor(shopSelectEl, checklistEl, previouslyChecked) {
+                                   const shopId = shopSelectEl.value;
+                                   const token = (rayonsLoadTokens.get(checklistEl) || 0) + 1;
+                                   rayonsLoadTokens.set(checklistEl, token);
+                                   if (!shopId) {
+                                        checklistEl.innerHTML = '<div class="text-muted small">Sélectionnez un magasin pour charger ses rayons...</div>';
+                                        return;
+                                   }
+                                   checklistEl.innerHTML = '<div class="text-muted small">Chargement des rayons...</div>';
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/shops/' + encodeURIComponent(shopId) + '/rayons');
+                                        const json = await res.json();
+                                        if (rayonsLoadTokens.get(checklistEl) !== token) return;
+                                        if (!json.success) throw new Error(json.message);
+                                        if (!json.data.length) {
+                                             checklistEl.innerHTML = '<div class="text-muted small">Aucun rayon trouvé pour ce magasin.</div>';
+                                             return;
+                                        }
+                                        const checkedSet = new Set(previouslyChecked || []);
+                                        const idPrefix = checklistEl.id + '-';
+                                        checklistEl.innerHTML = json.data.map(function (name, i) {
+                                             const checked = checkedSet.has(name) ? ' checked' : '';
+                                             return '<div class="form-check">' +
+                                                  '<input class="form-check-input dept-check" type="checkbox" value="' + name.replace(/"/g, '&quot;') + '" id="' + idPrefix + i + '"' + checked + '>' +
+                                                  '<label class="form-check-label" for="' + idPrefix + i + '">' + name + '</label>' +
+                                                  '</div>';
+                                        }).join('');
+                                   } catch (err) {
+                                        if (rayonsLoadTokens.get(checklistEl) !== token) return;
+                                        checklistEl.innerHTML = '<div class="text-danger small">Erreur de chargement des rayons : ' + err.message + '</div>';
+                                   }
+                              }
+
                               roleSelect.addEventListener('change', function () {
-                                   shopWrapper.style.display = roleSelect.value === 'STORE' ? 'block' : 'none';
-                                   shopSelect.required = roleSelect.value === 'STORE';
-                                   supervisedWrapper.style.display = roleSelect.value === 'SUPERVISOR' ? 'block' : 'none';
+                                   const role = roleSelect.value;
+                                   shopWrapper.style.display = SINGLE_SHOP_ROLES.has(role) ? 'block' : 'none';
+                                   shopSelect.required = SINGLE_SHOP_ROLES.has(role);
+                                   departmentWrapper.style.display = DEPARTMENT_SCOPED_ROLES.has(role) ? 'block' : 'none';
+                                   departmentLabel.textContent = role === 'SHELF_STOCKER' ? 'Rayon(s) assigné(s)' : 'Département assigné';
+                                   supervisedWrapper.style.display = role === 'SUPERVISOR' ? 'block' : 'none';
+                                   renderAiPermissionsChecklist(role);
+                                   if (DEPARTMENT_SCOPED_ROLES.has(role)) loadRayonsFor(shopSelect, departmentChecklist);
+                              });
+                              shopSelect.addEventListener('change', function () {
+                                   if (DEPARTMENT_SCOPED_ROLES.has(roleSelect.value)) loadRayonsFor(shopSelect, departmentChecklist);
                               });
 
                               form.addEventListener('submit', async function (e) {
@@ -242,11 +415,33 @@
                                         password: document.getElementById('new-user-password').value,
                                         role: role,
                                    };
-                                   if (role === 'STORE' && selectedOption) {
+                                   if (SINGLE_SHOP_ROLES.has(role) && selectedOption) {
                                         payload.rposShopId = selectedOption.value;
                                         payload.rposShopReference = selectedOption.dataset.reference;
                                         payload.rposShopName = selectedOption.dataset.name;
                                         payload.rposPosId = selectedOption.dataset.posId;
+                                   }
+                                   if (DEPARTMENT_SCOPED_ROLES.has(role)) {
+                                        const checkedDepts = Array.from(departmentChecklist.querySelectorAll('.dept-check:checked')).map(function (c) { return c.value; });
+                                        payload.assignedDepartment = checkedDepts.join(',');
+                                        if (!payload.assignedDepartment) {
+                                             errorBox.textContent = 'Sélectionnez au moins un rayon assigné.';
+                                             errorBox.style.display = 'block';
+                                             submitBtn.disabled = false;
+                                             return;
+                                        }
+                                   }
+                                   if (role !== 'ADMIN') {
+                                        // Ne transmet que les capacités DÉCOCHÉES par rapport au défaut du rôle (JSON minimal,
+                                        // cohérent avec aiPermissionsService.getEffectivePermissions qui fusionne { ...défaut,
+                                        // ...personnalisé } — inutile de renvoyer les valeurs déjà égales au défaut).
+                                        const defaults = AI_ROLE_DEFAULTS[role] || AI_ROLE_DEFAULTS.DIRECTOR;
+                                        const custom = {};
+                                        aiPermissionsChecklist.querySelectorAll('.ai-perm-check').forEach(function (c) {
+                                             const checked = c.checked;
+                                             if (checked !== !!defaults[c.value]) custom[c.value] = checked;
+                                        });
+                                        if (Object.keys(custom).length) payload.aiPermissionsJson = custom;
                                    }
                                    if (role === 'SUPERVISOR') {
                                         const checked = Array.from(supervisedChecklist.querySelectorAll('input:checked'));
@@ -282,18 +477,25 @@
                                    }
                               });
 
+                              let usersList = [];
                               async function loadUsers() {
                                    usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
                                    try {
                                         const res = await window.reassortFetch('/users');
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
+                                        usersList = json.data;
 
                                         if (!json.data.length) {
                                              usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucun compte.</td></tr>';
                                              return;
                                         }
 
+                                        const ROLE_LABELS = {
+                                             ADMIN: 'Administrateur', SUPERVISOR: 'Superviseur', DIRECTOR: 'Directeur',
+                                             DEPARTMENT_HEAD: 'Chef de département', SHELF_STOCKER: 'Rayonniste',
+                                             STORE: 'Magasin (ancien rôle)', // ne devrait plus apparaître après migration, gardé par prudence
+                                        };
                                         usersTbody.innerHTML = json.data.map(function (u) {
                                              let shopLabel;
                                              if (u.role === 'ADMIN') {
@@ -305,8 +507,9 @@
                                                        : '<span class="text-danger">Aucun magasin</span>';
                                              } else {
                                                   shopLabel = u.rposShopReference ? u.rposShopReference + ' - ' + u.rposShopName : '<span class="text-danger">Non assigné</span>';
+                                                  if (u.assignedDepartment) shopLabel += ' <span class="text-muted small">(' + u.assignedDepartment + ')</span>';
                                              }
-                                             const roleLabel = u.role === 'ADMIN' ? 'Administrateur' : (u.role === 'SUPERVISOR' ? 'Superviseur' : 'Magasin');
+                                             const roleLabel = ROLE_LABELS[u.role] || u.role;
                                              const statusBadge = u.isActive
                                                   ? '<span class="badge bg-success-subtle text-success py-1 px-2">Actif</span>'
                                                   : '<span class="badge bg-secondary-subtle text-secondary py-1 px-2">Désactivé</span>';
@@ -318,6 +521,9 @@
                                                   '<td>' + statusBadge + '</td>' +
                                                   '<td>' +
                                                        '<div class="d-flex gap-1">' +
+                                                       '<button class="btn btn-sm btn-outline-dark edit-user-btn" data-id="' + u.id + '">' +
+                                                            'Modifier' +
+                                                       '</button>' +
                                                        '<button class="btn btn-sm btn-outline-secondary toggle-user-btn" data-id="' + u.id + '" data-active="' + u.isActive + '">' +
                                                             (u.isActive ? 'Désactiver' : 'Réactiver') +
                                                        '</button>' +
@@ -344,6 +550,13 @@
                                                   } catch (err) {
                                                        btn.disabled = false;
                                                   }
+                                             });
+                                        });
+
+                                        document.querySelectorAll('.edit-user-btn').forEach(function (btn) {
+                                             btn.addEventListener('click', function () {
+                                                  const u = usersList.find(function (x) { return x.id === btn.dataset.id; });
+                                                  if (u) openEditModal(u);
                                              });
                                         });
 
@@ -400,9 +613,183 @@
                                    }
                               });
 
+                              // Modal de modification d'un compte existant (étape 2 du plan de rôles) : réutilise
+                              // les mêmes listes de magasins déjà chargées (shopsList) et le même mapping de
+                              // permissions par défaut (AI_ROLE_DEFAULTS) que le formulaire de création.
+                              let editUserTargetId = null;
+                              let editUserModal = null;
+                              function getEditUserModal() {
+                                   if (!editUserModal) editUserModal = new bootstrap.Modal(document.getElementById('edit-user-modal'));
+                                   return editUserModal;
+                              }
+                              const editForm = document.getElementById('edit-user-form');
+                              const editError = document.getElementById('edit-user-error');
+                              const editTargetLabel = document.getElementById('edit-user-target');
+                              const editSubmitBtn = document.getElementById('edit-user-submit');
+                              const editRoleSelect = document.getElementById('edit-user-role');
+                              const editShopWrapper = document.getElementById('edit-user-shop-wrapper');
+                              const editShopSelect = document.getElementById('edit-user-shop');
+                              const editDepartmentWrapper = document.getElementById('edit-user-department-wrapper');
+                              const editDepartmentLabel = document.getElementById('edit-user-department-label');
+                              const editDepartmentChecklist = document.getElementById('edit-user-department-checklist');
+                              const editSupervisedWrapper = document.getElementById('edit-user-supervised-wrapper');
+                              const editSupervisedChecklist = document.getElementById('edit-user-supervised-checklist');
+                              const editAiPermissionsWrapper = document.getElementById('edit-user-ai-permissions-wrapper');
+                              const editAiPermissionsChecklist = document.getElementById('edit-user-ai-permissions-checklist');
+
+                              function renderEditShopOptions() {
+                                   const byPos = {};
+                                   shopsList.forEach(function (s) {
+                                        if (!byPos[s.posId]) byPos[s.posId] = [];
+                                        byPos[s.posId].push(s);
+                                   });
+                                   editShopSelect.innerHTML = Object.keys(byPos).sort(function (a, b) { return parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10); }).map(function (posId) {
+                                        const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference||'').localeCompare(b.reference||''); });
+                                        const options = shops.map(function (s) {
+                                             return '<option value="' + s.id + '" data-pos-id="' + s.posId + '" data-reference="' + s.reference + '" data-name="' + s.name + '">' + s.reference + ' - ' + s.name + '</option>';
+                                        }).join('');
+                                        return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
+                                   }).join('');
+                                   editSupervisedChecklist.innerHTML = shopsList.map(function (s, i) {
+                                        return '<div class="form-check">' +
+                                             '<input class="form-check-input" type="checkbox" value="' + i + '" id="edit-supervised-check-' + i + '">' +
+                                             '<label class="form-check-label" for="edit-supervised-check-' + i + '">' + s.reference + ' - ' + s.name + '</label>' +
+                                             '</div>';
+                                   }).join('');
+                              }
+
+                              function renderEditAiPermissionsChecklist(role, customJson) {
+                                   if (role === 'ADMIN') {
+                                        editAiPermissionsWrapper.style.display = 'none';
+                                        return;
+                                   }
+                                   editAiPermissionsWrapper.style.display = '';
+                                   const defaults = AI_ROLE_DEFAULTS[role] || AI_ROLE_DEFAULTS.DIRECTOR;
+                                   let custom = {};
+                                   if (customJson) {
+                                        try { custom = JSON.parse(customJson); } catch { custom = {}; }
+                                   }
+                                   const effective = Object.assign({}, defaults, custom);
+                                   editAiPermissionsChecklist.innerHTML = AI_CAPABILITIES.map(function (cap) {
+                                        return '<div class="form-check">' +
+                                             '<input class="form-check-input edit-ai-perm-check" type="checkbox" value="' + cap.key + '" id="edit-ai-perm-' + cap.key + '"' + (effective[cap.key] ? ' checked' : '') + '>' +
+                                             '<label class="form-check-label" for="edit-ai-perm-' + cap.key + '">' + cap.label + '</label>' +
+                                             '</div>';
+                                   }).join('');
+                              }
+
+                              editRoleSelect.addEventListener('change', function () {
+                                   const role = editRoleSelect.value;
+                                   editShopWrapper.style.display = SINGLE_SHOP_ROLES.has(role) ? 'block' : 'none';
+                                   editDepartmentWrapper.style.display = DEPARTMENT_SCOPED_ROLES.has(role) ? 'block' : 'none';
+                                   editDepartmentLabel.textContent = role === 'SHELF_STOCKER' ? 'Rayon(s) assigné(s)' : 'Département assigné';
+                                   editSupervisedWrapper.style.display = role === 'SUPERVISOR' ? 'block' : 'none';
+                                   renderEditAiPermissionsChecklist(role, null); // change manuel de rôle : repart du défaut, pas de l'ancien custom
+                                   // Changement manuel de rôle (pas le pré-remplissage initial d'openEditModal) : pas de
+                                   // rayons déjà cochés à préserver, l'utilisateur repart d'une sélection vierge.
+                                   if (DEPARTMENT_SCOPED_ROLES.has(role)) loadRayonsFor(editShopSelect, editDepartmentChecklist);
+                              });
+                              editShopSelect.addEventListener('change', function () {
+                                   if (DEPARTMENT_SCOPED_ROLES.has(editRoleSelect.value)) loadRayonsFor(editShopSelect, editDepartmentChecklist);
+                              });
+
+                              function openEditModal(u) {
+                                   editUserTargetId = u.id;
+                                   editError.style.display = 'none';
+                                   editTargetLabel.textContent = 'Compte : ' + u.name + ' (' + u.email + ')';
+                                   renderEditShopOptions();
+                                   editRoleSelect.value = u.role;
+                                   if (SINGLE_SHOP_ROLES.has(u.role) && u.rposShopId) editShopSelect.value = u.rposShopId;
+                                   if (u.role === 'SUPERVISOR' && u.supervisedShops) {
+                                        const supervisedIds = new Set(u.supervisedShops.map(function (s) { return s.rposShopId; }));
+                                        Array.from(editSupervisedChecklist.querySelectorAll('input')).forEach(function (c, i) {
+                                             c.checked = supervisedIds.has(shopsList[i].id);
+                                        });
+                                   }
+                                   editRoleSelect.dispatchEvent(new Event('change')); // vide déjà editDepartmentChecklist (repart d'une sélection vierge)
+                                   renderEditAiPermissionsChecklist(u.role, u.aiPermissionsJson);
+                                   // Recharge APRÈS le dispatchEvent ci-dessus (qui vide déjà la liste) en passant les
+                                   // rayons déjà assignés à cet utilisateur, pour les précocher une fois la vraie liste
+                                   // du magasin arrivée — jamais avant, sinon le dispatchEvent écraserait le précochage.
+                                   if (DEPARTMENT_SCOPED_ROLES.has(u.role) && u.rposShopId) {
+                                        const existing = (u.assignedDepartment || '').split(',').map(function (d) { return d.trim(); }).filter(Boolean);
+                                        loadRayonsFor(editShopSelect, editDepartmentChecklist, existing);
+                                   }
+                                   getEditUserModal().show();
+                              }
+
+                              editForm.addEventListener('submit', async function (e) {
+                                   e.preventDefault();
+                                   editError.style.display = 'none';
+                                   editSubmitBtn.disabled = true;
+
+                                   const role = editRoleSelect.value;
+                                   const selectedOption = editShopSelect.options[editShopSelect.selectedIndex];
+                                   const payload = { role: role };
+
+                                   if (SINGLE_SHOP_ROLES.has(role) && selectedOption) {
+                                        payload.rposShopId = selectedOption.value;
+                                        payload.rposShopReference = selectedOption.dataset.reference;
+                                        payload.rposShopName = selectedOption.dataset.name;
+                                        payload.rposPosId = selectedOption.dataset.posId;
+                                   }
+                                   if (DEPARTMENT_SCOPED_ROLES.has(role)) {
+                                        const checkedDepts = Array.from(editDepartmentChecklist.querySelectorAll('.dept-check:checked')).map(function (c) { return c.value; });
+                                        payload.assignedDepartment = checkedDepts.join(',');
+                                        if (!payload.assignedDepartment) {
+                                             editError.textContent = 'Sélectionnez au moins un rayon assigné.';
+                                             editError.style.display = 'block';
+                                             editSubmitBtn.disabled = false;
+                                             return;
+                                        }
+                                   }
+                                   if (role !== 'ADMIN') {
+                                        const defaults = AI_ROLE_DEFAULTS[role] || AI_ROLE_DEFAULTS.DIRECTOR;
+                                        const custom = {};
+                                        editAiPermissionsChecklist.querySelectorAll('.edit-ai-perm-check').forEach(function (c) {
+                                             const checked = c.checked;
+                                             if (checked !== !!defaults[c.value]) custom[c.value] = checked;
+                                        });
+                                        payload.aiPermissionsJson = Object.keys(custom).length ? custom : null;
+                                   } else {
+                                        payload.aiPermissionsJson = null;
+                                   }
+                                   if (role === 'SUPERVISOR') {
+                                        const checked = Array.from(editSupervisedChecklist.querySelectorAll('input:checked'));
+                                        payload.supervisedShops = checked.map(function (c) {
+                                             const s = shopsList[parseInt(c.value, 10)];
+                                             return { rposShopId: s.id, rposShopReference: s.reference, rposShopName: s.name, rposPosId: s.posId };
+                                        });
+                                        if (payload.supervisedShops.length === 0) {
+                                             editError.textContent = 'Sélectionnez au moins un magasin à superviser.';
+                                             editError.style.display = 'block';
+                                             editSubmitBtn.disabled = false;
+                                             return;
+                                        }
+                                   }
+
+                                   try {
+                                        const res = await window.reassortFetch('/users/' + editUserTargetId, {
+                                             method: 'PUT',
+                                             headers: { 'Content-Type': 'application/json' },
+                                             body: JSON.stringify(payload),
+                                        });
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        getEditUserModal().hide();
+                                        loadUsers();
+                                   } catch (err) {
+                                        editError.textContent = err.message;
+                                        editError.style.display = 'block';
+                                   } finally {
+                                        editSubmitBtn.disabled = false;
+                                   }
+                              });
+
                               refreshBtn.addEventListener('click', loadUsers);
                               loadShops();
                               loadUsers();
+                              roleSelect.dispatchEvent(new Event('change'));
                          })();
                     </script>
 

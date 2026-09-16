@@ -55,6 +55,13 @@ services:
       # seule fois dans les logs au premier démarrage.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrateur}
+      # Connexion RPOS (ERP/POS Prosuma) — obligatoire pour toute synchronisation réelle (ventes,
+      # stock, commandes fournisseur). Sans ces deux variables, les jobs planifiés échoueront
+      # silencieusement à chaque tentative de connexion à RPOS.
+      RPOS_BASE_URL: ${RPOS_BASE_URL:-https://pos1-prod-prosuma.prosuma.pos}
+      RPOS_USER: ${RPOS_USER:-}
+      RPOS_PASSWORD: ${RPOS_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -333,9 +333,9 @@
         '<div class="aip-qa-answer"><span class="aip-stream-cursor">▍</span></div>';
       historyEl.appendChild(turnEl);
       const answerEl = turnEl.querySelector('.aip-qa-answer');
-      let streamedAnswer = '';
 
-      try {
+      async function attemptFollowUp() {
+        let streamedAnswer = '';
         const res = await window.reassortFetch('/reassort/proposal/' + item.proposalId + '/ai-ask-followup-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -365,17 +365,37 @@
           }
         });
         if (!finalAnswer) throw new Error('Flux terminé sans réponse exploitable.');
+        return finalAnswer;
+      }
+
+      // Une coupure réseau brève peut interrompre le flux SSE avant l'event "done" alors que le
+      // serveur a bien traité la question (ajouté le 16/09/2026, même constat que les autres points
+      // d'entrée IA de ce projet) — une seule retentative automatique avant d'afficher une erreur.
+      let finalAnswer = null;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          finalAnswer = await attemptFollowUp();
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (attempt === 1) answerEl.innerHTML = '<span class="aip-stream-cursor">▍</span>';
+        }
+      }
+
+      if (finalAnswer) {
         // Le Markdown (puces, gras) n'est appliqué qu'à la réponse complète, jamais pendant le
         // streaming caractère par caractère : une puce "- " non encore terminée casserait le rendu
         // HTML en cours de frappe (ex: <ul> ouvert sans <li> fermé). Le texte brut défile pendant le
         // streaming, puis le rendu final remplace tout une fois la réponse entière reçue.
         answerEl.innerHTML = markdownLiteToHtml(finalAnswer);
         conversationHistory.push({ question: question, answer: finalAnswer });
-      } catch (err) {
-        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(err.message) + '</span>';
-      } finally {
-        sendBtn.disabled = false;
+      } else {
+        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(lastErr.message) + '</span>';
+        if (window.reassortReportError) window.reassortReportError('Panneau recommandation IA (après 2 tentatives): ' + lastErr.message, lastErr.stack);
       }
+      sendBtn.disabled = false;
     }
 
     sendBtn.addEventListener('click', send);

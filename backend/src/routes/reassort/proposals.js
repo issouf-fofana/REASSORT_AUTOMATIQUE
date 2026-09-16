@@ -16,6 +16,7 @@ const {
 const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../../services/weeklyPlanService');
 const { getConfig } = require('../../services/configService');
 const { resolvePeriod } = require('../../services/periodService');
+const { filterProposalLinesForUser, DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 
 router.get('/proposal', async (req, res) => {
@@ -47,6 +48,14 @@ router.post('/create-order', async (req, res) => {
 
     if (!shopId || !posId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    // Commande manuelle non liée à une proposition (donc jamais filtrable par département) : un
+    // rôle borné à un rayon ne doit pas pouvoir passer commande sur des produits arbitraires du
+    // magasin entier via cette route (faille trouvée le 16/09/2026, audit "test tout ce qu'un
+    // Rayonniste ne devrait pas pouvoir faire" — endroit sans appelant frontend actuellement, mais
+    // atteignable par tout compte authentifié en appel HTTP direct).
+    if (DEPARTMENT_SCOPED_ROLES.has(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Cette action n\'est pas autorisée pour votre rôle.' });
     }
     if (!supplierId || !Array.isArray(lines) || lines.length === 0) {
       return res.status(400).json({ success: false, message: 'supplierId et lines sont requis' });
@@ -303,6 +312,15 @@ router.get('/proposal/pending', async (req, res) => {
     }
 
     const proposal = await getPendingProposal(shopId);
+    // Rayonniste/Chef de département (plan de rôles validé le 15/09/2026, étape 3) : ne voient que
+    // les lignes de leur département/rayon assigné, jamais les autres rayons du même magasin —
+    // no-op pour tout autre rôle (cf. filterProposalLinesForUser). assignedDepartment n'est jamais
+    // dans le JWT (comme supervisedShops, cf. auth.js) : relu en base pour rester à jour même si
+    // modifié après la connexion, sans attendre l'expiration du token.
+    if (proposal) {
+      const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+      proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
+    }
     res.json({ success: true, data: proposal });
   } catch (error) {
     console.error('Pending proposal error:', error);
@@ -344,6 +362,9 @@ router.get('/proposal/:id', async (req, res) => {
     if (shopId && proposal.rposShopId !== shopId) {
       return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
     }
+    // Même restriction par département/rayon que GET /proposal/pending (plan de rôles, étape 3).
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
     res.json({ success: true, data: proposal });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -367,6 +388,33 @@ router.post('/proposal/:id/validate', async (req, res) => {
     }
     if (!supplierId || !Array.isArray(decisions)) {
       return res.status(400).json({ success: false, message: 'supplierId et decisions sont requis' });
+    }
+
+    // Rayonniste/Chef de département (plan de rôles, étape 3) : ne peuvent valider QUE les lignes de
+    // leur périmètre. startProposalValidation traite TOUTES les lignes de la proposition (decisions
+    // ne fait qu'ajuster/exclure des lignes déjà connues, jamais en restreindre la liste elle-même,
+    // cf. proposalService.js) — sans ce filtre, un compte restreint pourrait valider une commande
+    // portant sur des rayons entiers hors de son périmètre malgré une UI qui ne lui en montre qu'un.
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    let allowedLineIds = null;
+    if (currentUser && DEPARTMENT_SCOPED_ROLES.has(currentUser.role)) {
+      const scopedProposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { lines: { select: { id: true, department: true } } } });
+      const allowedLines = filterProposalLinesForUser(scopedProposal?.lines || [], currentUser);
+      allowedLineIds = new Set(allowedLines.map((l) => l.id));
+    }
+    if (allowedLineIds) {
+      // Toute ligne hors périmètre est forcée à "exclue", quoi que le client ait envoyé dans
+      // decisions pour cette ligne (jamais faire confiance à l'input client pour une restriction de
+      // sécurité).
+      for (const line of (await prisma.proposalLine.findMany({ where: { proposalId: req.params.id }, select: { id: true } }))) {
+        if (!allowedLineIds.has(line.id)) {
+          const idx = decisions.findIndex((d) => d.lineId === line.id);
+          // outOfScope=true : cette exclusion vient du filtrage de sécurité, pas d'un rejet métier
+          // volontaire — distinction nécessaire pour ne pas fausser le KPI de taux de rejet (§23).
+          if (idx >= 0) decisions[idx] = { ...decisions[idx], excluded: true, outOfScope: true };
+          else decisions.push({ lineId: line.id, excluded: true, outOfScope: true });
+        }
+      }
     }
 
     const result = await startProposalValidation({

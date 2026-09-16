@@ -27,9 +27,62 @@
   // nouveau lien sidebar (ex: Améliorations IA) reste invisible tant que l'utilisateur ne vide
   // pas son cache manuellement. Incrémenter PARTIALS_VERSION à chaque modification de
   // sidebar.html/topbar.html (règle : toute fonctionnalité = lien sidebar + page dédiée).
-  const PARTIALS_VERSION = '2026-09-14-8';
+  const PARTIALS_VERSION = '2026-09-16-9';
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
+
+  // Sections repliables de la sidebar (Réassort, Administration — demande du 16/09/2026). État
+  // mémorisé en localStorage (pas de dépendance à Bootstrap collapse : son état vit dans le DOM,
+  // détruit à chaque ré-injection de ce partiel sur chaque page, cf. bug du 14/09/2026 où le menu
+  // "se refermait" — ici l'état SURVIT à la navigation). Par défaut (rien en localStorage) : ouvert,
+  // comportement identique à l'ancienne sidebar plate tant que l'utilisateur n'a rien replié.
+  //
+  // Le pliage utilise une classe CSS (.sidebar-group-collapsed sur le <ul> parent), JAMAIS
+  // style.display sur les <li> individuels : reassort-auth.js révèle certains de ces mêmes <li>
+  // (liens ADMIN) sur DOMContentLoaded, qui se déclenche APRÈS ce script (chargé en <head>, avant le
+  // corps de page) — s'il fixait lui-même style.display, il effacerait par erreur un display:none
+  // légitime posé pour un rôle non-admin, ou l'inverse. Une règle CSS (`[data-collapse-group="x"]`
+  // sous un ancêtre `.sidebar-group-collapsed`) laisse chaque <li> garder son propre style.display
+  // inline intact — reassort-auth.js reste l'unique source de vérité sur "ce lien existe-t-il pour
+  // ce rôle", le pliage ne fait qu'ajouter une couche par-dessus qui masque tout le groupe.
+  (function initCollapsibleSidebarSections() {
+    const COLLAPSE_KEY_PREFIX = 'sidebar-collapsed-';
+    function isCollapsed(group) {
+      try { return localStorage.getItem(COLLAPSE_KEY_PREFIX + group) === '1'; } catch (err) { return false; }
+    }
+    function setCollapsed(group, collapsed) {
+      try { localStorage.setItem(COLLAPSE_KEY_PREFIX + group, collapsed ? '1' : '0'); } catch (err) { /* état non persistant si le stockage est indisponible */ }
+    }
+    function applyState(group) {
+      const collapsed = isCollapsed(group);
+      const heading = document.querySelector('[data-collapse-heading="' + group + '"]');
+      if (heading) heading.classList.toggle('collapsed', collapsed);
+      document.querySelectorAll('[data-collapse-group="' + group + '"]').forEach(function (li) {
+        li.classList.toggle('sidebar-group-collapsed', collapsed);
+      });
+    }
+    document.querySelectorAll('[data-collapse-heading]').forEach(function (heading) {
+      const group = heading.dataset.collapseHeading;
+      applyState(group);
+      heading.addEventListener('click', function () {
+        setCollapsed(group, !isCollapsed(group));
+        applyState(group);
+      });
+    });
+    // Ne jamais cacher la page où l'utilisateur se trouve déjà : si l'item actif appartient à un
+    // groupe replié, on le déplie automatiquement au chargement (une seule fois, avant que
+    // data-nav-item/data-nav-href ne marquent l'état actif juste après).
+    let currentFile = window.location.pathname.split('/').pop() || 'index';
+    currentFile = currentFile.replace(/\.html$/, '') || 'index';
+    document.querySelectorAll('[data-collapse-group]').forEach(function (li) {
+      const navItem = li.dataset.navItem ? li.dataset.navItem.replace(/\.html$/, '') : null;
+      const isCurrentPage = navItem === currentFile || (li.dataset.navHref && currentFile === 'settings');
+      if (isCurrentPage && isCollapsed(li.dataset.collapseGroup)) {
+        setCollapsed(li.dataset.collapseGroup, false);
+        applyState(li.dataset.collapseGroup);
+      }
+    });
+  })();
 
   // Le sélecteur de magasin global (global-shop-selector.js) est chargé en <head>, avant que la
   // topbar ci-dessus n'injecte #global-shop-selector-btn dans le DOM : son tout premier rendu
@@ -81,7 +134,7 @@
     const el = document.getElementById('page-shop-context');
     if (!el) return;
     const user = window.reassortGetUser && window.reassortGetUser();
-    if (!shopName || (user && user.role !== 'STORE')) { el.style.display = 'none'; el.textContent = ''; return; }
+    if (!shopName || (user && !window.reassortIsSingleShopRole(user.role))) { el.style.display = 'none'; el.textContent = ''; return; }
     el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
     el.style.display = '';
   };
@@ -139,6 +192,15 @@
       const reason = e.reason;
       send((reason && (reason.message || String(reason))) || 'Promesse rejetée non capturée', reason && reason.stack);
     });
+
+    // Exposé pour tout code qui CATCH volontairement une erreur pour l'afficher proprement à
+    // l'utilisateur (message "Erreur : ..." dans une bulle de chat, un toast...) — ces erreurs ne
+    // remontent JAMAIS via window.onerror/unhandledrejection puisqu'elles sont gérées, donc
+    // resteraient invisibles au Conseiller d'amélioration IA sans cet appel explicite (trouvé le
+    // 16/09/2026 : le widget Assistant IA affichait "Flux terminé sans réponse exploitable." sans
+    // que le Journal d'audit n'en garde jamais trace). Même anti-bruit (dédup, plafond) que les
+    // erreurs automatiques.
+    window.reassortReportError = send;
   })();
 
   // Sidebar/topbar injectées, page prête à s'afficher : retire l'écran de chargement (cf.

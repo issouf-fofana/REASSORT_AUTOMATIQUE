@@ -25,10 +25,15 @@ const MIN_DAYS_FOR_AI_FORECAST = MIN_DAYS_FOR_SMOOTHING;
 const SHOP_CONCURRENCY = 3;
 
 async function runNightlyProposalGeneration() {
-  const shops = await prisma.user.findMany({
-    where: { role: 'STORE', isActive: true, rposShopId: { not: null }, rposPosId: { not: null } },
-    distinct: ['rposShopId'],
-    select: { rposShopId: true, rposShopReference: true, rposShopName: true, rposPosId: true },
+  // Lu depuis la table Shop (synchronisée par shopsSyncJob.js), jamais depuis les comptes User : un
+  // magasin sans compte STORE/DIRECTOR assigné existe quand même côté RPOS et doit être traité —
+  // dépendre des comptes utilisateurs pour lister les magasins actifs est fragile par nature (un
+  // magasin sans compte encore créé, ou dont l'unique compte a été désactivé, disparaissait
+  // silencieusement de la génération nocturne). Bug confirmé le 15/09/2026 : après la migration des
+  // rôles STORE -> DIRECTOR (plan de rôles), cette requête filtrée sur "role: 'STORE'" ne retournait
+  // plus AUCUN magasin, ce filtre par rôle n'ayant jamais eu de raison d'être ici.
+  const shops = await prisma.shop.findMany({
+    select: { rposShopId: true, reference: true, name: true, rposPosId: true },
   });
 
   console.log(`[nightlyProposalJob] Génération pour ${shops.length} magasin(s) (${SHOP_CONCURRENCY} en parallèle)...`);
@@ -38,29 +43,29 @@ async function runNightlyProposalGeneration() {
       const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({
         posId: shop.rposPosId,
         shopId: shop.rposShopId,
-        shopReference: shop.rposShopReference,
-        shopName: shop.rposShopName,
+        shopReference: shop.reference,
+        shopName: shop.name,
       });
 
-      console.log(`[nightlyProposalJob] ${shop.rposShopReference} (${shop.rposShopName}): ${stats.proposalsGenerated} proposition(s)`);
+      console.log(`[nightlyProposalJob] ${shop.reference} (${shop.name}): ${stats.proposalsGenerated} proposition(s)`);
       if (!weeklyPlanAttached) {
-        console.warn(`[nightlyProposalJob] ALERTE ${shop.rposShopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+        console.warn(`[nightlyProposalJob] ALERTE ${shop.reference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
       }
 
       const periodDays = (new Date(stats.periodEnd) - new Date(stats.periodStart)) / (24 * 60 * 60 * 1000);
       if (periodDays >= MIN_DAYS_FOR_AI_FORECAST && stats.proposalsGenerated > 0) {
         try {
           await runAiForecast(proposal.id, 'nightlyProposalJob');
-          console.log(`[nightlyProposalJob] ${shop.rposShopReference} : analyse IA automatique terminée.`);
+          console.log(`[nightlyProposalJob] ${shop.reference} : analyse IA automatique terminée.`);
         } catch (aiError) {
           // Ne fait jamais échouer la génération de la proposition elle-même (déjà réussie et
           // sauvegardée à ce stade) : l'IA reste une couche optionnelle par-dessus le calcul
           // classique, qui doit continuer à fonctionner même sans clé API IA configurée.
-          console.error(`[nightlyProposalJob] Analyse IA automatique échouée pour ${shop.rposShopReference}:`, aiError.message);
+          console.error(`[nightlyProposalJob] Analyse IA automatique échouée pour ${shop.reference}:`, aiError.message);
         }
       }
     } catch (error) {
-      console.error(`[nightlyProposalJob] Échec pour ${shop.rposShopReference}:`, error.message);
+      console.error(`[nightlyProposalJob] Échec pour ${shop.reference}:`, error.message);
     }
   });
 

@@ -30,13 +30,21 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER partagent exactement le même cloisonnement magasin que
+// l'ancien rôle STORE (toujours rposShopId du compte, jamais un ?shop= arbitraire) — seule la
+// granularité département/rayon (assignedDepartment) et les permissions IA par capacité les
+// distinguent entre eux, appliquées plus loin (chatbotService.js), pas ici (plan validé le
+// 15/09/2026).
+const SINGLE_SHOP_ROLES = new Set(['STORE', 'DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER']);
+
 /**
  * Détermine le shopId effectif pour la requête, en appliquant le cloisonnement :
  * - ADMIN : peut consulter n'importe quel magasin via ?shop=<id>, ou aucun (à gérer par l'appelant)
  * - SUPERVISOR : peut consulter uniquement un magasin de sa liste supervisée (vérifiée en base à
  *   chaque requête, jamais depuis le JWT, pour refuser l'accès même après une modification de la
  *   liste par un admin sans attendre l'expiration du token — readme §30)
- * - STORE : toujours son propre shopId, même si ?shop=<id> est fourni dans l'URL (ignoré)
+ * - DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER (et l'ancien STORE) : toujours son propre shopId, même
+ *   si ?shop=<id> est fourni dans l'URL (ignoré)
  * Retourne null si aucun magasin n'est accessible pour cette requête.
  */
 function resolveShopId(req) {
@@ -51,7 +59,8 @@ function resolveShopId(req) {
 
 /**
  * Détermine le posId (serveur RPOS) effectif pour la requête, avec le même cloisonnement que
- * resolveShopId : un compte STORE ne peut jamais cibler un autre serveur que le sien.
+ * resolveShopId : un compte à un seul magasin (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE) ne
+ * peut jamais cibler un autre serveur que le sien.
  */
 function resolvePosId(req) {
   if (req.user.role === 'ADMIN') {
@@ -86,4 +95,4 @@ async function requireSupervisedShop(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop };
+module.exports = { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop, SINGLE_SHOP_ROLES };

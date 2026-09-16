@@ -27,6 +27,12 @@
     <script src="assets/js/shop-picker.js"></script>
 
     <style>
+         /* Formulaire des règles de détection d'intention du chatbot (demande du 16/09/2026 :
+            "rend la tab dynamique") — une carte par règle, jamais un textarea JSON brut, pour
+            qu'une faute de frappe ne puisse pas casser le format enregistré. */
+         .intent-rule-card { border: 1px solid #e5e5e5; border-radius: .5rem; padding: .85rem 1rem; margin-bottom: .75rem; }
+         .intent-rule-card .intent-rule-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+         .intent-rule-card .intent-rule-index { font-size: .75rem; color: #6c757d; font-weight: 600; min-width: 1.5rem; }
          .step-icon-wrap { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
          .step-icon-wrap iconify-icon { font-size: 20px; }
          .step-icon-wrap.state-active iconify-icon { animation: step-spin 1s linear infinite; }
@@ -71,7 +77,15 @@
           <script src="assets/js/global-shop-selector.js"></script>
 
           <div class="py-4">
-               <div class="container-xxl">               <!-- Start Container Fluid -->
+               <!-- Paramètres réservés au Superadmin uniquement (décision explicite du 15/09/2026 :
+                    "personne ne doit voir les paramètres à part le superadmin"), affiché/masqué par le
+                    script en bas de page — un compte non-ADMIN ne voit plus que ce message, jamais le
+                    formulaire (qui échouerait de toute façon sur chaque appel API désormais protégé
+                    par requireAdmin côté backend). -->
+               <div id="settings-access-denied" class="container-xxl" style="display:none;">
+                    <div class="alert alert-danger mt-3">Cette page est réservée aux administrateurs.</div>
+               </div>
+               <div id="settings-page-content" class="container-xxl">               <!-- Start Container Fluid -->
 
                      <!-- Barre d'onglets masquée : la navigation par section vit dans la sidebar
                           (/settings#tab-xxx) depuis le 14/09/2026 — gardée dans le DOM (display:none)
@@ -1190,6 +1204,58 @@
 
                          <div class="card mt-3">
                               <div class="card-header">
+                                   <h5 class="card-title mb-0">Assistant IA — ton et style de réponse</h5>
+                              </div>
+                              <div class="card-body">
+                                   <p class="text-muted small">
+                                        Persona, ton et consignes de format de l'Assistant IA (le chatbot du magasin,
+                                        page Assistant IA / widget flottant). Placeholders disponibles :
+                                        <code>{{context}}</code> (magasin/rayon sélectionné), <code>{{dataSection}}</code>
+                                        (données réelles récupérées pour répondre — calculées automatiquement, ne
+                                        décrivez pas vous-même ce que contient ce bloc), <code>{{historySection}}</code>
+                                        (échanges précédents de la conversation), <code>{{question}}</code> (la question
+                                        posée). La règle qui empêche l'IA d'inventer un chiffre (jamais répondre avec une
+                                        donnée non fournie) reste toujours appliquée par le système, quel que soit le
+                                        texte ci-dessous — elle ne peut pas être désactivée depuis cet écran. Sans
+                                        <code>{{dataSection}}</code> et <code>{{question}}</code>, le prompt codé en dur
+                                        est utilisé.
+                                   </p>
+                                   <textarea id="chatbot-prompt-template" class="form-control font-monospace small" rows="12"></textarea>
+                                   <div class="d-flex gap-2 mt-2">
+                                        <button type="button" class="btn btn-primary btn-sm" id="chatbot-prompt-save">Enregistrer</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="chatbot-prompt-reset">Réinitialiser au texte par défaut</button>
+                                   </div>
+                                   <div id="chatbot-prompt-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                                   <div id="chatbot-prompt-success" class="alert alert-success mt-2" style="display:none;"></div>
+                              </div>
+                         </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
+                                   <h5 class="card-title mb-0">Assistant IA — mots-clés de détection</h5>
+                              </div>
+                              <div class="card-body">
+                                   <p class="text-muted small">
+                                        Détermine quel outil de données l'Assistant IA appelle selon les mots présents
+                                        dans la question posée (ex: "chiffre d'affaires" déclenche le calcul du CA).
+                                        Insensible aux accents/majuscules. <strong>L'ORDRE compte</strong> : pour une
+                                        question qui pourrait correspondre à plusieurs règles, c'est la PREMIÈRE règle
+                                        de la liste (de haut en bas) qui matche qui est utilisée — placez les intentions
+                                        les plus précises avant les plus générales. Utilisez les flèches pour réordonner.
+                                   </p>
+                                   <div id="chatbot-intent-rules-list"></div>
+                                   <button type="button" class="btn btn-outline-dark btn-sm mt-2" id="chatbot-intent-rule-add">+ Ajouter une règle</button>
+                                   <div class="d-flex gap-2 mt-3">
+                                        <button type="button" class="btn btn-primary btn-sm" id="chatbot-intent-rules-save">Enregistrer</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="chatbot-intent-rules-reset">Réinitialiser aux règles par défaut</button>
+                                   </div>
+                                   <div id="chatbot-intent-rules-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                                   <div id="chatbot-intent-rules-success" class="alert alert-success mt-2" style="display:none;"></div>
+                              </div>
+                         </div>
+
+                         <div class="card mt-3">
+                              <div class="card-header">
                                    <h5 class="card-title mb-0">Assistant IA — questions suggérées</h5>
                               </div>
                               <div class="card-body">
@@ -1280,13 +1346,23 @@
                     <script>
                          (function () {
                               const currentUser = window.reassortGetUser();
+                              // Blocage d'accès (décision du 15/09/2026) : seul ADMIN (Superadmin) voit cette page —
+                              // tout autre rôle, y compris SUPERVISOR et DIRECTOR qui y avaient accès partiellement
+                              // auparavant, reçoit uniquement le message ci-dessous. Les routes backend sous-jacentes
+                              // sont désormais protégées par requireAdmin de toute façon (défense en profondeur),
+                              // ce blocage frontend évite juste d'afficher un formulaire inutilisable.
+                              if (!currentUser || currentUser.role !== 'ADMIN') {
+                                   document.getElementById('settings-page-content').style.display = 'none';
+                                   document.getElementById('settings-access-denied').style.display = '';
+                                   return;
+                              }
                               const shopPickerWrapper = document.getElementById('settings-shop-picker-wrapper');
                               const shopDropdownBtn = document.getElementById('settings-shop-dropdown-btn');
                               const shopChecklist = document.getElementById('settings-shop-checklist');
                               const bulkNote = document.getElementById('reassort-config-bulk-note');
 
                               function selectedShopIds() {
-                                   if (currentUser.role === 'STORE') return [currentUser.rposShopId];
+                                   if (window.reassortIsSingleShopRole(currentUser.role)) return [currentUser.rposShopId];
                                    return Array.from(shopChecklist.querySelectorAll('input:checked')).map(function (c) { return c.value; });
                               }
 
@@ -1299,7 +1375,7 @@
                               }
 
                               async function initShopPicker() {
-                                   if (currentUser.role !== 'STORE') {
+                                   if (!window.reassortIsSingleShopRole(currentUser.role)) {
                                         shopPickerWrapper.style.display = '';
                                         if (currentUser.role === 'ADMIN') {
                                              document.getElementById('settings-tab-files-item').style.display = '';
@@ -2581,6 +2657,7 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                               function initAiTab() {
                                    loadAiKeys();
                                    loadAiPromptTemplate();
+                                   initIntentRulesEditor();
                               }
 
                               let defaultAiPromptTemplate = null;
@@ -2592,6 +2669,7 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                         if (!json.success) throw new Error(json.message);
                                         document.getElementById('ai-prompt-template').value = json.data.AI_ANALYSIS_PROMPT_TEMPLATE || '';
                                         document.getElementById('ai-quantity-adjustment-enabled').checked = json.data.AI_QUANTITY_ADJUSTMENT_ENABLED === 'true';
+                                        document.getElementById('chatbot-prompt-template').value = json.data.CHATBOT_PROMPT_TEMPLATE || '';
                                         document.getElementById('chatbot-suggested-questions').value = json.data.CHATBOT_SUGGESTED_QUESTIONS || '';
                                         document.getElementById('improvements-prompt-template').value = json.data.IMPROVEMENTS_PROMPT_TEMPLATE || '';
                                         document.getElementById('anomaly-min-daily-sales').value = json.data.ANOMALY_MIN_DAILY_SALES || '1';
@@ -2599,6 +2677,196 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                         document.getElementById('ai-prompt-error').textContent = 'Erreur: ' + err.message;
                                         document.getElementById('ai-prompt-error').style.display = 'block';
                                    }
+                              }
+
+                              // Éditeur des règles de détection d'intention du chatbot (CHATBOT_INTENT_RULES —
+                              // demande du 16/09/2026 : "rend la tab dynamique au cas ou je veux ajouter des mot
+                              // ou corrigé"). Un formulaire structuré (jamais un textarea JSON brut) : une carte
+                              // par règle avec un champ mots-clés et un menu déroulant d'outil, plus des boutons
+                              // monter/descendre pour réordonner — l'ORDRE compte (la première règle qui matche
+                              // gagne), donc l'UI doit permettre de le changer aussi facilement que le contenu.
+                              // Copie exacte du tableau par défaut (ENV_FALLBACK.CHATBOT_INTENT_RULES dans
+                              // systemConfigService.js) : pas de route de "reset" côté backend pour cette clé
+                              // (comme pour les prompts), on réenregistre ce JSON comme une modification normale.
+                              const DEFAULT_INTENT_RULES = [
+                                   { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', 'quand a-t-il changé de prix', 'quand est-ce que le prix', 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', 'quand est-ce qu\'il', 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
+                                   { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
+                                   { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
+                                   { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente'], tool: 'getParetoArticles' },
+                                   { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
+                                   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
+                                   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
+                                   { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', 'lia se trompe', 'l\'ia se trompe', 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
+                                   { keywords: ['commande', 'commandes récentes', 'qu\'est-ce qui a été commandé', 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
+                                   { keywords: ['proposition', 'proposition en attente', 'aujourd\'hui', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
+                                   { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
+                                   { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien'], tool: 'getArticleStock' },
+                              ];
+                              let intentRulesState = [];
+                              let intentToolLabels = {};
+
+                              const INTENT_TOOL_LABELS_FALLBACK = {
+                                   getPriceChangeHistory: 'Historique des changements de prix',
+                                   getStockMoveHistory: 'Mouvements de stock (casse, cession, retour...)',
+                                   getArticleDetails: 'Fiche article complète (prix, emplacement, promo...)',
+                                   getParetoArticles: 'Articles représentant X% du chiffre d\'affaires (Pareto)',
+                                   getRevenue: 'Chiffre d\'affaires (magasin ou article/rayon)',
+                                   getStockoutRisks: 'Articles à risque de rupture',
+                                   getOverstockArticles: 'Articles en surstock',
+                                   getPredictionAccuracy: 'Fiabilité des prédictions IA',
+                                   getOrders: 'Commandes passées récemment',
+                                   getCurrentProposal: 'Proposition de commande en attente',
+                                   getSalesHistory: 'Historique des ventes / tendance',
+                                   getArticleStock: 'Stock actuel (magasin ou article précis)',
+                              };
+
+                              async function loadIntentToolOptions() {
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/system-config/chatbot-tools');
+                                        const json = await res.json();
+                                        if (json.success) {
+                                             intentToolLabels = Object.fromEntries(json.data.map(function (t) { return [t, INTENT_TOOL_LABELS_FALLBACK[t] || t]; }));
+                                             return;
+                                        }
+                                   } catch (err) { /* repli sur la liste fixe ci-dessous */ }
+                                   intentToolLabels = INTENT_TOOL_LABELS_FALLBACK;
+                              }
+
+                              function renderIntentRulesList() {
+                                   const container = document.getElementById('chatbot-intent-rules-list');
+                                   const toolOptions = Object.entries(intentToolLabels)
+                                        .map(function (entry) { return '<option value="' + entry[0] + '">' + escapeHtmlSettings(entry[1]) + '</option>'; })
+                                        .join('');
+                                   container.innerHTML = intentRulesState.map(function (rule, i) {
+                                        return '<div class="intent-rule-card" data-rule-index="' + i + '">' +
+                                             '<div class="intent-rule-header">' +
+                                                  '<span class="intent-rule-index">#' + (i + 1) + '</span>' +
+                                                  '<select class="form-select form-select-sm intent-rule-tool" style="max-width:340px;">' + toolOptions + '</select>' +
+                                                  '<div class="ms-auto d-flex gap-1">' +
+                                                       '<button type="button" class="btn btn-sm btn-outline-secondary intent-rule-up" title="Monter (priorité plus haute)"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
+                                                       '<button type="button" class="btn btn-sm btn-outline-secondary intent-rule-down" title="Descendre (priorité plus basse)"' + (i === intentRulesState.length - 1 ? ' disabled' : '') + '>↓</button>' +
+                                                       '<button type="button" class="btn btn-sm btn-outline-danger intent-rule-remove" title="Supprimer cette règle">×</button>' +
+                                                  '</div>' +
+                                             '</div>' +
+                                             '<input type="text" class="form-control form-control-sm intent-rule-keywords" placeholder="Mots-clés séparés par des virgules (ex: chiffre d\'affaires, le ca, du ca)" value="' + escapeHtmlSettings(rule.keywords.join(', ')) + '">' +
+                                        '</div>';
+                                   }).join('');
+                                   container.querySelectorAll('.intent-rule-tool').forEach(function (sel, i) { sel.value = intentRulesState[i].tool; });
+
+                                   container.querySelectorAll('.intent-rule-up').forEach(function (btn) {
+                                        btn.addEventListener('click', function () {
+                                             const i = parseInt(btn.closest('.intent-rule-card').dataset.ruleIndex, 10);
+                                             syncIntentRulesStateFromDom();
+                                             [intentRulesState[i - 1], intentRulesState[i]] = [intentRulesState[i], intentRulesState[i - 1]];
+                                             renderIntentRulesList();
+                                        });
+                                   });
+                                   container.querySelectorAll('.intent-rule-down').forEach(function (btn) {
+                                        btn.addEventListener('click', function () {
+                                             const i = parseInt(btn.closest('.intent-rule-card').dataset.ruleIndex, 10);
+                                             syncIntentRulesStateFromDom();
+                                             [intentRulesState[i], intentRulesState[i + 1]] = [intentRulesState[i + 1], intentRulesState[i]];
+                                             renderIntentRulesList();
+                                        });
+                                   });
+                                   container.querySelectorAll('.intent-rule-remove').forEach(function (btn) {
+                                        btn.addEventListener('click', function () {
+                                             const i = parseInt(btn.closest('.intent-rule-card').dataset.ruleIndex, 10);
+                                             syncIntentRulesStateFromDom();
+                                             intentRulesState.splice(i, 1);
+                                             renderIntentRulesList();
+                                        });
+                                   });
+                              }
+
+                              // Relit les champs du DOM vers intentRulesState AVANT toute opération qui reconstruit
+                              // le rendu (réordonner, supprimer, enregistrer) — sans ça, une modification de texte
+                              // pas encore "commit" via un événement change serait perdue au premier clic sur une
+                              // flèche monter/descendre.
+                              function syncIntentRulesStateFromDom() {
+                                   document.querySelectorAll('#chatbot-intent-rules-list .intent-rule-card').forEach(function (card, i) {
+                                        const keywordsRaw = card.querySelector('.intent-rule-keywords').value;
+                                        intentRulesState[i] = {
+                                             keywords: keywordsRaw.split(',').map(function (k) { return k.trim(); }).filter(Boolean),
+                                             tool: card.querySelector('.intent-rule-tool').value,
+                                        };
+                                   });
+                              }
+
+                              function escapeHtmlSettings(str) {
+                                   const div = document.createElement('div');
+                                   div.textContent = str;
+                                   return div.innerHTML;
+                              }
+
+                              async function loadIntentRules() {
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/system-config');
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        intentRulesState = JSON.parse(json.data.CHATBOT_INTENT_RULES || '[]');
+                                        renderIntentRulesList();
+                                   } catch (err) {
+                                        document.getElementById('chatbot-intent-rules-error').textContent = 'Erreur de chargement : ' + err.message;
+                                        document.getElementById('chatbot-intent-rules-error').style.display = 'block';
+                                   }
+                              }
+
+                              async function initIntentRulesEditor() {
+                                   await loadIntentToolOptions();
+                                   await loadIntentRules();
+
+                                   document.getElementById('chatbot-intent-rule-add').addEventListener('click', function () {
+                                        syncIntentRulesStateFromDom();
+                                        const firstTool = Object.keys(intentToolLabels)[0] || 'getRevenue';
+                                        intentRulesState.push({ keywords: [], tool: firstTool });
+                                        renderIntentRulesList();
+                                   });
+
+                                   document.getElementById('chatbot-intent-rules-save').addEventListener('click', async function () {
+                                        const errBox = document.getElementById('chatbot-intent-rules-error');
+                                        const okBox = document.getElementById('chatbot-intent-rules-success');
+                                        errBox.style.display = 'none';
+                                        okBox.style.display = 'none';
+                                        syncIntentRulesStateFromDom();
+                                        // Une règle sans aucun mot-clé n'a aucun sens (ne matchera jamais) : filtrée
+                                        // silencieusement plutôt que de bloquer l'enregistrement pour un oubli mineur
+                                        // (ex: une carte ajoutée puis laissée vide par erreur).
+                                        const cleaned = intentRulesState.filter(function (r) { return r.keywords.length > 0; });
+                                        if (!cleaned.length) {
+                                             errBox.textContent = 'Au moins une règle avec au moins un mot-clé est requise.';
+                                             errBox.style.display = 'block';
+                                             return;
+                                        }
+                                        try {
+                                             await saveSystemConfigKey('CHATBOT_INTENT_RULES', JSON.stringify(cleaned));
+                                             intentRulesState = cleaned;
+                                             renderIntentRulesList();
+                                             okBox.textContent = 'Règles enregistrées — appliquées à la prochaine question posée à l\'Assistant IA (jusqu\'à 60s de cache).';
+                                             okBox.style.display = 'block';
+                                        } catch (err) {
+                                             errBox.textContent = 'Erreur : ' + err.message;
+                                             errBox.style.display = 'block';
+                                        }
+                                   });
+
+                                   document.getElementById('chatbot-intent-rules-reset').addEventListener('click', async function () {
+                                        if (!(await window.reassortConfirm('Réinitialiser toutes les règles aux valeurs par défaut ? Cette action remplace la liste actuelle immédiatement.'))) return;
+                                        const errBox = document.getElementById('chatbot-intent-rules-error');
+                                        const okBox = document.getElementById('chatbot-intent-rules-success');
+                                        errBox.style.display = 'none';
+                                        okBox.style.display = 'none';
+                                        try {
+                                             await saveSystemConfigKey('CHATBOT_INTENT_RULES', JSON.stringify(DEFAULT_INTENT_RULES));
+                                             intentRulesState = DEFAULT_INTENT_RULES.map(function (r) { return { keywords: r.keywords.slice(), tool: r.tool }; });
+                                             renderIntentRulesList();
+                                             okBox.textContent = 'Règles réinitialisées aux valeurs par défaut.';
+                                             okBox.style.display = 'block';
+                                        } catch (err) {
+                                             errBox.textContent = 'Erreur : ' + err.message;
+                                             errBox.style.display = 'block';
+                                        }
+                                   });
                               }
 
                               document.getElementById('anomaly-min-daily-sales-save').addEventListener('click', async function () {
@@ -2633,6 +2901,50 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                         errBox.textContent = 'Erreur: ' + err.message;
                                         errBox.style.display = 'block';
                                    }
+                              });
+
+                              document.getElementById('chatbot-prompt-save').addEventListener('click', async function () {
+                                   const errBox = document.getElementById('chatbot-prompt-error');
+                                   const okBox = document.getElementById('chatbot-prompt-success');
+                                   errBox.style.display = 'none';
+                                   okBox.style.display = 'none';
+                                   try {
+                                        const value = document.getElementById('chatbot-prompt-template').value;
+                                        if (value && (!value.includes('{{dataSection}}') || !value.includes('{{question}}'))) {
+                                             throw new Error('Le modèle doit contenir {{dataSection}} et {{question}} (sinon le prompt codé en dur sera utilisé).');
+                                        }
+                                        await saveSystemConfigKey('CHATBOT_PROMPT_TEMPLATE', value);
+                                        okBox.textContent = 'Prompt enregistré — appliqué dès la prochaine question posée à l\'Assistant IA.';
+                                        okBox.style.display = 'block';
+                                   } catch (err) {
+                                        errBox.textContent = 'Erreur: ' + err.message;
+                                        errBox.style.display = 'block';
+                                   }
+                              });
+
+                              // Copie exacte du texte par défaut (ENV_FALLBACK.CHATBOT_PROMPT_TEMPLATE dans
+                              // systemConfigService.js) : pas de route de "reset" côté backend, on réenregistre
+                              // simplement ce texte comme une modification normale.
+                              const DEFAULT_CHATBOT_PROMPT_TEMPLATE = `Tu es l'Assistant IA Store d'un magasin de grande distribution. Tu réponds aux questions du responsable magasin sur le réassort, les ventes, les stocks et les prévisions.
+
+Contexte :
+{{context}}
+
+{{dataSection}}
+
+{{historySection}}Question du responsable magasin : {{question}}
+
+Réponds en français, de façon directe et concise, en Markdown léger (gras **mot** pour les chiffres clés). Ne résume jamais à l'excès une question vague : si les données ci-dessus contiennent plusieurs informations pertinentes pour répondre (ex: plusieurs types de mouvement, plusieurs jours, plusieurs sous-totaux), donne-les TOUTES même si la question ne les nomme pas explicitement une par une — l'utilisateur qui demande "combien de types de mouvement" attend le détail de chaque type avec sa quantité, pas seulement un nombre total de types. Règle de format selon le contenu de ta réponse :
+- Si la question porte sur "quels articles" (ruptures, surstock, à commander...) et que les données listent plusieurs articles : réponds avec UNE PUCE PAR ARTICLE nommé explicitement (label + chiffre clé, ex: "**LAMP BUR** : rupture dans **2 jours**, réassort suggéré **5** unités"), jamais un total agrégé seul qui masque quels articles précis sont concernés. Maximum 8 puces — au-delà, indique le nombre total et ne détaille que les plus urgents/importants.
+- Si la question porte sur les mouvements de stock d'un article (byType/recentMoves dans les données) : réponds avec UNE PUCE PAR TYPE DE MOUVEMENT (ex: "**Vente** : 12 mouvements, -45 unités", "**Casse** : 1 mouvement, -3 unités"), jamais juste "il y a eu 3 types de mouvement" sans les nommer.
+- Si la question porte sur une évolution/tendance globale (ventes, CA) sans lister d'articles : un court paragraphe avec les chiffres clés suffit, pas de liste forcée.
+- Sinon (réponse à une seule idée) : 1-2 phrases courtes.
+Ne réponds jamais par un seul chiffre agrégé quand la question demande explicitement "quels articles" — l'utilisateur veut toujours savoir lesquels, pas seulement combien.
+Si la question posée contient PLUSIEURS demandes distinctes (ex: "donne-moi le prix ET l'historique de rupture") et que les données ci-dessus ne couvrent qu'UNE seule de ces demandes : réponds à celle que tu peux avec ces données, PUIS indique explicitement en une phrase que l'autre partie de la question nécessite une question séparée (précise laquelle) — ne l'ignore jamais silencieusement.`;
+
+                              document.getElementById('chatbot-prompt-reset').addEventListener('click', async function () {
+                                   if (!(await window.reassortConfirm('Réinitialiser le prompt au texte par défaut ? Cliquez ensuite sur Enregistrer pour confirmer.'))) return;
+                                   document.getElementById('chatbot-prompt-template').value = DEFAULT_CHATBOT_PROMPT_TEMPLATE;
                               });
 
                               document.getElementById('chatbot-suggested-questions-save').addEventListener('click', async function () {                                   const errBox = document.getElementById('chatbot-suggested-questions-error');

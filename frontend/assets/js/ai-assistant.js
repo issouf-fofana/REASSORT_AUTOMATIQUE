@@ -1,5 +1,5 @@
 (function () {
-  const shopSelect = document.getElementById('aia-shop');
+  const shopContextEl = document.getElementById('aia-shop-context');
   const departmentSelect = document.getElementById('aia-department');
   const subDepartmentInput = document.getElementById('aia-subdepartment');
   const chatWindow = document.getElementById('aia-chat-window');
@@ -14,6 +14,15 @@
   let suggestedQuestions = [];
   let conversations = [];
   let currentConversationId = null;
+  let shopsById = new Map(); // chargée une fois, utilisée pour retrouver reference/name d'un rposShopId (ex: rouvrir une ancienne conversation d'un autre magasin, cf. openConversation)
+
+  async function loadShopsMap() {
+    try {
+      const res = await window.reassortFetch('/reassort/shops');
+      const json = await res.json();
+      if (json.success) shopsById = new Map(json.data.map(function (s) { return [s.id, s]; }));
+    } catch (err) { /* best-effort : un échec laisse juste la restauration de magasin inopérante */ }
+  }
 
   function escapeHtml(str) {
     const div = document.createElement('div');
@@ -101,6 +110,13 @@
   function buildArticlesTable(lines, quantityLabel) {
     const hasStock = lines.some(function (l) { return l.stockAtGeneration !== undefined || l.stock !== undefined; });
     const hasDays = lines.some(function (l) { return l.daysUntilStockout !== undefined && l.daysUntilStockout !== null; });
+    // La quantité (vendue ou proposée) n'existe pas sur toutes les formes de "lines" — getParetoArticles
+    // (part du chiffre d'affaires) ne renvoie que revenueSharePct/cumulativePct, jamais une quantité.
+    // Sans cette détection, la colonne "Quantité" s'affichait quand même avec un tiret sur chaque ligne
+    // (bug trouvé le 16/09/2026 : "quantité il n'affiche rien"), plutôt que de simplement ne pas
+    // afficher une colonne qui n'a pas de sens pour cet outil.
+    const hasQuantity = lines.some(function (l) { return l.quantity !== undefined || l.quantitySuggested !== undefined; });
+    const hasRevenueShare = lines.some(function (l) { return l.revenueSharePct !== undefined; });
     const rows = lines.slice(0, 20).map(function (l) {
       const qty = l.quantity !== undefined ? l.quantity : (l.quantitySuggested !== undefined ? l.quantitySuggested : '—');
       const stock = l.stockAtGeneration !== undefined ? l.stockAtGeneration : (l.stock !== undefined ? l.stock : null);
@@ -108,12 +124,13 @@
         '<td>' + escapeHtml(l.label || l.ean || '—') + '</td>' +
         (hasStock ? '<td class="text-end">' + (stock !== null ? stock : '—') + '</td>' : '') +
         (hasDays ? '<td class="text-end">' + (l.daysUntilStockout !== undefined && l.daysUntilStockout !== null ? Math.round(l.daysUntilStockout) + ' j' : '—') + '</td>' : '') +
-        '<td class="text-end">' + qty + '</td>' +
+        (hasQuantity ? '<td class="text-end">' + qty + '</td>' : '') +
+        (hasRevenueShare ? '<td class="text-end">' + (l.revenueSharePct !== undefined ? l.revenueSharePct + ' %' : '—') + '</td>' : '') +
         '</tr>';
     }).join('');
 
     return '<div class="table-responsive mt-2"><table class="table table-sm aia-table">' +
-      '<thead><tr><th>Article</th>' + (hasStock ? '<th class="text-end">Stock</th>' : '') + (hasDays ? '<th class="text-end">Rupture</th>' : '') + '<th class="text-end">' + escapeHtml(quantityLabel || 'Quantité') + '</th></tr></thead>' +
+      '<thead><tr><th>Article</th>' + (hasStock ? '<th class="text-end">Stock</th>' : '') + (hasDays ? '<th class="text-end">Rupture</th>' : '') + (hasQuantity ? '<th class="text-end">' + escapeHtml(quantityLabel || 'Quantité') + '</th>' : '') + (hasRevenueShare ? '<th class="text-end">Part du CA</th>' : '') + '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
       '</table></div>';
   }
@@ -142,28 +159,32 @@
     }
   }
 
-  async function loadShopList() {
-    try {
-      const res = await window.reassortFetch('/reassort/shops');
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message);
-      const byPos = {};
-      json.data.forEach(function (s) {
-        if (!byPos[s.posId]) byPos[s.posId] = [];
-        byPos[s.posId].push(s);
-      });
-      shopSelect.innerHTML = Object.keys(byPos).sort().map(function (posId) {
-        const shops = byPos[posId].slice().sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); });
-        const options = shops.map(function (s) {
-          return '<option value="' + s.id + '">' + s.reference + ' - ' + s.name + '</option>';
-        }).join('');
-        return '<optgroup label="' + (shops[0].posLabel || posId) + '">' + options + '</optgroup>';
-      }).join('');
-      if (window.reassortMakeShopPickerSearchable) window.reassortMakeShopPickerSearchable(shopSelect);
-      if (shopSelect.value) onShopReady();
-    } catch (err) {
-      shopSelect.innerHTML = '<option value="">Erreur: ' + err.message + '</option>';
+  // Suit désormais le SÉLECTEUR DE MAGASIN GLOBAL de la topbar (demande du 16/09/2026 : un
+  // ADMIN/SUPERVISOR voyait un magasin en haut de page mais cette page répondait pour un autre
+  // magasin resté sélectionné dans son propre <select> indépendant, jamais synchronisé — deux
+  // sources de vérité pour "quel magasin" sur la même page). Pour un rôle à magasin unique
+  // (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE), reassortGetActiveShop() renvoie toujours
+  // null (pas de sélecteur affiché pour eux) : le magasin effectif est alors déterminé côté serveur
+  // par resolveShopId (req.user.rposShopId), jamais par ce paramètre.
+  function currentShopId() {
+    const user = window.reassortGetUser && window.reassortGetUser();
+    if (user && window.reassortIsSingleShopRole(user.role)) return user.rposShopId || null;
+    const shop = window.reassortGetActiveShop();
+    return shop ? shop.id : null;
+  }
+
+  function refreshShopContext() {
+    const user = window.reassortGetUser && window.reassortGetUser();
+    let label;
+    if (user && window.reassortIsSingleShopRole(user.role)) {
+      label = user.rposShopName ? user.rposShopReference + ' - ' + user.rposShopName : null;
+    } else {
+      const shop = window.reassortGetActiveShop();
+      label = shop ? shop.reference + ' - ' + shop.name : null;
     }
+    shopContextEl.textContent = label || 'Sélectionnez un magasin (en haut de page)';
+    if (currentShopId()) onShopReady();
+    else { input.disabled = true; sendBtn.disabled = true; }
   }
 
   async function loadDepartments(shopId) {
@@ -284,9 +305,14 @@
       currentConversationId = id;
       renderConversationList();
 
-      if (json.data.rposShopId && shopSelect.querySelector('option[value="' + json.data.rposShopId + '"]')) {
-        shopSelect.value = json.data.rposShopId;
-        onShopReady();
+      // Rouvrir une ancienne conversation d'un autre magasin met à jour le sélecteur GLOBAL (topbar)
+      // plutôt qu'un état local à cette page — un seul magasin actif partagé par toute
+      // l'application, jamais deux affichages divergents (cf. currentShopId ci-dessus). Pas
+      // d'action pour un rôle à magasin unique (rien à changer, un seul magasin possible).
+      const user = window.reassortGetUser && window.reassortGetUser();
+      const convShop = json.data.rposShopId ? shopsById.get(json.data.rposShopId) : null;
+      if (convShop && !(user && window.reassortIsSingleShopRole(user.role)) && convShop.id !== currentShopId()) {
+        window.reassortSetActiveShop({ id: convShop.id, reference: convShop.reference, name: convShop.name });
       }
       departmentSelect.value = json.data.department || '';
       subDepartmentInput.value = json.data.subDepartment || '';
@@ -312,7 +338,7 @@
     currentConversationId = null;
     chatWindow.innerHTML = '';
     chatWindow.appendChild(emptyHint);
-    emptyHint.style.display = shopSelect.value ? 'none' : '';
+    emptyHint.style.display = currentShopId() ? 'none' : '';
     renderConversationList();
   }
 
@@ -329,7 +355,7 @@
   function onShopReady() {
     input.disabled = false;
     sendBtn.disabled = false;
-    loadDepartments(shopSelect.value);
+    loadDepartments(currentShopId());
   }
 
   // Contrôleur de la génération en cours (permet de l'interrompre via le bouton "Arrêter" —
@@ -350,79 +376,116 @@
     }
   }
 
+  // Une tentative d'appel + streaming (sans gestion d'erreur ni retry) : isolée pour être rejouable
+  // telle quelle par sendQuestion en cas de coupure réseau en cours de flux (cf. plus bas). Retourne
+  // { finalResult, streamedAnswer } — streamedAnswer permet d'afficher le texte partiel déjà reçu
+  // même si l'utilisateur interrompt (Abort) pendant cette tentative précise.
+  async function attemptQuestion(question, answerEl, signal) {
+    let streamedAnswer = '';
+    const res = await window.reassortFetch('/reassort/chatbot/ask-stream?shop=' + encodeURIComponent(currentShopId() || ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: currentConversationId,
+        department: departmentSelect.value || null,
+        subDepartment: subDepartmentInput.value.trim() || null,
+        question: question,
+      }),
+      signal: signal,
+    });
+    if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
+
+    let finalResult = null;
+    await consumeSseStream(res, function (eventName, data) {
+      if (eventName === 'chunk') {
+        streamedAnswer += data.text;
+        answerEl.textContent = streamedAnswer;
+        const cursor = document.createElement('span');
+        cursor.className = 'aia-stream-cursor';
+        cursor.textContent = '▍';
+        answerEl.appendChild(cursor);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      } else if (eventName === 'error') {
+        throw new Error(data.message);
+      } else if (eventName === 'done') {
+        finalResult = data;
+      }
+    });
+    if (!finalResult) throw new Error('Flux terminé sans réponse exploitable.');
+    return { finalResult, streamedAnswer };
+  }
+
   async function sendQuestion() {
     const question = input.value.trim();
-    if (!question || !shopSelect.value) return;
+    if (!question || !currentShopId()) return;
     input.value = '';
     setSendingState(true);
     emptyHint.style.display = 'none';
 
     const answerEl = appendTurn(question, '<span class="aia-stream-cursor">▍</span>');
     chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    // Une coupure réseau brève (latence, micro-déconnexion) peut interrompre le flux SSE avant
+    // l'event "done" alors que le serveur a bien traité la question — observé en usage réel sans
+    // jamais avoir pu être reproduit ni côté serveur (curl direct systématiquement correct) ni dans
+    // un navigateur automatisé en local (ajouté le 16/09/2026). Une seule retentative automatique,
+    // jamais si l'échec vient d'un Abort volontaire (bouton "Arrêter" — retenter irait à l'encontre
+    // de la demande explicite de l'utilisateur).
+    let finalResult = null;
     let streamedAnswer = '';
-    currentAbortController = new AbortController();
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      currentAbortController = new AbortController();
+      try {
+        const result = await attemptQuestion(question, answerEl, currentAbortController.signal);
+        finalResult = result.finalResult;
+        streamedAnswer = result.streamedAnswer;
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        streamedAnswer = ''; // repart d'un tour vide à la tentative suivante, pas de texte partiel dupliqué
+        if (err.name === 'AbortError' || attempt === 2) break;
+        answerEl.innerHTML = '<span class="aia-stream-cursor">▍</span>';
+      }
+    }
 
-    try {
-      const res = await window.reassortFetch('/reassort/chatbot/ask-stream?shop=' + encodeURIComponent(shopSelect.value), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversationId: currentConversationId,
-          department: departmentSelect.value || null,
-          subDepartment: subDepartmentInput.value.trim() || null,
-          question: question,
-        }),
-        signal: currentAbortController.signal,
-      });
-      if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
-
-      let finalResult = null;
-      await consumeSseStream(res, function (eventName, data) {
-        if (eventName === 'chunk') {
-          streamedAnswer += data.text;
-          answerEl.textContent = streamedAnswer;
-          const cursor = document.createElement('span');
-          cursor.className = 'aia-stream-cursor';
-          cursor.textContent = '▍';
-          answerEl.appendChild(cursor);
-          chatWindow.scrollTop = chatWindow.scrollHeight;
-        } else if (eventName === 'error') {
-          throw new Error(data.message);
-        } else if (eventName === 'done') {
-          finalResult = data;
-        }
-      });
-      if (!finalResult) throw new Error('Flux terminé sans réponse exploitable.');
+    if (finalResult) {
       answerEl.innerHTML = markdownLiteToHtml(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult);
-
       const isNewConversation = !currentConversationId;
       currentConversationId = finalResult.conversationId;
       if (isNewConversation) await loadConversations();
       else renderConversationList();
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        // Interruption volontaire (bouton "Arrêter") : le texte déjà reçu reste affiché tel quel,
-        // avec une mention explicite, plutôt qu'un message d'erreur qui laisserait croire à un bug.
-        answerEl.innerHTML = markdownLiteToHtml(streamedAnswer) + '<div class="text-muted small mt-1">(réponse interrompue)</div>';
-      } else {
-        answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(err.message) + '</span>';
-      }
-    } finally {
-      currentAbortController = null;
-      setSendingState(false);
-      input.focus();
-      chatWindow.scrollTop = chatWindow.scrollHeight;
+    } else if (lastErr.name === 'AbortError') {
+      // Interruption volontaire (bouton "Arrêter") : le texte déjà reçu reste affiché tel quel,
+      // avec une mention explicite, plutôt qu'un message d'erreur qui laisserait croire à un bug.
+      answerEl.innerHTML = markdownLiteToHtml(streamedAnswer) + '<div class="text-muted small mt-1">(réponse interrompue)</div>';
+    } else {
+      answerEl.innerHTML = '<span class="text-danger">Erreur : ' + escapeHtml(lastErr.message) + '</span>';
+      if (window.reassortReportError) window.reassortReportError('Assistant IA (après 2 tentatives): ' + lastErr.message, lastErr.stack);
     }
+
+    currentAbortController = null;
+    setSendingState(false);
+    input.focus();
+    chatWindow.scrollTop = chatWindow.scrollHeight;
   }
 
   function stopGeneration() {
     if (currentAbortController) currentAbortController.abort();
   }
 
-  shopSelect.addEventListener('change', function () {
-    startNewConversation();
-    if (shopSelect.value) onShopReady();
-  });
+  // Changer de magasin en haut de page (sélecteur global) repart sur une conversation neuve — une
+  // conversation est rattachée à un magasin précis côté serveur, jamais mélangée entre deux
+  // magasins (remplace l'ancien shopSelect.addEventListener('change', ...) propre à cette page).
+  function initShopContext() {
+    if (!window.reassortGetActiveShop) { setTimeout(initShopContext, 200); return; } // attend global-shop-selector.js
+    window.reassortOnActiveShopChange(function () {
+      startNewConversation();
+      refreshShopContext();
+    });
+    refreshShopContext();
+  }
 
   newConvBtn.addEventListener('click', startNewConversation);
   sendBtn.addEventListener('click', function () {
@@ -433,7 +496,7 @@
     if (e.key === 'Enter' && !currentAbortController) sendQuestion();
   });
 
-  loadShopList();
+  loadShopsMap().then(initShopContext);
   loadSuggestedQuestions();
   loadConversations();
 })();

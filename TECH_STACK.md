@@ -2,7 +2,7 @@
 
 Ce document répertorie tous les langages/technologies présents dans le dépôt, où ils sont utilisés,
 et quelles fonctionnalités ou calculs métier ils implémentent. Le cahier des charges fonctionnel
-complet est dans [readme.md](readme.md) ; ce fichier-ci répond à la question « quel langage fait
+complet est dans [CAHIER_DES_CHARGES.md](CAHIER_DES_CHARGES.md) ; ce fichier-ci répond à la question « quel langage fait
 quoi et où ».
 
 ## Vue d'ensemble
@@ -49,7 +49,7 @@ tâches planifiées.
 
 ### 1.3 API HTTP (`backend/src/routes/`, `backend/src/middleware/`)
 
-Express REST classique : `reassort.js` (toutes les routes métier réassort/propositions/IA/synchronisation), `auth.js` (connexion JWT avec limitation anti-brute-force), `users.js` (gestion des comptes). Middleware `auth.js` : vérification du token JWT et des rôles (ADMIN/SUPERVISOR/STORE).
+Express REST classique : `reassort.js` (toutes les routes métier réassort/propositions/IA/synchronisation), `auth.js` (connexion JWT avec limitation anti-brute-force), `users.js` (gestion des comptes). Middleware `auth.js` : vérification du token JWT et des rôles (ADMIN, SUPERVISOR, DIRECTOR, DEPARTMENT_HEAD, SHELF_STOCKER — migration du 15/09/2026, remplace l'ancien trio ADMIN/SUPERVISOR/STORE), avec `resolveShopId`/`resolvePosId` qui cantonnent chaque rôle à son périmètre réel (magasin unique, rayon assigné) plutôt que de faire confiance à un paramètre fourni par le client.
 
 ---
 
@@ -115,4 +115,4 @@ départ mais nécessitent une réécriture en JS pour s'intégrer au backend act
 - **Comprendre l'intégration RPOS** (et ses bugs déjà corrigés : colisage, filtres de date ignorés) → `backend/src/services/rposClient.js`.
 - **Modifier l'apparence d'une page** → `frontend/assets/css/theme.css` et [THEME_SYSTEM.md](THEME_SYSTEM.md).
 - **Ajouter un job planifié** → `backend/src/jobs/`, puis l'enregistrer dans `backend/src/jobs/cronManager.js`.
-- **Comprendre le cahier des charges métier d'origine** → [readme.md](readme.md).
+- **Comprendre le cahier des charges métier d'origine** → [CAHIER_DES_CHARGES.md](CAHIER_DES_CHARGES.md).

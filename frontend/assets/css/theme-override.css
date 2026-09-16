@@ -88,8 +88,8 @@ a:not(.sidebar *),
      color: #ffffff !important;
 }
 
-/* Sidebar plate par sections (demande du 14/09/2026) : intitulés de section discrets et
-   sous-liens Paramètres légèrement indentés pour marquer la hiérarchie sans groupe repliable. */
+/* Sidebar par sections (demande du 14/09/2026, pliage ajouté le 16/09/2026) : intitulés de section
+   discrets et sous-liens Paramètres légèrement indentés pour marquer la hiérarchie. */
 .sidebar-heading {
      color: #8a8a8a !important;
      font-size: 0.68rem;
@@ -99,9 +99,51 @@ a:not(.sidebar *),
      padding: 1rem 0.5rem 0.25rem;
      list-style: none;
 }
+
+/* En-têtes repliables (Réassort, Administration — demande du 16/09/2026 : "fais la sidebare
+   pliable"). L'état ouvert/fermé est mémorisé en localStorage par layout.js, PAS par un mécanisme
+   Bootstrap collapse classique : ce dernier avait déjà échoué le 14/09/2026 car son état vit dans
+   le DOM, entièrement reconstruit à chaque changement de page (la sidebar est ré-injectée par
+   layout.js sur CHAQUE page) — un vrai localStorage survit à cette ré-injection. */
+.sidebar-heading-collapsible {
+     display: flex;
+     align-items: center;
+     justify-content: space-between;
+     cursor: pointer;
+     user-select: none;
+}
+.sidebar-collapse-caret {
+     font-size: 0.85rem;
+     transition: transform 0.15s ease;
+}
+/* .collapsed sur le <li> d'en-tête (pas sur les liens eux-mêmes) : la flèche pointe vers la droite
+   quand le groupe est replié, vers le bas quand il est ouvert. */
+.sidebar-heading-collapsible.collapsed .sidebar-collapse-caret {
+     transform: rotate(-90deg);
+}
+/* Masque un <li> de groupe replié SANS toucher à son style.display inline (reassort-auth.js pose ce
+   style séparément pour les liens ADMIN, sur un événement qui se déclenche après ce calcul — cf.
+   commentaire dans layout.js). !important gagne face à display:'' comme face à display:'none',
+   dans les deux cas le résultat voulu est "masqué tant que le groupe est replié". */
+.sidebar-group-collapsed {
+     display: none !important;
+}
 .sidebar .nav-link.sidebar-sub {
      padding-left: 2.75rem;
      font-size: 0.9rem;
+}
+
+/* Sous-en-tête interne (ex: "Paramètres" au sein de la section Administration) : plus discret
+   qu'un sidebar-heading de premier niveau (pas de bordure/majuscule marquée), juste assez pour
+   séparer visuellement un sous-groupe de liens du reste de la section (demande du 16/09/2026). */
+.sidebar-subheading {
+     color: #6b7280 !important;
+     font-size: 0.7rem;
+     font-weight: 600;
+     letter-spacing: 0.06em;
+     text-transform: uppercase;
+     padding: 0.6rem 0.5rem 0.15rem 2.75rem;
+     list-style: none;
 }
 
 /* Espace un peu plus marqué entre sections + séparateur discret, pour que le regroupement

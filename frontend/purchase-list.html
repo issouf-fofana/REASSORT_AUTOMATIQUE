@@ -121,19 +121,19 @@
                                              const shopSelect = document.getElementById('orders-shop-select');
 
                                              function selectedShopId() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.value || '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.value || '';
                                                   return currentUser.rposShopId;
                                              }
 
                                              function selectedPosId() {
-                                                  if (currentUser.role !== 'STORE') return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) return shopSelect.selectedOptions.length ? shopSelect.selectedOptions[0].dataset.posId : '';
                                                   return currentUser.rposPosId;
                                              }
 
                                              function updateTitle() {
                                                   let shopName = currentUser.rposShopName;
                                                   let shopRef = currentUser.rposShopReference;
-                                                  if (currentUser.role !== 'STORE' && shopSelect.selectedOptions.length) {
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role) && shopSelect.selectedOptions.length) {
                                                        shopName = shopSelect.selectedOptions[0].dataset.name;
                                                        shopRef = shopSelect.selectedOptions[0].dataset.reference;
                                                   }
@@ -142,7 +142,7 @@
                                              }
 
                                              async function initShopPicker() {
-                                                  if (currentUser.role !== 'STORE') {
+                                                  if (!window.reassortIsSingleShopRole(currentUser.role)) {
                                                        shopSelect.style.display = '';
                                                        shopSelect.innerHTML = '<option value="">Chargement...</option>';
                                                        try {

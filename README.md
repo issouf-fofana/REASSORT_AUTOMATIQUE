@@ -15,7 +15,10 @@ de valider puis d'envoyer les commandes directement à RPOS, rayon par rayon.
 - ✅ Récupération d'historique par tranches avec pause/reprise/annulation
 - ✅ Import de fichiers CSV d'export de ventes, avec bascule automatique sur l'API RPOS si absent
 - ✅ Gestion multi-magasins / multi-serveurs RPOS (18 serveurs, 52+ magasins)
-- ✅ Rôles ADMIN / SUPERVISOR / STORE avec périmètre de magasins supervisés
+- ✅ 5 rôles hiérarchiques (Rayonniste/Chef de département/Directeur/Superviseur/Administrateur),
+  permissions IA granulaires par capacité, filtrage automatique par rayon assigné
+- ✅ Assistant IA conversationnel avec règles de détection éditables sans redéploiement, guide de
+  permissions par rôle ("Mon accès")
 
 ## 🛠️ Stack technique
 
@@ -174,6 +177,38 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   commandes), conversations persistées (`ChatbotConversation/Message`), page
   `ai-assistant.html` + widget flottant sur toutes les pages. Vérifié en prod : 4
   conversations, réponse Pareto réelle (1316 articles = 80% CA).
+  **Étendu les 15-16/09/2026** — voir détail juste après l'étape 10 (RBAC), section suivante :
+  outils supplémentaires (fiche article, historique de prix, mouvements de stock avec nombre
+  de tickets réel), permissions par capacité liées au rôle, règles de détection dynamiques,
+  retry réseau, filet de sécurité process.
+- ✅ **Étape 10 (partiel) — RBAC fin par rôle** (§39-42, sans le volet LDAP) : 5 rôles
+  hiérarchiques remplaçant l'ancien trio ADMIN/SUPERVISOR/STORE — Rayonniste (`SHELF_STOCKER`,
+  un ou plusieurs rayons d'un magasin), Chef de département (`DEPARTMENT_HEAD`, un rayon), 
+  Directeur (`DIRECTOR`, tout un magasin), Superviseur (`SUPERVISOR`, plusieurs magasins),
+  Administrateur (`ADMIN`, configuration technique complète). Magasin et rayon assignés une
+  fois à la création du compte (`User.rposShopId`/`assignedDepartment`, ce dernier tolère
+  plusieurs rayons séparés par virgule). Filtrage effectif (pas juste déclaratif) vérifié à
+  plusieurs niveaux : `SINGLE_SHOP_ROLES`/`DEPARTMENT_SCOPED_ROLES`
+  (`middleware/auth.js`/`aiPermissionsService.js`) cantonnent `resolveShopId` et
+  `filterProposalLinesForUser` ; l'Assistant IA a ses propres permissions PAR CAPACITÉ
+  (`revenueShop`, `revenueArticle`, `articleDetails`, `stock`, `sales`, `orders`, `accuracy` —
+  `aiPermissionsService.js`), avec défaut par rôle personnalisable par compte
+  (`User.aiPermissionsJson`) : un Rayonniste ne voit ni le CA du magasin ni celui de ses propres
+  articles, un Chef de département voit le CA de son rayon mais pas celui du magasin, conforme
+  à la règle métier explicite du 15/09/2026. Un article ciblé par EAN reste soumis à ce même
+  filtre même hors d'une liste déjà filtrée (`isEanInUserScope`), pour empêcher un contournement
+  en connaissant/devinant un code produit. Écrans réservés Administrateur (`requireAdmin`) :
+  Paramètres (toutes les clés techniques), Utilisateurs, Vue globale, Améliorations IA, Journal
+  d'audit — décision explicite du 15/09/2026 ("personne ne doit voir les paramètres à part le
+  superadmin"), y compris pour le Superviseur. Audité activement à plusieurs reprises (tests
+  HTTP réels avec de vrais comptes de chaque rôle, pas seulement des tests unitaires) : failles
+  trouvées et corrigées — routes `insights.js`/`shops.js` qui ne filtraient pas par rayon,
+  contournement via l'historique de conversation du chatbot, injection du paramètre
+  `department` dans le corps de requête (toujours écrasé côté serveur par
+  `assignedDepartment`, jamais fait confiance à l'entrée client), écran "Ce que je peux faire"
+  par rôle (`/ai-guide`, "Mon accès") listant pages accessibles et actions autorisées avec le
+  nom du rôle explicitement nommé dans le texte. **Non fait** : le volet LDAP du §39-40
+  (authentification reste par email/mot de passe local, JWT).
 - ⬜ Étape 12 — Shadow Mode (§50)
 - ⬜ Étape 13 — Réassort automatique contrôlé (§26-29)
 - ⬜ Étape 14 — Réassort automatique complet
@@ -258,7 +293,8 @@ Détail dans `backend/src/services/proposalService.js`, fonction `computeQuantit
 
 ## 📚 Documentation
 
-- **[readme.md](readme.md)** — cahier des charges fonctionnel complet (contexte métier, sections détaillées)
+- **[CAHIER_DES_CHARGES.md](CAHIER_DES_CHARGES.md)** — cahier des charges fonctionnel complet
+  (contexte métier, sections détaillées, §72 pour le suivi d'avancement croisé avec ce README)
 - **[TECH_STACK.md](TECH_STACK.md)** — langages utilisés, où et pour quel calcul
 - **[THEME_SYSTEM.md](THEME_SYSTEM.md)** — système de thème CSS/JS du frontend
 

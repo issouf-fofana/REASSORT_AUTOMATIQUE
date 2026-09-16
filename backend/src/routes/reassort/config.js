@@ -11,6 +11,7 @@ const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
 const { findSalesFiles } = require('../../services/salesFileService');
 const jobHealthService = require('../../services/jobHealthService');
+const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
 const multer = require('multer');
 const path = require('path');
 const fsPromises = require('fs/promises');
@@ -19,7 +20,13 @@ const fsPromises = require('fs/promises');
 // avant d'ecrire sur disque, jamais un stockage direct sur le dossier surveille par multer lui-meme.
 const salesFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-router.get('/config', async (req, res) => {
+// Paramètres réassort réservés au Superadmin uniquement (décision explicite du 15/09/2026 :
+// "personne ne doit voir les paramètres à part le superadmin") — Directeur/Chef de département/
+// Rayonniste/Superviseur n'y ont plus accès du tout, alors qu'un compte STORE pouvait auparavant
+// consulter/modifier les paramètres de son propre magasin. Changement de portée volontaire, pas un
+// bug : ces rôles pilotent le réassort au quotidien (propositions, Assistant IA) mais ne touchent
+// plus aux réglages qui influencent le calcul lui-même (seuils, période d'analyse...).
+router.get('/config', requireAdmin, async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
@@ -35,7 +42,7 @@ router.get('/config', async (req, res) => {
 // PUT /api/reassort/config - met à jour la configuration réassort du magasin
 // body: { paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
 //         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice }
-router.put('/config', async (req, res) => {
+router.put('/config', requireAdmin, async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
@@ -77,31 +84,20 @@ router.put('/config', async (req, res) => {
   }
 });
 
-// PUT /api/reassort/config/bulk - applique les mêmes paramètres à plusieurs magasins (ADMIN uniquement)
+// PUT /api/reassort/config/bulk - applique les mêmes paramètres à plusieurs magasins (Superadmin
+// uniquement — décision explicite du 15/09/2026 : "personne ne doit voir les paramètres à part le
+// superadmin", y compris SUPERVISOR qui pouvait auparavant configurer les magasins de son
+// périmètre). requireAdmin remplace l'ancien contrôle manuel par rôle, désormais inutile ici.
 // body: { shopIds: [uuid, ...], paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
 //         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice }
-router.put('/config/bulk', async (req, res) => {
+router.put('/config/bulk', requireAdmin, async (req, res) => {
   try {
-    if (req.user.role === 'STORE') {
-      return res.status(403).json({ success: false, message: 'Réservé aux administrateurs et superviseurs' });
-    }
-
     const {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
       return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
-    }
-
-    if (req.user.role === 'SUPERVISOR') {
-      // Un superviseur ne peut appliquer une config en masse qu'à des magasins de son périmètre.
-      const supervised = await prisma.supervisedShop.findMany({
-        where: { userId: req.user.id, rposShopId: { in: shopIds } },
-      });
-      if (supervised.length !== shopIds.length) {
-        return res.status(403).json({ success: false, message: 'Un ou plusieurs magasins ne sont pas dans votre périmètre de supervision' });
-      }
     }
 
     const data = {};
@@ -148,6 +144,14 @@ router.get('/system-config', requireAdmin, async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
+});
+
+// GET /api/reassort/system-config/chatbot-tools - noms d'outils valides pour une règle de
+// détection d'intention (menu déroulant du formulaire d'édition, demande du 16/09/2026) — source
+// unique avec la validation serveur (VALID_INTENT_TOOLS dans chatbotService.js), jamais une copie
+// devinée côté frontend qui pourrait diverger si un outil est ajouté/retiré plus tard.
+router.get('/system-config/chatbot-tools', requireAdmin, async (req, res) => {
+  res.json({ success: true, data: [...VALID_INTENT_TOOLS].sort() });
 });
 
 // GET /api/reassort/system-config/jobs-health - état des 4 jobs planifiés (dernier statut, nombre
@@ -223,6 +227,31 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       const windows = value.split(',').map((s) => s.trim());
       if (!windows.length || windows.some((w) => !/^\d+$/.test(w) || parseInt(w, 10) <= 0)) {
         return res.status(400).json({ success: false, message: 'Liste invalide : entiers positifs séparés par des virgules (ex: 31,93,366)' });
+      }
+    }
+
+    // Règles de détection d'intention du chatbot (demande du 16/09/2026 : rendre la table dynamique
+    // plutôt que codée en dur) — validées ICI, à l'écriture, plutôt que de laisser une règle
+    // malformée passer et être filtrée silencieusement par chatbotService.getIntentRules à chaque
+    // lecture : un admin qui enregistre une règle invalide doit le savoir immédiatement, pas
+    // découvrir plus tard que sa règle n'a jamais été appliquée.
+    if (key === systemConfig.KEYS.CHATBOT_INTENT_RULES) {
+      let parsed;
+      try {
+        parsed = JSON.parse(value);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: 'JSON invalide : ' + err.message });
+      }
+      if (!Array.isArray(parsed) || !parsed.length) {
+        return res.status(400).json({ success: false, message: 'Au moins une règle est requise (tableau non vide)' });
+      }
+      for (const [i, rule] of parsed.entries()) {
+        if (!rule || !Array.isArray(rule.keywords) || !rule.keywords.length || rule.keywords.some((k) => typeof k !== 'string' || !k.trim())) {
+          return res.status(400).json({ success: false, message: `Règle ${i + 1} : au moins un mot-clé non vide est requis` });
+        }
+        if (!VALID_INTENT_TOOLS.has(rule.tool)) {
+          return res.status(400).json({ success: false, message: `Règle ${i + 1} : outil "${rule.tool}" inconnu` });
+        }
       }
     }
 

@@ -18,17 +18,41 @@ model User {
   email     String   @unique
   password  String
   name      String
-  // ADMIN (tous les magasins), SUPERVISOR (un sous-ensemble de magasins choisi, cf.
-  // SupervisedShop, readme §29), STORE (un seul magasin assigné)
-  role      String   @default("STORE")
+  // Hiérarchie de rôles (plan validé le 15/09/2026, remplace l'ancien système à 3 niveaux) :
+  //   ADMIN (alias historique de SUPERADMIN, conservé pour compatibilité avec le code existant qui
+  //     le teste encore à ~27 endroits — tous les magasins + configuration technique complète) ;
+  //   SUPERVISOR (plusieurs magasins choisis, cf. SupervisedShop, mêmes droits IA qu'un DIRECTOR
+  //     mais répétés sur chaque magasin de son périmètre, jamais de configuration) ;
+  //   DIRECTOR (un seul magasin entier, tout voir/toutes les questions IA, jamais de configuration) ;
+  //   DEPARTMENT_HEAD (un département assigné dans un magasin — cf. assignedDepartment ci-dessous —
+  //     peut demander le CA de son département/ses articles, jamais le CA du magasin entier) ;
+  //   SHELF_STOCKER (un ou plusieurs rayons assignés dans un magasin — cf. assignedDepartment —
+  //     bloqué sur TOUT CA, y compris celui de ses propres articles).
+  // DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER partagent le même cloisonnement magasin que l'ancien
+  // STORE (rposShopId ci-dessous) — seule la granularité département/rayon et les permissions IA
+  // par capacité (aiPermissions ci-dessous) les distinguent entre eux.
+  role      String   @default("DIRECTOR")
 
   // Rattachement au magasin RPOS (uuid, référence et nom mis en cache pour l'affichage), et au
   // serveur RPOS qui l'héberge (chaque magasin n'est joignable que via son propre serveur).
-  // Utilisé uniquement pour un compte STORE ; null pour ADMIN/SUPERVISOR.
+  // Utilisé pour DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER ; null pour ADMIN/SUPERVISOR.
   rposShopId        String? @map("rpos_shop_id")
   rposShopReference String? @map("rpos_shop_reference")
   rposShopName      String? @map("rpos_shop_name")
   rposPosId         String? @map("rpos_pos_id") // ex: "pos1"
+
+  // Département/rayon assigné (DEPARTMENT_HEAD/SHELF_STOCKER uniquement) : nom du département tel
+  // que retourné par RPOS (ProposalLine.department), utilisé pour filtrer ce que le compte peut voir
+  // dans les propositions et ce que l'Assistant IA peut lui montrer. Un SHELF_STOCKER peut cumuler
+  // plusieurs rayons (liste séparée par virgules) — cf. plan §9 "un seul rayon par compte ?" tranché
+  // en faveur du cumul pour rester réaliste (un rayonniste couvre souvent plusieurs petits rayons).
+  assignedDepartment String? @map("assigned_department")
+
+  // Permissions IA par capacité (JSON, ex: {"revenueShop": false, "revenueArticle": true, ...}) —
+  // réglage fin qui part d'un défaut par rôle (cf. aiPermissionsService.js) mais peut être ajusté
+  // au cas par cas par un ADMIN pour un utilisateur précis, sans changer son rôle. null = utilise
+  // uniquement le défaut de son rôle, jamais recalculé/écrasé automatiquement une fois personnalisé.
+  aiPermissionsJson String? @map("ai_permissions_json")
 
   isActive  Boolean  @default(true) @map("is_active")
 
@@ -732,6 +756,13 @@ model ProposalLine {
   // L'article a-t-il été décoché (exclu) par l'utilisateur lors de la validation ?
   wasExcluded Boolean @default(false) @map("was_excluded")
 
+  // Si wasExcluded=true, l'exclusion vient-elle du forçage sécurité par périmètre de rayon
+  // (Rayonniste/Chef de département validant une proposition contenant des lignes hors de son
+  // périmètre, cf. proposals.js route POST /proposal/:id/validate) plutôt que d'un vrai rejet
+  // métier volontaire ? Sans cette distinction, un taux de rejet agrégé (KPI §23) est totalement
+  // faussé par ce filtrage de sécurité qui n'a rien à voir avec la qualité des recommandations IA.
+  excludedOutOfScope Boolean @default(false) @map("excluded_out_of_scope")
+
   // Précision des prévisions (readme §17) : quantité réellement vendue sur la fenêtre de mesure
   // (ReassortConfig.forecastAccuracyWindowDays) après la validation, calculée une seule fois à la
   // demande puis mise en cache ici (la période mesurée est figée dans le passé, jamais recalculée).
@@ -877,6 +908,13 @@ model SalesLine {
   // supplémentaire nécessaire) : nullable car les lignes synchronisées avant l'ajout de ce champ
   // n'en disposent pas — ne pas les traiter comme "0 CFA de TTC", qui serait faux.
   revenueInclTax Float? @map("revenue_incl_tax")
+
+  // UUID du ticket de caisse RPOS (receipt.id) — ajouté le 16/09/2026 pour compter le vrai "nombre
+  // de ventes" (tickets distincts), demande explicite car une ligne = un article vendu, pas un
+  // ticket (un même ticket a plusieurs lignes). Nullable : les lignes synchronisées avant l'ajout
+  // de ce champ n'en disposent pas, jamais traitées comme "0 ticket" (qui serait faux), simplement
+  // exclues d'un comptage de tickets sur une période qui couvre en partie des données anciennes.
+  receiptId String? @map("receipt_id")
 
   syncedAt DateTime @default(now()) @map("synced_at")
 
