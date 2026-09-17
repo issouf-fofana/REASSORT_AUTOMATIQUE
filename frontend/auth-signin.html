@@ -17,7 +17,6 @@
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
      <script src="assets/js/backend-config.js"></script>
-     <script src="assets/js/reassort-toast.js"></script>
 </head>
 
 <body>
@@ -91,17 +90,8 @@
                                                        localStorage.setItem('reassort_user', JSON.stringify(json.data.user));
                                                        window.location.href = '/';
                                                   } catch (err) {
-                                                       // Toast plutôt qu'un encart fixe dans la page (demande du 17/09/2026) : le message
-                                                       // "compte en attente de validation, contactez le SOS" reste visible assez longtemps
-                                                       // pour être lu/noté, sans rester figé indéfiniment dans la mise en page comme l'ancien
-                                                       // encart .alert-danger — window.reassortToast est le mécanisme standard du reste du
-                                                       // site (settings.html, purchase-order.html, etc.).
-                                                       if (window.reassortToast) {
-                                                            window.reassortToast(err.message, 'error');
-                                                       } else {
-                                                            errorBox.textContent = err.message;
-                                                            errorBox.style.display = 'block';
-                                                       }
+                                                       errorBox.textContent = err.message;
+                                                       errorBox.style.display = 'block';
                                                   } finally {
                                                        submitBtn.disabled = false;
                                                   }
