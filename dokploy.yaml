@@ -66,6 +66,10 @@ services:
       RPOS_BASE_URL: ${RPOS_BASE_URL:-https://pos1-prod-prosuma.prosuma.pos}
       RPOS_USER: ${RPOS_USER:-}
       RPOS_PASSWORD: ${RPOS_PASSWORD:-}
+      # Authentification LDAP (Active Directory Prosuma, STEP 10) — nécessite que le serveur Dokploy
+      # ait une route réseau vers le contrôleur de domaine (10.0.70.1), pas juste vers Internet.
+      LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
+      LDAP_DOMAIN_FQDN: ${LDAP_DOMAIN_FQDN:-prosuma.ci}
     depends_on:
       postgres:
         condition: service_healthy

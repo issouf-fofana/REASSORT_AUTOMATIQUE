@@ -6,6 +6,8 @@ const rateLimit = require('express-rate-limit');
 const prisma = require('../utils/prisma');
 const { requireAuth } = require('../middleware/auth');
 const { getJwtConfig } = require('../services/jwtConfigService');
+const { verifyLdapCredentials, LDAP_DOMAIN_FQDN } = require('../services/ldapService');
+const crypto = require('crypto');
 
 
 // Limite les tentatives de connexion par IP (brute-force sur mot de passe) : sans ce garde-fou,
@@ -28,13 +30,38 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.isActive) {
-      return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
-    }
+    let user = await prisma.user.findUnique({ where: { email } });
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
+    // Priorité au compte local (STEP 10, plan de rôles §39-40) : si un compte existe déjà avec un
+    // mot de passe local, on l'authentifie normalement, LDAP n'intervient jamais pour lui — évite
+    // qu'une panne ou une politique de mot de passe AD ne bloque un compte de service/admin local
+    // qui n'a jamais eu besoin d'un compte réseau Prosuma (ex: admin@reassort.local).
+    if (user && user.isActive) {
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) {
+        return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+      }
+    } else if (!user && email.toLowerCase().endsWith(`@${LDAP_DOMAIN_FQDN}`)) {
+      // Pas de compte local pour cet email : si son domaine correspond à Prosuma, on tente LDAP
+      // avec l'identifiant réseau (partie avant @) — jamais pour un email d'un autre domaine, qui
+      // n'a de toute façon aucune chance d'exister dans cet Active Directory.
+      const ldapUsername = email.slice(0, email.indexOf('@'));
+      const ldapOk = await verifyLdapCredentials(ldapUsername, password);
+      if (!ldapOk) {
+        return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+      }
+      // Premier succès LDAP pour cet utilisateur : crée le compte local avec un rôle par défaut
+      // sans périmètre — un ADMIN doit ensuite configurer le rôle/magasin réel depuis Utilisateurs,
+      // exactement comme pour un compte créé manuellement (cf. décision du 17/09/2026).
+      user = await prisma.user.create({
+        data: {
+          email,
+          password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
+          name: ldapUsername,
+        },
+      });
+      console.log(`[auth] Compte créé automatiquement au premier login LDAP : ${email}`);
+    } else {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
 
