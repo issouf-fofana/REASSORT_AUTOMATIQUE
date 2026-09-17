@@ -789,4 +789,4 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   return { answer: fullText.trim(), providerUsed };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, geminiErrorMessage };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage };

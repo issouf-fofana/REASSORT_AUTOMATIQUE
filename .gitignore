@@ -45,3 +45,12 @@ temp/
 /reassort
 commede.text
 *.kate-swp
+scratchpad/
+
+# Exports de ventes bruts (peuvent dépasser 100 Mo, jamais du code — cf. 17/09/2026, import
+# de fichiers volumineux) : ne doivent jamais entrer dans l'historique git, qui garderait ce
+# poids même après suppression ultérieure.
+*.csv
+# Dossier local des imports manuels de fichiers de vente (backend/src/services/salesFileService.js,
+# MANUAL_IMPORT_DIR) : créé dynamiquement au runtime, son contenu ne doit jamais être versionné.
+backend/data/

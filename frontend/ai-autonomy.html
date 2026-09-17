@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Préparation à l'autonomie | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+     <link rel="icon" type="image/png" href="assets/images/logo-reassort.png">
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          .autonomy-ladder { display: flex; gap: 8px; flex-wrap: wrap; }
+          .autonomy-step { flex: 1; min-width: 180px; border: 2px solid #dee2e6; border-radius: 8px; padding: 12px; text-align: center; }
+          .autonomy-step.active { border-color: #198754; background: #d1e7dd; }
+          .autonomy-step.pending { border-color: #fd7e14; background: #fff3cd; }
+          .criteria-bar { height: 8px; border-radius: 5px; background: #e9ecef; overflow: hidden; }
+          .criteria-bar-fill { height: 100%; background: #0d6efd; }
+     </style>
+</head>
+
+<body data-page-title="Préparation à l'autonomie">
+
+     <script src="assets/js/loading-overlay.js"></script>
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+          <script src="assets/js/global-shop-selector.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> indicateur <strong>purement consultatif</strong> —
+                                   il ne déclenche jamais lui-même un changement de comportement du système. Il mesure,
+                                   à partir de critères réels (taux d'erreur, exactitude, stabilité, détection
+                                   d'anomalies, résultats après correction), si l'IA progresse vers moins de
+                                   supervision humaine. Un palier n'est affiché comme <strong>atteint</strong> que
+                                   s'il se maintient sur plusieurs évaluations consécutives — jamais sur un seul bon
+                                   résultat ponctuel — et redescend immédiatement si la performance se dégrade.
+                                   À vous de décider, en vous appuyant sur cet indicateur, d'activer ou non
+                                   davantage d'automatisation (ex: Paramètres &gt; IA &gt; Ajustement IA à la génération).
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="d-flex justify-content-between align-items-center mb-3">
+                                   <h5 class="mb-0">Échelle de supervision</h5>
+                                   <button type="button" id="autonomy-recompute" class="btn btn-primary btn-sm">Recalculer maintenant</button>
+                              </div>
+                              <div class="autonomy-ladder" id="autonomy-ladder"></div>
+                              <div id="autonomy-streak-note" class="small text-muted mt-2"></div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <h5 class="mb-3">Critères mesurables</h5>
+                              <div id="autonomy-criteria"></div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <h5 class="mb-3">Historique des évaluations</h5>
+                              <div id="autonomy-history" class="table-responsive"></div>
+                         </div>
+                    </div>
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-autonomy.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+</body>
+
+</html>

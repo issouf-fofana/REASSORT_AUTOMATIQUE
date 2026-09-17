@@ -9,7 +9,7 @@
  */
 const prisma = require('../utils/prisma');
 const tools = require('./chatbotToolsService');
-const { streamWithFallback } = require('./aiForecastService');
+const { streamWithFallback, callWithFallback } = require('./aiForecastService');
 const systemConfig = require('./systemConfigService');
 const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./aiPermissionsService');
 
@@ -203,6 +203,66 @@ function isVisualRequest(question) {
   return VISUAL_REQUEST_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
+// Catalogue des outils présenté au LLM pour le function-calling de repli (voir TOOL_CALL_SYSTEM
+// PROMPT ci-dessous). Signature UNIFORME (rposShopId implicite + params nommés) pour les 13 outils,
+// y compris les 3 dont la vraie fonction JS prend des paramètres positionnels différents
+// (getArticleDetails/getPriceChangeHistory/getStockMoveHistory prennent posId/shopId/ean en positionnel
+// — cf. chatbotToolsService.js) : la traduction vers la vraie signature se fait dans
+// callToolByName ci-dessous, jamais exposée au LLM qui ne doit connaître qu'une forme simple.
+const TOOL_CATALOG = [
+  { name: 'getRevenue', description: 'Chiffre d\'affaires (CA) du magasin, d\'un rayon ou d\'un article, sur une date ou période.', params: { date: 'date ISO aaaa-mm-jj, optionnel', department: 'rayon, optionnel', ean: 'code EAN article, optionnel' } },
+  { name: 'getSalesHistory', description: 'Historique/évolution des ventes (quantités, tendance) sur les derniers jours, du magasin ou d\'un article.', params: { ean: 'code EAN article, optionnel', days: 'nombre de jours, optionnel (défaut 30)', department: 'rayon, optionnel' } },
+  { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
+  { name: 'getPriceChangeHistory', description: 'Historique des changements de prix (dont mises en promo) d\'un article précis.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
+  { name: 'getStockMoveHistory', description: 'Mouvements de stock d\'un article précis (casse, vol, cession de rayon, retour fournisseur) expliquant une variation de stock.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
+  { name: 'getArticleStock', description: 'Stock actuel disponible, du magasin entier/un rayon, ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel', department: 'rayon, optionnel' } },
+  { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
+  { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement.', params: { department: 'rayon, optionnel' } },
+  { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
+  { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
+  { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
+  { name: 'getOrders', description: 'Commandes récentes passées par le magasin.', params: {} },
+];
+
+const TOOL_CALL_SYSTEM_PROMPT_HEADER = `Tu es un routeur d'intention pour un assistant de réassort en magasin. Voici la liste des outils de données disponibles, au format JSON :
+${JSON.stringify(TOOL_CATALOG, null, 2)}
+
+Question de l'utilisateur : `;
+
+const TOOL_CALL_INSTRUCTIONS = `
+
+Réponds UNIQUEMENT avec un tableau JSON contenant UN SEUL objet, sans aucun texte avant ni après, au format exact :
+[{"tool": "<nom exact d'un outil ci-dessus, ou null si aucun ne correspond>", "params": {<paramètres nommés selon la description de l'outil choisi, ou objet vide>}}]
+Si un outil exige un EAN "OBLIGATOIRE" et qu'aucun code EAN n'est identifiable dans la question, réponds tool: null plutôt que d'inventer un EAN.`;
+
+/**
+ * Filet de repli n°3 (après mots-clés, EAN explicite, continuation d'historique) : quand aucune
+ * règle déterministe n'a permis d'identifier un outil, on demande au LLM lui-même de choisir parmi
+ * le catalogue — plutôt que d'abandonner directement sur "je ne comprends pas" pour une question mal
+ * formulée par rapport aux mots-clés connus mais dont l'intention réelle est claire pour un LLM.
+ * Approche "JSON structuré par prompt" (validée le 17/09/2026) plutôt que function-calling natif de
+ * chaque fournisseur : un seul prompt uniforme, réutilise callWithFallback tel quel (même bascule
+ * multi-clés que le reste du chatbot), aucun adaptateur par fournisseur à maintenir. Ne remplace
+ * JAMAIS le routage par mots-clés (rapide et gratuit) — n'est appelé qu'en dernier recours.
+ * Ne fait JAMAIS planter la conversation : toute erreur (LLM indisponible, JSON invalide, outil
+ * inconnu) retombe silencieusement sur null, exactement comme si aucune intention n'avait été
+ * détectée.
+ */
+async function detectIntentViaLlm(question) {
+  try {
+    const prompt = TOOL_CALL_SYSTEM_PROMPT_HEADER + question + TOOL_CALL_INSTRUCTIONS;
+    const { result } = await callWithFallback(prompt);
+    const choice = Array.isArray(result) ? result[0] : null;
+    if (!choice || !choice.tool) return null;
+    if (!VALID_INTENT_TOOLS.has(choice.tool)) return null;
+    return { toolName: choice.tool, params: choice.params && typeof choice.params === 'object' ? choice.params : {} };
+  } catch (err) {
+    // LLM indisponible, JSON mal formé, toutes les clés en échec... : jamais remonté à l'utilisateur,
+    // le chatbot se comporte comme si aucun outil n'avait été identifié (message générique existant).
+    return null;
+  }
+}
+
 /**
  * Exécute l'outil détecté avec les paramètres extraits de la question, retourne un objet
  * { toolName, toolResult } prêt à être injecté dans le prompt du LLM. found=false si aucun outil
@@ -246,9 +306,20 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
     if (lastTurn.toolUsed) toolName = lastTurn.toolUsed;
   }
 
+  // Filet de sécurité n°3 : function-calling par LLM (cf. detectIntentViaLlm), dernier recours
+  // avant d'abandonner — uniquement si aucune règle déterministe ci-dessus n'a rien trouvé du tout.
+  let llmParams = null;
+  if (!toolName) {
+    const llmFallbackEnabled = (await systemConfig.getValue(systemConfig.KEYS.CHATBOT_LLM_FALLBACK_ENABLED)) === 'true';
+    if (llmFallbackEnabled) {
+      const llmChoice = await detectIntentViaLlm(question);
+      if (llmChoice) { toolName = llmChoice.toolName; llmParams = llmChoice.params; }
+    }
+  }
+
   if (!toolName) return { toolName: null, toolResult: null };
 
-  let ean = extractEan(question);
+  let ean = extractEan(question) || (llmParams && ARTICLE_SCOPED_TOOLS.has(toolName) ? llmParams.ean : null) || null;
   if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && conversationHistory && conversationHistory.length) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
       const pastEan = extractEan(conversationHistory[i].question);
@@ -256,8 +327,8 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
     }
   }
   const rawDate = extractDate(question);
-  const date = rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate;
-  const percentage = extractPercentage(question);
+  const date = (rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate) || (llmParams ? llmParams.date : null) || null;
+  const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
 
   // Permissions IA par capacité (plan de rôles validé le 15/09/2026) : vérifiées ici, APRÈS avoir
   // résolu ean/department, car getRevenue est ambigu (CA magasin vs CA article/département — seul
@@ -269,7 +340,7 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
   // par défaut — faille de sécurité trouvée et corrigée le 15/09/2026 lors de l'audit de robustesse
   // (checkToolPermission gère déjà un user manquant/invalide en fail-closed via ROLE_DEFAULTS).
   {
-    const { allowed, capability } = checkToolPermission(user, toolName, { ean: extractEan(question), department });
+    const { allowed, capability } = checkToolPermission(user, toolName, { ean, department });
     if (!allowed) {
       const label = CAPABILITY_LABELS[capability] || capability;
       return { toolName, toolResult: { found: false, permissionDenied: true, message: `Vous n'avez pas accès à ${label} avec votre compte.` } };
@@ -286,41 +357,51 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
     }
   }
 
-  switch (toolName) {
-    case 'getArticleDetails':
-      if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
-      if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-      return { toolName, toolResult: await tools.getArticleDetails(posId, rposShopId, ean) };
-    case 'getPriceChangeHistory':
-      if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour consulter son historique de prix.' } };
-      if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-      return { toolName, toolResult: await tools.getPriceChangeHistory(posId, rposShopId, ean) };
-    case 'getStockMoveHistory':
-      if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour voir ses mouvements de stock (casse, cession, retour...).' } };
-      if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-      return { toolName, toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, { days: 14 }) };
-    case 'getParetoArticles':
-      return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
-    case 'getRevenue':
-      return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
-    case 'getStockoutRisks':
-      return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
-    case 'getOverstockArticles':
-      return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
-    case 'getPredictionAccuracy':
-      return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, {}) };
-    case 'getOrders':
-      return { toolName, toolResult: await tools.getOrders(rposShopId, {}) };
-    case 'getCurrentProposal':
-      return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
-    case 'getSalesHistory':
-      return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: 30, department }) };
-    case 'getArticleStock':
-      return ean
-        ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
-        : { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
-    default:
-      return { toolName: null, toolResult: null };
+  // Tout appel d'outil peut lever une exception (RPOS injoignable, timeout réseau — cf. rposClient.js)
+  // en plus de retourner normalement un found:false. Sans ce filet, une panne RPOS transitoire ferait
+  // planter TOUTE la conversation avec une exception non gérée au lieu de dégrader proprement comme le
+  // reste du chatbot (bug trouvé le 17/09/2026 lors d'une campagne de test de robustesse : une question
+  // ciblant un article via un EAN inventé par le LLM, sans RPOS joignable, remontait une exception brute
+  // jusqu'à l'appelant HTTP au lieu d'un message d'erreur normal).
+  try {
+    switch (toolName) {
+      case 'getArticleDetails':
+        if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        return { toolName, toolResult: await tools.getArticleDetails(posId, rposShopId, ean) };
+      case 'getPriceChangeHistory':
+        if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour consulter son historique de prix.' } };
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        return { toolName, toolResult: await tools.getPriceChangeHistory(posId, rposShopId, ean) };
+      case 'getStockMoveHistory':
+        if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour voir ses mouvements de stock (casse, cession, retour...).' } };
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        return { toolName, toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, { days: 14 }) };
+      case 'getParetoArticles':
+        return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
+      case 'getRevenue':
+        return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
+      case 'getStockoutRisks':
+        return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
+      case 'getOverstockArticles':
+        return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
+      case 'getPredictionAccuracy':
+        return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, {}) };
+      case 'getOrders':
+        return { toolName, toolResult: await tools.getOrders(rposShopId, {}) };
+      case 'getCurrentProposal':
+        return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
+      case 'getSalesHistory':
+        return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: 30, department }) };
+      case 'getArticleStock':
+        return ean
+          ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
+          : { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
+      default:
+        return { toolName: null, toolResult: null };
+    }
+  } catch (err) {
+    return { toolName, toolResult: { found: false, message: `Donnée momentanément indisponible (${err.message}). Réessayez dans quelques instants.` } };
   }
 }
 

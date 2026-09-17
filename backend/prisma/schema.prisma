@@ -1266,6 +1266,10 @@ model AIImprovement {
   // Erreurs du journal regroupées dans ce constat (clic journal → correctif).
   errorReports ErrorReport[]
 
+  // Entrée du journal unifié de corrections créée quand ce constat passe à APPLIED/IMPROVED
+  // (cf. CorrectionRecord, source AI_AUTO) — 0 ou 1, jamais recréée à chaque évaluation.
+  correctionRecords CorrectionRecord[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1296,6 +1300,150 @@ model AIImprovementEvent {
 
   @@index([improvementId, at])
   @@map("ai_improvement_events")
+}
+
+// Journal unifié des corrections (demande du 17/09/2026 : "à chaque correction, l'erreur exacte
+// constatée, son contexte, la cause identifiée, la correction apportée, les fichiers/fonctions
+// concernés, les tests avant/après, et l'historique des corrections similaires"). Couvre deux
+// sources différentes dans UN SEUL journal (choix explicite plutôt que deux journaux séparés) :
+//   - AI_AUTO : une correction détectée et appliquée automatiquement par le chien de garde
+//     (AIImprovement passé à APPLIED/IMPROVED) — improvementId renseigné, lien vers son evidence.
+//   - DEV_FIX : une correction de code faite en développement (par Claude ou un développeur) —
+//     improvementId absent, saisie manuelle au moment du fix.
+// domain reprend la granularité des capacités déjà utilisées pour le RBAC IA (aiPermissionsService.js
+// CAPABILITIES : stock, sales, orders, accuracy, revenueShop, revenueArticle, articleDetails), avec
+// "code" en repli pour un correctif transverse qui ne se rattache à aucune capacité précise — jamais
+// une nouvelle taxonomie inventée en parallèle qui divergerait de celle déjà utilisée pour la
+// maîtrise par domaine (AIDomainMastery) et le RBAC.
+model CorrectionRecord {
+  id String @id @default(cuid())
+
+  source String // AI_AUTO | DEV_FIX
+
+  improvementId String?        @map("improvement_id")
+  improvement   AIImprovement? @relation(fields: [improvementId], references: [id], onDelete: SetNull)
+
+  domain String // capacité concernée (cf. aiPermissionsService.CAPABILITIES), ou "code"
+
+  errorObserved String @map("error_observed")
+  context        String
+  rootCause      String @map("root_cause")
+  fixApplied     String @map("fix_applied")
+
+  filesChanged     String @map("files_changed")     // JSON: string[]
+  functionsChanged String @map("functions_changed") // JSON: string[]
+
+  testsBefore String @map("tests_before")
+  testsAfter  String @map("tests_after")
+
+  // Liens vers des CorrectionRecord antérieurs jugés similaires (même domaine, cause proche) —
+  // renseigné à la création par correctionRecordService.findSimilar, jamais recalculé après coup :
+  // une correction future qui cite CELLE-CI comme similaire ne modifie pas cette liste rétroactivement.
+  similarPastCorrectionIds String? @map("similar_past_correction_ids") // JSON: string[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String   @default("system") @map("created_by")
+
+  @@index([domain])
+  @@index([source])
+  @@index([createdAt])
+  @@map("correction_records")
+}
+
+// Mémoire de maîtrise par domaine métier (demande du 17/09/2026 : "vérifier s'il maîtrise
+// correctement chaque partie de la logique métier, connaître son niveau de maîtrise par domaine").
+// Granularité = les capacités déjà utilisées pour le RBAC IA (aiPermissionsService.CAPABILITIES),
+// plus "code" pour les correctifs transverses — jamais une taxonomie parallèle (cf. CorrectionRecord).
+// Une seule ligne par domaine (@unique), recalculée périodiquement par aiMasteryService.js — jamais
+// un historique de lignes, ce modèle représente l'état ACTUEL de la maîtrise, pas son évolution
+// (l'évolution se lit dans CorrectionRecord.createdAt, déjà horodaté).
+//
+// Deux méthodes de calcul cohabitent (choix assumé le 17/09/2026, pas une simplification par
+// défaut) :
+//  - domain = "accuracy" : vraie vérité-terrain disponible (AIPredictionOutcome compare la quantité
+//    prédite à la vente réelle) — masteryScore dérivé de l'erreur moyenne réelle.
+//  - tous les autres domaines : AUCUNE vérité-terrain n'existe aujourd'hui (juste des lectures
+//    instantanées sans historique de justesse, ex: getStockoutRisks ne vérifie jamais après coup si
+//    la rupture prédite s'est produite) — masteryScore dérivé du volume et de l'ancienneté des
+//    CorrectionRecord sur ce domaine (une correction récente pénalise plus qu'une correction
+//    ancienne). Moins précis qu'une vraie vérité-terrain, mais honnête sur ce qui est réellement
+//    mesuré plutôt que d'afficher un chiffre qui n'aurait pas de vrai sens.
+model AIDomainMastery {
+  id String @id @default(cuid())
+
+  domain String @unique
+
+  masteryScore    Float @default(100) @map("mastery_score") // 0-100
+  confidenceScore Float @default(0)   @map("confidence_score") // 0-100 : bas si peu d'observations, même si masteryScore est haut
+
+  // Méthode ayant produit masteryScore pour cette ligne — traçabilité pour ne jamais confondre un
+  // score "vérité-terrain" avec un score "volume de corrections" en lisant seulement le chiffre.
+  method String @default("CORRECTION_VOLUME") // ACCURACY_OUTCOME | CORRECTION_VOLUME
+
+  totalObservations Int @default(0) @map("total_observations") // AIPredictionOutcome évalués (accuracy) ou décisions connues (autres)
+  errorCount        Int @default(0) @map("error_count")
+  correctionCount   Int @default(0) @map("correction_count") // CorrectionRecord liés à ce domaine, tous historiques confondus
+
+  knownIssuesJson String? @map("known_issues_json") // JSON: résumé des erreurs récurrentes connues (libellés + fréquence)
+
+  lastEvaluatedAt DateTime? @map("last_evaluated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("ai_domain_mastery")
+}
+
+// Score de préparation à l'autonomie (demande du 17/09/2026) : indicateur CONSULTATIF (choix validé
+// le 17/09/2026, pas de bascule automatique de comportement) mesurant si le système est prêt à
+// fonctionner avec moins de supervision humaine — jamais un interrupteur qui déclenche seul un
+// changement réel : AI_QUANTITY_ADJUSTMENT_ENABLED (systemConfigService.js) reste le seul réglage qui
+// affecte vraiment le comportement, décidé par un humain qui consulte ce score.
+//
+// 7 critères demandés, chacun 0-100 quand mesurable :
+//   - errorRateScore : dérivé d'AIPredictionOutcome (taux d'erreur > seuil) + CorrectionRecord
+//   - recommendationAccuracyScore : dérivé d'AIPredictionOutcome (accuracyPct), même base qu'AIDomainMastery.accuracy
+//   - stabilityScore : dérivé de la variance des percentageError récents (une IA erratique, même en
+//     moyenne correcte, n'est pas prête à l'autonomie)
+//   - anomalyDetectionScore : dérivé d'AIImprovement type SILENT_ANOMALY (taux confirmé vs DISMISSED)
+//   - postCorrectionScore : dérivé d'AIImprovement (taux IMPROVED vs NO_EFFECT après correction)
+//   - ruleComplianceScore et testCaseScore : AUCUNE source de données réelle aujourd'hui (pas de
+//     journal de violations RBAC dédié, pas de suite de cas de test rejouée) — stockés à `null`
+//     explicitement plutôt qu'une valeur inventée, et EXCLUS du calcul de globalScore (moyenne des
+//     seuls critères réellement mesurés, jamais une pénalité arbitraire ni un chiffre flatteur creux).
+//
+// Paliers réversibles avec hystérésis (demande explicite : "débloquée progressivement... atteints ET
+// maintenus dans le temps", jamais sur un seul pic) : un palier n'est retenu comme "atteint" que si
+// le globalScore reste au-dessus de son seuil sur STABILITY_STREAK_REQUIRED snapshots consécutifs
+// (cf. autonomyReadinessService.js) — currentStreakCount trace cette continuité, remise à 0 dès
+// qu'un snapshot retombe sous le seuil du palier courant.
+model AutonomyReadinessSnapshot {
+  id String @id @default(cuid())
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  errorRateScore              Float? @map("error_rate_score")
+  recommendationAccuracyScore Float? @map("recommendation_accuracy_score")
+  stabilityScore              Float? @map("stability_score")
+  anomalyDetectionScore       Float? @map("anomaly_detection_score")
+  ruleComplianceScore         Float? @map("rule_compliance_score") // toujours null aujourd'hui, cf. commentaire de tête
+  postCorrectionScore         Float? @map("post_correction_score")
+  testCaseScore               Float? @map("test_case_score") // toujours null aujourd'hui, cf. commentaire de tête
+
+  globalScore Float @map("global_score") // moyenne des critères non-null ci-dessus
+  // Nombre de critères réellement entrés dans le calcul de globalScore (sur 7) — affiché dans l'UI
+  // pour ne jamais laisser croire à une mesure complète alors que 2 critères manquent aujourd'hui.
+  measuredCriteriaCount Int @map("measured_criteria_count")
+
+  // VALIDATION_HUMAINE | SUPERVISION_HUMAINE | AUTONOMIE_CONTROLEE | AUTONOME
+  level String
+  // Nombre de snapshots consécutifs (ce snapshot inclus) où le score est resté au niveau suffisant
+  // pour CE palier — un palier n'est affiché comme réellement "tenu" que si ce compteur dépasse le
+  // seuil de continuité requis, jamais sur la base d'un seul snapshot ponctuel.
+  currentStreakCount Int @map("current_streak_count")
+
+  detailsJson String @map("details_json") // JSON: détail par domaine (AIDomainMastery), échantillons utilisés
+
+  @@index([computedAt])
+  @@map("autonomy_readiness_snapshots")
 }
 
 // Journal des erreurs applicatives (debug global) : TOUTES les erreurs 5xx de l'API et TOUTES

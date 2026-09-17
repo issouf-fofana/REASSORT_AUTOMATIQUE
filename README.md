@@ -17,8 +17,13 @@ de valider puis d'envoyer les commandes directement à RPOS, rayon par rayon.
 - ✅ Gestion multi-magasins / multi-serveurs RPOS (18 serveurs, 52+ magasins)
 - ✅ 5 rôles hiérarchiques (Rayonniste/Chef de département/Directeur/Superviseur/Administrateur),
   permissions IA granulaires par capacité, filtrage automatique par rayon assigné
-- ✅ Assistant IA conversationnel avec règles de détection éditables sans redéploiement, guide de
-  permissions par rôle ("Mon accès")
+- ✅ Assistant IA conversationnel avec règles de détection éditables sans redéploiement,
+  function-calling en repli pour les questions ambiguës, guide de permissions par rôle
+  ("Mon accès")
+- ✅ Authentification LDAP/Active Directory (en plus des comptes locaux), recherche annuaire
+  pour créer un compte préconfiguré
+- ✅ Mémoire IA : journal de corrections, maîtrise par domaine métier, score consultatif de
+  préparation à l'autonomie
 
 ## 🛠️ Stack technique
 
@@ -170,7 +175,28 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   tout le script — chaque liaison est gardée), enrichissement IA en parallèle ×3 (fini les
   minutes de bouton figé), journal d'audit visible sur la page (100 dernières erreurs brutes
   avec contexte : base preuve que chaque bug est sauvé avant analyse).
-- ⬜ Étape 10 — LDAP + RBAC étendu (§39-42)
+  **Étendu le 17/09/2026 — mémoire de correction, maîtrise par domaine, préparation à
+  l'autonomie** : 3 nouvelles pages (sidebar > Réassort, ADMIN uniquement) —
+  **Journal des corrections** (`ai-corrections.html`) trace chaque correction (auto-IA
+  confirmée efficace, ou correction de code manuelle) avec erreur/contexte/cause/fix/
+  fichiers/tests avant-après et liens vers l'historique similaire ; **Mémoire du modèle**
+  (`ai-mastery.html`) affiche un score de maîtrise par domaine métier, avec la méthode de
+  calcul explicite (vraie précision réelle pour les prévisions, volume de corrections pour
+  les autres domaines faute de vérité-terrain disponible) ; **Préparation à l'autonomie**
+  (`ai-autonomy.html`) calcule un score consultatif sur 5 critères mesurables et une échelle
+  à 4 paliers (Validation humaine → Supervision humaine → Autonomie contrôlée → Autonome)
+  avec hystérésis — un palier n'est affiché comme tenu qu'après 5 évaluations consécutives,
+  et redescend immédiatement si la performance se dégrade. **Purement consultatif** : ne
+  déclenche jamais de changement de comportement, `AI_QUANTITY_ADJUSTMENT_ENABLED` reste le
+  seul réglage qui agit réellement sur le système.
+- ✅ **Étape 10 — LDAP + RBAC étendu** (§39-42) : voir détail RBAC juste en dessous. Volet
+  LDAP (`ldapService.js`, bibliothèque `ldapts`) : bind Active Directory, connexion par
+  identifiant seul ou email complet, deux domaines distincts gérés (`LDAP_DOMAIN_FQDN` pour
+  l'UPN/email, `LDAP_AD_DOMAIN_FQDN` pour le Base DN de recherche — différents chez Prosuma).
+  Accès refusé par défaut avec message SOS explicite pour un compte LDAP authentifié mais
+  jamais configuré côté application. Recherche annuaire (bind de service) pour créer un
+  compte préconfiguré (rôle + magasin) à partir d'un utilisateur AD existant, sans jamais lui
+  faire saisir de mot de passe local.
 - ✅ **Étape 11 — Chatbot IA** (§34-38) : `chatbotService.js` (intent déterministe par
   mots-clés → outils → LLM, jamais d'accès direct base, §35) + `chatbotToolsService.js`
   (stock, ventes, CA, Pareto recalculé depuis `SalesLine`, ruptures, surstock, précision IA,
@@ -181,6 +207,16 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
   outils supplémentaires (fiche article, historique de prix, mouvements de stock avec nombre
   de tickets réel), permissions par capacité liées au rôle, règles de détection dynamiques,
   retry réseau, filet de sécurité process.
+  **Étendu le 17/09/2026 — function-calling par JSON structuré** : filet de repli n°3 (après
+  mots-clés, EAN explicite, continuation d'historique) — quand aucune règle déterministe ne
+  matche, un appel LLM non-streamé propose un outil parmi les 12 disponibles (JSON structuré,
+  uniforme sur les 3 fournisseurs, plutôt que le function-calling natif de chaque API — pas
+  d'adaptateur par fournisseur à maintenir). Toggle `CHATBOT_LLM_FALLBACK_ENABLED`
+  (Paramètres > IA), **désactivé par défaut**. RBAC inchangé : le tool suggéré par le LLM
+  passe par les mêmes contrôles de permission qu'un tool trouvé par mots-clés. Testé par
+  fuzzing (injection de prompt, EAN halluciné, contournement RBAC, sortie de périmètre) :
+  aucune faille, une régression trouvée et corrigée (exception non gérée si RPOS injoignable
+  pendant l'exécution d'un tool — protège désormais aussi le chemin par mots-clés).
 - ✅ **Étape 10 (partiel) — RBAC fin par rôle** (§39-42, sans le volet LDAP) : 5 rôles
   hiérarchiques remplaçant l'ancien trio ADMIN/SUPERVISOR/STORE — Rayonniste (`SHELF_STOCKER`,
   un ou plusieurs rayons d'un magasin), Chef de département (`DEPARTMENT_HEAD`, un rayon), 
@@ -222,6 +258,19 @@ contrôle. Chaque étape est implémentée par-dessus l'existant, sans le rééc
 > `actualOrders` de l'évaluation reprend donc la quantité recommandée) et `percentageError`
 > à null quand les ventes réelles sont nulles (§22, exclues du score plutôt que pénalisées —
 > un zéro peut aussi venir d'une rupture, pas d'une mauvaise prévision).
+>
+> **Correctifs transverses du 17/09/2026 — import de fichiers de vente volumineux** : un export
+> RPOS réel dépasse régulièrement 300 Mo, taille imprévisible selon la période couverte — pas de
+> plafond fixe pertinent. `client_max_body_size 0` (illimité) dans `frontend/nginx.conf` ;
+> `multer.diskStorage()` en streaming direct côté upload (remplace `memoryStorage`, qui chargeait
+> tout le fichier en RAM avant écriture) ; lecture ultérieure du fichier (génération de
+> proposition) convertie de `fs.readFileSync` en un bloc vers une lecture ligne par ligne
+> (`readline`) dans `salesFileService.js` — testé sur un fichier réel de 160 Mo : 22110 lignes
+> extraites en 3.3s, pic mémoire de 32 Mo au lieu de ~160 Mo. Import manuel (bouton Paramètres >
+> Fichiers de ventes) rendu indépendant du montage réseau partagé (`SALES_FILES_DIR`) : écrit
+> désormais dans un dossier local dédié du serveur, cherché en plus du dossier réseau par
+> `readSalesLinesForPeriod` — un import manuel d'urgence fonctionne même si le montage réseau est
+> indisponible.
 
 ## 📦 Installation
 

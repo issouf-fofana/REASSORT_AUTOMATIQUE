@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Journal des corrections | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+     <link rel="icon" type="image/png" href="assets/images/logo-reassort.png">
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          .src-AI_AUTO { background-color: #0d6efd; }
+          .src-DEV_FIX { background-color: #6f42c1; }
+          .corr-pre { white-space: pre-line; }
+     </style>
+</head>
+
+<body data-page-title="Journal des corrections">
+
+     <script src="assets/js/loading-overlay.js"></script>
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+          <script src="assets/js/global-shop-selector.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> chaque correction — qu'elle vienne d'une
+                                   auto-correction confirmée du chien de garde IA (<span class="badge src-AI_AUTO">auto IA</span>)
+                                   ou d'une correction de code faite en développement (<span class="badge src-DEV_FIX">dev</span>) —
+                                   est journalisée ici avec le détail complet : erreur exacte constatée, contexte,
+                                   cause identifiée, correction apportée, fichiers/fonctions concernés, tests avant
+                                   et après, et liens vers les corrections similaires déjà résolues sur le même
+                                   domaine. Sert de mémoire consultable pour éviter de refaire la même erreur.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                              <select id="corr-domain" class="form-select" style="max-width: 220px;">
+                                   <option value="">Tous domaines</option>
+                                   <option value="revenueShop">CA magasin</option>
+                                   <option value="revenueArticle">CA article/rayon</option>
+                                   <option value="articleDetails">Fiche article</option>
+                                   <option value="stock">Stock</option>
+                                   <option value="sales">Ventes</option>
+                                   <option value="orders">Commandes</option>
+                                   <option value="accuracy">Précision IA</option>
+                                   <option value="code">Code / technique</option>
+                              </select>
+                              <select id="corr-source" class="form-select" style="max-width: 200px;">
+                                   <option value="">Toutes sources</option>
+                                   <option value="AI_AUTO">Auto-correction IA</option>
+                                   <option value="DEV_FIX">Correction de code</option>
+                              </select>
+                              <span id="corr-summary" class="small text-muted ms-auto"></span>
+                         </div>
+                    </div>
+
+                    <div id="corr-list"></div>
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-corrections.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+     <!-- Modale : détail complet d'une correction + corrections similaires -->
+     <div class="modal fade" id="corr-detail-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Détail de la correction</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body" id="corr-detail-body"></div>
+               </div>
+          </div>
+     </div>
+
+</body>
+
+</html>

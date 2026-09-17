@@ -11,6 +11,9 @@ const aiForecastService = require('../../services/aiForecastService');
 const cryptoService = require('../../services/cryptoService');
 const improvementService = require('../../services/improvementService');
 const errorReportService = require('../../services/errorReportService');
+const correctionRecordService = require('../../services/correctionRecordService');
+const aiMasteryService = require('../../services/aiMasteryService');
+const autonomyReadinessService = require('../../services/autonomyReadinessService');
 const { filterProposalLinesForUser, getCapabilityGuide, getPlatformGuide } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir faire analyser par l'IA (ou poser une
@@ -595,6 +598,118 @@ router.get('/improvements/:id', requireAdmin, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+// GET /api/reassort/corrections - journal unifié des corrections (AI_AUTO + DEV_FIX), demande du
+// 17/09/2026 : chaque entrée trace erreur constatée, contexte, cause, correction, fichiers/fonctions
+// touchés, tests avant/après, et liens vers l'historique des corrections similaires. Filtrable par
+// domaine (capacité IA) et/ou source.
+router.get('/corrections', requireAdmin, async (req, res) => {
+  try {
+    const data = await correctionRecordService.listCorrections({
+      domain: req.query.domain || undefined,
+      source: req.query.source || undefined,
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : undefined,
+      cursor: req.query.cursor || undefined,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/corrections/:id - détail complet d'une correction, y compris les corrections
+// similaires passées résolues en objets complets (pas seulement leurs ids) pour affichage direct.
+router.get('/corrections/:id', requireAdmin, async (req, res) => {
+  try {
+    const record = await correctionRecordService.getCorrection(req.params.id);
+    if (!record) return res.status(404).json({ success: false, message: 'Correction introuvable' });
+    const similar = await Promise.all(
+      (record.similarPastCorrectionIds || []).map((id) => correctionRecordService.getCorrection(id)),
+    );
+    res.json({ success: true, data: { ...record, similarPastCorrections: similar.filter(Boolean) } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/corrections - ajoute une entrée DEV_FIX au journal (correction de code faite en
+// développement, ex: par Claude) — saisie manuelle au moment du fix, jamais générée automatiquement
+// contrairement aux entrées AI_AUTO (cf. improvementService.js, transition vers IMPROVED).
+router.post('/corrections', requireAdmin, async (req, res) => {
+  try {
+    const { domain, errorObserved, context, rootCause, fixApplied, filesChanged, functionsChanged, testsBefore, testsAfter } = req.body;
+    if (!domain || !errorObserved || !context || !rootCause || !fixApplied) {
+      return res.status(400).json({ success: false, message: 'domain, errorObserved, context, rootCause et fixApplied sont requis' });
+    }
+    const record = await correctionRecordService.recordCorrection({
+      source: 'DEV_FIX',
+      domain, errorObserved, context, rootCause, fixApplied,
+      filesChanged, functionsChanged, testsBefore, testsAfter,
+      createdBy: (req.user && req.user.email) || 'dev',
+    });
+    res.json({ success: true, data: record });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/mastery - mémoire de maîtrise par domaine métier (demande du 17/09/2026) :
+// niveau de maîtrise/confiance calculé pour chaque capacité IA (stock, sales, orders, accuracy...),
+// avec la méthode de calcul explicite (vraie vérité-terrain pour "accuracy", volume/ancienneté des
+// corrections pour les autres — cf. aiMasteryService.js).
+router.get('/mastery', requireAdmin, async (req, res) => {
+  try {
+    res.json({ success: true, data: await aiMasteryService.listMastery() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/mastery/recompute - relance le calcul de tous les domaines à la demande (le
+// cron planifié le fait déjà périodiquement, cette route sert au bouton "Recalculer maintenant").
+router.post('/mastery/recompute', requireAdmin, async (req, res) => {
+  try {
+    await aiMasteryService.recomputeAllDomains();
+    res.json({ success: true, data: await aiMasteryService.listMastery() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/autonomy-readiness - palier de préparation à l'autonomie EFFECTIVEMENT tenu
+// (avec hystérésis : n'affiche une montée de palier que si elle est confirmée sur plusieurs
+// snapshots consécutifs, cf. autonomyReadinessService.js). Indicateur purement consultatif — ne
+// déclenche jamais de changement de comportement du système.
+router.get('/autonomy-readiness', requireAdmin, async (req, res) => {
+  try {
+    const data = await autonomyReadinessService.getEffectiveReadiness();
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/autonomy-readiness/history - historique des snapshots calculés (évolution du
+// score et du palier dans le temps).
+router.get('/autonomy-readiness/history', requireAdmin, async (req, res) => {
+  try {
+    const data = await autonomyReadinessService.listHistory({ limit: req.query.limit ? parseInt(req.query.limit, 10) : undefined });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/autonomy-readiness/recompute - calcule un nouveau snapshot à la demande (un
+// cron planifié le fera aussi périodiquement une fois en production).
+router.post('/autonomy-readiness/recompute', requireAdmin, async (req, res) => {
+  try {
+    await autonomyReadinessService.computeSnapshot();
+    res.json({ success: true, data: await autonomyReadinessService.getEffectiveReadiness() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/improvements/generate - lance le cycle complet : détection des anomalies
 // silencieuses, persistance (dédupliquée), enrichissement IA des priorités, puis évaluation
 // d'effet des recommandations précédemment appliquées (boucle d'apprentissage). Le contexte

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Mémoire du modèle | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+     <link rel="icon" type="image/png" href="assets/images/logo-reassort.png">
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+          .mastery-bar { height: 10px; border-radius: 6px; background: #e9ecef; overflow: hidden; }
+          .mastery-bar-fill { height: 100%; }
+          .mastery-high { background-color: #198754; }
+          .mastery-mid { background-color: #fd7e14; }
+          .mastery-low { background-color: #dc3545; }
+     </style>
+</head>
+
+<body data-page-title="Mémoire du modèle">
+
+     <script src="assets/js/loading-overlay.js"></script>
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+          <script src="assets/js/global-shop-selector.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> pour chaque domaine métier, ce tableau montre
+                                   le niveau de maîtrise appris au fil du temps. Deux méthodes de calcul coexistent
+                                   selon les données disponibles : <strong>Précision réelle</strong> compare
+                                   directement la prédiction du système à la vente réellement constatée (vérité
+                                   terrain fiable) — <strong>Volume de corrections</strong> se base sur le nombre et
+                                   l'ancienneté des corrections journalisées sur ce domaine, faute de vérité terrain
+                                   disponible aujourd'hui pour cette capacité (moins précis, mais honnête sur ce qui
+                                   est réellement mesuré). Une confiance basse signale un échantillon encore trop
+                                   petit pour se fier pleinement au score affiché.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                              <button type="button" id="mastery-recompute" class="btn btn-primary">Recalculer maintenant</button>
+                              <span id="mastery-summary" class="small text-muted ms-auto"></span>
+                         </div>
+                    </div>
+
+                    <div id="mastery-list"></div>
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/ai-mastery.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+</body>
+
+</html>

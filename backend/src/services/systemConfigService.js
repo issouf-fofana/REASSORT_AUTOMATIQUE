@@ -86,6 +86,12 @@ const KEYS = {
   // casser le chatbot). L'ORDRE du tableau compte (la première règle qui matche gagne) — l'UI doit
   // permettre de réordonner, pas seulement ajouter/supprimer.
   CHATBOT_INTENT_RULES: 'CHATBOT_INTENT_RULES',
+  // Filet de repli n°3 du chatbot (chatbotService.js detectIntentViaLlm, ajouté le 17/09/2026) :
+  // quand aucune règle de mots-clés ne matche une question, demande au LLM lui-même de choisir un
+  // outil parmi le catalogue plutôt que d'abandonner sur "je ne comprends pas". Off par défaut,
+  // même raison que AI_QUANTITY_ADJUSTMENT_ENABLED : coût et latence d'un appel LLM supplémentaire
+  // par question ambiguë, à activer explicitement une fois vérifié en conditions réelles.
+  CHATBOT_LLM_FALLBACK_ENABLED: 'CHATBOT_LLM_FALLBACK_ENABLED',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -196,6 +202,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
+  [KEYS.CHATBOT_LLM_FALLBACK_ENABLED]: () => 'false',
   [KEYS.CHATBOT_PROMPT_TEMPLATE]: () => `Tu es l'Assistant IA Store d'un magasin de grande distribution. Tu réponds aux questions du responsable magasin sur le réassort, les ventes, les stocks et les prévisions.
 
 Contexte :

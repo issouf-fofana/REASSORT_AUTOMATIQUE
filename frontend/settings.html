@@ -1202,6 +1202,28 @@
                          </div>
 
                          <div class="card mt-3">
+                              <div class="card-header d-flex justify-content-between align-items-center">
+                                   <h5 class="card-title mb-0">Assistant IA — repli par function-calling</h5>
+                                   <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="chatbot-llm-fallback-enabled">
+                                        <label class="form-check-label small" for="chatbot-llm-fallback-enabled">Actif</label>
+                                   </div>
+                              </div>
+                              <div class="card-body">
+                                   <div class="alert alert-light border small mb-0">
+                                        <strong>À quoi ça sert :</strong> quand une question posée à l'Assistant IA ne correspond à
+                                        aucun mot-clé connu (Paramètres > IA > Règles de détection), active ce réglage pour laisser
+                                        le LLM configuré choisir lui-même l'outil de données le plus pertinent, avant d'abandonner
+                                        sur "je ne comprends pas". <strong>Impact</strong> : un appel LLM supplémentaire (non
+                                        streamé) est fait pour chaque question non reconnue par les règles de mots-clés — coût et
+                                        latence additionnels, uniquement sur ces questions-là. Un échec (LLM indisponible, réponse
+                                        mal formée) ne bloque jamais la conversation : elle se comporte alors comme si ce réglage
+                                        était désactivé.
+                                   </div>
+                              </div>
+                         </div>
+
+                         <div class="card mt-3">
                               <div class="card-header">
                                    <h5 class="card-title mb-0">Détection d'anomalies</h5>
                               </div>
@@ -1742,6 +1764,7 @@
                               wireJobEnabledSwitch('system-sales-sync-enabled', 'SALES_SYNC_ENABLED');
                               wireJobEnabledSwitch('system-prediction-outcome-enabled', 'PREDICTION_OUTCOME_ENABLED');
                               wireJobEnabledSwitch('ai-quantity-adjustment-enabled', 'AI_QUANTITY_ADJUSTMENT_ENABLED');
+                              wireJobEnabledSwitch('chatbot-llm-fallback-enabled', 'CHATBOT_LLM_FALLBACK_ENABLED');
 
                               loadShopSelect('system-sales-sync-shop-ids', true).then(function () {
                                    applySalesSyncShopIdsSelection();
@@ -2968,6 +2991,7 @@ document.getElementById('sales-backfill-cancel-batch-btn').addEventListener('cli
                                         if (!json.success) throw new Error(json.message);
                                         document.getElementById('ai-prompt-template').value = json.data.AI_ANALYSIS_PROMPT_TEMPLATE || '';
                                         document.getElementById('ai-quantity-adjustment-enabled').checked = json.data.AI_QUANTITY_ADJUSTMENT_ENABLED === 'true';
+                                        document.getElementById('chatbot-llm-fallback-enabled').checked = json.data.CHATBOT_LLM_FALLBACK_ENABLED === 'true';
                                         document.getElementById('chatbot-prompt-template').value = json.data.CHATBOT_PROMPT_TEMPLATE || '';
                                         document.getElementById('chatbot-suggested-questions').value = json.data.CHATBOT_SUGGESTED_QUESTIONS || '';
                                         document.getElementById('improvements-prompt-template').value = json.data.IMPROVEMENTS_PROMPT_TEMPLATE || '';

@@ -4,21 +4,57 @@
 const express = require('express');
 const router = express.Router();
 const { requireAdmin, resolveShopId } = require('../../middleware/auth');
-const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const { getConfig, upsertConfig } = require('../../services/configService');
 const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
-const { findSalesFiles } = require('../../services/salesFileService');
+const { findSalesFiles, ensureManualImportDir } = require('../../services/salesFileService');
 const jobHealthService = require('../../services/jobHealthService');
 const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
 const multer = require('multer');
 const path = require('path');
-const fsPromises = require('fs/promises');
 
-// Upload en memoire (fichiers de vente CSV, quelques Mo max) : on valide le nom et le contenu
-// avant d'ecrire sur disque, jamais un stockage direct sur le dossier surveille par multer lui-meme.
-const salesFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+// Nom de fichier strictement validé (même format que findSalesFiles) pour ne jamais écrire en
+// dehors du dossier configuré ni accepter un fichier qui ne serait pas détecté ensuite. Déclaré ici
+// (avant salesFileUpload) car réutilisé par le storage multer lui-même, pas seulement par la route.
+const SALES_FILE_NAME_PATTERN = /^[a-zA-Z0-9]+_statvente-lignes_articles_[a-zA-Z0-9_-]+\.csv$/i;
+
+// Stockage disque en flux direct (17/09/2026, remplace memoryStorage) : un export RPOS dépasse
+// régulièrement 300 Mo selon la période couverte — charger un tel fichier ENTIÈREMENT en RAM avant
+// de l'écrire (comportement de memoryStorage) devient risqué si plusieurs imports se chevauchent
+// (mémoire du serveur épuisée). diskStorage laisse Node streamer directement le corps de la requête
+// vers le fichier final, sans jamais retenir tout le contenu en mémoire à la fois. La validation du
+// nom (SALES_FILE_NAME_PATTERN) doit se faire ICI, dans `filename`, appelée AVANT toute écriture —
+// contrairement à l'ancien code qui validait après coup sur req.file.originalname (sans risque avec
+// memoryStorage puisque rien n'était encore écrit, mais un nom invalide écrirait désormais un
+// fichier partiel sur disque si la validation restait après l'upload).
+//
+// Écrit dans MANUAL_IMPORT_DIR (dossier local du serveur), PAS dans SALES_FILES_DIR (17/09/2026) :
+// avant ce fix, un import manuel échouait dès que le dossier réseau partagé (généralement un montage
+// /mnt/asten) était indisponible — précisément le scénario où cette solution de secours ("sans avoir
+// besoin d'un accès manuel au partage réseau") est censée servir. readSalesLinesForPeriod
+// (salesFileService.js) cherche désormais dans les deux dossiers, donc un fichier importé ici reste
+// utilisable normalement pour la génération de propositions.
+const salesFileUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      try {
+        cb(null, ensureManualImportDir());
+      } catch (err) {
+        cb(err);
+      }
+    },
+    filename: (req, file, cb) => {
+      if (!SALES_FILE_NAME_PATTERN.test(file.originalname)) {
+        return cb(new Error(`Nom de fichier invalide : "${file.originalname}". Format attendu : <code_magasin>_statvente-lignes_articles_<date>.csv (ex: 050_statvente-lignes_articles_01062024_0000.csv)`));
+      }
+      // path.basename() défend contre un nom contenant des séparateurs de chemin (../, /) malgré la
+      // validation par regex ci-dessus — ceinture et bretelles sur un chemin d'écriture disque
+      // construit à partir d'une entrée utilisateur.
+      cb(null, path.basename(file.originalname));
+    },
+  }),
+});
 
 // Paramètres réassort réservés au Superadmin uniquement (décision explicite du 15/09/2026 :
 // "personne ne doit voir les paramètres à part le superadmin") — Directeur/Chef de département/
@@ -214,6 +250,8 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       systemConfig.KEYS.SHOPS_SYNC_ENABLED,
       systemConfig.KEYS.DAILY_REVIEW_ENABLED,
       systemConfig.KEYS.PREDICTION_OUTCOME_ENABLED,
+      systemConfig.KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED,
+      systemConfig.KEYS.CHATBOT_LLM_FALLBACK_ENABLED,
     ];
     if (ENABLED_KEYS.includes(key) && !['true', 'false'].includes(value)) {
       return res.status(400).json({ success: false, message: 'Valeur invalide : "true" ou "false" attendu' });
@@ -311,36 +349,14 @@ router.get('/system-config/sales-files-check', requireAdmin, async (req, res) =>
 // POST /api/reassort/system-config/sales-files-upload - dépose un fichier d'export de ventes CSV
 // directement dans le dossier surveillé, sans avoir besoin d'un accès manuel au partage réseau
 // (ex: import d'un historique ancien fourni par un collègue, hors du flux FTP automatique habituel).
-// Nom de fichier strictement validé (même format que findSalesFiles) pour ne jamais écrire en
-// dehors du dossier configuré ni accepter un fichier qui ne serait pas détecté ensuite.
-const SALES_FILE_NAME_PATTERN = /^[a-zA-Z0-9]+_statvente-lignes_articles_[a-zA-Z0-9_-]+\.csv$/i;
-
+// Validation du nom et du dossier faite dans salesFileUpload (storage.filename/destination, appelées
+// avant toute écriture) — cette route n'a plus qu'à confirmer le résultat, streaming déjà terminé.
 router.post('/system-config/sales-files-upload', requireAdmin, salesFileUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Aucun fichier reçu' });
     }
-    const originalName = req.file.originalname;
-    if (!SALES_FILE_NAME_PATTERN.test(originalName)) {
-      return res.status(400).json({
-        success: false,
-        message: `Nom de fichier invalide : "${originalName}". Format attendu : <code_magasin>_statvente-lignes_articles_<date>.csv (ex: 050_statvente-lignes_articles_01062024_0000.csv)`,
-      });
-    }
-
-    const baseDir = await systemConfig.getValue(systemConfig.KEYS.SALES_FILES_DIR);
-    if (!require('fs').existsSync(baseDir)) {
-      return res.status(400).json({ success: false, message: `Le dossier configuré "${baseDir}" n'existe pas ou n'est pas accessible.` });
-    }
-
-    // path.basename() défend contre un nom de fichier contenant des séparateurs de chemin
-    // (../, /) malgré la validation par regex ci-dessus — ceinture et bretelles sur un chemin
-    // d'écriture disque construit à partir d'une entrée utilisateur.
-    const safeName = path.basename(originalName);
-    const destPath = path.join(baseDir, safeName);
-    await fsPromises.writeFile(destPath, req.file.buffer);
-
-    res.json({ success: true, message: `Fichier "${safeName}" importé avec succès dans ${baseDir}.` });
+    res.json({ success: true, message: `Fichier "${req.file.filename}" importé avec succès dans ${req.file.destination}.` });
   } catch (error) {
     console.error('Sales file upload error:', error);
     res.status(500).json({ success: false, message: error.message });

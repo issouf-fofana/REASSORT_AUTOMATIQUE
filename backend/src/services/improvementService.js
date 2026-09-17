@@ -19,6 +19,7 @@ const systemConfig = require('./systemConfigService');
 const { streamWithFallback } = require('./aiForecastService');
 const { groupErrorReports, pruneErrorReports } = require('./errorReportService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const correctionRecordService = require('./correctionRecordService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Nombre max de constats enrichis par LLM par exécution : borne le coût/quota API, les constats
@@ -689,6 +690,13 @@ async function evaluateAppliedImprovements() {
     if (current <= before * IMPROVEMENT_RATIO) {
       next.status = 'IMPROVED';
       improved += 1;
+      // Correction confirmée efficace (pas juste appliquée) : c'est le seul moment où on sait
+      // vraiment qu'une correction a marché — entrée journalisée dans le journal unifié des
+      // corrections (cf. correctionRecordService.js, demande du 17/09/2026). Ne bloque jamais
+      // l'évaluation elle-même si la journalisation échoue (jamais vu en pratique, mais une table
+      // annexe ne doit pas empêcher la boucle d'apprentissage principale de progresser).
+      correctionRecordService.recordFromImprovement(imp, { metricBefore: before, metricAfter: current })
+        .catch((err) => console.error(`[improvementService] Échec journalisation correction ${imp.id}:`, err.message));
     } else {
       next.status = 'NO_EFFECT';
       noEffect += 1;

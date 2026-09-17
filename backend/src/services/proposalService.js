@@ -48,7 +48,7 @@ const VALID_AI_ACTIONS = new Set([
 async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, dateEnd) {
   if (shopReference) {
     const salesDir = await systemConfig.getValue(systemConfig.KEYS.SALES_FILES_DIR);
-    const fileLines = readSalesLinesForPeriod(salesDir, shopReference, dateStart, dateEnd);
+    const fileLines = await readSalesLinesForPeriod(salesDir, shopReference, dateStart, dateEnd);
     if (fileLines) return { lines: fileLines, source: 'file' };
   }
 
