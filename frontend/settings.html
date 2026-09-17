@@ -1077,8 +1077,21 @@
                                         </div>
                                         <div class="row g-2 align-items-end">
                                              <div class="col-md-4">
-                                                  <label class="form-label small">Magasin</label>
-                                                  <select id="sales-purge-shop" class="form-select" data-independent-shop="1"><option value="">Chargement...</option></select>
+                                                  <label class="form-label small">Magasin(s)</label>
+                                                  <select id="sales-purge-shop" class="form-select" multiple data-independent-shop="1" style="display:none;"><option value="">Chargement...</option></select>
+                                                  <div class="dropdown" id="sales-purge-shop-picker-wrapper">
+                                                       <button class="btn btn-sm btn-outline-secondary dropdown-toggle w-100" type="button" id="sales-purge-shop-dropdown-btn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                                            Magasins
+                                                       </button>
+                                                       <div class="dropdown-menu p-2" style="min-width: 320px;">
+                                                            <input type="text" id="sales-purge-shop-search" class="form-control form-control-sm mb-2" placeholder="Rechercher par POS, code ou nom...">
+                                                            <div class="d-flex gap-2 mb-2">
+                                                                 <button type="button" id="sales-purge-select-all" class="btn btn-sm btn-outline-secondary flex-fill">Tout cocher</button>
+                                                                 <button type="button" id="sales-purge-select-none" class="btn btn-sm btn-outline-secondary flex-fill">Tout décocher</button>
+                                                            </div>
+                                                            <div id="sales-purge-shop-checklist" style="max-height: 280px; overflow-y: auto;"></div>
+                                                       </div>
+                                                  </div>
                                              </div>
                                              <div class="col-md-3">
                                                   <label class="form-label small">Date de début</label>
@@ -2630,12 +2643,72 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                    loadSalesCoverage();
                               });
 
-                              // --- Purge des ventes synchronisées ---
+                              // --- Purge des ventes synchronisées (multi-magasins, même patron checklist que le backfill) ---
+                              const purgeDropdownBtn = document.getElementById('sales-purge-shop-dropdown-btn');
+                              const purgeChecklist = document.getElementById('sales-purge-shop-checklist');
+                              const purgeSearch = document.getElementById('sales-purge-shop-search');
+
+                              function updatePurgeDropdownLabel() {
+                                   const select = document.getElementById('sales-purge-shop');
+                                   const count = select ? select.selectedOptions.length : 0;
+                                   if (count === 0) purgeDropdownBtn.textContent = 'Magasins';
+                                   else if (count === 1) purgeDropdownBtn.textContent = select.selectedOptions[0].dataset.reference || '1 magasin';
+                                   else purgeDropdownBtn.textContent = count + ' magasins';
+                              }
+
+                              function renderPurgeShopChecklist(filterText) {
+                                   const select = document.getElementById('sales-purge-shop');
+                                   if (!select || !select.options.length) {
+                                        purgeChecklist.innerHTML = '<div class="text-muted small p-2">Chargement...</div>';
+                                        return;
+                                   }
+                                   const q = (filterText || '').trim().toLowerCase();
+                                   const options = Array.from(select.options).filter(function (opt) {
+                                        if (!q) return true;
+                                        return (opt.textContent || '').toLowerCase().indexOf(q) !== -1;
+                                   });
+                                   purgeChecklist.innerHTML = options.map(function (opt) {
+                                        return '<div class="form-check">' +
+                                             '<input class="form-check-input purge-shop-check" type="checkbox" value="' + opt.value + '" id="purge-shop-check-' + opt.value + '"' + (opt.selected ? ' checked' : '') + '>' +
+                                             '<label class="form-check-label" for="purge-shop-check-' + opt.value + '">' + opt.textContent + '</label>' +
+                                             '</div>';
+                                   }).join('') || '<div class="text-muted small p-2">Aucun magasin trouvé.</div>';
+                                   purgeChecklist.querySelectorAll('.purge-shop-check').forEach(function (c) {
+                                        c.addEventListener('change', function () {
+                                             const opt = select.querySelector('option[value="' + c.value + '"]');
+                                             if (opt) opt.selected = c.checked;
+                                             updatePurgeDropdownLabel();
+                                             select.dispatchEvent(new Event('change'));
+                                        });
+                                   });
+                                   updatePurgeDropdownLabel();
+                              }
+                              if (purgeSearch) {
+                                   purgeSearch.addEventListener('input', function (e) { renderPurgeShopChecklist(e.target.value); });
+                              }
+                              function setAllVisiblePurgeShops(selected) {
+                                   const select = document.getElementById('sales-purge-shop');
+                                   purgeChecklist.querySelectorAll('.purge-shop-check').forEach(function (c) {
+                                        c.checked = selected;
+                                        const opt = select.querySelector('option[value="' + c.value + '"]');
+                                        if (opt) opt.selected = selected;
+                                   });
+                                   updatePurgeDropdownLabel();
+                                   select.dispatchEvent(new Event('change'));
+                              }
+                              const purgeSelectAllBtn = document.getElementById('sales-purge-select-all');
+                              const purgeSelectNoneBtn = document.getElementById('sales-purge-select-none');
+                              if (purgeSelectAllBtn) purgeSelectAllBtn.addEventListener('click', function () { setAllVisiblePurgeShops(true); });
+                              if (purgeSelectNoneBtn) purgeSelectNoneBtn.addEventListener('click', function () { setAllVisiblePurgeShops(false); });
+
+                              // La couverture affichée n'a de sens que pour un seul magasin à la fois (période propre à
+                              // chacun) — vide dès que plusieurs sont cochés plutôt que d'afficher une période trompeuse.
                               async function loadPurgeCoverage() {
                                    const select = document.getElementById('sales-purge-shop');
                                    const box = document.getElementById('sales-purge-coverage');
-                                   const shopId = select.value;
-                                   if (!shopId) { box.textContent = ''; return; }
+                                   const selected = Array.from(select.selectedOptions);
+                                   if (selected.length !== 1) { box.textContent = ''; return; }
+                                   const shopId = selected[0].value;
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-lines/coverage?shopId=' + encodeURIComponent(shopId));
                                         const json = await res.json();
@@ -2654,20 +2727,21 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                               document.getElementById('sales-purge-run').addEventListener('click', async function () {
                                    const select = document.getElementById('sales-purge-shop');
                                    const resultBox = document.getElementById('sales-purge-result');
-                                   const shopId = select.value;
+                                   const shopOptions = Array.from(select.selectedOptions);
                                    const dateStart = document.getElementById('sales-purge-start').value;
                                    const dateEnd = document.getElementById('sales-purge-end').value;
-                                   if (!shopId) {
-                                        resultBox.innerHTML = '<span class="text-danger">Sélectionnez un magasin.</span>';
+                                   if (!shopOptions.length) {
+                                        resultBox.innerHTML = '<span class="text-danger">Sélectionnez au moins un magasin.</span>';
                                         return;
                                    }
                                    if (!dateStart || !dateEnd) {
                                         resultBox.innerHTML = '<span class="text-danger">Renseignez une date de début et de fin (la purge totale n\'est pas autorisée).</span>';
                                         return;
                                    }
-                                   const shopLabel = select.selectedOptions[0] ? select.selectedOptions[0].textContent : shopId;
+                                   const shopLabels = shopOptions.map(function (o) { return o.textContent; });
                                    const confirmed = await window.reassortConfirm(
-                                        'Supprimer définitivement les ventes synchronisées pour ' + shopLabel + '\n' +
+                                        'Supprimer définitivement les ventes synchronisées pour ' + shopOptions.length + ' magasin(s) :\n' +
+                                        shopLabels.join(', ') + '\n\n' +
                                         'du ' + dateStart + ' au ' + dateEnd + ' ?\n\n' +
                                         'Cette action ne supprime que la copie locale : les ventes réelles restent dans RPOS et pourront être ' +
                                         're-synchronisées plus tard si besoin.',
@@ -2675,20 +2749,42 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
                                    );
                                    if (!confirmed) return;
 
-                                   resultBox.textContent = 'Suppression en cours...';
+                                   const btn = this;
+                                   btn.disabled = true;
+                                   const params = new URLSearchParams({ dateStart: '', dateEnd: dateEnd + 'T23:59:59' });
+                                   let totalDeleted = 0;
+                                   const errors = [];
                                    try {
-                                        const params = new URLSearchParams({ shopId, dateStart, dateEnd: dateEnd + 'T23:59:59' });
-                                        const res = await window.reassortFetch('/reassort/sales-lines?' + params.toString(), { method: 'DELETE' });
-                                        const json = await res.json();
-                                        if (!json.success) throw new Error(json.message);
-                                        resultBox.innerHTML = '<span class="text-success">' + json.message + '</span>';
+                                        for (let i = 0; i < shopOptions.length; i++) {
+                                             const opt = shopOptions[i];
+                                             resultBox.textContent = shopOptions.length > 1
+                                                  ? 'Suppression ' + (i + 1) + '/' + shopOptions.length + ' : ' + opt.textContent + '...'
+                                                  : 'Suppression en cours...';
+                                             try {
+                                                  const p = new URLSearchParams({ shopId: opt.value, dateStart, dateEnd: dateEnd + 'T23:59:59' });
+                                                  const res = await window.reassortFetch('/reassort/sales-lines?' + p.toString(), { method: 'DELETE' });
+                                                  const json = await res.json();
+                                                  if (!json.success) throw new Error(json.message);
+                                                  totalDeleted += json.data.count;
+                                             } catch (err) {
+                                                  errors.push(opt.textContent + ' : ' + err.message);
+                                             }
+                                        }
+                                        if (errors.length) {
+                                             resultBox.innerHTML = '<span class="text-danger">' + totalDeleted.toLocaleString('fr-FR') + ' ligne(s) supprimée(s), erreurs : ' + errors.join(' — ') + '</span>';
+                                        } else {
+                                             resultBox.innerHTML = '<span class="text-success">' + totalDeleted.toLocaleString('fr-FR') + ' ligne(s) supprimée(s) au total (' + shopOptions.length + ' magasin(s)).</span>';
+                                        }
                                         loadPurgeCoverage();
-                                   } catch (err) {
-                                        resultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
+                                   } finally {
+                                        btn.disabled = false;
                                    }
                               });
 
-                              loadShopSelect('sales-purge-shop').then(loadPurgeCoverage);
+                              loadShopSelect('sales-purge-shop', true).then(function () {
+                                   renderPurgeShopChecklist();
+                                   loadPurgeCoverage();
+                              });
 
                               // --- Onglet IA : gestion des clés API multi-fournisseurs (ADMIN uniquement) ---
                               let aiKeyModal = null;
