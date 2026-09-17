@@ -99,6 +99,25 @@ router.put('/servers/:posId', requireAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/reassort/servers/apply-all - applique le même identifiant RPOS à TOUS les serveurs
+// (cas Prosuma où un seul compte RPOS est valide sur toutes les plateformes) — ADMIN uniquement.
+// body: { rposUser, rposPassword }
+router.put('/servers/apply-all', requireAdmin, async (req, res) => {
+  try {
+    const { rposUser, rposPassword } = req.body;
+    if (!rposUser && !rposPassword) {
+      return res.status(400).json({ success: false, message: 'rposUser ou rposPassword requis' });
+    }
+    await rposServers.applyCredentialsToAllServers({ rposUser, rposPassword });
+    rpos.invalidateRposConfigCache();
+    const servers = await rposServers.listServers();
+    res.json({ success: true, data: servers.map((s) => ({ posId: s.posId, rposUser: s.rposUser, isActive: s.isActive })) });
+  } catch (error) {
+    console.error('Apply credentials to all servers error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/shops - liste des magasins du serveur de l'utilisateur, ou de tous les
 // serveurs actifs pour un ADMIN sans ?pos=, ou d'un serveur précis avec ?pos=<posId>
 router.get('/shops', async (req, res) => {

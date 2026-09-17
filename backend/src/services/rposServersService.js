@@ -54,4 +54,24 @@ async function upsertServerCredentials(posId, { baseUrl, rposUser, rposPassword 
   return prisma.rposServer.update({ where: { posId }, data });
 }
 
-module.exports = { seedServersFromJson, listServers, getServer, upsertServerCredentials };
+/**
+ * Applique le même identifiant/mot de passe RPOS à TOUS les serveurs connus (cas Prosuma où un
+ * seul compte RPOS est valide sur toutes les plateformes) — ne touche jamais baseUrl, chaque
+ * serveur garde sa propre adresse physique.
+ */
+async function applyCredentialsToAllServers({ rposUser, rposPassword }) {
+  const data = {};
+  if (rposUser !== undefined) data.rposUser = rposUser;
+  if (rposPassword) data.rposPassword = crypto.encrypt(rposPassword);
+  if (rposUser || rposPassword) data.isActive = true;
+
+  return prisma.rposServer.updateMany({ data });
+}
+
+module.exports = {
+  seedServersFromJson,
+  listServers,
+  getServer,
+  upsertServerCredentials,
+  applyCredentialsToAllServers,
+};

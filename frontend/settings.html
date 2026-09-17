@@ -613,6 +613,13 @@
                                                   <div class="form-text">Par sécurité, le mot de passe actuel n'est jamais affiché. Laissez vide pour le conserver.</div>
                                              </div>
                                         </div>
+                                        <div class="form-check mb-3">
+                                             <input type="checkbox" id="system-rpos-apply-all" class="form-check-input">
+                                             <label for="system-rpos-apply-all" class="form-check-label">
+                                                  Appliquer cet utilisateur/mot de passe à <strong>tous les serveurs RPOS</strong> (pos1 à pos18)
+                                             </label>
+                                             <div class="form-text">À cocher seulement si un même compte RPOS est valide sur toutes les plateformes Prosuma — ne change pas l'URL de chaque serveur, seulement l'identifiant/mot de passe.</div>
+                                        </div>
                                         <button type="button" id="system-rpos-save" class="btn btn-primary">Enregistrer ce serveur</button>
                                         <div id="system-rpos-error" class="alert alert-danger mt-3" style="display:none;"></div>
                                         <div id="system-rpos-success" class="alert alert-success mt-3" style="display:none;"></div>
@@ -1877,21 +1884,37 @@
                                    okBox.style.display = 'none';
                                    const posId = rposServerSelect.value;
                                    if (!posId) return;
+                                   const applyAll = document.getElementById('system-rpos-apply-all').checked;
                                    try {
-                                        const body = {
-                                             baseUrl: document.getElementById('system-rpos-base-url').value,
-                                             rposUser: document.getElementById('system-rpos-user').value,
-                                        };
+                                        const rposUser = document.getElementById('system-rpos-user').value;
                                         const password = document.getElementById('system-rpos-password').value;
-                                        if (password) body.rposPassword = password;
-                                        const res = await window.reassortFetch('/reassort/servers/' + encodeURIComponent(posId), {
-                                             method: 'PUT',
-                                             headers: { 'Content-Type': 'application/json' },
-                                             body: JSON.stringify(body),
-                                        });
-                                        const json = await res.json();
-                                        if (!json.success) throw new Error(json.message);
-                                        okBox.textContent = 'Serveur ' + posId + ' mis à jour.';
+
+                                        if (applyAll) {
+                                             const body = { rposUser };
+                                             if (password) body.rposPassword = password;
+                                             const res = await window.reassortFetch('/reassort/servers/apply-all', {
+                                                  method: 'PUT',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(body),
+                                             });
+                                             const json = await res.json();
+                                             if (!json.success) throw new Error(json.message);
+                                             okBox.textContent = 'Identifiant appliqué à tous les serveurs (' + json.data.length + ').';
+                                        } else {
+                                             const body = {
+                                                  baseUrl: document.getElementById('system-rpos-base-url').value,
+                                                  rposUser,
+                                             };
+                                             if (password) body.rposPassword = password;
+                                             const res = await window.reassortFetch('/reassort/servers/' + encodeURIComponent(posId), {
+                                                  method: 'PUT',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(body),
+                                             });
+                                             const json = await res.json();
+                                             if (!json.success) throw new Error(json.message);
+                                             okBox.textContent = 'Serveur ' + posId + ' mis à jour.';
+                                        }
                                         okBox.style.display = 'block';
                                         await loadRposServers();
                                         rposServerSelect.value = posId;
