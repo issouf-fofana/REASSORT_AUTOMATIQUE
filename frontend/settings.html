@@ -1075,7 +1075,12 @@
                                              </div>
                                              <button type="button" id="sales-backfill-pause-btn" class="btn btn-outline-secondary btn-sm mt-2" style="display:none;">Mettre en pause</button>
                                              <button type="button" id="sales-backfill-resume-btn" class="btn btn-outline-warning btn-sm mt-2" style="display:none;">Reprendre la récupération</button>
-                                             <button type="button" id="sales-backfill-cancel-btn" class="btn btn-outline-danger btn-sm mt-2" style="display:none;">Annuler la récupération</button>
+                                             <button type="button" id="sales-backfill-cancel-btn" class="btn btn-outline-danger btn-sm mt-2" style="display:none;">Annuler ce magasin</button>
+                                             <!-- Visible uniquement quand un lot multi-magasins est en cours (cf. renderBatchFailures/
+                                                  startBatchPolling) : distinct du bouton ci-dessus qui n'annule QUE le magasin
+                                                  actuellement affiché — demande explicite du 17/09/2026, "annuler" prêtait à
+                                                  confusion sans préciser la portée (un magasin ou les 52 du lot). -->
+                                             <button type="button" id="sales-backfill-cancel-batch-btn" class="btn btn-outline-danger btn-sm mt-2 ms-2" style="display:none;">Annuler tout le lot</button>
                                         </div>
                                    </div>
                               </div>
@@ -2240,7 +2245,7 @@
                                         cancelBtn.style.display = '';
                                         cancelBtn.dataset.runId = status.runId;
                                         cancelBtn.disabled = false;
-                                        cancelBtn.textContent = 'Annuler la récupération';
+                                        cancelBtn.textContent = 'Annuler ce magasin';
                                         stopBackfillPolling();
                                    } else if (status.status === 'DONE' || status.status === 'CANCELLED') {
                                         resumeBtn.style.display = 'none';
@@ -2257,7 +2262,7 @@
                                              cancelBtn.style.display = '';
                                              cancelBtn.dataset.runId = status.runId;
                                              cancelBtn.disabled = false;
-                                             cancelBtn.textContent = 'Annuler la récupération';
+                                             cancelBtn.textContent = 'Annuler ce magasin';
                                         }
                                         if (!pauseBtn.dataset.pausing) {
                                              pauseBtn.disabled = false;
@@ -2346,6 +2351,7 @@
 
                               async function pollBatchStatus(batchId) {
                                    const queueStatusBox = document.getElementById('sales-backfill-queue-status');
+                                   const cancelBatchBtn = document.getElementById('sales-backfill-cancel-batch-btn');
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-backfill/batch/' + batchId + '/status');
                                         const json = await res.json();
@@ -2356,6 +2362,12 @@
                                         const label = status.currentTarget ? (status.currentTarget.shopLabel || status.currentTarget.shopId) : '';
                                         if (status.status === 'IN_PROGRESS') {
                                              queueStatusBox.textContent = 'Lot en cours — magasin ' + (status.currentIndex + 1) + '/' + status.total + ' : ' + label + '...';
+                                             // Un seul bouton "Annuler tout le lot" à la fois : n'affiche/ne réarme pas si une
+                                             // demande d'annulation du lot est déjà en cours de traitement par ce navigateur.
+                                             if (!cancelBatchBtn.dataset.cancelling) {
+                                                  cancelBatchBtn.style.display = '';
+                                                  cancelBatchBtn.dataset.batchId = batchId;
+                                             }
                                              if (status.currentRunId && status.currentRunId !== lastPolledBatchRunId) {
                                                   lastPolledBatchRunId = status.currentRunId;
                                                   startBackfillPolling(status.currentRunId);
@@ -2364,6 +2376,7 @@
                                              queueStatusBox.textContent = status.status === 'CANCELLED'
                                                   ? 'Lot annulé (' + status.currentIndex + '/' + status.total + ' magasin(s) traité(s)).'
                                                   : 'Lot terminé (' + status.total + ' magasin(s)).';
+                                             cancelBatchBtn.style.display = 'none';
                                              stopBatchPolling();
                                         }
                                    } catch (err) {
@@ -2557,8 +2570,30 @@ document.getElementById('sales-backfill-cancel-btn').addEventListener('click', a
   } catch (err) {
     document.getElementById('sales-backfill-result').textContent = 'Erreur: ' + err.message;
     btn.disabled = false;
-    btn.textContent = 'Annuler la récupération';
+    btn.textContent = 'Annuler ce magasin';
   } finally {
+    delete btn.dataset.cancelling;
+  }
+});
+
+document.getElementById('sales-backfill-cancel-batch-btn').addEventListener('click', async function () {
+  const batchId = this.dataset.batchId;
+  if (!batchId) return;
+  if (!(await window.reassortConfirm('Annuler TOUT le lot de récupération (tous les magasins restants) ? Le magasin en cours ira jusqu\'au bout de sa tranche courante, puis les magasins qui n\'ont pas encore été traités ne seront jamais lancés. Les ventes déjà récupérées resteront disponibles.', { danger: true, okLabel: 'Annuler tout le lot' }))) return;
+  const btn = this;
+  btn.disabled = true;
+  btn.dataset.cancelling = '1';
+  btn.textContent = 'Annulation du lot...';
+  try {
+    const res = await window.reassortFetch('/reassort/sales-backfill/batch/' + batchId + '/cancel', { method: 'POST' });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    document.getElementById('sales-backfill-queue-status').textContent = json.message;
+  } catch (err) {
+    document.getElementById('sales-backfill-result').textContent = 'Erreur: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Annuler tout le lot';
     delete btn.dataset.cancelling;
   }
 });
