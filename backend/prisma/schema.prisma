@@ -987,10 +987,50 @@ model SalesBackfillRun {
 
   chunks SalesBackfillChunk[]
 
+  // Si ce run fait partie d'un lot multi-magasins (bouton "Tout cocher"), pointe vers le batch qui
+  // le pilote — permet au traitement séquentiel de continuer côté serveur même si l'utilisateur
+  // ferme l'onglet ou recharge la page (avant cet ajout, la file d'attente tournait entièrement en
+  // JS navigateur : quitter la page arrêtait tous les magasins restants sans que rien ne le
+  // signale, le run en cours seul continuait jusqu'au bout côté serveur).
+  batchId String?           @map("batch_id")
+  batch   SalesBackfillBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
   // Un seul run actif à la fois par magasin : une reprise doit retrouver ce run existant plutôt
   // que d'en créer un nouveau en parallèle qui retéléchargerait les mêmes tranches.
   @@index([rposShopId, status])
+  @@index([batchId])
   @@map("sales_backfill_runs")
+}
+
+// Lot de récupération multi-magasins (bouton "Tout cocher" côté UI) : la liste des cibles est
+// figée au lancement, puis le serveur enchaîne un SalesBackfillRun par magasin, un par un, sans
+// dépendre de la page restée ouverte dans le navigateur. Au plus un batch actif à la fois (imposé
+// en code, pas en contrainte DB) pour ne jamais paralléliser plusieurs lots entre eux.
+model SalesBackfillBatch {
+  id String @id @default(cuid())
+
+  // Liste des cibles [{ posId, shopId, shopLabel }], figée au lancement — ne change jamais après
+  // coup même si la liste des magasins actifs évolue en cours de route.
+  targetsJson String @map("targets_json")
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  status String @default("IN_PROGRESS") @map("status") // IN_PROGRESS | DONE | CANCELLED
+
+  // Index (0-based) dans targetsJson du magasin en cours de traitement — permet de reconstruire
+  // "magasin X/Y" côté UI sans avoir à recompter les runs terminés à chaque affichage.
+  currentIndex Int @default(0) @map("current_index")
+
+  cancelRequested Boolean @default(false) @map("cancel_requested")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  runs SalesBackfillRun[]
+
+  @@map("sales_backfill_batches")
 }
 
 model SalesBackfillChunk {

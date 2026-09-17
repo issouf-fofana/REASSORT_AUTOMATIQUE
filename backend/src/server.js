@@ -7,6 +7,7 @@ const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
 const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
+const salesBackfillService = require('./services/salesBackfillService');
 
 // Import routes
 const reassortRoutes = require('./routes/reassort');
@@ -175,6 +176,16 @@ async function start() {
     });
     if (staleRuns.count > 0) {
       console.log(`⚠️  ${staleRuns.count} génération(s) de proposition interrompue(s) par le redémarrage, marquée(s) en erreur.`);
+    }
+
+    // Contrairement aux propositions ci-dessus, un batch de récupération d'historique (bouton
+    // "Tout cocher" du backfill) sait reprendre proprement là où il s'est arrêté (chunks/pages déjà
+    // persistés, cf. salesBackfillService) : un redémarrage du serveur ne doit donc jamais
+    // l'abandonner, juste relancer sa boucle de traitement pour le magasin en cours et les suivants.
+    const activeBatch = await salesBackfillService.findActiveBatch();
+    if (activeBatch) {
+      console.log(`📥 Reprise du lot de récupération de ventes ${activeBatch.id} (magasin ${activeBatch.currentIndex + 1}/${JSON.parse(activeBatch.targetsJson).length})...`);
+      salesBackfillService.processBatch(activeBatch.id).catch((err) => console.error('Erreur reprise batch backfill:', err.message));
     }
 
     app.listen(PORT, () => {

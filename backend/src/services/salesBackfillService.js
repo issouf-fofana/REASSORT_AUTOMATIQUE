@@ -344,4 +344,119 @@ async function cancelRun(runId) {
   await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'CANCELLED', completedAt: new Date() } });
 }
 
-module.exports = { startBackfill, getRunStatus, findResumableRun, processRun, requestPause, cancelRun };
+/**
+ * Lance un lot de récupération sur plusieurs magasins (bouton "Tout cocher" côté UI), un magasin
+ * après l'autre, piloté entièrement côté serveur — persiste la liste des cibles et l'avancement en
+ * base (SalesBackfillBatch) pour que fermer l'onglet ou recharger la page n'arrête jamais les
+ * magasins restants (contrairement à l'ancienne file d'attente en JS navigateur qu'elle remplace).
+ * targets : [{ posId, shopId, shopLabel }]
+ */
+async function startBatch(targets, periodStart, periodEnd) {
+  if (!targets || !targets.length) throw new Error('Aucun magasin sélectionné');
+
+  const existingActive = await prisma.salesBackfillBatch.findFirst({ where: { status: 'IN_PROGRESS' } });
+  if (existingActive) throw new Error('Une récupération groupée est déjà en cours');
+
+  const batch = await prisma.salesBackfillBatch.create({
+    data: {
+      targetsJson: JSON.stringify(targets),
+      periodStart: new Date(periodStart),
+      periodEnd: new Date(periodEnd),
+    },
+  });
+
+  processBatch(batch.id).catch((err) => console.error(`[salesBackfillService] Erreur non gérée pour le batch ${batch.id}:`, err.message));
+  return batch.id;
+}
+
+/**
+ * Traite un batch : reprend à currentIndex (utile après un redémarrage du serveur en plein milieu
+ * d'un lot — le run du magasin interrompu est lui-même repris via startOrResumeRun) et avance un
+ * magasin à la fois, jamais en parallèle, jusqu'à la fin de la liste ou une annulation demandée.
+ */
+async function processBatch(batchId) {
+  const batch = await prisma.salesBackfillBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw new Error(`Batch ${batchId} introuvable`);
+  if (batch.status !== 'IN_PROGRESS') return;
+
+  const targets = JSON.parse(batch.targetsJson);
+  const periodStart = batch.periodStart.toISOString();
+  const periodEnd = batch.periodEnd.toISOString();
+
+  for (let i = batch.currentIndex; i < targets.length; i++) {
+    const fresh = await prisma.salesBackfillBatch.findUnique({ where: { id: batchId } });
+    if (!fresh || fresh.cancelRequested) {
+      await prisma.salesBackfillBatch.update({ where: { id: batchId }, data: { status: 'CANCELLED', completedAt: new Date() } });
+      console.log(`[salesBackfillService] Batch ${batchId} annulé à l'index ${i}.`);
+      return;
+    }
+
+    const target = targets[i];
+    await prisma.salesBackfillBatch.update({ where: { id: batchId }, data: { currentIndex: i } });
+    console.log(`[salesBackfillService] Batch ${batchId} : magasin ${i + 1}/${targets.length} (${target.shopLabel || target.shopId})...`);
+    try {
+      const run = await startOrResumeRun(target.posId, target.shopId, periodStart, periodEnd);
+      await prisma.salesBackfillRun.update({ where: { id: run.id }, data: { batchId } });
+      await processRun(run.id);
+    } catch (err) {
+      console.error(`[salesBackfillService] Batch ${batchId} : échec sur ${target.shopId} :`, err.message);
+      // Une erreur sur un magasin ne bloque pas les suivants — visible dans l'historique des runs
+      // via batchId, pas la peine d'arrêter tout le lot pour un seul magasin en échec.
+    }
+  }
+
+  await prisma.salesBackfillBatch.update({
+    where: { id: batchId },
+    data: { status: 'DONE', currentIndex: targets.length, completedAt: new Date() },
+  });
+  console.log(`[salesBackfillService] Batch ${batchId} terminé.`);
+}
+
+/** Batch actif (IN_PROGRESS) le plus récent, pour que l'UI retrouve sa progression au chargement. */
+async function findActiveBatch() {
+  return prisma.salesBackfillBatch.findFirst({ where: { status: 'IN_PROGRESS' }, orderBy: { createdAt: 'desc' } });
+}
+
+/** Détail d'un batch avec son run en cours (pour afficher la progression du magasin actif). */
+async function getBatchStatus(batchId) {
+  const batch = await prisma.salesBackfillBatch.findUnique({
+    where: { id: batchId },
+    include: { runs: { orderBy: { createdAt: 'desc' }, take: 1 } },
+  });
+  if (!batch) return null;
+
+  const targets = JSON.parse(batch.targetsJson);
+  const currentTarget = targets[batch.currentIndex] || null;
+  const currentRun = batch.runs[0] || null;
+
+  return {
+    batchId: batch.id,
+    status: batch.status,
+    total: targets.length,
+    currentIndex: batch.currentIndex,
+    currentTarget,
+    currentRunId: currentRun ? currentRun.id : null,
+  };
+}
+
+/** Demande l'arrêt propre d'un batch : le magasin en cours va jusqu'au bout de sa tranche courante, puis le lot s'arrête sans lancer les magasins restants. */
+async function requestCancelBatch(batchId) {
+  const batch = await prisma.salesBackfillBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw new Error(`Batch ${batchId} introuvable`);
+  if (batch.status !== 'IN_PROGRESS') throw new Error('Ce lot n\'est pas en cours');
+  await prisma.salesBackfillBatch.update({ where: { id: batchId }, data: { cancelRequested: true } });
+}
+
+module.exports = {
+  startBackfill,
+  getRunStatus,
+  findResumableRun,
+  processRun,
+  requestPause,
+  cancelRun,
+  startBatch,
+  processBatch,
+  findActiveBatch,
+  getBatchStatus,
+  requestCancelBatch,
+};

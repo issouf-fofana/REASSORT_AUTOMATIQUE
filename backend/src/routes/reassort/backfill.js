@@ -91,6 +91,66 @@ router.post('/sales-backfill/:runId/cancel', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/sales-backfill/batch - lance un lot de récupération sur PLUSIEURS magasins,
+// un après l'autre, piloté côté serveur (contrairement à l'ancienne file d'attente en JS
+// navigateur, ce lot continue même si l'utilisateur ferme l'onglet ou recharge la page).
+// body: { targets: [{ posId, shopId, shopLabel }], periodStart, periodEnd }
+router.post('/sales-backfill/batch', requireAdmin, async (req, res) => {
+  try {
+    const { targets, periodStart: bodyStart, periodEnd: bodyEnd } = req.body;
+    if (!Array.isArray(targets) || !targets.length) {
+      return res.status(400).json({ success: false, message: 'targets (liste de magasins) requis' });
+    }
+    if (!bodyStart) {
+      return res.status(400).json({ success: false, message: 'periodStart requis' });
+    }
+    const periodEnd = bodyEnd ? new Date(bodyEnd) : new Date();
+    const periodStart = new Date(bodyStart);
+    if (periodStart >= periodEnd) {
+      return res.status(400).json({ success: false, message: 'La date de début doit être antérieure à la date de fin' });
+    }
+    const batchId = await salesBackfillService.startBatch(targets, periodStart.toISOString(), periodEnd.toISOString());
+    res.json({ success: true, message: 'Récupération groupée démarrée', data: { batchId } });
+  } catch (error) {
+    res.status(409).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/sales-backfill/batch/active - lot en cours (ADMIN), pour que l'UI retrouve sa
+// progression au chargement/rechargement de la page plutôt que de laisser croire qu'il n'y a rien.
+router.get('/sales-backfill/batch/active', requireAdmin, async (req, res) => {
+  try {
+    const batch = await salesBackfillService.findActiveBatch();
+    res.json({ success: true, data: batch });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/sales-backfill/batch/:batchId/status - progression détaillée d'un lot
+// (magasin en cours, index/total, run actif).
+router.get('/sales-backfill/batch/:batchId/status', requireAdmin, async (req, res) => {
+  try {
+    const status = await salesBackfillService.getBatchStatus(req.params.batchId);
+    if (!status) return res.status(404).json({ success: false, message: 'Lot introuvable' });
+    res.json({ success: true, data: status });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/sales-backfill/batch/:batchId/cancel - demande l'arrêt propre d'un lot : le
+// magasin en cours va jusqu'au bout de sa tranche courante, puis les magasins restants ne sont
+// jamais lancés.
+router.post('/sales-backfill/batch/:batchId/cancel', requireAdmin, async (req, res) => {
+  try {
+    await salesBackfillService.requestCancelBatch(req.params.batchId);
+    res.json({ success: true, message: 'Arrêt du lot demandé, en cours...' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/sales-lines - consultation paginée des ventes synchronisées localement pour
 // un magasin (ADMIN), avec filtres période/article, pour vérifier ce qui a réellement été récupéré
 // sans repasser par RPOS. Query: shopId (requis), dateStart, dateEnd, ean, page, pageSize.
