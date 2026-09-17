@@ -42,6 +42,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 
     let user = await prisma.user.findUnique({ where: { email } });
 
+    const PENDING_ACCESS_MESSAGE = 'Votre compte existe mais n\'a pas encore été configuré. Contactez le service informatique (SOS) pour demander l\'accès.';
+
     // Priorité au compte local (STEP 10, plan de rôles §39-40) : si un compte existe déjà avec un
     // mot de passe local, on l'authentifie normalement, LDAP n'intervient jamais pour lui — évite
     // qu'une panne ou une politique de mot de passe AD ne bloque un compte de service/admin local
@@ -51,6 +53,12 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (!valid) {
         return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
       }
+    } else if (user && !user.isActive && user.ldapManaged) {
+      // Compte déjà créé automatiquement par un login LDAP précédent, mais jamais configuré par un
+      // ADMIN (pas de rôle/magasin attribué) : message explicite plutôt que la même erreur générique
+      // qu'un mauvais mot de passe, pour que l'utilisateur sache quoi faire (contacter SOS) au lieu
+      // de retenter indéfiniment sa saisie en pensant s'être trompé.
+      return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
     } else if (!user && email.toLowerCase().endsWith(`@${LDAP_DOMAIN_FQDN}`)) {
       // Pas de compte local pour cet email : si son domaine correspond à Prosuma, on tente LDAP
       // avec l'identifiant réseau (partie avant @) — jamais pour un email d'un autre domaine, qui
@@ -60,17 +68,22 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (!ldapOk) {
         return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
       }
-      // Premier succès LDAP pour cet utilisateur : crée le compte local avec un rôle par défaut
-      // sans périmètre — un ADMIN doit ensuite configurer le rôle/magasin réel depuis Utilisateurs,
-      // exactement comme pour un compte créé manuellement (cf. décision du 17/09/2026).
+      // Premier succès LDAP pour cet utilisateur : le mot de passe AD est valide, mais le compte est
+      // créé INACTIF (pas de rôle/magasin attribué) — un ADMIN doit explicitement le configurer
+      // depuis Utilisateurs (recherche annuaire ou activation directe) avant que la connexion
+      // n'aboutisse (décision du 17/09/2026 : accès refusé par défaut, jamais un rôle par défaut
+      // qui donnerait un accès même limité sans validation humaine).
       user = await prisma.user.create({
         data: {
           email,
           password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
           name: ldapUsername,
+          isActive: false,
+          ldapManaged: true,
         },
       });
-      console.log(`[auth] Compte créé automatiquement au premier login LDAP : ${email}`);
+      console.log(`[auth] Compte LDAP créé en attente de validation : ${email}`);
+      return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
     } else {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }

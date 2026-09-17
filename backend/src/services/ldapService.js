@@ -16,6 +16,18 @@ const LDAP_URL = process.env.LDAP_URL || 'ldap://10.0.70.1';
 const LDAP_DOMAIN_FQDN = process.env.LDAP_DOMAIN_FQDN || 'prosuma.ci';
 const LDAP_BIND_TIMEOUT_MS = 5000;
 
+// Compte de service pour la RECHERCHE annuaire (pas l'authentification d'un utilisateur qui se
+// connecte) : nécessaire pour l'écran Utilisateurs > "Rechercher dans l'annuaire AD" (préconfigurer
+// un compte avant son premier login), un bind simple utilisateur normal n'ayant pas forcément le
+// droit de lister l'annuaire. Sans ces deux variables, la recherche est simplement indisponible
+// (l'auth normale par bind, elle, continue de fonctionner sans compte de service).
+const LDAP_BIND_USER = process.env.LDAP_BIND_USER || '';
+const LDAP_BIND_PASSWORD = process.env.LDAP_BIND_PASSWORD || '';
+
+// Base DN dérivée du domaine FQDN (ex: "prosuma.ci" -> "DC=prosuma,DC=ci") : format standard d'un
+// domaine Active Directory, où chaque segment du nom de domaine devient un composant DC séparé.
+const LDAP_BASE_DN = LDAP_DOMAIN_FQDN.split('.').map((part) => `DC=${part}`).join(',');
+
 /**
  * Tente une authentification LDAP pour cet identifiant/mot de passe. Retourne true si le bind
  * réussit (mot de passe valide), false sinon (mauvais mot de passe, compte AD inexistant/désactivé)
@@ -43,4 +55,50 @@ async function verifyLdapCredentials(username, password) {
   }
 }
 
-module.exports = { verifyLdapCredentials, LDAP_DOMAIN_FQDN };
+/**
+ * Recherche des comptes dans l'annuaire AD par nom/identifiant (utilisée par Utilisateurs >
+ * "Rechercher dans l'annuaire AD", pour préconfigurer le rôle/magasin d'un employé AVANT son
+ * premier login plutôt que d'attendre qu'il se connecte une fois et reste bloqué en attente).
+ * Nécessite un compte de service (LDAP_BIND_USER/LDAP_BIND_PASSWORD) : lève une erreur explicite
+ * si absent, pour que l'appelant distingue "recherche non configurée" d'un résultat vide.
+ * Retourne au plus 20 résultats : [{ username, displayName, email }]
+ */
+async function searchLdapUsers(query) {
+  if (!LDAP_BIND_USER || !LDAP_BIND_PASSWORD) {
+    throw new Error('Recherche annuaire non configurée (LDAP_BIND_USER/LDAP_BIND_PASSWORD absents)');
+  }
+  const q = (query || '').trim();
+  if (q.length < 2) throw new Error('Saisissez au moins 2 caractères');
+
+  const client = new Client({ url: LDAP_URL, connectTimeout: LDAP_BIND_TIMEOUT_MS });
+  try {
+    await client.bind(`${LDAP_BIND_USER}@${LDAP_DOMAIN_FQDN}`, LDAP_BIND_PASSWORD);
+
+    // Filtre AD standard : compte utilisateur (pas un ordinateur ou un groupe), nom ou identifiant
+    // contenant la recherche — échappe les métacaractères LDAP pour éviter une injection de filtre
+    // si la recherche contient des caractères spéciaux (*, (, ), \, NUL).
+    const escaped = q.replace(/[\\*()\0]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+    const filter = `(&(objectClass=user)(objectCategory=person)(|(sAMAccountName=*${escaped}*)(displayName=*${escaped}*)(cn=*${escaped}*)))`;
+
+    const { searchEntries } = await client.search(LDAP_BASE_DN, {
+      scope: 'sub',
+      filter,
+      attributes: ['sAMAccountName', 'displayName', 'mail'],
+      sizeLimit: 20,
+    });
+
+    return searchEntries.map((entry) => ({
+      username: String(entry.sAMAccountName || ''),
+      displayName: String(entry.displayName || entry.cn || ''),
+      email: String(entry.mail || (entry.sAMAccountName ? `${entry.sAMAccountName}@${LDAP_DOMAIN_FQDN}` : '')),
+    })).filter((r) => r.username);
+  } finally {
+    try {
+      await client.unbind();
+    } catch (err) {
+      // Rien à faire si le unbind échoue après une recherche déjà terminée ou en erreur.
+    }
+  }
+}
+
+module.exports = { verifyLdapCredentials, searchLdapUsers, LDAP_DOMAIN_FQDN };

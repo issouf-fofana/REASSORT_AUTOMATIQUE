@@ -56,6 +56,12 @@ model User {
 
   isActive  Boolean  @default(true) @map("is_active")
 
+  // true si ce compte a été créé automatiquement au premier login réussi contre l'Active Directory
+  // Prosuma (STEP 10) plutôt que créé à la main par un ADMIN — sert uniquement à distinguer, dans
+  // l'écran Utilisateurs, "en attente de validation après un login LDAP" d'un compte local que
+  // quelqu'un a délibérément désactivé (les deux ont isActive=false, mais des raisons différentes).
+  ldapManaged Boolean @default(false) @map("ldap_managed")
+
   supervisedShops SupervisedShop[]
 
   createdAt DateTime @default(now()) @map("created_at")

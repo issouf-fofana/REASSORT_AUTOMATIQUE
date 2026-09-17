@@ -69,19 +69,44 @@
                                              <h4 class="card-title">Nouveau compte</h4>
                                         </div>
                                         <div class="card-body">
+                                             <!-- Choix du mode de création (ajout du 17/09/2026, STEP 10) : un compte "Active Directory"
+                                                  n'a pas de mot de passe local (l'authentification passe toujours par LDAP, cf.
+                                                  auth.js) — recherché par identifiant réseau dans l'annuaire Prosuma plutôt que saisi à
+                                                  la main, pour éviter une faute de frappe sur l'email qui empêcherait le compte de se
+                                                  faire reconnaître au premier login LDAP réel de cette personne. -->
+                                             <div class="mb-3">
+                                                  <div class="btn-group w-100" role="group">
+                                                       <input type="radio" class="btn-check" name="new-user-mode" id="new-user-mode-local" value="local" checked>
+                                                       <label class="btn btn-outline-secondary" for="new-user-mode-local">Compte local</label>
+                                                       <input type="radio" class="btn-check" name="new-user-mode" id="new-user-mode-ldap" value="ldap">
+                                                       <label class="btn btn-outline-secondary" for="new-user-mode-ldap">Compte Active Directory</label>
+                                                  </div>
+                                             </div>
                                              <div id="create-user-error" class="alert alert-danger" style="display:none;"></div>
                                              <form id="create-user-form">
-                                                  <div class="mb-3">
-                                                       <label class="form-label">Nom</label>
-                                                       <input type="text" id="new-user-name" class="form-control" required>
+                                                  <!-- Mode "Compte Active Directory" : recherche dans l'annuaire au lieu d'une saisie
+                                                       manuelle du nom/email — le compte créé n'a jamais de mot de passe local exploitable. -->
+                                                  <div id="new-user-ldap-search-wrapper" style="display:none;">
+                                                       <div class="mb-3">
+                                                            <label class="form-label">Rechercher dans l'annuaire (nom ou identifiant)</label>
+                                                            <input type="text" id="new-user-ldap-search" class="form-control" placeholder="ex: jdupont ou Dupont">
+                                                            <div id="new-user-ldap-results" class="list-group mt-2"></div>
+                                                       </div>
+                                                       <div id="new-user-ldap-selected" class="alert alert-secondary small" style="display:none;"></div>
                                                   </div>
-                                                  <div class="mb-3">
-                                                       <label class="form-label">Email</label>
-                                                       <input type="email" id="new-user-email" class="form-control" required>
-                                                  </div>
-                                                  <div class="mb-3">
-                                                       <label class="form-label">Mot de passe</label>
-                                                       <input type="password" id="new-user-password" class="form-control" required minlength="6">
+                                                  <div id="new-user-local-fields-wrapper">
+                                                       <div class="mb-3">
+                                                            <label class="form-label">Nom</label>
+                                                            <input type="text" id="new-user-name" class="form-control" required>
+                                                       </div>
+                                                       <div class="mb-3">
+                                                            <label class="form-label">Email</label>
+                                                            <input type="email" id="new-user-email" class="form-control" required>
+                                                       </div>
+                                                       <div class="mb-3" id="new-user-password-wrapper">
+                                                            <label class="form-label">Mot de passe</label>
+                                                            <input type="password" id="new-user-password" class="form-control" required minlength="6">
+                                                       </div>
                                                   </div>
                                                   <div class="mb-3">
                                                        <label class="form-label">Rôle</label>
@@ -305,6 +330,76 @@
                               const usersTbody = document.getElementById('users-tbody');
                               const refreshBtn = document.getElementById('users-refresh');
 
+                              // --- Mode "Compte Active Directory" (ajout du 17/09/2026, STEP 10) : recherche dans
+                              // l'annuaire Prosuma au lieu d'une saisie manuelle nom/email/mot de passe. ---
+                              let selectedLdapUser = null;
+                              const ldapSearchInput = document.getElementById('new-user-ldap-search');
+                              const ldapResultsBox = document.getElementById('new-user-ldap-results');
+                              const ldapSelectedBox = document.getElementById('new-user-ldap-selected');
+                              const localFieldsWrapper = document.getElementById('new-user-local-fields-wrapper');
+                              const ldapSearchWrapper = document.getElementById('new-user-ldap-search-wrapper');
+                              const passwordWrapper = document.getElementById('new-user-password-wrapper');
+
+                              document.querySelectorAll('input[name="new-user-mode"]').forEach(function (radio) {
+                                   radio.addEventListener('change', function () {
+                                        const isLdap = document.getElementById('new-user-mode-ldap').checked;
+                                        ldapSearchWrapper.style.display = isLdap ? '' : 'none';
+                                        // En mode LDAP, nom/email sont remplis automatiquement par la sélection d'un résultat
+                                        // de recherche (jamais tapés à la main, pour éviter toute faute de frappe qui
+                                        // empêcherait le compte de se reconnaître au premier vrai login LDAP de la personne).
+                                        document.getElementById('new-user-name').readOnly = isLdap;
+                                        document.getElementById('new-user-email').readOnly = isLdap;
+                                        passwordWrapper.style.display = isLdap ? 'none' : '';
+                                        document.getElementById('new-user-password').required = !isLdap;
+                                        if (!isLdap) {
+                                             selectedLdapUser = null;
+                                             ldapSelectedBox.style.display = 'none';
+                                             document.getElementById('new-user-name').value = '';
+                                             document.getElementById('new-user-email').value = '';
+                                        }
+                                   });
+                              });
+
+                              let ldapSearchTimer = null;
+                              if (ldapSearchInput) {
+                                   ldapSearchInput.addEventListener('input', function () {
+                                        clearTimeout(ldapSearchTimer);
+                                        const q = this.value.trim();
+                                        if (q.length < 2) { ldapResultsBox.innerHTML = ''; return; }
+                                        ldapSearchTimer = setTimeout(async function () {
+                                             ldapResultsBox.innerHTML = '<div class="text-muted small p-2">Recherche...</div>';
+                                             try {
+                                                  const res = await window.reassortFetch('/users/ldap/search?q=' + encodeURIComponent(q));
+                                                  const json = await res.json();
+                                                  if (!json.success) throw new Error(json.message);
+                                                  if (!json.data.length) {
+                                                       ldapResultsBox.innerHTML = '<div class="text-muted small p-2">Aucun résultat.</div>';
+                                                       return;
+                                                  }
+                                                  ldapResultsBox.innerHTML = json.data.map(function (u, i) {
+                                                       return '<button type="button" class="list-group-item list-group-item-action ldap-result-btn" data-idx="' + i + '">' +
+                                                            '<strong>' + u.displayName + '</strong> — ' + u.username + ' (' + u.email + ')' +
+                                                            '</button>';
+                                                  }).join('');
+                                                  ldapResultsBox.querySelectorAll('.ldap-result-btn').forEach(function (btn) {
+                                                       btn.addEventListener('click', function () {
+                                                            const u = json.data[parseInt(this.dataset.idx, 10)];
+                                                            selectedLdapUser = u;
+                                                            document.getElementById('new-user-name').value = u.displayName || u.username;
+                                                            document.getElementById('new-user-email').value = u.email;
+                                                            ldapSelectedBox.textContent = 'Sélectionné : ' + (u.displayName || u.username) + ' (' + u.email + ')';
+                                                            ldapSelectedBox.style.display = '';
+                                                            ldapResultsBox.innerHTML = '';
+                                                            ldapSearchInput.value = '';
+                                                       });
+                                                  });
+                                             } catch (err) {
+                                                  ldapResultsBox.innerHTML = '<div class="text-danger small p-2">Erreur : ' + err.message + '</div>';
+                                             }
+                                        }, 400);
+                                   });
+                              }
+
                               let shopsList = [];
 
                               async function loadShops() {
@@ -408,13 +503,25 @@
 
                                    const role = roleSelect.value;
                                    const selectedOption = shopSelect.options[shopSelect.selectedIndex];
+                                   const isLdapMode = document.getElementById('new-user-mode-ldap').checked;
+
+                                   if (isLdapMode && !selectedLdapUser) {
+                                        errorBox.textContent = 'Recherchez et sélectionnez un compte dans l\'annuaire Active Directory.';
+                                        errorBox.style.display = 'block';
+                                        submitBtn.disabled = false;
+                                        return;
+                                   }
 
                                    const payload = {
                                         name: document.getElementById('new-user-name').value,
                                         email: document.getElementById('new-user-email').value,
-                                        password: document.getElementById('new-user-password').value,
                                         role: role,
                                    };
+                                   if (isLdapMode) {
+                                        payload.ldapManaged = true;
+                                   } else {
+                                        payload.password = document.getElementById('new-user-password').value;
+                                   }
                                    if (SINGLE_SHOP_ROLES.has(role) && selectedOption) {
                                         payload.rposShopId = selectedOption.value;
                                         payload.rposShopReference = selectedOption.dataset.reference;
@@ -467,6 +574,10 @@
                                         if (!json.success) throw new Error(json.message);
 
                                         form.reset();
+                                        selectedLdapUser = null;
+                                        ldapSelectedBox.style.display = 'none';
+                                        document.getElementById('new-user-mode-local').checked = true;
+                                        document.getElementById('new-user-mode-local').dispatchEvent(new Event('change'));
                                         roleSelect.dispatchEvent(new Event('change'));
                                         loadUsers();
                                    } catch (err) {

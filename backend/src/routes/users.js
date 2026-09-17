@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = require('../utils/prisma');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const ldapService = require('../services/ldapService');
 
 
 router.use(requireAuth, requireAdmin);
@@ -28,6 +30,19 @@ function toPublicUser(user) {
   return rest;
 }
 
+// GET /api/users/ldap/search?q=... - recherche des comptes dans l'annuaire AD Prosuma par nom ou
+// identifiant (admin uniquement), pour préconfigurer le rôle/magasin d'un employé AVANT son
+// premier login plutôt que d'attendre qu'il se connecte une fois et reste bloqué en attente de
+// validation (cf. décision du 17/09/2026, STEP 10).
+router.get('/ldap/search', async (req, res) => {
+  try {
+    const results = await ldapService.searchLdapUsers(req.query.q);
+    res.json({ success: true, data: results });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/users - liste tous les comptes (admin uniquement)
 router.get('/', async (req, res) => {
   try {
@@ -45,18 +60,21 @@ router.get('/', async (req, res) => {
 // body: { email, password, name, role, rposShopId, rposShopReference, rposShopName, rposPosId,
 //         assignedDepartment (DEPARTMENT_HEAD/SHELF_STOCKER, nom(s) de département séparés par
 //         virgule pour un rayonniste multi-rayons), aiPermissionsJson (réglage fin optionnel),
-//         supervisedShops: [{ rposShopId, rposShopReference, rposShopName, rposPosId }, ...] }
+//         supervisedShops: [{ rposShopId, rposShopReference, rposShopName, rposPosId }, ...],
+//         ldapManaged (optionnel, compte préconfiguré depuis l'annuaire AD avant son premier
+//         login — cf. GET /ldap/search — dans ce cas password n'est pas requis : l'authentification
+//         de ce compte se fera toujours via LDAP, jamais avec un mot de passe local) }
 router.post('/', async (req, res) => {
   try {
     const {
       email, password, name, role,
       rposShopId, rposShopReference, rposShopName, rposPosId,
       assignedDepartment, aiPermissionsJson,
-      supervisedShops,
+      supervisedShops, ldapManaged,
     } = req.body;
 
-    if (!email || !password || !name) {
-      return res.status(400).json({ success: false, message: 'email, password et name sont requis' });
+    if (!email || !name || (!password && !ldapManaged)) {
+      return res.status(400).json({ success: false, message: 'email, name et password (sauf compte LDAP) sont requis' });
     }
     const normalizedRole = normalizeRole(role);
     if (SINGLE_SHOP_ROLES.has(normalizedRole) && (!rposShopId || !rposPosId)) {
@@ -69,13 +87,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Un compte SUPERVISOR doit superviser au moins un magasin' });
     }
 
-    const hashed = await bcrypt.hash(password, 10);
+    // Un compte LDAP n'a jamais de mot de passe local exploitable : hash aléatoire jamais destiné
+    // à être utilisé (cf. logique de /api/auth/login, qui redirige toujours ce compte vers LDAP dès
+    // que son email correspond au domaine Prosuma), plutôt qu'exiger un mot de passe fictif côté UI.
+    const hashed = await bcrypt.hash(ldapManaged ? crypto.randomBytes(32).toString('hex') : password, 10);
 
     const user = await prisma.user.create({
       data: {
         email,
         password: hashed,
         name,
+        ldapManaged: !!ldapManaged,
         role: normalizedRole,
         rposShopId: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposShopId : null,
         rposShopReference: SINGLE_SHOP_ROLES.has(normalizedRole) ? rposShopReference : null,
