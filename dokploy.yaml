@@ -1,10 +1,14 @@
 # Configuration Dockploy — déploie les 3 services (postgres, backend, frontend) ensemble.
-# Après le premier déploiement, configurer dans l'UI Dockploy (onglet "Domains" de chaque
-# application) :
-#   - frontend : domaine public (ex: app.tondomaine.com) -> port interne 80
-#   - backend  : domaine public (ex: api.tondomaine.com) -> port interne 3001
-# Puis reporter ces deux domaines dans les variables BACKEND_URL et CORS_ORIGIN ci-dessous
-# (Dockploy > variables d'environnement du projet) et redéployer.
+#
+# Accès SANS domaine (test local sur le réseau, IP du serveur) : les ports sont publiés
+# directement (8080 pour le frontend, 3001 pour l'API) — définir BACKEND_URL et CORS_ORIGIN avec
+# http://<IP-du-serveur>:8080 et http://<IP-du-serveur>:3001 dans les variables d'environnement du
+# projet, puis redéployer.
+#
+# Pour passer à un vrai domaine public plus tard : remplacer les deux blocs "ports" ci-dessous par
+# "expose" (3001 côté app, 80 côté frontend), configurer les domaines dans l'UI Dockploy (onglet
+# "Domains" de chaque application, avec Traefik/HTTPS automatique), puis reporter ces domaines
+# dans BACKEND_URL et CORS_ORIGIN.
 #
 # Accès admin : à la toute première création de la base de données, un compte administrateur est
 # créé automatiquement avec un mot de passe généré aléatoirement, affiché UNE SEULE FOIS dans les
@@ -35,8 +39,8 @@ services:
   app:
     build: ./backend
     restart: unless-stopped
-    expose:
-      - "3001"
+    ports:
+      - "3001:3001"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public
       NODE_ENV: production
@@ -75,8 +79,8 @@ services:
   frontend:
     build: ./frontend
     restart: unless-stopped
-    expose:
-      - "80"
+    ports:
+      - "8080:80"
     environment:
       # Domaine public du backend (configuré dans Dockploy > app backend > Domains), ex:
       # https://api.tondomaine.com — injecté dans le frontend au démarrage du conteneur
