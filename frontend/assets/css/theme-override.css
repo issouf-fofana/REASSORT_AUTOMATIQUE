@@ -14,6 +14,23 @@
      border-radius: 0 !important;
 }
 
+/* Bug du thème Volt (volt.css ligne ~21453, @media min-width: 992px) : .navbar-nav .dropdown-menu
+   est mis en position: relative + display: block (caché seulement par opacity: 0), donc occupe
+   quand même sa vraie place dans le flux même fermé — le menu Notifications de la topbar (large,
+   350px) pousse alors la page en débordement horizontal permanent sur desktop, faisant apparaître
+   un ascenseur horizontal en bas de toutes les pages. position: absolute ne suffit pas seul (le
+   dropdown se positionne alors par rapport à un ancêtre non prévu pour, débordant quand même) —
+   overflow-x: hidden sur html/body coupe court à ce débordement, quelle que soit sa cause exacte,
+   sans risquer de casser un futur élément large similaire ailleurs dans le thème vendor. */
+html, body {
+     overflow-x: hidden;
+}
+@media (min-width: 992px) {
+     .navbar-nav .dropdown-menu {
+          position: absolute !important;
+     }
+}
+
 /* Le filtre grayscale global précédent désaturait TOUTE la page, y compris les couleurs
    sémantiques (succès/erreur/alerte) que les règles plus bas dans ce fichier tentaient justement de
    préserver — contradiction relevée par l'utilisateur ("tout est trop sombre", badges succès/erreur
