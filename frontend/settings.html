@@ -1768,7 +1768,7 @@
                                         });
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
-                                        resultBox.innerHTML = '<span class="text-success">✅ ' + json.message + '</span>';
+                                        resultBox.innerHTML = '<span class="text-success">' + json.message + '</span>';
                                         input.value = '';
                                    } catch (err) {
                                         resultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
@@ -1826,9 +1826,9 @@
                                              // "actif/erreur" en temps réel n'est pas connu, on affiche juste "configuré" pour ne pas
                                              // laisser croire à une vérification qui n'a pas eu lieu.
                                              let status;
-                                             if (!s.hasCredentials) status = '⛔ inactif';
-                                             else if (s.source === 'local') status = '⚙️ configuré (non vérifié)';
-                                             else status = s.error ? '⚠️ erreur' : '✅ actif';
+                                             if (!s.hasCredentials) status = 'inactif';
+                                             else if (s.source === 'local') status = 'configuré, non vérifié';
+                                             else status = s.error ? 'erreur' : 'actif';
                                              return '<option value="' + s.posId + '">' + s.posId + ' — ' + s.label + ' (' + status + ')</option>';
                                         }).join('');
                                         const keepSelection = previousSelection && rposServersCache.some(function (s) { return s.posId === previousSelection; });
@@ -2156,7 +2156,7 @@
                                    if (backfillPollTimer) { clearInterval(backfillPollTimer); backfillPollTimer = null; }
                               }
 
-                              const chunkStatusLabel = { PENDING: '⏳ En attente', IN_PROGRESS: '⚙️ En cours', DONE: '✅ Terminée', ERROR: '❌ Erreur' };
+                              const chunkStatusLabel = { PENDING: 'En attente', IN_PROGRESS: 'En cours', DONE: 'Terminée', ERROR: 'Erreur' };
 
                               function renderBackfillStatus(status) {
                                    document.getElementById('sales-backfill-progress-panel').style.display = '';
