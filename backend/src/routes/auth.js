@@ -44,21 +44,32 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 
     const PENDING_ACCESS_MESSAGE = 'Votre compte existe mais n\'a pas encore été configuré. Contactez le service informatique (SOS) pour demander l\'accès.';
 
+    // Un compte ldapManaged (créé via le premier login LDAP, ou préconfiguré depuis Utilisateurs >
+    // recherche annuaire) n'a JAMAIS de mot de passe local exploitable — bcrypt.compare échouerait
+    // toujours contre son hash aléatoire. Sa vérification passe systématiquement par LDAP, qu'il
+    // soit actif (déjà configuré par un ADMIN, cf. Utilisateurs) ou inactif (en attente).
+    if (user && user.ldapManaged) {
+      const ldapUsername = email.slice(0, email.indexOf('@'));
+      const ldapOk = await verifyLdapCredentials(ldapUsername, password);
+      if (!ldapOk) {
+        return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+      }
+      if (!user.isActive) {
+        // Mot de passe AD valide, mais compte pas encore configuré par un ADMIN (pas de
+        // rôle/magasin réel attribué) : message explicite plutôt que la même erreur générique
+        // qu'un mauvais mot de passe, pour que l'utilisateur sache quoi faire (contacter SOS) au
+        // lieu de retenter indéfiniment sa saisie en pensant s'être trompé.
+        return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
+      }
     // Priorité au compte local (STEP 10, plan de rôles §39-40) : si un compte existe déjà avec un
     // mot de passe local, on l'authentifie normalement, LDAP n'intervient jamais pour lui — évite
     // qu'une panne ou une politique de mot de passe AD ne bloque un compte de service/admin local
     // qui n'a jamais eu besoin d'un compte réseau Prosuma (ex: admin@reassort.local).
-    if (user && user.isActive) {
+    } else if (user && user.isActive) {
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
         return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
       }
-    } else if (user && !user.isActive && user.ldapManaged) {
-      // Compte déjà créé automatiquement par un login LDAP précédent, mais jamais configuré par un
-      // ADMIN (pas de rôle/magasin attribué) : message explicite plutôt que la même erreur générique
-      // qu'un mauvais mot de passe, pour que l'utilisateur sache quoi faire (contacter SOS) au lieu
-      // de retenter indéfiniment sa saisie en pensant s'être trompé.
-      return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
     } else if (!user && email.toLowerCase().endsWith(`@${LDAP_DOMAIN_FQDN}`)) {
       // Pas de compte local pour cet email : si son domaine correspond à Prosuma, on tente LDAP
       // avec l'identifiant réseau (partie avant @) — jamais pour un email d'un autre domaine, qui
