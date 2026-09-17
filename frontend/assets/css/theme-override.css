@@ -14,6 +14,30 @@
      border-radius: 0 !important;
 }
 
+/* Résultats de recherche annuaire AD (Utilisateurs > Nouveau compte > Compte Active Directory) :
+   volt.css ne cadre pas visuellement un .list-group flottant hors d'une .card — sans bordure
+   propre sur le conteneur, les boutons de résultat se fondaient dans le fond blanc de la page. */
+#new-user-ldap-results {
+     border: 1px solid var(--bs-border-color, #dee2e6);
+}
+#new-user-ldap-results:empty {
+     border: none;
+}
+.ldap-result-btn {
+     text-align: left;
+     border-left: none;
+     border-right: none;
+}
+.ldap-result-btn:first-child {
+     border-top: none;
+}
+.ldap-result-btn:last-child {
+     border-bottom: none;
+}
+.ldap-result-btn:hover {
+     background-color: var(--bs-tertiary-bg, #f8f9fa);
+}
+
 /* Bug du thème Volt (volt.css ligne ~21453, @media min-width: 992px) : .navbar-nav .dropdown-menu
    est mis en position: relative + display: block (caché seulement par opacity: 0), donc occupe
    quand même sa vraie place dans le flux même fermé — le menu Notifications de la topbar (large,
