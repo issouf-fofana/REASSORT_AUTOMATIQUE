@@ -72,6 +72,16 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+    environment:
+      # host.docker.internal, pas "backend" : le service backend tourne en network_mode: host
+      # (pour voir la vraie IP LAN du client, cf. commentaire du service backend ci-dessus), donc
+      # il n'a pas d'IP propre dans le réseau Docker Compose de ce projet — host.docker.internal
+      # résout vers l'hôte, où le port 3001 est bien atteignable.
+      INTERNAL_BACKEND_HOST: host.docker.internal
+    extra_hosts:
+      # host.docker.internal n'est résolu automatiquement que sur Docker Desktop (Mac/Windows) —
+      # sur Linux il faut le déclarer explicitement pour qu'il pointe vers la passerelle Docker.
+      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
 

@@ -990,6 +990,10 @@
                                                        </button>
                                                        <div class="dropdown-menu p-2" style="min-width: 320px;">
                                                             <input type="text" id="sales-backfill-shop-search" class="form-control form-control-sm mb-2" placeholder="Rechercher par POS, code ou nom...">
+                                                            <div class="d-flex gap-2 mb-2">
+                                                                 <button type="button" id="sales-backfill-select-all" class="btn btn-sm btn-outline-secondary flex-fill">Tout cocher</button>
+                                                                 <button type="button" id="sales-backfill-select-none" class="btn btn-sm btn-outline-secondary flex-fill">Tout décocher</button>
+                                                            </div>
                                                             <div id="sales-backfill-shop-checklist" style="max-height: 280px; overflow-y: auto;"></div>
                                                        </div>
                                                   </div>
@@ -2325,6 +2329,25 @@
                                         renderBackfillShopChecklist(e.target.value);
                                    });
                               }
+
+                              // Coche/décoche uniquement les magasins actuellement visibles dans la checklist (respecte
+                              // un filtre de recherche en cours), plutôt que la totalité des options du <select> caché —
+                              // évite de sélectionner à l'aveugle des magasins que l'utilisateur a volontairement exclus
+                              // par sa recherche.
+                              function setAllVisibleBackfillShops(selected) {
+                                   const select = document.getElementById('sales-backfill-shop');
+                                   backfillChecklist.querySelectorAll('.backfill-shop-check').forEach(function (c) {
+                                        c.checked = selected;
+                                        const opt = select.querySelector('option[value="' + c.value + '"]');
+                                        if (opt) opt.selected = selected;
+                                   });
+                                   updateBackfillDropdownLabel();
+                                   select.dispatchEvent(new Event('change'));
+                              }
+                              const backfillSelectAllBtn = document.getElementById('sales-backfill-select-all');
+                              const backfillSelectNoneBtn = document.getElementById('sales-backfill-select-none');
+                              if (backfillSelectAllBtn) backfillSelectAllBtn.addEventListener('click', function () { setAllVisibleBackfillShops(true); });
+                              if (backfillSelectNoneBtn) backfillSelectNoneBtn.addEventListener('click', function () { setAllVisibleBackfillShops(false); });
 
                               document.getElementById('sales-backfill-resume-btn').addEventListener('click', async function () {
                                    const runId = this.dataset.runId;
