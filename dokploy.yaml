@@ -70,6 +70,11 @@ services:
       # ait une route réseau vers le contrôleur de domaine (10.0.70.1), pas juste vers Internet.
       LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
       LDAP_DOMAIN_FQDN: ${LDAP_DOMAIN_FQDN:-prosuma.ci}
+      # Vrai domaine AD (diffère du domaine email ci-dessus, cf. .env.example) — utilisé pour la
+      # recherche annuaire uniquement, pas pour l'authentification normale par bind.
+      LDAP_AD_DOMAIN_FQDN: ${LDAP_AD_DOMAIN_FQDN:-prosuma.lan}
+      LDAP_BIND_USER: ${LDAP_BIND_USER:-}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

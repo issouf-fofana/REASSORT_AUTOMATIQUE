@@ -13,7 +13,18 @@
 const { Client } = require('ldapts');
 
 const LDAP_URL = process.env.LDAP_URL || 'ldap://10.0.70.1';
+// Domaine utilisé pour construire l'UPN de connexion (identifiant@LDAP_DOMAIN_FQDN) — celui des
+// adresses email Prosuma, PAS forcément le nom de domaine Active Directory interne réel (les deux
+// peuvent diverger : constaté en pratique le 17/09/2026, prosuma.ci pour les emails/UPN contre
+// prosuma.lan comme vrai nom de domaine AD, cf. LDAP_AD_DOMAIN_FQDN ci-dessous). Un bind par UPN
+// fonctionne quand même via prosuma.ci si le contrôleur a un suffixe UPN configuré pour ce domaine.
 const LDAP_DOMAIN_FQDN = process.env.LDAP_DOMAIN_FQDN || 'prosuma.ci';
+// Vrai nom de domaine Active Directory (rootDomainNamingContext), utilisé pour construire le Base
+// DN d'une recherche annuaire — un Base DN incorrect fait échouer client.search() avec un referral
+// vide (erreur AD 0000202B) plutôt qu'un résultat vide, ldapts ne suivant pas les referrals
+// automatiquement. Se découvre via une requête RootDSE anonyme si besoin (scope=base sur DN vide,
+// attribut defaultNamingContext) en cas de doute sur la valeur exacte à configurer.
+const LDAP_AD_DOMAIN_FQDN = process.env.LDAP_AD_DOMAIN_FQDN || LDAP_DOMAIN_FQDN;
 const LDAP_BIND_TIMEOUT_MS = 5000;
 
 // Compte de service pour la RECHERCHE annuaire (pas l'authentification d'un utilisateur qui se
@@ -24,9 +35,9 @@ const LDAP_BIND_TIMEOUT_MS = 5000;
 const LDAP_BIND_USER = process.env.LDAP_BIND_USER || '';
 const LDAP_BIND_PASSWORD = process.env.LDAP_BIND_PASSWORD || '';
 
-// Base DN dérivée du domaine FQDN (ex: "prosuma.ci" -> "DC=prosuma,DC=ci") : format standard d'un
-// domaine Active Directory, où chaque segment du nom de domaine devient un composant DC séparé.
-const LDAP_BASE_DN = LDAP_DOMAIN_FQDN.split('.').map((part) => `DC=${part}`).join(',');
+// Base DN dérivé du VRAI domaine AD (ex: "prosuma.lan" -> "DC=prosuma,DC=lan") — jamais du domaine
+// UPN/email, qui peut être un domaine différent purement cosmétique pour les adresses email.
+const LDAP_BASE_DN = LDAP_AD_DOMAIN_FQDN.split('.').map((part) => `DC=${part}`).join(',');
 
 /**
  * Tente une authentification LDAP pour cet identifiant/mot de passe. Retourne true si le bind
