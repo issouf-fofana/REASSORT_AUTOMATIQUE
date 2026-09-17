@@ -2245,20 +2245,32 @@
                                    }
                               }
 
+                              // Tolère les échecs isolés (redéploiement en cours, hoquet réseau de quelques secondes) :
+                              // n'affiche une vraie erreur qu'après plusieurs échecs consécutifs, jamais dès le
+                              // premier — un JSON.parse raté sur la page d'erreur HTML d'un backend en cours de
+                              // redémarrage ne doit pas interrompre un suivi de plusieurs heures pour rien.
+                              const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+                              let backfillPollFailures = 0;
+
                               async function pollBackfillStatus(runId) {
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-backfill/' + runId + '/status');
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
+                                        backfillPollFailures = 0;
                                         renderBackfillStatus(json.data);
                                    } catch (err) {
-                                        stopBackfillPolling();
-                                        document.getElementById('sales-backfill-result').textContent = 'Erreur de suivi: ' + err.message;
+                                        backfillPollFailures += 1;
+                                        if (backfillPollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                                             stopBackfillPolling();
+                                             document.getElementById('sales-backfill-result').textContent = 'Erreur de suivi: ' + err.message;
+                                        }
                                    }
                               }
 
                               function startBackfillPolling(runId) {
                                    stopBackfillPolling();
+                                   backfillPollFailures = 0;
                                    pollBackfillStatus(runId);
                                    backfillPollTimer = setInterval(function () { pollBackfillStatus(runId); }, 3000);
                               }
@@ -2269,6 +2281,7 @@
                               // run actuellement en cours dans ce lot.
                               let batchPollTimer = null;
                               let lastPolledBatchRunId = null;
+                              let batchPollFailures = 0;
 
                               function stopBatchPolling() {
                                    if (batchPollTimer) { clearInterval(batchPollTimer); batchPollTimer = null; }
@@ -2281,6 +2294,7 @@
                                         const res = await window.reassortFetch('/reassort/sales-backfill/batch/' + batchId + '/status');
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
+                                        batchPollFailures = 0;
                                         const status = json.data;
                                         const label = status.currentTarget ? (status.currentTarget.shopLabel || status.currentTarget.shopId) : '';
                                         if (status.status === 'IN_PROGRESS') {
@@ -2296,13 +2310,21 @@
                                              stopBatchPolling();
                                         }
                                    } catch (err) {
-                                        stopBatchPolling();
-                                        queueStatusBox.textContent = 'Erreur de suivi du lot : ' + err.message;
+                                        // Même tolérance que pollBackfillStatus ci-dessus : un lot dure potentiellement des
+                                        // heures (52 magasins), un hoquet réseau de quelques secondes ou un redéploiement ne
+                                        // doit pas faire croire à l'utilisateur que le suivi est cassé alors que le lot
+                                        // continue tranquillement côté serveur (persisté en base, cf. SalesBackfillBatch).
+                                        batchPollFailures += 1;
+                                        if (batchPollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                                             stopBatchPolling();
+                                             queueStatusBox.textContent = 'Erreur de suivi du lot : ' + err.message;
+                                        }
                                    }
                               }
 
                               function startBatchPolling(batchId) {
                                    stopBatchPolling();
+                                   batchPollFailures = 0;
                                    pollBatchStatus(batchId);
                                    batchPollTimer = setInterval(function () { pollBatchStatus(batchId); }, 3000);
                               }
