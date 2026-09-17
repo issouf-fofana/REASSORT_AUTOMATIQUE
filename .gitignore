@@ -15,9 +15,10 @@ yarn-error.log*
 # traçables, appliquées via `prisma migrate deploy` dans docker-entrypoint.sh).
 # Ne jamais y ajouter de règle d'ignorance.
 
-# Build
-dist/
-build/
+# Build (racine uniquement — frontend/assets/volt/vendor/**/dist/ contient de vraies librairies
+# vendorisées (Bootstrap, Popper) à versionner, jamais un dossier de build à ignorer)
+/dist/
+/build/
 
 # IDE
 .vscode/
