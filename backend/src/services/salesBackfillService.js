@@ -400,8 +400,22 @@ async function processBatch(batchId) {
       await processRun(run.id);
     } catch (err) {
       console.error(`[salesBackfillService] Batch ${batchId} : échec sur ${target.shopId} :`, err.message);
-      // Une erreur sur un magasin ne bloque pas les suivants — visible dans l'historique des runs
-      // via batchId, pas la peine d'arrêter tout le lot pour un seul magasin en échec.
+      // Une erreur AVANT même la création du run (ex: comptage du volume initial impossible car le
+      // serveur RPOS était injoignable) ne laisse aucune trace en base côté SalesBackfillRun — sans
+      // ce champ, seul le log serveur (perdu après coup) indiquait quel magasin/période a échoué,
+      // empêchant une relance ciblée depuis l'UI plutôt que de devoir tout relancer.
+      const current = await prisma.salesBackfillBatch.findUnique({ where: { id: batchId }, select: { failuresJson: true } });
+      const failures = JSON.parse(current?.failuresJson || '[]');
+      failures.push({
+        posId: target.posId,
+        shopId: target.shopId,
+        shopLabel: target.shopLabel || target.shopId,
+        periodStart,
+        periodEnd,
+        message: err.message,
+        failedAt: new Date().toISOString(),
+      });
+      await prisma.salesBackfillBatch.update({ where: { id: batchId }, data: { failuresJson: JSON.stringify(failures) } });
     }
   }
 
@@ -436,7 +450,30 @@ async function getBatchStatus(batchId) {
     currentIndex: batch.currentIndex,
     currentTarget,
     currentRunId: currentRun ? currentRun.id : null,
+    failures: JSON.parse(batch.failuresJson || '[]'),
   };
+}
+
+/**
+ * Relance un magasin précis en échec dans un batch (bouton "Relancer" par ligne d'échec côté UI),
+ * sur la même période que la tentative initiale — indépendant du batch lui-même (pas besoin qu'il
+ * soit encore IN_PROGRESS), en utilisant startBackfill (le chemin single-magasin déjà existant) et
+ * en retirant cette entrée de failuresJson dès que la relance démarre avec succès.
+ */
+async function retryBatchFailure(batchId, shopId) {
+  const batch = await prisma.salesBackfillBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw new Error(`Batch ${batchId} introuvable`);
+
+  const failures = JSON.parse(batch.failuresJson || '[]');
+  const failure = failures.find((f) => f.shopId === shopId);
+  if (!failure) throw new Error('Aucun échec enregistré pour ce magasin dans ce lot');
+
+  const runId = await startBackfill(failure.posId, failure.shopId, failure.periodStart, failure.periodEnd);
+
+  const remaining = failures.filter((f) => f.shopId !== shopId);
+  await prisma.salesBackfillBatch.update({ where: { id: batchId }, data: { failuresJson: JSON.stringify(remaining) } });
+
+  return runId;
 }
 
 /** Demande l'arrêt propre d'un batch : le magasin en cours va jusqu'au bout de sa tranche courante, puis le lot s'arrête sans lancer les magasins restants. */
@@ -459,4 +496,5 @@ module.exports = {
   findActiveBatch,
   getBatchStatus,
   requestCancelBatch,
+  retryBatchFailure,
 };

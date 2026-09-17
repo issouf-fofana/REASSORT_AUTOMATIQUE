@@ -1030,6 +1030,14 @@ model SalesBackfillBatch {
 
   cancelRequested Boolean @default(false) @map("cancel_requested")
 
+  // Magasins qui ont échoué avant même de pouvoir créer un SalesBackfillRun (ex: comptage du volume
+  // initial impossible car le serveur RPOS était injoignable) — sans ce champ, cet échec n'était
+  // visible que dans les logs serveur, perdu dès qu'on les cherchait après coup. JSON:
+  // [{ posId, shopId, shopLabel, periodStart, periodEnd, message, failedAt }]. periodStart/periodEnd
+  // dupliquent volontairement ceux du batch (jamais différents pour l'instant) pour que ce champ
+  // reste auto-suffisant si un jour une relance ciblée change la période effectivement retentée.
+  failuresJson String @default("[]") @map("failures_json")
+
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")

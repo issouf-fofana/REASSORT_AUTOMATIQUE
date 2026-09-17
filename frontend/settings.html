@@ -1035,6 +1035,27 @@
                                         <div id="sales-backfill-result" class="small mt-2"></div>
                                         <div id="sales-backfill-queue-status" class="small text-muted mt-1"></div>
 
+                                        <!-- Magasins en échec dans le lot en cours (ex: serveur RPOS injoignable au moment du
+                                             comptage initial) — persistés côté serveur (SalesBackfillBatch.failuresJson) pour
+                                             rester visibles même après un rechargement de page, avec relance ciblée par ligne
+                                             plutôt que de devoir relancer tout le lot pour un seul magasin en échec. -->
+                                        <div id="sales-backfill-failures-panel" class="mt-3" style="display:none;">
+                                             <div class="alert alert-warning small mb-2">
+                                                  <strong id="sales-backfill-failures-count"></strong> magasin(s) en échec sur ce lot — vérifiez la connexion réseau/VPN vers le serveur RPOS concerné, puis relancez individuellement.
+                                             </div>
+                                             <table class="table table-sm align-middle mb-0">
+                                                  <thead class="bg-light-subtle">
+                                                       <tr>
+                                                            <th>Magasin</th>
+                                                            <th>Période tentée</th>
+                                                            <th>Erreur</th>
+                                                            <th></th>
+                                                       </tr>
+                                                  </thead>
+                                                  <tbody id="sales-backfill-failures-tbody"></tbody>
+                                             </table>
+                                        </div>
+
                                         <div id="sales-backfill-progress-panel" class="mt-4" style="display:none;">
                                              <div class="d-flex justify-content-between align-items-center mb-1">
                                                   <strong id="sales-backfill-progress-title">Progression</strong>
@@ -2288,6 +2309,41 @@
                                    lastPolledBatchRunId = null;
                               }
 
+                              function renderBatchFailures(batchId, failures) {
+                                   const panel = document.getElementById('sales-backfill-failures-panel');
+                                   if (!failures || !failures.length) { panel.style.display = 'none'; return; }
+                                   panel.style.display = '';
+                                   document.getElementById('sales-backfill-failures-count').textContent = failures.length;
+                                   document.getElementById('sales-backfill-failures-tbody').innerHTML = failures.map(function (f, i) {
+                                        return '<tr>' +
+                                             '<td>' + f.shopLabel + '</td>' +
+                                             '<td>' + new Date(f.periodStart).toLocaleDateString('fr-FR') + ' → ' + new Date(f.periodEnd).toLocaleDateString('fr-FR') + '</td>' +
+                                             '<td class="text-danger small">' + f.message + '</td>' +
+                                             '<td><button type="button" class="btn btn-sm btn-outline-warning batch-retry-btn" data-shop-id="' + f.shopId + '">Relancer</button></td>' +
+                                             '</tr>';
+                                   }).join('');
+                                   document.querySelectorAll('.batch-retry-btn').forEach(function (btn) {
+                                        btn.addEventListener('click', async function () {
+                                             btn.disabled = true;
+                                             btn.textContent = 'Relance...';
+                                             try {
+                                                  const res = await window.reassortFetch('/reassort/sales-backfill/batch/' + batchId + '/retry', {
+                                                       method: 'POST',
+                                                       headers: { 'Content-Type': 'application/json' },
+                                                       body: JSON.stringify({ shopId: btn.dataset.shopId }),
+                                                  });
+                                                  const json = await res.json();
+                                                  if (!json.success) throw new Error(json.message);
+                                                  startBackfillPolling(json.data.runId);
+                                                  pollBatchStatus(batchId);
+                                             } catch (err) {
+                                                  btn.disabled = false;
+                                                  btn.textContent = 'Erreur : ' + err.message;
+                                             }
+                                        });
+                                   });
+                              }
+
                               async function pollBatchStatus(batchId) {
                                    const queueStatusBox = document.getElementById('sales-backfill-queue-status');
                                    try {
@@ -2296,6 +2352,7 @@
                                         if (!json.success) throw new Error(json.message);
                                         batchPollFailures = 0;
                                         const status = json.data;
+                                        renderBatchFailures(batchId, status.failures);
                                         const label = status.currentTarget ? (status.currentTarget.shopLabel || status.currentTarget.shopId) : '';
                                         if (status.status === 'IN_PROGRESS') {
                                              queueStatusBox.textContent = 'Lot en cours — magasin ' + (status.currentIndex + 1) + '/' + status.total + ' : ' + label + '...';

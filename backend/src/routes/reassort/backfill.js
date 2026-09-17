@@ -151,6 +151,20 @@ router.post('/sales-backfill/batch/:batchId/cancel', requireAdmin, async (req, r
   }
 });
 
+// POST /api/reassort/sales-backfill/batch/:batchId/retry - relance un magasin précis qui a échoué
+// dans ce lot (ex: serveur RPOS injoignable au moment du comptage initial), sur la même période que
+// la tentative initiale, sans devoir relancer tout le lot. body: { shopId }
+router.post('/sales-backfill/batch/:batchId/retry', requireAdmin, async (req, res) => {
+  try {
+    const { shopId } = req.body;
+    if (!shopId) return res.status(400).json({ success: false, message: 'shopId requis' });
+    const runId = await salesBackfillService.retryBatchFailure(req.params.batchId, shopId);
+    res.json({ success: true, message: 'Relance démarrée', data: { runId } });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/sales-lines - consultation paginée des ventes synchronisées localement pour
 // un magasin (ADMIN), avec filtres période/article, pour vérifier ce qui a réellement été récupéré
 // sans repasser par RPOS. Query: shopId (requis), dateStart, dateEnd, ean, page, pageSize.
