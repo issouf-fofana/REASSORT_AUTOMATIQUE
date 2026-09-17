@@ -25,9 +25,19 @@ const loginRateLimiter = rateLimit({
 // POST /api/auth/login - body: { email, password }
 router.post('/login', loginRateLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    let { email } = req.body;
+    const { password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
+    }
+
+    // Accepte aussi le simple identifiant réseau Prosuma (ex: "jdupont") sans "@..." — complété en
+    // email @LDAP_DOMAIN_FQDN pour rejoindre le même flux ci-dessous (recherche du compte local
+    // existant, puis LDAP si absent). Un compte local se crée forcément avec un email complet
+    // (contrainte @unique en base), donc cette normalisation ne risque jamais de collision avec un
+    // identifiant local qui contiendrait un "@" par ailleurs.
+    if (!email.includes('@')) {
+      email = `${email}@${LDAP_DOMAIN_FQDN}`;
     }
 
     let user = await prisma.user.findUnique({ where: { email } });
