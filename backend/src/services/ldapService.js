@@ -55,7 +55,11 @@ async function verifyLdapCredentials(username, password) {
   } catch (err) {
     // ldapts lève une exception aussi bien pour un mauvais mot de passe (InvalidCredentialsError)
     // que pour une vraie panne réseau — le message distingue les deux, mais dans les deux cas la
-    // conséquence pour l'appelant est la même : cette tentative d'authentification échoue.
+    // conséquence pour l'appelant est la même : cette tentative d'authentification échoue. Logué
+    // côté serveur uniquement (jamais renvoyé au client, qui reçoit toujours "Identifiants
+    // incorrects" quelle que soit la cause) pour pouvoir diagnostiquer un vrai problème de
+    // configuration/réseau sans exposer de détail exploitable à un attaquant potentiel.
+    console.error(`[ldapService] Échec du bind pour ${username}@${LDAP_DOMAIN_FQDN} :`, err.message);
     return false;
   } finally {
     try {
