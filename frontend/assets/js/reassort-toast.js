@@ -35,10 +35,14 @@
     @keyframes reassort-confirm-fade { from { opacity: 0; } to { opacity: 1; } }
     .reassort-confirm-box {
       background-color: #ffffff; color: #111111; border-radius: 6px; max-width: 440px; width: 100%;
+      max-height: 80vh; display: flex; flex-direction: column;
       box-shadow: 0 12px 40px rgba(0,0,0,.3); overflow: hidden;
     }
-    .reassort-confirm-body { padding: 1.25rem 1.25rem 1rem; font-size: .92rem; line-height: 1.5; white-space: pre-line; }
-    .reassort-confirm-footer { padding: .85rem 1.25rem; display: flex; justify-content: flex-end; gap: .5rem; border-top: 1px solid #eee; }
+    .reassort-confirm-body {
+      padding: 1.25rem 1.25rem 1rem; font-size: .92rem; line-height: 1.5; white-space: pre-line;
+      overflow-y: auto;
+    }
+    .reassort-confirm-footer { padding: .85rem 1.25rem; display: flex; justify-content: flex-end; gap: .5rem; border-top: 1px solid #eee; flex-shrink: 0; }
     .reassort-confirm-footer button { border: none; border-radius: 4px; padding: .45rem 1rem; font-size: .85rem; cursor: pointer; }
     .reassort-confirm-cancel { background-color: #f0f0f0; color: #333333; }
     .reassort-confirm-cancel:hover { background-color: #e2e2e2; }

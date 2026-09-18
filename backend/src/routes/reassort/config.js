@@ -8,7 +8,7 @@ const rpos = require('../../services/rposClient');
 const { getConfig, upsertConfig } = require('../../services/configService');
 const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
-const { findSalesFiles, ensureManualImportDir } = require('../../services/salesFileService');
+const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase } = require('../../services/salesFileService');
 const jobHealthService = require('../../services/jobHealthService');
 const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
 const multer = require('multer');
@@ -356,7 +356,31 @@ router.post('/system-config/sales-files-upload', requireAdmin, salesFileUpload.s
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Aucun fichier reçu' });
     }
-    res.json({ success: true, message: `Fichier "${req.file.filename}" importé avec succès dans ${req.file.destination}.` });
+
+    // Import réel dans SalesLine (demande du 18/09/2026 : "je veux que ses fichier viennent dans
+    // les ventes synchronisées aussi... comme les ventes aussi") — sans ça, le fichier restait un
+    // CSV sur disque, lu seulement À LA DEMANDE à la génération d'une proposition, jamais visible
+    // dans "Ventes synchronisées" ni exploitable par le chatbot. Le code magasin est le préfixe du
+    // nom de fichier déjà validé par SALES_FILE_NAME_PATTERN (<code>_statvente-lignes_articles_...).
+    // Une erreur d'import (magasin inconnu, fichier illisible) est signalée mais NE fait PAS
+    // échouer l'upload lui-même : le fichier reste utilisable via readSalesLinesForPeriod à la
+    // génération même si son import direct en base a échoué.
+    const shopReference = req.file.filename.split('_')[0];
+    let importResult = null;
+    let importError = null;
+    try {
+      importResult = await importCsvFileToDatabase(req.file.path, shopReference);
+    } catch (err) {
+      importError = err.message;
+      console.error(`[sales-files-upload] Échec de l'import en base pour ${req.file.filename} : ${err.message}`);
+    }
+
+    res.json({
+      success: true,
+      message: importResult
+        ? `Fichier "${req.file.filename}" importé avec succès : ${importResult.imported} ligne(s) de vente ajoutée(s) pour le magasin ${importResult.shopReference} (${importResult.shopName})${importResult.imported < importResult.totalLinesInFile ? ` — ${importResult.totalLinesInFile - importResult.imported} ligne(s) déjà présente(s), ignorée(s).` : '.'}`
+        : `Fichier "${req.file.filename}" déposé, mais son import dans les ventes synchronisées a échoué : ${importError}`,
+    });
   } catch (error) {
     console.error('Sales file upload error:', error);
     res.status(500).json({ success: false, message: error.message });

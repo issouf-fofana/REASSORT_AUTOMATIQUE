@@ -2878,7 +2878,7 @@ document.getElementById('sales-backfill-cancel-batch-btn').addEventListener('cli
                                    const shopLabels = shopOptions.map(function (o) { return o.textContent; });
                                    const confirmed = await window.reassortConfirm(
                                         'Supprimer définitivement les ventes synchronisées pour ' + shopOptions.length + ' magasin(s) :\n' +
-                                        shopLabels.join(', ') + '\n\n' +
+                                        shopLabels.join('\n') + '\n\n' +
                                         'du ' + dateStart + ' au ' + dateEnd + ' ?\n\n' +
                                         'Cette action ne supprime que la copie locale : les ventes réelles restent dans RPOS et pourront être ' +
                                         're-synchronisées plus tard si besoin.',

@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const prisma = require('../utils/prisma');
 
 // Dossier local du serveur dédié à l'import manuel (bouton "Importer un fichier d'export",
 // Paramètres > Fichiers de ventes), INDÉPENDANT du dossier réseau partagé configurable
@@ -149,4 +150,122 @@ async function readSalesLinesForPeriod(baseDir, shopReference, dateStart, dateEn
   return matchedAnyLine ? lines : null;
 }
 
-module.exports = { findSalesFiles, readSalesLinesForPeriod, MANUAL_IMPORT_DIR, ensureManualImportDir };
+// Taille de lot pour l'insertion en base au fil de la lecture (importCsvFileToDatabase) — jamais la
+// totalité du fichier accumulée en mémoire avant d'écrire : un export réel peut dépasser 780 000
+// lignes (168 Mo), et les garder toutes dans un tableau JS fait planter Node en "JavaScript heap out
+// of memory" AVANT même d'atteindre l'insertion (crash constaté le 18/09/2026 avec un tel fichier :
+// readLinesFromFileStreaming lit bien ligne par ligne, mais empilait quand même tout dans `lines`
+// avant de retourner — l'accumulation totale était le vrai problème, pas la lecture). 5000 lignes par
+// lot reste largement sous la limite de paramètres SQL d'un batch Postgres/Prisma.
+const IMPORT_BATCH_SIZE = 5000;
+
+/**
+ * Importe RÉELLEMENT un fichier CSV d'export de ventes dans SalesLine (demande du 18/09/2026:
+ * "je veux que ses fichier viennent dans les ventes synchronisées aussi... comme les ventes aussi")
+ * — jusqu'ici, un fichier importé restait un CSV sur disque, lu seulement À LA DEMANDE au moment
+ * d'une génération de proposition (readSalesLinesForPeriod), jamais persisté dans la base comme les
+ * ventes de la synchro RPOS automatique. Après cet import, les lignes deviennent visibles partout
+ * où SalesLine est déjà utilisé (page "Ventes synchronisées", chatbot, mémoire de maîtrise...), pas
+ * seulement pour le calcul de proposition.
+ *
+ * Résout rposShopId depuis shopReference (le code magasin dans le nom du fichier, ex: "415") —
+ * échoue explicitement si aucun magasin connu ne correspond, plutôt que d'écrire des lignes
+ * orphelines avec un rposShopId inventé.
+ *
+ * Déduplication identique à la synchro RPOS (skipDuplicates + dedupKey construite pareil) : réimporter
+ * deux fois le même fichier, ou un fichier qui chevauche une période déjà synchronisée par RPOS,
+ * n'insère jamais de doublons.
+ *
+ * Lit et insère par lots de IMPORT_BATCH_SIZE lignes au fil de la lecture readline (jamais tout le
+ * fichier en mémoire, cf. commentaire ci-dessus) — implémentation directe (pas
+ * readLinesFromFileStreaming, qui accumule tout dans un tableau avant de retourner) mais même
+ * parsing CSV (parseCsvLine, toFloat) que le reste du fichier, pour rester cohérent.
+ */
+function importCsvFileToDatabase(filePath, shopReference) {
+  return new Promise((resolve, reject) => {
+    (async () => {
+      const shop = await prisma.shop.findFirst({ where: { reference: shopReference } });
+      if (!shop) {
+        throw new Error(`Aucun magasin connu avec le code "${shopReference}" — le fichier a été déposé mais pas importé en base.`);
+      }
+
+      let headers = null;
+      let firstLine = true;
+      let batch = [];
+      let totalLinesInFile = 0;
+      let imported = 0;
+      let pendingWrite = Promise.resolve();
+
+      const flushBatch = async (rows) => {
+        if (!rows.length) return;
+        const result = await prisma.salesLine.createMany({ data: rows, skipDuplicates: true });
+        imported += result.count;
+      };
+
+      const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+      rl.on('line', (rawLine) => {
+        const line = firstLine ? rawLine.replace(/^﻿/, '') : rawLine;
+        if (!line.length) return;
+
+        if (firstLine) {
+          headers = parseCsvLine(line, ';').map((h) => h.trim());
+          firstLine = false;
+          return;
+        }
+
+        const values = parseCsvLine(line, ';');
+        const row = {};
+        headers.forEach((h, i) => { row[h] = values[i]; });
+
+        const ean = (row['EAN'] || '').trim();
+        const rawDate = row['date'];
+        if (!ean || !rawDate) return;
+        const isoDate = new Date(rawDate.replace(' ', 'T'));
+        if (Number.isNaN(isoDate.getTime())) return;
+
+        const quantity = toFloat(row['quantité vendue']);
+        const revenueExclTax = toFloat(row['CA H.T.']);
+        totalLinesInFile += 1;
+        batch.push({
+          rposPosId: shop.rposPosId,
+          rposShopId: shop.rposShopId,
+          ean,
+          label: row['Libellé produit'] || null,
+          date: isoDate,
+          quantity,
+          revenueExclTax,
+          revenueInclTax: toFloat(row['CA T.T.C.']),
+          receiptId: null, // jamais disponible dans un export CSV (pas de colonne ticket)
+          dedupKey: `${shop.rposShopId}|${ean}|${isoDate.toISOString()}|${quantity}|${revenueExclTax}`,
+        });
+
+        // readline continue à émettre des lignes pendant qu'un flushBatch précédent est encore en
+        // cours (event loop non bloqué par l'await) — on chaîne les écritures pour ne jamais lancer
+        // deux createMany en parallèle sur la même table, et on met le stream en pause le temps du
+        // flush pour ne pas laisser `batch` grossir sans limite si l'écriture est plus lente que la
+        // lecture.
+        if (batch.length >= IMPORT_BATCH_SIZE) {
+          const toFlush = batch;
+          batch = [];
+          rl.pause();
+          pendingWrite = pendingWrite.then(() => flushBatch(toFlush)).then(() => rl.resume());
+        }
+      });
+
+      rl.on('close', () => {
+        pendingWrite
+          .then(() => flushBatch(batch))
+          .then(() => resolve({ imported, totalLinesInFile, shopReference, shopName: shop.name }))
+          .catch(reject);
+      });
+      rl.on('error', reject);
+      stream.on('error', reject);
+    })().catch(reject);
+  });
+}
+
+module.exports = {
+  findSalesFiles, readSalesLinesForPeriod, MANUAL_IMPORT_DIR, ensureManualImportDir, importCsvFileToDatabase,
+};
