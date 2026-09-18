@@ -8,7 +8,7 @@ const rpos = require('../../services/rposClient');
 const { getConfig, upsertConfig } = require('../../services/configService');
 const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
-const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase } = require('../../services/salesFileService');
+const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase, MANUAL_IMPORT_DIR } = require('../../services/salesFileService');
 const jobHealthService = require('../../services/jobHealthService');
 const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
 const multer = require('multer');
@@ -339,9 +339,43 @@ router.get('/system-config/sales-files-check', requireAdmin, async (req, res) =>
     const baseDir = await systemConfig.getValue(systemConfig.KEYS.SALES_FILES_DIR);
     const fs = require('fs');
     const dirAccessible = fs.existsSync(baseDir);
-    const files = dirAccessible && shopReference ? findSalesFiles(baseDir, shopReference) : [];
+    // Cherche aussi dans MANUAL_IMPORT_DIR (les fichiers déposés via "Importer un fichier
+    // d'export" ci-dessus atterrissent là, jamais dans baseDir) — sans ça, un fichier uploadé
+    // manuellement n'apparaissait jamais dans cette vérification, même bien présent sur le
+    // serveur (trouvé le 18/09/2026 : "Vérifier" ne cherchait que le dossier réseau partagé).
+    const files = shopReference ? findSalesFiles([baseDir, MANUAL_IMPORT_DIR], shopReference) : [];
     res.json({ success: true, data: { baseDir, dirAccessible, files } });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/system-config/sales-files-import-to-db - intègre RÉELLEMENT dans SalesLine un
+// fichier déjà présent sur le serveur (déposé via upload web ou copié manuellement), sans repasser
+// par un nouvel upload (demande du 18/09/2026 : un fichier déjà déposé avant que ce mécanisme
+// n'existe reste sinon coincé, jamais intégré). Le chemin fourni doit être un résultat EXACT de
+// findSalesFiles pour ce même shopReference — jamais un chemin arbitraire envoyé par le client
+// (protection contre un chemin construit à la main qui pointerait ailleurs sur le disque).
+router.post('/system-config/sales-files-import-to-db', requireAdmin, async (req, res) => {
+  try {
+    const { filePath, shopReference } = req.body;
+    if (!filePath || !shopReference) {
+      return res.status(400).json({ success: false, message: 'filePath et shopReference requis.' });
+    }
+    const baseDir = await systemConfig.getValue(systemConfig.KEYS.SALES_FILES_DIR);
+    const knownFiles = findSalesFiles([baseDir, MANUAL_IMPORT_DIR], shopReference);
+    if (!knownFiles.includes(filePath)) {
+      return res.status(400).json({ success: false, message: 'Ce fichier n\'est pas reconnu pour ce magasin (relancez "Vérifier" pour rafraîchir la liste).' });
+    }
+
+    const result = await importCsvFileToDatabase(filePath, shopReference);
+    res.json({
+      success: true,
+      message: `${result.imported} ligne(s) de vente intégrée(s) pour le magasin ${result.shopReference} (${result.shopName})${result.imported < result.totalLinesInFile ? ` — ${result.totalLinesInFile - result.imported} ligne(s) déjà présente(s), ignorée(s).` : '.'}`,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Sales file import-to-db error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

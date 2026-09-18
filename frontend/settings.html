@@ -1858,8 +1858,41 @@
                                         } else if (!d.files.length) {
                                              resultBox.innerHTML = '<span class="text-warning">Dossier accessible, mais aucun fichier trouvé pour le code "' + shopRef + '".</span>';
                                         } else {
-                                             resultBox.innerHTML = '<span class="text-success">' + d.files.length + ' fichier(s) trouvé(s) :</span><ul class="mb-0">' +
-                                                  d.files.map(function (f) { return '<li>' + f + '</li>'; }).join('') + '</ul>';
+                                             // Bouton "Intégrer en base" par fichier (ajouté le 18/09/2026) : un fichier déjà déposé
+                                             // sur le serveur (upload web ou copie manuelle) n'est jamais intégré automatiquement tant
+                                             // qu'on ne le déclenche pas explicitement — contrairement à un NOUVEL upload, qui s'intègre
+                                             // tout seul juste après le dépôt.
+                                             resultBox.innerHTML = '<span class="text-success">' + d.files.length + ' fichier(s) trouvé(s) :</span><ul class="mb-0 ps-3">' +
+                                                  d.files.map(function (f, i) {
+                                                       return '<li class="mb-1">' + f +
+                                                            ' <button type="button" class="btn btn-sm btn-outline-primary ms-2 system-sales-file-import-btn" data-path="' + f.replace(/"/g, '&quot;') + '" data-shop-ref="' + shopRef.replace(/"/g, '&quot;') + '">Intégrer en base</button>' +
+                                                            '</li>';
+                                                  }).join('') + '</ul>' +
+                                                  '<div id="system-sales-file-import-result" class="small mt-2"></div>';
+                                             resultBox.querySelectorAll('.system-sales-file-import-btn').forEach(function (btn) {
+                                                  btn.addEventListener('click', async function () {
+                                                       const importResultBox = document.getElementById('system-sales-file-import-result');
+                                                       const originalText = btn.textContent;
+                                                       btn.disabled = true;
+                                                       btn.textContent = 'Import en cours (peut prendre plusieurs minutes sur un gros fichier)...';
+                                                       importResultBox.innerHTML = '';
+                                                       try {
+                                                            const importRes = await window.reassortFetch('/reassort/system-config/sales-files-import-to-db', {
+                                                                 method: 'POST',
+                                                                 headers: { 'Content-Type': 'application/json' },
+                                                                 body: JSON.stringify({ filePath: btn.dataset.path, shopReference: btn.dataset.shopRef }),
+                                                            });
+                                                            const importJson = await importRes.json();
+                                                            if (!importJson.success) throw new Error(importJson.message);
+                                                            importResultBox.innerHTML = '<span class="text-success">' + importJson.message + '</span>';
+                                                            btn.textContent = '✓ Intégré';
+                                                       } catch (err) {
+                                                            importResultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
+                                                            btn.disabled = false;
+                                                            btn.textContent = originalText;
+                                                       }
+                                                  });
+                                             });
                                         }
                                    } catch (err) {
                                         resultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
