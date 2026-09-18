@@ -1164,6 +1164,21 @@
                                                                       '</span>' +
                                                                       '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '">🔓 Débloquer et commander quand même</button>'
                                                                  : '');
+                                                       // Anomalie de commande (backend/amelioration.md, 18/09/2026) : quantité proposée qui
+                                                       // s'écarte significativement de l'historique validé pour cet article — jamais "erreur",
+                                                       // juste un signal à vérifier avant de valider. Visible directement sur la ligne, avant
+                                                       // toute décision (contrairement à un blocage après-coup).
+                                                       const orderAnomalyBadge = l.orderAnomaly
+                                                            ? '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))">⚠️ ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>'
+                                                            : '';
+                                                       // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
+                                                       // uniquement si une commande RPOS/POS est déjà en cours pour cet article — explique en
+                                                       // langage naturel si elle suffit ou non, plutôt qu'une simple soustraction silencieuse.
+                                                       // Affiché même quand l'article reste dans la liste (quantité complémentaire proposée),
+                                                       // pas seulement quand il est totalement exclu (cf. alreadyOrderedBadge ci-dessus).
+                                                       const orderSufficiencyBadge = l.orderSufficiencyReasoning
+                                                            ? '<br><div class="small ' + (l.excludedAsAlreadyOrderedRpos ? 'd-none' : 'text-muted') + ' mt-1" style="max-width: 320px;">🧮 ' + l.orderSufficiencyReasoning + '</div>'
+                                                            : '';
                                                        return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
                                                             '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
                                                             '<td class="text-muted">' + (pageStart + idx + 1) + '</td>' +
@@ -1171,6 +1186,8 @@
                                                             '<td>' + l.label +
                                                                  ' <button type="button" class="btn btn-sm btn-link p-0 ms-1 pa-open-btn" data-ean="' + l.ean + '" data-product-id="' + l.productId + '" data-label="' + l.label.replace(/"/g, '&quot;') + '" title="Voir l\'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>' +
                                                                  alreadyOrderedBadge +
+                                                                 orderAnomalyBadge +
+                                                                 orderSufficiencyBadge +
                                                             '</td>' +
                                                             '<td class="text-end">' + (l.sellingPrice ? l.sellingPrice.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
                                                             '<td class="text-end">' + avgSalesCell + '</td>' +

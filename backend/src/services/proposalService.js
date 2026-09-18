@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
 const { detectAnomalies } = require('./anomalyService');
+const orderAnomalyService = require('./orderAnomalyService');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { PRIORITY_RANK } = require('./improvementService');
 const aiForecastService = require('./aiForecastService');
@@ -300,6 +301,56 @@ function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit,
   const unit = orderingUnit || 1;
   const nbUnits = Math.ceil(rawNeed / unit);
   return nbUnits * unit;
+}
+
+/**
+ * Explique en langage naturel si une commande déjà en cours (RPOS, hors plateforme, ou plateforme
+ * — orderedQty cumule les deux, cf. computeQuantityToOrder) suffit à couvrir le besoin, plutôt que
+ * de laisser une simple soustraction silencieuse dans le calcul (demande explicite du 18/09/2026 :
+ * "il doit voir la quantité commandée... et voir si ce sera suffisant ou pas, si oui il laisse
+ * passer, si non il propose une quantité"). Retourne null si aucune commande en cours pour cet
+ * article — rien à raisonner dans ce cas.
+ *
+ * "Suffisant" est jugé sur la même formule que computeQuantityToOrder (quantityProposed <= 0),
+ * jamais un second calcul divergent — ce texte explique la décision DÉJÀ prise, il n'en prend pas
+ * une nouvelle.
+ */
+function buildOrderSufficiencyReasoning({ orderedQty, avgWeeklySales, stock, quantityProposed, orderCount }) {
+  if (!(orderedQty > 0)) return null;
+
+  const avgDailySales = avgWeeklySales / 7;
+  const totalAvailable = stock + orderedQty;
+  // null si l'article ne se vend pas du tout : "jours de couverture" n'a alors aucun sens à afficher.
+  const daysCovered = avgDailySales > 0 ? totalAvailable / avgDailySales : null;
+  const orderLabel = orderCount > 1 ? `${orderCount} commandes (${orderedQty} unité(s) au total)` : `une commande de ${orderedQty} unité(s)`;
+
+  if (quantityProposed <= 0) {
+    return {
+      sufficient: true,
+      orderedQty,
+      daysCovered,
+      message: `${capitalize(orderLabel)} ${orderCount > 1 ? 'sont' : 'est'} déjà en cours. `
+        + (daysCovered !== null
+          ? `Avec le stock actuel (${Math.round(stock)}), cela représente environ ${Math.round(daysCovered)} jour(s) de vente au rythme actuel — suffisant pour le moment.`
+          : `L'article ne se vend pas actuellement, cette quantité reste donc suffisante pour le moment.`),
+    };
+  }
+
+  return {
+    sufficient: false,
+    orderedQty,
+    daysCovered,
+    quantityProposed,
+    message: `${capitalize(orderLabel)} ${orderCount > 1 ? 'sont' : 'est'} déjà en cours, mais `
+      + (daysCovered !== null
+        ? `cela ne représente qu'environ ${Math.round(daysCovered)} jour(s) de couverture au rythme de vente actuel (${avgDailySales.toFixed(1)}/jour), ce qui reste insuffisant. `
+        : `la consommation récente dépasse ce que cette commande couvre. `)
+      + `Quantité complémentaire recommandée : ${quantityProposed}.`,
+  };
+}
+
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 /**
@@ -624,6 +675,32 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       avgWeeklySales, stock, orderedQty, orderingUnit, config.safetyStockRatio,
       config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation
     );
+
+    // Raisonnement explicite de suffisance de commande (backend/amelioration.md, demande du
+    // 18/09/2026) : explique en langage naturel POURQUOI la commande RPOS déjà en cours (celle
+    // détectée par getRecentUndeliveredOrderedQuantity, en lisant directement RPOS/POS — jamais
+    // seulement les commandes passées via cette plateforme) suffit ou non, plutôt que de laisser une
+    // simple soustraction silencieuse dans quantityProposed. rposOrderCount vient de
+    // recentRposOrder.orderCount (nombre de commandes distinctes cumulées dans orderedQty).
+    const orderSufficiencyReasoning = buildOrderSufficiencyReasoning({
+      orderedQty: rposOrderedQty, avgWeeklySales, stock, quantityProposed,
+      orderCount: recentRposOrder.orderCount || 1,
+    });
+
+    // Détection d'anomalie de commande (backend/amelioration.md, 18/09/2026) : compare cette
+    // proposition à l'historique des quantités RÉELLEMENT VALIDÉES par un humain pour cet article —
+    // détectée ICI, à la génération, pour que l'alerte soit visible AVANT toute validation, jamais
+    // après coup. N'interrompt jamais la génération si la détection échoue (base indisponible...) :
+    // une alerte manquée reste bien moins grave qu'une génération entière bloquée pour ça.
+    let orderAnomaly = null;
+    if (quantityProposed > 0) {
+      try {
+        const anomalyResult = await orderAnomalyService.detectOrderAnomaly(shopId, ean, quantityProposed);
+        if (anomalyResult.anomaly) orderAnomaly = anomalyResult;
+      } catch (err) {
+        console.error(`[proposalService] Détection d'anomalie de commande échouée pour ${ean} (shop=${shopId}) : ${err.message}`);
+      }
+    }
     // Un article avec beaucoup de CA peut avoir un besoin nul simplement parce que RPOS indique
     // déjà une grosse quantité en commande (current_ordered_quantity, une commande manuelle ou
     // fournisseur classique, indépendante de cette plateforme) : sans ce badge, il disparaîtrait
@@ -689,6 +766,15 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         rposOrderStatus: excludedAsAlreadyOrderedRpos ? (recentRposOrder.mostRecentStatus ?? null) : null,
         rposOrders: excludedAsAlreadyOrderedRpos ? recentRposOrder.orders : null,
         quantityIfUnblocked,
+        // Anomalie de commande (backend/amelioration.md, 18/09/2026) : présent uniquement si
+        // quantityProposed s'écarte significativement de l'historique des quantités validées pour
+        // cet article — jamais une conclusion "erreur", juste un signal "différent de l'habitude"
+        // à vérifier avant validation (cf. orderAnomalyService.js).
+        orderAnomaly,
+        // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
+        // uniquement si une commande RPOS/POS est déjà en cours pour cet article — null sinon,
+        // rien à raisonner.
+        orderSufficiencyReasoning,
       },
     };
   }
@@ -989,11 +1075,38 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           anomalies: p.anomalies && p.anomalies.length ? JSON.stringify(p.anomalies) : null,
           trendCategory: p.trendCategory || null,
           trendChangePct: p.trendChangePct ?? null,
+          orderSufficiencyReasoning: p.orderSufficiencyReasoning ? p.orderSufficiencyReasoning.message : null,
         })),
       },
     },
     include: { lines: true },
   });
+
+  // Persistance des anomalies de commande détectées à cette génération (backend/amelioration.md,
+  // 18/09/2026) — une ligne par article dont orderAnomaly a été posé plus haut (detectOrderAnomaly).
+  // Jamais bloquant : un échec d'écriture ici ne doit jamais remettre en cause la proposition déjà
+  // sauvegardée juste avant.
+  const orderAnomalyProposals = result.proposals.filter((p) => p.orderAnomaly);
+  if (orderAnomalyProposals.length) {
+    try {
+      await prisma.orderAnomaly.createMany({
+        data: orderAnomalyProposals.map((p) => ({
+          rposShopId: shopId,
+          ean: p.ean,
+          label: p.label,
+          proposalId: proposal.id,
+          newQuantity: p.orderAnomaly.newQuantity,
+          historicalMean: p.orderAnomaly.historicalMean,
+          historicalMin: p.orderAnomaly.historicalMin,
+          historicalMax: p.orderAnomaly.historicalMax,
+          sampleSize: p.orderAnomaly.sampleSize,
+          direction: p.orderAnomaly.direction,
+        })),
+      });
+    } catch (err) {
+      console.error(`[proposalService] Échec de persistance des anomalies de commande pour la proposition ${proposal.id} : ${err.message}`);
+    }
+  }
 
   const excludedArticleRows = [];
   for (const [reason, items] of Object.entries(result.skipped)) {
@@ -1079,11 +1192,24 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
 
 /** Dernière proposition en attente de validation pour un magasin (status GENERATED). */
 async function getPendingProposal(shopId) {
-  return prisma.proposal.findFirst({
+  const proposal = await prisma.proposal.findFirst({
     where: { rposShopId: shopId, status: 'GENERATED' },
     orderBy: { generatedAt: 'desc' },
-    include: { lines: true },
+    include: { lines: true, orderAnomalies: true },
   });
+  return attachOrderAnomaliesToLines(proposal);
+}
+
+/**
+ * Fusionne les OrderAnomaly persistées (table séparée, backend/amelioration.md du 18/09/2026) sur
+ * chaque ProposalLine correspondante (par EAN), pour affichage direct côté frontend sans jointure
+ * manuelle à refaire à chaque route qui sert des lignes de proposition.
+ */
+function attachOrderAnomaliesToLines(proposal) {
+  if (!proposal) return proposal;
+  const anomalyByEan = new Map((proposal.orderAnomalies || []).map((a) => [a.ean, a]));
+  proposal.lines = proposal.lines.map((line) => ({ ...line, orderAnomaly: anomalyByEan.get(line.ean) || null }));
+  return proposal;
 }
 
 /**
@@ -1754,6 +1880,7 @@ async function getForecastAccuracy(shopId) {
 module.exports = {
   generateProposal,
   computeQuantityToOrder,
+  buildOrderSufficiencyReasoning,
   computeParetoFromLines,
   generateAndSaveProposal,
   getPendingProposal,
@@ -1765,4 +1892,5 @@ module.exports = {
   getAdminDashboard,
   getForecastAccuracy,
   getProductByEanCached,
+  attachOrderAnomaliesToLines,
 };

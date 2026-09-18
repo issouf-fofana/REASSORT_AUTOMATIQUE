@@ -12,12 +12,15 @@ const {
   getPendingProposal,
   startProposalValidation,
   getProposalStatus,
+  attachOrderAnomaliesToLines,
 } = require('../../services/proposalService');
 const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../../services/weeklyPlanService');
 const { getConfig } = require('../../services/configService');
 const { resolvePeriod } = require('../../services/periodService');
 const { filterProposalLinesForUser, DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
 const { mapWithConcurrency } = require('../../utils/concurrency');
+const orderAnomalyService = require('../../services/orderAnomalyService');
+const { requireAdmin } = require('../../middleware/auth');
 
 router.get('/proposal', async (req, res) => {
   try {
@@ -357,11 +360,12 @@ router.get('/proposal/history', async (req, res) => {
 router.get('/proposal/:id', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
-    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, include: { lines: true } });
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, include: { lines: true, orderAnomalies: true } });
     if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
     if (shopId && proposal.rposShopId !== shopId) {
       return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
     }
+    attachOrderAnomaliesToLines(proposal);
     // Même restriction par département/rayon que GET /proposal/pending (plan de rôles, étape 3).
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
     proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
@@ -494,4 +498,36 @@ router.get('/weekly-plan/:id/history', async (req, res) => {
 // GET /api/reassort/predictions/proposals - liste des propositions du magasin courant (les plus
 // récentes en premier), pour alimenter le sélecteur de la page "IA & Prédictions" : permet de
 // consulter les prédictions d'une génération passée, pas seulement la toute dernière.
+
+// GET /api/reassort/order-anomalies - liste des anomalies de commande détectées (page dédiée,
+// backend/amelioration.md du 18/09/2026) : quantités qui s'écartent significativement de
+// l'historique validé pour un article, tous magasins confondus par défaut (filtrable). Réservé
+// ADMIN comme les autres écrans de diagnostic (Améliorations IA, Journal des corrections).
+router.get('/order-anomalies', requireAdmin, async (req, res) => {
+  try {
+    const data = await orderAnomalyService.listAnomalies({
+      status: req.query.status || undefined,
+      rposShopId: req.query.shopId || undefined,
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/order-anomalies/:id/status - marque une anomalie comme vue/acceptée
+// (ACKNOWLEDGED, écart accepté avec contexte) ou fausse alerte confirmée (DISMISSED) — jamais posé
+// automatiquement, toujours une décision humaine explicite (cf. amelioration.md §9 : une anomalie
+// ne doit jamais être conclue "erreur" automatiquement).
+router.post('/order-anomalies/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { status, contextNote } = req.body;
+    const updated = await orderAnomalyService.setAnomalyStatus(req.params.id, status, contextNote);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

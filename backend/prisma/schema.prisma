@@ -442,6 +442,7 @@ model Proposal {
   orders          ProposalOrder[]
   excludedArticles ExcludedArticle[]
   predictions     AIPrediction[]
+  orderAnomalies  OrderAnomaly[]
 
   // Rattache cette génération à une semaine cible (CAHIER_DES_CHARGES.md §11-13, étape 1 du plan) :
   // une Proposal reste le mécanisme de calcul/validation existant, inchangé ; weeklyPlanId l'associe
@@ -726,6 +727,13 @@ model ProposalLine {
   // NO_ACTION. Renseigné uniquement si aiAdjusted=true (l'IA a réellement tourné) — jamais déduit
   // ou inventé côté backend si l'IA n'a pas répondu ce champ.
   aiAction          String? @map("ai_action")
+
+  // Raisonnement déterministe (pas l'IA) expliquant si une commande RPOS/POS déjà en cours pour
+  // cet article suffit à couvrir le besoin ou non (backend/amelioration.md, demande du 18/09/2026 :
+  // "il doit voir la quantité commandée... et me dire que la quantité commandée en premier est
+  // insuffisante"). Distinct de aiReasoning (celui-ci vient du LLM, sur la quantité finale ; celui-ci
+  // est calculé, sur la suffisance d'une commande déjà passée). Null si aucune commande en cours.
+  orderSufficiencyReasoning String? @map("order_sufficiency_reasoning")
 
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).
@@ -1444,6 +1452,48 @@ model AutonomyReadinessSnapshot {
 
   @@index([computedAt])
   @@map("autonomy_readiness_snapshots")
+}
+
+// Détection d'anomalie de commande (demande du 18/09/2026, backend/amelioration.md) : une commande
+// déjà passée pour un article ne doit jamais être un simple blocage "0 à proposer" — computeQuantityToOrder
+// (proposalService.js) fait déjà cette soustraction correctement. Ce qui manquait : comparer la
+// quantité COMMANDÉE (ProposalLine.quantityValidated, l'historique des vraies décisions humaines)
+// à l'historique récent pour CE MÊME article/magasin, et signaler un écart statistique important —
+// ni trop haut (risque de surstock) ni trop bas (risque de rupture malgré une commande déjà passée).
+// Détecté à la GÉNÉRATION (pas à la validation, choix explicite du 18/09/2026 : "je veux que sur le
+// UI dans la commande il ait la partie... pas au moment de validation, il doit voir l'info avant"),
+// pour que l'alerte soit visible AVANT que l'utilisateur ne valide, jamais après coup.
+model OrderAnomaly {
+  id String @id @default(cuid())
+
+  rposShopId String @map("rpos_shop_id")
+  ean        String
+  label      String?
+
+  proposalId String? @map("proposal_id")
+  proposal   Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+
+  detectedAt DateTime @default(now()) @map("detected_at")
+
+  newQuantity     Float @map("new_quantity")
+  historicalMean  Float @map("historical_mean")
+  historicalMin   Float @map("historical_min")
+  historicalMax   Float @map("historical_max")
+  sampleSize      Int   @map("sample_size") // nombre de commandes passées ayant servi au calcul
+
+  // HIGH (quantité nettement supérieure à l'habitude, risque de surstock) | LOW (nettement
+  // inférieure, risque de rupture malgré la commande déjà passée).
+  direction String
+
+  // PENDING (jamais vue) -> ACKNOWLEDGED (vue par un humain, contexte accepté tel quel) ->
+  // DISMISSED (fausse alerte confirmée, ex: promotion connue). Jamais conclu automatiquement
+  // "commande incorrecte" (demande explicite §9 du document) — seul un humain statue.
+  status      String  @default("PENDING")
+  contextNote String? @map("context_note") // note humaine expliquant l'écart (promo, reprise d'activité...)
+
+  @@index([rposShopId, ean])
+  @@index([status, detectedAt])
+  @@map("order_anomalies")
 }
 
 // Journal des erreurs applicatives (debug global) : TOUTES les erreurs 5xx de l'API et TOUTES
