@@ -11,6 +11,7 @@
 const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
 
 async function getLatestProposal(rposShopId) {
@@ -178,11 +179,19 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
     }
   }
 
-  const lines = await prisma.salesLine.findMany({
+  const rawLines = await prisma.salesLine.findMany({
     where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart } },
-    select: { date: true, quantity: true, ean: true, label: true, receiptId: true },
+    select: { date: true, quantity: true, revenueExclTax: true, ean: true, label: true, receiptId: true },
     orderBy: { date: 'asc' },
   });
+
+  // Écarte les articles génériques/poids libre (ex: "FRUITS & LEGUMES", "POISSONNERIE PESEE") du
+  // calcul de QUANTITÉ : ces lignes ont systématiquement quantity === revenueExclTax (le "prix"
+  // saisi en caisse EST la quantité, en valeur, pas un nombre d'unités réel — cf. getTopGisements,
+  // même signal, trouvé le 18/09/2026 lors d'une campagne de fuzz testing où une question anodine
+  // affichait "32 672 873 unités vendues"). Le CA (getRevenue) n'est PAS concerné : ces articles ont
+  // un vrai chiffre d'affaires réel, seule leur "quantité" en unités n'a aucun sens.
+  const lines = rawLines.filter((l) => Math.abs(l.revenueExclTax - l.quantity) > 0.01);
 
   const byDay = new Map();
   // Tickets distincts par jour (ajouté le 16/09/2026, même donnée que getRevenue.salesCount — ici
@@ -472,6 +481,137 @@ async function getArticleDetails(posId, shopId, ean) {
 }
 
 /**
+ * getArticlesByGisement(posId, shopId, gisementQuery, { days }) — liste des articles d'un gisement
+ * (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS"), en direct depuis RPOS
+ * (demande du 18/09/2026 : "je veux voir mes tops ventes de chaque gisement" — le chatbot ne
+ * connaissait jusqu'ici que la fiche complète d'UN article via getArticleDetails, jamais "tous les
+ * articles D'UN gisement"). Distinct de department/rayon (getDepartmentHierarchy, classification
+ * produit) : le gisement est une notion RPOS différente, la position physique réelle en magasin —
+ * malgré la ressemblance de vocabulaire, ne jamais confondre les deux dans une réponse.
+ * Recherche par nom approximatif (insensible à la casse, sous-chaîne) — l'utilisateur ne connaît
+ * jamais l'id technique du gisement, seulement son nom affiché en magasin.
+ *
+ * Croisé avec SalesLine (ajouté le 18/09/2026, même magasin/jours que les autres outils de ventes) :
+ * la liste RPOS seule ne donne que stock/prix, jamais un "top ventes" — sans ce croisement, le LLM
+ * ne pouvait que dire "je n'ai pas cette donnée" à une question pourtant légitime. articleCount peut
+ * dépasser 250 sur un gros gisement ; on ne trie/n'agrège les ventes que sur les EAN réellement
+ * présents dans ce gisement, jamais sur tout le magasin (ce serait le rôle de getParetoArticles).
+ */
+async function getArticlesByGisement(posId, shopId, gisementQuery, { days = 30 } = {}) {
+  const result = await rpos.getArticlesByGisement(posId, shopId, gisementQuery);
+  if (!result) return { found: false, message: `Aucun gisement trouvé correspondant à "${gisementQuery}" pour ce magasin.` };
+
+  const eans = result.articles.map((a) => a.ean).filter(Boolean);
+  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const salesByEan = new Map();
+  if (eans.length) {
+    const lines = await prisma.salesLine.findMany({
+      where: { rposShopId: shopId, ean: { in: eans }, date: { gte: dateStart } },
+      select: { ean: true, quantity: true, revenueExclTax: true },
+    });
+    for (const line of lines) {
+      const entry = salesByEan.get(line.ean) || { quantitySold: 0, revenue: 0 };
+      entry.quantitySold += line.quantity;
+      entry.revenue += line.revenueExclTax;
+      salesByEan.set(line.ean, entry);
+    }
+  }
+
+  const articles = result.articles.map((a) => ({
+    ...a,
+    quantitySold: salesByEan.get(a.ean)?.quantitySold || 0,
+    revenue: salesByEan.get(a.ean)?.revenue || 0,
+  })).sort((a, b) => b.revenue - a.revenue);
+
+  return {
+    found: true,
+    gisementName: result.gisementName,
+    gisementCode: result.gisementCode,
+    articleCount: result.articleCount,
+    days,
+    salesDataAvailable: salesByEan.size > 0,
+    articles,
+  };
+}
+
+// Nombre de meilleurs articles (par CA) dont on résout le gisement pour construire getTopGisements
+// — jamais tous les articles vendus (potentiellement des milliers), un appel RPOS par article
+// résolu serait bien trop lourd. 30 (réduit de 60 le 18/09/2026, ~30s -> ~15s en pratique) : le
+// Pareto 80/20 capture déjà l'essentiel du signal bien avant ce nombre pour un magasin type — un
+// classement de gisements n'a pas besoin de la même exhaustivité qu'un calcul de proposition.
+const TOP_GISEMENTS_ARTICLE_SAMPLE = 30;
+const TOP_GISEMENTS_CONCURRENCY = 8;
+
+/**
+ * getTopGisements(posId, shopId, { days }) — classement des gisements (positions physiques de
+ * stockage) par chiffre d'affaires généré, quand aucun gisement précis n'est nommé dans la question
+ * (demande du 18/09/2026 : "tops ventes de chaque gisement" sans nom — répondre par un vrai
+ * classement plutôt que de bloquer sur "précisez lequel"). Approche : identifie les meilleurs
+ * articles vendus (déjà en base, SalesLine — aucun coût RPOS), résout leur gisement UN PAR UN via
+ * RPOS (getProductGisement, TOP_GISEMENTS_ARTICLE_SAMPLE articles maximum, en parallèle contrôlé),
+ * puis agrège par gisement. Ne parcourt JAMAIS tous les gisements du magasin (391 vus le 18/09/2026)
+ * ni tous les articles vendus — seulement l'échantillon des meilleures ventes, en confiance que le
+ * Pareto 80/20 y capture l'essentiel du signal utile pour un classement de gisements.
+ */
+async function getTopGisements(posId, shopId, { days = 30 } = {}) {
+  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const lines = await prisma.salesLine.findMany({
+    where: { rposShopId: shopId, date: { gte: dateStart } },
+    select: { ean: true, revenueExclTax: true, quantity: true },
+  });
+  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur les ${days} derniers jours.` };
+
+  const byEan = new Map();
+  for (const line of lines) {
+    const entry = byEan.get(line.ean) || { ean: line.ean, revenue: 0, quantitySold: 0 };
+    entry.revenue += line.revenueExclTax;
+    entry.quantitySold += line.quantity;
+    byEan.set(line.ean, entry);
+  }
+  // Écarte les articles génériques/poids libre agrégés au niveau d'un rayon entier (ex: "FRUITS &
+  // LEGUMES", "POISSONNERIE PESEE") — même filtre en principe que excludeGenericArticlesBelowPrice
+  // (proposalService.js, prix de vente < seuil), mais détecté ici sans appel RPOS supplémentaire :
+  // ces articles génériques ont systématiquement quantity === revenue (le "prix" saisi en caisse
+  // EST la quantité, en valeur, pas un nombre d'unités réel) — signal trouvé le 18/09/2026 en
+  // creusant un classement de gisements faussé par ces pseudo-articles.
+  const topArticles = Array.from(byEan.values())
+    .filter((a) => Math.abs(a.revenue - a.quantitySold) > 0.01)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, TOP_GISEMENTS_ARTICLE_SAMPLE);
+
+  const resolved = await mapWithConcurrency(topArticles, TOP_GISEMENTS_CONCURRENCY, async (art) => {
+    try {
+      const gisement = await rpos.getProductGisement(posId, shopId, art.ean);
+      return gisement ? { ...art, gisementName: gisement.name, gisementCode: gisement.code } : null;
+    } catch (err) {
+      return null; // un article dont le gisement échoue à résoudre est simplement ignoré, jamais fatal
+    }
+  });
+
+  const byGisement = new Map();
+  for (const art of resolved) {
+    if (!art) continue;
+    const key = art.gisementCode || art.gisementName;
+    const entry = byGisement.get(key) || { gisementName: art.gisementName, gisementCode: art.gisementCode, revenue: 0, quantitySold: 0, articleCount: 0 };
+    entry.revenue += art.revenue;
+    entry.quantitySold += art.quantitySold;
+    entry.articleCount += 1;
+    byGisement.set(key, entry);
+  }
+
+  const gisements = Array.from(byGisement.values()).sort((a, b) => b.revenue - a.revenue);
+  if (!gisements.length) return { found: false, message: 'Impossible de rattacher les meilleures ventes à un gisement (données RPOS indisponibles).' };
+
+  return {
+    found: true,
+    days,
+    sampleSize: topArticles.length,
+    note: `Classement basé sur les ${topArticles.length} meilleures ventes du magasin, pas la totalité des articles.`,
+    gisements,
+  };
+}
+
+/**
  * getPriceChangeHistory(posId, shopId, ean) — historique des changements de prix (vente, promo,
  * achat) d'un article, en direct depuis RPOS (demande du 15/09/2026 : "quand est-ce que l'article a
  * changé de prix de vente ou prix promo, je veux les détails"). Miroir de l'écran admin RPOS "Log
@@ -506,6 +646,8 @@ module.exports = {
   getStoreStock,
   getArticleStock,
   getArticleDetails,
+  getArticlesByGisement,
+  getTopGisements,
   getPriceChangeHistory,
   getRevenue,
   getSalesHistory,

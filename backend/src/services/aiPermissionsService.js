@@ -39,6 +39,8 @@ const ROLE_DEFAULTS = {
 const TOOL_CAPABILITY = {
   getRevenue: null, // résolu dynamiquement (revenueShop vs revenueArticle) selon la présence d'un filtre ean/department, cf. resolveRevenueCapability
   getArticleDetails: 'articleDetails',
+  getArticlesByGisement: 'articleDetails',
+  getTopGisements: 'articleDetails',
   getPriceChangeHistory: 'articleDetails',
   getArticleStock: 'stock',
   getStoreStock: 'stock',

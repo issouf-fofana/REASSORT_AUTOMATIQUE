@@ -1022,6 +1022,85 @@ async function getProductLinesForPeriod(posId, shopId, dateStart, dateEnd, onPro
   return allLines;
 }
 
+// Cache mémoire (5 min) de la liste complète des gisements (adressage physique) d'un magasin —
+// /api/product_addressing/ ne filtre pas fiablement par nom côté serveur (search/name/code ne
+// matchent qu'exactement ou pas du tout, cf. test manuel du 18/09/2026), donc on récupère la liste
+// complète une fois et on filtre nous-mêmes par sous-chaîne insensible à la casse, comme
+// findSalesFiles (salesFileService.js). Distinct du "département/rayon" (getDepartmentHierarchy,
+// classification produit) : le gisement est la POSITION PHYSIQUE de stockage en magasin (ex:
+// "PETITS ELECTRO-MENAGERS"), une notion RPOS différente malgré la ressemblance de vocabulaire.
+const gisementListCache = new Map(); // `${posId}:${shopId}` -> { gisements, cachedAt }
+const GISEMENT_CACHE_TTL_MS = 5 * 60_000;
+
+async function listGisements(posId, shopId) {
+  const cacheKey = `${posId}:${shopId}`;
+  const cached = gisementListCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < GISEMENT_CACHE_TTL_MS) return cached.gisements;
+
+  // fields=... exclut le tableau `products` (potentiellement des centaines d'articles par
+  // gisement) de la réponse — sans ça, /api/product_addressing/ devient si volumineux qu'il
+  // dépasse le timeout RPOS (15s) même avec page_size réduit (constaté le 18/09/2026 : timeout
+  // systématique avec le tableau products inclus, 977ms sans lui).
+  const gisements = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await rposGet(posId, '/api/product_addressing/', { shop: shopId, page, page_size: 250, fields: 'id,name,code,display_name,path' });
+    for (const g of data.results || []) {
+      gisements.push({ id: g.id, name: g.path?.[0]?.name || g.display_name, code: g.code });
+    }
+    if (!data.next_page || gisements.length >= (data.count || 0)) break;
+    page = data.next_page;
+  }
+
+  gisementListCache.set(cacheKey, { gisements, cachedAt: Date.now() });
+  return gisements;
+}
+
+/**
+ * Recherche un gisement (adressage physique) par nom approximatif OU par code exact (demande du
+ * 18/09/2026 : les gisements sont affichés avec un numéro/code en magasin, ex: "60110235", que le
+ * personnel connaît parfois mieux que le nom complet) et retourne ses articles.
+ * Retourne null si aucun gisement ne correspond (le code appelant doit alors le signaler comme
+ * "gisement introuvable" plutôt que de renvoyer une liste vide ambiguë).
+ */
+async function getArticlesByGisement(posId, shopId, gisementNameQuery) {
+  const gisements = await listGisements(posId, shopId);
+  const query = gisementNameQuery.trim().toLowerCase();
+  // Code exact prioritaire sur la recherche approximative par nom : un code numérique est sans
+  // ambiguïté, jamais la peine de risquer un match partiel de nom si l'utilisateur a donné le code.
+  const match = gisements.find((g) => (g.code || '').toLowerCase() === query)
+    || gisements.find((g) => (g.name || '').toLowerCase().includes(query));
+  if (!match) return null;
+
+  // Un seul appel supplémentaire pour récupérer les vrais articles de CE gisement précis (la
+  // liste initiale ne garde que le nombre, pas le détail, pour rester légère en mémoire cache).
+  const data = await rposGet(posId, '/api/product_addressing/', { shop: shopId, id: match.id, page_size: 1 });
+  const detail = (data.results || [])[0];
+  const products = (detail?.products || []).map((p) => ({
+    ean: p.ean,
+    label: p.label_1,
+    department: p.department,
+    stock: Number(p.stock) || 0,
+    sellingPrice: Number(p.selling_price) || 0,
+    orderable: !!p.orderable,
+  }));
+
+  return { gisementName: match.name, gisementCode: match.code, articleCount: products.length, articles: products };
+}
+
+/**
+ * Résout le gisement (adressage) d'un EAN précis, via getProductByEan (champ `addresses`, déjà
+ * exposé par getArticleDetails côté chatbotToolsService.js) — utilisé par getTopGisements pour
+ * rattacher les meilleurs articles vendus à leur gisement, un par un, plutôt que de parcourir tous
+ * les gisements du magasin (391 vus le 18/09/2026, bien trop lourd pour cet usage).
+ */
+async function getProductGisement(posId, shopId, ean) {
+  const product = await getProductByEan(posId, shopId, ean);
+  const address = product?.addresses?.[0];
+  return address ? { name: address.name, code: address.code } : null;
+}
+
 module.exports = {
   getShops,
   getProductByEan,
@@ -1052,5 +1131,8 @@ module.exports = {
   getStockMoveTypes,
   getStockMovesForProduct,
   getShopRayons,
+  listGisements,
+  getArticlesByGisement,
+  getProductGisement,
   invalidateRposConfigCache,
 };

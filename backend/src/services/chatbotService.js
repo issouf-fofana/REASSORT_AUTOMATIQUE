@@ -19,7 +19,7 @@ const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./
 // aiPermissionsService.TOOL_CAPABILITY (sans getStoreStock, jamais une cible directe de règle —
 // c'est un repli interne de getArticleStock sans EAN, pas une intention détectable par mot-clé).
 const VALID_INTENT_TOOLS = new Set([
-  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getParetoArticles',
+  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock',
 ]);
@@ -92,14 +92,48 @@ function normalize(str) {
 // pourcentage + CA" avant la boucle de mots-clés fixes, quel que soit le nombre demandé.
 const PARETO_PATTERN_REGEX = /articles?.*\d{1,3}\s*%.*(ca\b|chiffre)|.*\d{1,3}\s*%.*(ca\b|chiffre).*articles?/;
 
+// "gisement"/"adressage" (position physique de stockage en magasin, distincte du rayon/département)
+// doit gagner sur toute règle générique concurrente (ex: "ventes", "chiffre") — sans cette priorité,
+// une question comme "tops ventes du gisement X" matche d'abord getSalesHistory (mot-clé "ventes")
+// et le LLM n'a jamais l'occasion de router vers getArticlesByGisement (bug trouvé le 18/09/2026 :
+// le nouvel outil n'était utilisable QUE si la question ne contenait aucun autre mot-clé concurrent).
+// Deux formes : un nom précis après le mot ("du gisement PETITS ELECTRO-MENAGERS", capturé), ou
+// juste le mot seul/générique ("chaque gisement", "tous les gisements", "par gisement" — aucun
+// nom capturable). Router vers getArticlesByGisement dans LES DEUX CAS : sans nom, l'outil répond
+// lui-même "précisez le gisement" (réponse honnête) plutôt que de retomber sur un autre outil qui
+// donnerait une fausse impression de réponse correcte (bug trouvé le 18/09/2026 : "tops ventes de
+// CHAQUE gisement", sans nom, retombait sur getSalesHistory qui répondait un classement plausible
+// mais sans aucun rapport avec un gisement).
+const GISEMENT_MENTION_REGEX = /\b(?:gisement|adressage)s?\b/i;
+const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|le\s+)?([^?.!]+)/i;
+
 async function detectIntent(question) {
   const normalized = normalize(question);
   if (PARETO_PATTERN_REGEX.test(normalized)) return 'getParetoArticles';
+  if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
   const rules = await getIntentRules();
   for (const rule of rules) {
     if (rule.keywords.some((kw) => normalized.includes(normalize(kw)))) return rule.tool;
   }
   return null;
+}
+
+/**
+ * Extrait le nom du gisement mentionné dans la question ("le gisement <nom>"), ou null si le mot
+ * apparaît seul/générique ("chaque gisement", "tous les gisements") — dans ce dernier cas,
+ * getArticlesByGisement reçoit gisementQuery=null et répond lui-même "précisez lequel".
+ */
+function extractGisement(question) {
+  const match = (question || '').match(GISEMENT_NAME_REGEX);
+  if (!match) return null;
+  const captured = match[1].trim();
+  // Un mot générique/de liaison juste après ("gisement chaque", "gisements tous/tout", "gisements
+  // SUR 90 jours" — trouvé en fuzzing le 18/09/2026, "sur 90 jours" capturé à tort comme faux nom
+  // de gisement) ne désigne aucun nom réel — évite de chercher un "gisement" littéralement nommé
+  // d'après un de ces mots.
+  const GENERIC_WORDS = new Set(['chaque', 'tous', 'tout', 'toutes', 'les', 'des', 'de', 'sur', 'pour', 'avec', 'dans']);
+  const firstWord = captured.split(/\s+/)[0].toLowerCase();
+  return GENERIC_WORDS.has(firstWord) ? null : captured;
 }
 
 /**
@@ -128,6 +162,19 @@ function extractPercentage(question) {
   if (!match) return null;
   const value = parseInt(match[1], 10);
   return value >= 1 && value <= 100 ? value : null;
+}
+
+/**
+ * Tente d'extraire un nombre de jours explicite ("sur 90 jours", "les 60 derniers jours") mentionné
+ * dans la question — utilisé par getTopGisements (ajouté le 18/09/2026, faille trouvée en fuzzing :
+ * "top gisements sur 90 jours" ignorait complètement le "90 jours" et utilisait le défaut 30j).
+ * Bornée [1, 365] : au-delà, le volume RPOS/local devient peu réaliste pour ce calcul.
+ */
+function extractDays(question) {
+  const match = (question || '').match(/\b(\d{1,3})\s*jours?\b/i);
+  if (!match) return null;
+  const value = parseInt(match[1], 10);
+  return value >= 1 && value <= 365 ? value : null;
 }
 
 /**
@@ -213,6 +260,8 @@ const TOOL_CATALOG = [
   { name: 'getRevenue', description: 'Chiffre d\'affaires (CA) du magasin, d\'un rayon ou d\'un article, sur une date ou période.', params: { date: 'date ISO aaaa-mm-jj, optionnel', department: 'rayon, optionnel', ean: 'code EAN article, optionnel' } },
   { name: 'getSalesHistory', description: 'Historique/évolution des ventes (quantités, tendance) sur les derniers jours, du magasin ou d\'un article.', params: { ean: 'code EAN article, optionnel', days: 'nombre de jours, optionnel (défaut 30)', department: 'rayon, optionnel' } },
   { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
+  { name: 'getArticlesByGisement', description: 'Liste tous les articles rangés dans un gisement précis (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS", "ACCESSOIRES DE CUISINE") — à ne pas confondre avec le rayon/département (classification produit). Utile pour "quels articles sont dans tel gisement", "tops ventes par gisement/emplacement".', params: { gisement: 'nom ou code approximatif du gisement recherché, OBLIGATOIRE' } },
+  { name: 'getTopGisements', description: 'Classement des gisements (positions physiques de stockage) par chiffre d\'affaires généré — utile quand la question porte sur les gisements SANS en nommer un précis (ex: "top des gisements", "quels gisements vendent le plus").', params: { days: 'nombre de jours de la période, optionnel (défaut 30)' } },
   { name: 'getPriceChangeHistory', description: 'Historique des changements de prix (dont mises en promo) d\'un article précis.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getStockMoveHistory', description: 'Mouvements de stock d\'un article précis (casse, vol, cession de rayon, retour fournisseur) expliquant une variation de stock.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getArticleStock', description: 'Stock actuel disponible, du magasin entier/un rayon, ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel', department: 'rayon, optionnel' } },
@@ -273,6 +322,14 @@ async function detectIntentViaLlm(question) {
 async function runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user } = {}) {
   let toolName = await detectIntent(question);
 
+  // "gisement" + un EAN explicite ("quel gisement pour l'article X", "gisement de l'article X") :
+  // la question demande LE gisement DE cet article précis, pas une liste d'articles D'UN gisement —
+  // sens inverse de getArticlesByGisement, déjà couvert par getArticleDetails (champ location, cf.
+  // chatbotToolsService.js) sans nouveau tool. Doit gagner sur GISEMENT_MENTION_REGEX (bug trouvé le
+  // 18/09/2026 lors d'un test de fuzzing : "quel gisement pour l'article 100144265" répondait
+  // "aucun gisement trouvé" au lieu de chercher le gisement DE cet article précis).
+  if (toolName === 'getArticlesByGisement' && extractEan(question)) toolName = 'getArticleDetails';
+
   if (!toolName && isVisualRequest(question) && conversationHistory && conversationHistory.length) {
     const lastWithTool = [...conversationHistory].reverse().find((turn) => turn.toolUsed && turn.toolResult);
     if (lastWithTool) return { toolName: lastWithTool.toolUsed, toolResult: lastWithTool.toolResult, reusedFromHistory: true };
@@ -329,6 +386,8 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
   const rawDate = extractDate(question);
   const date = (rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate) || (llmParams ? llmParams.date : null) || null;
   const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
+  const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
+  const daysQuery = extractDays(question) || (llmParams ? llmParams.days : null) || null;
 
   // Permissions IA par capacité (plan de rôles validé le 15/09/2026) : vérifiées ici, APRÈS avoir
   // résolu ean/department, car getRevenue est ambigu (CA magasin vs CA article/département — seul
@@ -369,6 +428,17 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         return { toolName, toolResult: await tools.getArticleDetails(posId, rposShopId, ean) };
+      case 'getArticlesByGisement':
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        // Aucun nom de gisement précisé ("chaque gisement", "mes gisements") : bascule sur un
+        // classement TOP gisements (getTopGisements) plutôt que de bloquer sur "précisez lequel" —
+        // répond réellement à l'intention de la question plutôt que de forcer une reformulation
+        // (demande du 18/09/2026).
+        if (!gisementQuery) return { toolName: 'getTopGisements', toolResult: await tools.getTopGisements(posId, rposShopId, { days: daysQuery || 30 }) };
+        return { toolName, toolResult: await tools.getArticlesByGisement(posId, rposShopId, gisementQuery, { days: daysQuery || 30 }) };
+      case 'getTopGisements':
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        return { toolName, toolResult: await tools.getTopGisements(posId, rposShopId, { days: daysQuery || 30 }) };
       case 'getPriceChangeHistory':
         if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour consulter son historique de prix.' } };
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
