@@ -384,11 +384,49 @@ async function getParetoArticles(rposShopId, { thresholdPct = 80, department, da
     withinThreshold.push({
       ean: art.ean,
       label: art.label,
+      revenue: art.revenue,
       revenueSharePct: Math.round((art.revenue / totalRevenue) * 10000) / 100,
       cumulativePct: Math.round(cumulativePct * 100) / 100,
     });
     if (cumulativePct >= thresholdPct) break;
   }
+
+  // Regroupement par rayon réel (demande du 19/09/2026 : "quand on demande les articles qui font
+  // 80% du CA, qu'il découpe par rayon" — jusqu'ici la réponse listait des libellés d'articles bruts
+  // sans hiérarchie, certains étant eux-mêmes des noms de rayon agrégés type "FRUITS & LEGUMES",
+  // prêtant à confusion avec un vrai classement par rayon). Le rayon (ProposalLine.department) n'est
+  // connu QUE pour les EAN déjà présents dans la dernière proposition — un article jamais proposé
+  // (ex: hors Pareto habituel, nouveau) reste sous "Rayon non renseigné" plutôt que d'être exclu.
+  const latestProposal = !department ? await getLatestProposal(rposShopId) : null;
+  let departmentByEan = new Map();
+  if (latestProposal) {
+    const proposalLines = await prisma.proposalLine.findMany({
+      where: { proposalId: latestProposal.id, ean: { in: withinThreshold.map((a) => a.ean) } },
+      select: { ean: true, department: true, sector: true },
+    });
+    departmentByEan = new Map(proposalLines.map((l) => [l.ean, { department: l.department, sector: l.sector }]));
+  }
+
+  const byDepartment = new Map();
+  for (const art of withinThreshold) {
+    const info = departmentByEan.get(art.ean);
+    const key = info?.department || 'Rayon non renseigné';
+    const entry = byDepartment.get(key) || { department: key, sector: info?.sector || null, revenue: 0, articleCount: 0 };
+    entry.revenue += art.revenue;
+    entry.articleCount += 1;
+    byDepartment.set(key, entry);
+  }
+  const departments = Array.from(byDepartment.values())
+    .map((d) => ({ ...d, revenueSharePct: Math.round((d.revenue / totalRevenue) * 10000) / 100 }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  // Seuil au-delà duquel "Rayon non renseigné" domine trop le classement pour rester présenté comme
+  // un résultat normal (demande du 19/09/2026) : la dernière proposition ne couvre alors visiblement
+  // pas assez d'articles (proposition ancienne, limitée, ou magasin jamais généré) — le LLM doit le
+  // dire explicitement plutôt que de laisser croire à un vrai rayon "non renseigné" comme les autres.
+  const unassignedShare = byDepartment.get('Rayon non renseigné')?.revenueSharePct
+    ?? (byDepartment.has('Rayon non renseigné') ? Math.round((byDepartment.get('Rayon non renseigné').revenue / totalRevenue) * 10000) / 100 : 0);
+  const UNASSIGNED_WARNING_THRESHOLD_PCT = 20;
 
   return {
     found: true,
@@ -397,6 +435,12 @@ async function getParetoArticles(rposShopId, { thresholdPct = 80, department, da
     department: department || null,
     totalArticlesWithSales: articles.length,
     articleCount: withinThreshold.length,
+    // "departments" est le classement PRINCIPAL à présenter (demande explicite de regroupement par
+    // rayon) ; "lines" (détail par article individuel) reste disponible pour une question de suivi
+    // qui demanderait le détail d'un rayon précis.
+    departments,
+    departmentDataIncomplete: unassignedShare > UNASSIGNED_WARNING_THRESHOLD_PCT,
+    unassignedRevenueSharePct: unassignedShare,
     lines: withinThreshold.slice(0, 100),
   };
 }

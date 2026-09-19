@@ -500,7 +500,18 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // pouvoir en fournir, ni re-décrire toutes les données en detail (déjà visibles dans le visuel).
     dataSection = `L'utilisateur demande une représentation visuelle (graphique ou tableau) des données déjà obtenues précédemment dans cette conversation (outil "${toolName}"). Un graphique ou tableau sera affiché automatiquement juste après ta réponse par l'application — ne dis JAMAIS que tu ne peux pas fournir de graphique. Réponds simplement par une phrase confirmant que la représentation demandée est affichée ci-dessous, sans réénumérer le détail des données (déjà visible dans le visuel).`;
   } else if (toolResult) {
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}`;
+    // getParetoArticles (demande du 19/09/2026 : "quand on demande les articles qui font 80% du CA,
+    // qu'il découpe par rayon") — le JSON contient DEUX classements (departments, groupé par rayon
+    // réel, ET lines, détail par article individuel) : sans cette consigne explicite, le LLM
+    // choisissait tantôt l'un tantôt l'autre selon la formulation de la question, incohérent d'une
+    // fois à l'autre pour la même intention.
+    const paretoNote = toolName === 'getParetoArticles'
+      ? '\n\nIMPORTANT pour cette réponse : présente le classement PAR RAYON (champ "departments" du JSON, déjà trié par part de CA décroissante) comme structure principale de ta réponse — jamais la liste "lines" (détail par article individuel) sauf si la question porte explicitement sur des articles précis plutôt que des rayons. Pour chaque rayon, indique son nom, sa part de CA et son nombre d\'articles contributeurs.'
+        + (toolResult.departmentDataIncomplete
+          ? ` ATTENTION : "Rayon non renseigné" représente ${toolResult.unassignedRevenueSharePct}% du CA, une part anormalement élevée — signale-le explicitement dans ta réponse comme une limite de données actuelle (la dernière génération de proposition ne couvre probablement pas assez d'articles pour connaître leur rayon), pas comme un vrai rayon au même titre que les autres.`
+          : '')
+      : '';
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}`;
   } else {
     // Aucun outil de données identifié pour cette question : deux cas très différents à distinguer
     // (demande du 16/09/2026 : "si je pose une question qu'il ne comprend pas, il doit demander une
