@@ -309,3 +309,52 @@ Et également :
 Le système doit donc analyser **à la fois les besoins futurs et les décisions de commande déjà prises**.
 
 Les commandes passées deviennent ainsi une source d'information importante pour l'IA, aussi bien pour **éviter les surcommandes** que pour **détecter les sous-commandes et les comportements inhabituels**.
+
+---
+
+## Chantier futur : gestion des DLC/DLV (dates limites de consommation/vente) dans le réassort
+
+**Statut : à démarrer, bloqué faute d'accès réseau (19/09/2026).**
+
+### Contexte
+
+L'utilisateur a confirmé que les DLV (dates limites de vente) sont disponibles côté API RPOS —
+reste à identifier l'endpoint exact et la structure des données une fois l'accès réseau
+disponible (VPN ou connexion directe au serveur RPOS).
+
+### Pourquoi c'est important (analyse du 19/09/2026)
+
+Identifié comme la plus grosse lacune métier de l'Assistant IA / du calcul de réassort : aucune
+notion de péremption n'existe nulle part dans le système actuel (confirmé par recherche dans tout
+le code — `proposalService.js`, `chatbotToolsService.js`, schéma Prisma). Le calcul de quantité à
+commander (`computeQuantityToOrder`, proposalService.js) ne connaît que la vente moyenne, le stock
+et les commandes en cours — il peut donc proposer une quantité qui semble cohérente avec la
+demande, mais qui expose le magasin à de la perte sèche si l'article est périssable et proche de sa
+DLC (le stock ne sera jamais vendu avant péremption, quelle que soit la demande théorique).
+
+### Ce qu'il faudra faire une fois l'accès réseau rétabli
+
+1. **Explorer l'API RPOS** pour trouver l'endpoint/champ exposant les DLV par lot ou par article
+   (probablement `/api/product/` avec un champ dédié, ou un endpoint séparé type
+   `/api/stock_batch/` ou `/api/expiry/` — à confirmer, aucune certitude à ce stade).
+2. Déterminer si la DLV est suivie **par lot de réception** (plusieurs dates possibles pour un même
+   article selon les livraisons successives) ou **par article seul** (une seule date, plus simple
+   mais moins précis) — ça détermine toute l'architecture de stockage côté base.
+3. **Décider du périmètre v1** : probablement démarrer par un nouveau tool chatbot
+   (`getExpiringArticles` ou similaire, sur le modèle de `getStockoutRisks`/`getOverstockArticles`)
+   avant d'intégrer la DLC dans le calcul de proposition lui-même (chantier plus lourd, touche
+   `computeQuantityToOrder` et le cœur du calcul).
+4. Vérifier si un nouveau modèle Prisma est nécessaire (ex: `ProductExpiry` ou champ ajouté à
+   `ProductCache`) ou si l'info peut rester en lecture directe RPOS à la demande, sans persistance
+   locale (dépend du volume et de la fraîcheur nécessaire).
+
+### Rappel des autres lacunes métier identifiées le même jour (non traitées, par ordre d'impact)
+
+2. Aucune anticipation d'impact promo sur le réassort (une promo à venir devrait ajuster la
+   quantité proposée à l'avance, pas seulement signaler qu'une promo est en cours).
+3. Aucune vue consolidée de la casse/démarque (uniquement article par article sur demande,
+   `getStockMoveHistory` — pas de KPI global "quel rayon perd le plus").
+4. Aucune analyse de fiabilité fournisseur (retards de livraison récurrents, taux de rupture par
+   fournisseur).
+5. Aucune anticipation calendaire/événementielle proactive (Ramadan, Noël, rentrée...) au-delà de
+   l'ajustement de saisonnalité déjà basé sur l'historique.
