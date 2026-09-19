@@ -13,6 +13,44 @@ const rpos = require('./rposClient');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
+// Seuil "article générique" identique à excludeGenericArticlesBelowPrice (configService.js,
+// utilisé par proposalService.js) : un article dont le prix de vente RPOS est en dessous n'est pas
+// un vrai produit vendable individuellement (agrégat de rayon type "FRUITS & LEGUMES", "CHARCUTERIE
+// PESEE"), sa "quantité vendue" est en réalité une valeur monétaire ou un poids, jamais un nombre
+// d'unités réel.
+const GENERIC_ARTICLE_PRICE_THRESHOLD = 2;
+
+/**
+ * Écarte les lignes de ventes d'articles génériques/poids libre d'une liste de SalesLine — deux
+ * signaux combinés (aucun des deux seul n'est fiable, découvert le 18-19/09/2026) :
+ * 1. quantity === revenueExclTax (rapide, gratuit, sans dépendance) : couvre le cas où le "prix"
+ *    saisi en caisse EST la quantité en valeur — mais ne couvre PAS tous les articles génériques
+ *    (ex: "CHARCUTERIE PESEE" a quantity=2 228 922 et revenueExclTax=1 888 915, différents, donc
+ *    passait à travers ce seul filtre malgré un prix de vente RPOS à 1 CFA).
+ * 2. Prix de vente RPOS < GENERIC_ARTICLE_PRICE_THRESHOLD (via ProductCache, déjà peuplé par la
+ *    dernière génération de proposition — AUCUN appel réseau supplémentaire ici) : le signal fiable
+ *    déjà utilisé par proposalService.js, mais seulement disponible pour les articles déjà vus par
+ *    une génération — un article vendu mais absent du cache n'est alors filtré que par le signal 1.
+ * Ne bloque jamais si aucun signal n'est disponible pour un EAN donné : une ligne reste incluse par
+ * défaut plutôt que sur-filtrée faute de donnée.
+ */
+async function filterGenericArticleLines(rposShopId, lines) {
+  const survivingLines = lines.filter((l) => Math.abs(l.revenueExclTax - l.quantity) > 0.01);
+  if (!survivingLines.length) return survivingLines;
+
+  const eans = [...new Set(survivingLines.map((l) => l.ean))];
+  const cached = await prisma.productCache.findMany({
+    where: { rposShopId, ean: { in: eans } },
+    select: { ean: true, sellingPrice: true },
+  });
+  const priceByEan = new Map(cached.map((c) => [c.ean, c.sellingPrice]));
+
+  return survivingLines.filter((l) => {
+    const price = priceByEan.get(l.ean);
+    return price === undefined || price >= GENERIC_ARTICLE_PRICE_THRESHOLD;
+  });
+}
+
 
 async function getLatestProposal(rposShopId) {
   return prisma.proposal.findFirst({
@@ -185,13 +223,11 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
     orderBy: { date: 'asc' },
   });
 
-  // Écarte les articles génériques/poids libre (ex: "FRUITS & LEGUMES", "POISSONNERIE PESEE") du
-  // calcul de QUANTITÉ : ces lignes ont systématiquement quantity === revenueExclTax (le "prix"
-  // saisi en caisse EST la quantité, en valeur, pas un nombre d'unités réel — cf. getTopGisements,
-  // même signal, trouvé le 18/09/2026 lors d'une campagne de fuzz testing où une question anodine
-  // affichait "32 672 873 unités vendues"). Le CA (getRevenue) n'est PAS concerné : ces articles ont
-  // un vrai chiffre d'affaires réel, seule leur "quantité" en unités n'a aucun sens.
-  const lines = rawLines.filter((l) => Math.abs(l.revenueExclTax - l.quantity) > 0.01);
+  // Écarte les articles génériques/poids libre (ex: "FRUITS & LEGUMES", "CHARCUTERIE PESEE") du
+  // calcul de QUANTITÉ (cf. filterGenericArticleLines) — leur "quantité vendue" est en réalité une
+  // valeur monétaire ou un poids, jamais un nombre d'unités réel. Le CA (getRevenue) n'est PAS
+  // concerné : ces articles ont un vrai chiffre d'affaires réel, seule leur "quantité" n'a pas de sens.
+  const lines = await filterGenericArticleLines(rposShopId, rawLines);
 
   const byDay = new Map();
   // Tickets distincts par jour (ajouté le 16/09/2026, même donnée que getRevenue.salesCount — ici
@@ -561,21 +597,20 @@ async function getTopGisements(posId, shopId, { days = 30 } = {}) {
   });
   if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur les ${days} derniers jours.` };
 
+  // Écarte les articles génériques/poids libre agrégés au niveau d'un rayon entier (ex: "FRUITS &
+  // LEGUMES", "CHARCUTERIE PESEE") avant l'agrégation par EAN — cf. filterGenericArticleLines
+  // (deux signaux combinés, un seul suffisait pas : trouvé le 18-19/09/2026, un classement de
+  // gisements ET un "tops ventes" faussés par ces pseudo-articles malgré un premier filtre).
+  const genuineLines = await filterGenericArticleLines(shopId, lines);
+
   const byEan = new Map();
-  for (const line of lines) {
+  for (const line of genuineLines) {
     const entry = byEan.get(line.ean) || { ean: line.ean, revenue: 0, quantitySold: 0 };
     entry.revenue += line.revenueExclTax;
     entry.quantitySold += line.quantity;
     byEan.set(line.ean, entry);
   }
-  // Écarte les articles génériques/poids libre agrégés au niveau d'un rayon entier (ex: "FRUITS &
-  // LEGUMES", "POISSONNERIE PESEE") — même filtre en principe que excludeGenericArticlesBelowPrice
-  // (proposalService.js, prix de vente < seuil), mais détecté ici sans appel RPOS supplémentaire :
-  // ces articles génériques ont systématiquement quantity === revenue (le "prix" saisi en caisse
-  // EST la quantité, en valeur, pas un nombre d'unités réel) — signal trouvé le 18/09/2026 en
-  // creusant un classement de gisements faussé par ces pseudo-articles.
   const topArticles = Array.from(byEan.values())
-    .filter((a) => Math.abs(a.revenue - a.quantitySold) > 0.01)
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, TOP_GISEMENTS_ARTICLE_SAMPLE);
 
