@@ -1444,6 +1444,14 @@
                                                             '<strong>Prochaine commande estimée :</strong> ' + p.predictedQuantity + ' unité(s)' +
                                                             (p.nextOrderInDays !== null ? ' — dans environ ' + p.nextOrderInDays + ' jour(s), sur la base de ' + s.orderCount + ' commande(s) passée(s) (intervalle moyen : ' + (s.avgDaysBetweenOrders ? s.avgDaysBetweenOrders.toFixed(1) : '—') + ' j)' : '') +
                                                        '</div>' +
+                                                       // Raisonnement de suffisance de commande (demande du 21/09/2026 : "comment on voit
+                                                       // l'article a une quantité suffisante ou pas quand il ont validé ?") — présent
+                                                       // uniquement si une commande RPOS est déjà en cours pour cet article.
+                                                       (p.orderSufficiencyReasoning
+                                                            ? '<div class="alert ' + (p.orderSufficiencyReasoning.sufficient ? 'alert-success' : 'alert-warning') + ' mt-2 mb-0">' +
+                                                                 '<strong>' + (p.orderSufficiencyReasoning.sufficient ? '✓ Commande suffisante' : '⚠️ Commande insuffisante') + ' :</strong> ' + p.orderSufficiencyReasoning.message +
+                                                                 '</div>'
+                                                            : '') +
                                                        '<div class="border rounded p-3 mt-2 bg-light-subtle">' +
                                                             '<div class="fw-semibold small mb-2">Formule de calcul</div>' +
                                                             '<div class="d-flex flex-wrap align-items-center gap-2 small">' +

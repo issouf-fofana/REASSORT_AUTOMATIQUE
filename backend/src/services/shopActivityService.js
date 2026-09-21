@@ -56,7 +56,39 @@ async function hasSalesInMonth(posId, shopId, year, month) {
 // ramenant le temps total à la durée du plus lent appel individuel plutôt qu'à leur somme.
 const MONTH_SAMPLE_CONCURRENCY = 12;
 
+// Fenêtre de vérification locale rapide (demande du 21/09/2026) : au-delà de ce délai, on retombe
+// sur l'échantillonnage RPOS classique plutôt que de risquer de dire "actif" sur la seule base d'une
+// vente très ancienne encore visible localement.
+const LOCAL_RECENT_ACTIVITY_DAYS = 60;
+
+/**
+ * Vérifie D'ABORD la base locale (SalesLine, déjà synchronisée — cf. "Ventes synchronisées") avant
+ * de risquer l'échantillonnage RPOS (24 appels réseau fragiles). Bug trouvé le 21/09/2026 : quand
+ * TOUS les appels RPOS échouaient (réseau instable), hasSalesInMonth retournait null pour chaque
+ * mois, lastActiveIndex ne trouvait jamais `true`, et le magasin était déclaré "NEVER_ACTIVE"/
+ * "inactif depuis X mois" à tort — alors que le magasin avait de vraies ventes récentes, visibles
+ * dans SalesLine (donc dans l'écran "Ventes synchronisées"), jamais vérifiées avant RPOS. Cette
+ * vérification est aussi bien plus rapide (une requête SQL locale vs jusqu'à 24 appels réseau).
+ */
+async function hasRecentLocalSales(shopId) {
+  const dateStart = new Date(Date.now() - LOCAL_RECENT_ACTIVITY_DAYS * 24 * 60 * 60 * 1000);
+  const count = await prisma.salesLine.count({ where: { rposShopId: shopId, date: { gte: dateStart } }, take: 1 });
+  return count > 0;
+}
+
 async function buildActivityProfile(posId, shopId) {
+  if (await hasRecentLocalSales(shopId)) {
+    return {
+      status: 'ACTIVE',
+      monthsSinceLastActivity: 0,
+      lastActiveMonth: null,
+      hadActivityBeyondSampleWindow: true,
+      monthlyActivity: [],
+      source: 'local', // distingue ce chemin rapide de l'échantillonnage RPOS complet ci-dessous
+      computedAt: new Date().toISOString(),
+    };
+  }
+
   const now = new Date();
   const months = [];
   for (let i = 0; i < MONTHS_TO_SAMPLE; i++) {
@@ -80,10 +112,18 @@ async function buildActivityProfile(posId, shopId) {
   }
   const hadActivityBeyondSampleWindow = firstActiveIndexFromEnd === monthlyActivity.length - 1;
 
+  // Filet de sécurité (en plus de hasRecentLocalSales ci-dessus) : si CHAQUE mois échantillonné a
+  // échoué en réseau (hasActivity === null partout), on n'a strictement aucune information — jamais
+  // conclure NEVER_ACTIVE dans ce cas (bug du 21/09/2026), un vrai "on ne sait pas" est plus honnête
+  // qu'une fausse certitude d'inactivité qui ferait proposer 0 à tort.
+  const allSamplesFailed = monthlyActivity.every((m) => m.hasActivity === null);
+
   // Statut déduit uniquement de la présence/absence de ventes réelles — jamais de règle câblée sur
   // un magasin ou une date précise.
   let status;
-  if (lastActiveIndex === -1) {
+  if (allSamplesFailed) {
+    status = 'UNKNOWN'; // aucun échantillon exploitable (réseau RPOS indisponible sur toute la fenêtre)
+  } else if (lastActiveIndex === -1) {
     status = 'NEVER_ACTIVE'; // aucune vente trouvée sur toute la fenêtre échantillonnée
   } else if (monthsSinceLastActivity <= 1) {
     status = 'ACTIVE'; // activité ce mois-ci ou le mois dernier

@@ -92,7 +92,20 @@ router.get('/sales-lines/departments', requireAdmin, async (req, res) => {
     await mapWithConcurrency(eanList, EAN_CONCURRENCY, async (ean) => {
       try {
         const product = await getProductByEanCached(posId, shopId, ean);
-        if (!product) { byEan[ean] = { sector: 'Article introuvable', department: 'Article introuvable' }; return; }
+        if (!product) {
+          // Article générique (vente au poids/valeur libre, ex: "GENERIQUE EPICERIE 1576") : pas de
+          // fiche produit RPOS (product: null sur sa ligne de vente), mais sa ligne de vente porte
+          // quand même un vrai rayon générique — trouvé le 21/09/2026, "il faut faire la différence
+          // entre Code article saisi et Code article" (distinction confirmée par l'utilisateur :
+          // certains génériques ont un vrai article catalogué, d'autres non, ce qui explique le
+          // fourre-tout "Article introuvable" jusqu'ici). Repli sur ce rayon générique réel plutôt
+          // qu'un message qui sonne comme une erreur pour un cas parfaitement normal.
+          const generic = await rpos.getGenericArticleDepartment(posId, shopId, ean).catch(() => null);
+          byEan[ean] = generic
+            ? { sector: 'Articles génériques (poids/valeur libre)', department: generic.name }
+            : { sector: 'Article générique', department: 'Sans rayon identifié côté RPOS' };
+          return;
+        }
         const { sector, rayon } = await rpos.getDepartmentHierarchy(posId, product.department?.id);
         byEan[ean] = { sector, department: rayon };
       } catch (err) {

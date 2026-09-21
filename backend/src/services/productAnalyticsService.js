@@ -196,6 +196,19 @@ async function analyzeProduct(posId, shopId, { ean, productId, dateStart, dateEn
     ? Math.max(0, Math.round(avgDaysBetweenOrders - (orderCount ? (Date.now() - new Date(purchaseHistory[0].date).getTime()) / (24 * 60 * 60 * 1000) : 0)))
     : null;
 
+  // Raisonnement de suffisance de commande (demande du 21/09/2026 : "comment on voit l'article a
+  // une quantité suffisante ou pas quand il ont validé ?" — le panneau "Analyser" ne montrait jamais
+  // cette info, seulement dans le tableau de fond de la page). Même fonction que le calcul de
+  // proposition standard (proposalService.buildOrderSufficiencyReasoning), appliquée ici à ce
+  // second calcul indépendant — les deux peuvent légèrement diverger (page déjà assumée : "cette
+  // analyse recalcule... peut différer du chiffre déjà dans le tableau"), jamais une source de
+  // vérité supplémentaire, juste la même explication rendue visible dans ce panneau aussi.
+  const orderSufficiencyReasoning = orderedQty > 0
+    ? require('./proposalService').buildOrderSufficiencyReasoning({
+        orderedQty, avgWeeklySales, stock, quantityProposed: predictedQuantity, orderCount: 1,
+      })
+    : null;
+
   return {
     periodStart: dateStart,
     periodEnd: dateEnd,
@@ -221,6 +234,7 @@ async function analyzeProduct(posId, shopId, { ean, productId, dateStart, dateEn
       currentStock: stock,
       currentOrderedQuantity: orderedQty,
       safetyStock,
+      orderSufficiencyReasoning,
     },
   };
 }

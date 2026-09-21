@@ -223,6 +223,24 @@ async function getProductByEan(posId, shopId, ean) {
 }
 
 /**
+ * Résout le "rayon générique" d'un code de vente sans article catalogué (demande du 21/09/2026 :
+ * "il y a des générique avec code et d'autre non... il faut faire la différence entre Code article
+ * saisi et Code article") — un article générique (vente au poids/valeur libre, ex: "GENERIQUE
+ * EPICERIE 1576") n'a jamais de fiche produit RPOS (`product: null` sur sa ligne de vente,
+ * getProductByEan renvoie toujours null pour ces codes), mais SA LIGNE DE VENTE (/api/product_line/)
+ * porte quand même un vrai champ `department` (le rayon générique réel, ex: {code:
+ * "10130999999", name: "GENERIQUE EPICERIE 1576"}) — jusqu'ici jamais consulté, ce qui faisait
+ * regrouper TOUS les articles génériques sous un vague "Article introuvable" au lieu de leur vrai
+ * rayon. Un seul enregistrement de vente suffit (page_size=1) : le department d'un même code
+ * générique est toujours le même.
+ */
+async function getGenericArticleDepartment(posId, shopId, ean) {
+  const data = await rposGet(posId, '/api/product_line/', { shop: shopId, ean, page_size: 1, fields: 'ean,department' });
+  const line = (data.results || [])[0];
+  return line?.department ? { name: line.department.name, code: line.department.code } : null;
+}
+
+/**
  * Historique des changements de prix d'un article (prix de vente, prix promo, prix d'achat...) —
  * miroir de l'écran admin RPOS "Log changements de prix" (demande du 15/09/2026 : "quand est-ce que
  * l'article a changé de prix de vente ou prix promo"). Chaque entrée porte la date, le type de prix
@@ -1104,6 +1122,7 @@ async function getProductGisement(posId, shopId, ean) {
 module.exports = {
   getShops,
   getProductByEan,
+  getGenericArticleDepartment,
   getPriceChangeHistory,
   getSupplierByCode,
   getProductsByEans,
