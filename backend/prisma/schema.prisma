@@ -1075,6 +1075,12 @@ model SalesBackfillChunk {
   status String @default("PENDING") @map("status") // PENDING | IN_PROGRESS | DONE | ERROR
   errorMessage String? @map("error_message")
 
+  // Nombre de tentatives déjà effectuées sur cette tranche (demande du 21/09/2026 : "combien de
+  // tentatives ont été effectuées") — incrémenté à chaque échec, avant retry automatique. Distinct
+  // d'un simple compteur de pages : une tentative repart de lastPageCompleted+1 (jamais depuis le
+  // début de la tranche), donc ce compteur reflète le nombre d'essais, pas le volume retélécharché.
+  retryCount Int @default(0) @map("retry_count")
+
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")

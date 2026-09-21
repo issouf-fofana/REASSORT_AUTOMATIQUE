@@ -28,6 +28,18 @@ const TARGET_LINES_PER_CHUNK = 400_000;
 const PAGE_SIZE = 250;
 const MIN_CHUNK_DAYS = 1;
 
+// Retry automatique par tranche (demande du 21/09/2026 : "le système ne doit pas recommencer toute
+// la récupération... il doit identifier précisément l'intervalle concerné et relancer
+// automatiquement la récupération uniquement sur la partie qui a échoué") — jusqu'à
+// MAX_CHUNK_RETRIES tentatives sur LA MÊME tranche avant de l'abandonner et de continuer avec les
+// tranches suivantes, plutôt que d'arrêter tout le run au premier incident réseau/RPOS transitoire.
+const MAX_CHUNK_RETRIES = 3;
+const RETRY_DELAY_MS = 5000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Signale une pause demandée par l'utilisateur, distincte d'une vraie erreur : le run est
  * reprenable normalement, pas dans un état "ERROR" qui suggérerait un problème à corriger. */
 class PauseRequestedError extends Error {
@@ -146,8 +158,15 @@ async function startOrResumeRun(posId, shopId, periodStart, periodEnd) {
   return run;
 }
 
-/** Traite une tranche : pagine RPOS et insère les lignes au fur et à mesure, en persistant la progression après chaque page. */
-async function processChunk(posId, shopId, chunk) {
+/**
+ * Traite UNE tentative d'une tranche : pagine RPOS et insère les lignes au fur et à mesure, en
+ * persistant la progression après chaque page. Logs détaillés à chaque page (demande du
+ * 21/09/2026 : "où l'erreur s'est produite", "combien de données ont été récupérées") — le nom du
+ * magasin/tranche/page apparaît systématiquement pour pouvoir suivre précisément le déroulement
+ * même sur un run avec des dizaines de tranches en parallèle (plusieurs magasins dans un batch).
+ */
+async function attemptChunk(posId, shopId, chunk) {
+  const label = `${shopId} tranche ${chunk.chunkIndex} (${chunk.periodStart.toISOString().slice(0, 10)} -> ${chunk.periodEnd.toISOString().slice(0, 10)})`;
   await prisma.salesBackfillChunk.update({
     where: { id: chunk.id },
     data: { status: 'IN_PROGRESS', startedAt: chunk.startedAt || new Date(), errorMessage: null },
@@ -163,11 +182,20 @@ async function processChunk(posId, shopId, chunk) {
   let page = (chunk.lastPageCompleted || 0) + 1;
   let fetchedLines = chunk.fetchedLines || 0;
   let expectedLines = chunk.expectedLines || 0;
+  const t0 = Date.now();
+  console.log(`[salesBackfillService] DÉBUT ${label} — reprise à la page ${page} (${fetchedLines} ligne(s) déjà récupérée(s) précédemment)`);
 
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const pageResult = await rpos.fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, PAGE_SIZE);
+      let pageResult;
+      try {
+        pageResult = await rpos.fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, PAGE_SIZE);
+      } catch (err) {
+        // Où l'erreur s'est produite (demande explicite) : page précise, pas seulement la tranche.
+        console.error(`[salesBackfillService] ERREUR ${label} page ${page} — appel RPOS échoué : ${err.message}`);
+        throw err;
+      }
       expectedLines = pageResult.count;
 
       // Ne filtre plus les EAN non-numériques (ex: "D10130999999" - articles génériques RPOS) : ces
@@ -196,6 +224,13 @@ async function processChunk(posId, shopId, chunk) {
         data: { expectedLines, fetchedLines, lastPageCompleted: page },
       });
 
+      // Une ligne de log toutes les 10 pages (pas à chaque page, trop verbeux sur une tranche de
+      // 400 000 lignes/1600 pages) pour suivre l'avancement sans noyer les logs — la page 1 et
+      // toute page en erreur restent systématiquement loguées, quelle que soit cette fréquence.
+      if (page === 1 || page % 10 === 0) {
+        console.log(`[salesBackfillService] PROGRESSION ${label} — page ${page}, ${fetchedLines}/${expectedLines} ligne(s) (${Math.round((fetchedLines / Math.max(expectedLines, 1)) * 100)}%)`);
+      }
+
       if (!pageResult.nextPage) break;
       page = pageResult.nextPage;
 
@@ -206,6 +241,18 @@ async function processChunk(posId, shopId, chunk) {
       if (current?.pauseRequested) throw new PauseRequestedError();
     }
 
+    // Vérification de complétude explicite (demande du 21/09/2026 : "aucune donnée ne doit être
+    // considérée comme correctement récupérée tant que le système n'a pas vérifié que l'intervalle
+    // attendu est complet") — expectedLines vient du dernier count() RPOS vu (peut légèrement
+    // différer du count() initial si des ventes sont entrées entre-temps), donc un écart n'est pas
+    // forcément une vraie perte de données, mais doit être signalé plutôt que silencieusement
+    // marqué DONE comme si tout concordait.
+    if (fetchedLines < expectedLines) {
+      console.warn(`[salesBackfillService] INCOMPLET ${label} — ${fetchedLines}/${expectedLines} ligne(s) récupérée(s) après la dernière page RPOS (pas de page suivante signalée). Écart possible : ventes ajoutées côté RPOS pendant la récupération, ou lignes sans EAN filtrées.`);
+    }
+
+    const durationSec = Math.round((Date.now() - t0) / 1000);
+    console.log(`[salesBackfillService] FIN ${label} — ${fetchedLines}/${expectedLines} ligne(s) récupérée(s) en ${durationSec}s`);
     await prisma.salesBackfillChunk.update({
       where: { id: chunk.id },
       data: { status: 'DONE', completedAt: new Date() },
@@ -224,7 +271,50 @@ async function processChunk(posId, shopId, chunk) {
   }
 }
 
-/** Traite toutes les tranches non terminées d'un run, dans l'ordre, en s'arrêtant à la première erreur (le run reste reprenable). */
+/**
+ * Traite une tranche avec retry automatique (demande du 21/09/2026) : jusqu'à MAX_CHUNK_RETRIES
+ * tentatives sur CETTE tranche précise avant de l'abandonner. Chaque tentative reprend exactement
+ * où la précédente s'est arrêtée (lastPageCompleted persisté par attemptChunk même en cas d'échec
+ * en cours de route), jamais depuis le début de la tranche. Une pause utilisateur n'est jamais
+ * retentée (propagée telle quelle) — ce n'est pas un échec, retenter n'aurait aucun sens.
+ */
+async function processChunk(posId, shopId, chunk) {
+  const label = `${shopId} tranche ${chunk.chunkIndex}`;
+  let lastError;
+  for (let attempt = chunk.retryCount + 1; attempt <= MAX_CHUNK_RETRIES; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.log(`[salesBackfillService] TENTATIVE ${attempt}/${MAX_CHUNK_RETRIES} pour ${label} (après échec précédent : ${lastError?.message})`);
+      }
+      await attemptChunk(posId, shopId, { ...chunk, retryCount: attempt - 1 });
+      if (attempt > 1) console.log(`[salesBackfillService] TENTATIVE ${attempt}/${MAX_CHUNK_RETRIES} pour ${label} — RÉUSSIE après ${attempt - 1} échec(s) précédent(s).`);
+      return;
+    } catch (err) {
+      if (err instanceof PauseRequestedError) throw err;
+      lastError = err;
+      await prisma.salesBackfillChunk.update({ where: { id: chunk.id }, data: { retryCount: attempt } });
+      if (attempt < MAX_CHUNK_RETRIES) {
+        console.warn(`[salesBackfillService] ÉCHEC tentative ${attempt}/${MAX_CHUNK_RETRIES} pour ${label} : ${err.message} — nouvelle tentative dans ${RETRY_DELAY_MS / 1000}s.`);
+        await sleep(RETRY_DELAY_MS);
+        // Relit la tranche pour repartir du VRAI dernier état persisté (lastPageCompleted,
+        // fetchedLines mis à jour par la tentative qui vient d'échouer), pas l'état capturé au
+        // tout début de processChunk (qui serait périmé dès la 2e tentative).
+        chunk = await prisma.salesBackfillChunk.findUnique({ where: { id: chunk.id } });
+      }
+    }
+  }
+  console.error(`[salesBackfillService] ABANDON ${label} après ${MAX_CHUNK_RETRIES} tentative(s) — dernière erreur : ${lastError.message}`);
+  throw lastError;
+}
+
+/**
+ * Traite toutes les tranches non terminées d'un run, dans l'ordre. Contrairement au comportement
+ * précédent (arrêt immédiat du run entier à la première tranche en échec), CONTINUE avec les
+ * tranches suivantes même si une tranche épuise ses tentatives (demande du 21/09/2026 : maximiser
+ * les données récupérées en une seule exécution) — le run passe en ERROR seulement à LA FIN, si au
+ * moins une tranche reste en échec après retry, pour rester compatible avec l'UI existante (déjà
+ * capable de proposer une reprise sur un run ERROR).
+ */
 async function processRun(runId) {
   const run = await prisma.salesBackfillRun.findUnique({
     where: { id: runId },
@@ -233,28 +323,42 @@ async function processRun(runId) {
   if (!run) throw new Error(`Run ${runId} introuvable`);
 
   const pendingChunks = run.chunks.filter((c) => c.status !== 'DONE');
-  console.log(`[salesBackfillService] Run ${runId} : ${pendingChunks.length}/${run.chunks.length} tranche(s) à traiter`);
+  console.log(`[salesBackfillService] DÉBUT run ${runId} (magasin ${run.rposShopId}, période ${run.periodStart.toISOString().slice(0, 10)} -> ${run.periodEnd.toISOString().slice(0, 10)}) : ${pendingChunks.length}/${run.chunks.length} tranche(s) à traiter, ${run.estimatedTotalLines} ligne(s) estimée(s) au total`);
 
   await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'IN_PROGRESS', pauseRequested: false } });
 
+  // Tranches qui ont épuisé leurs tentatives (demande du 21/09/2026 : "identifier précisément
+  // l'intervalle concerné") — accumulées ici pour un résumé final clair, jamais mélangées avec les
+  // tranches réussies dans les logs de progression courante.
+  const failedChunks = [];
+
   for (const chunk of pendingChunks) {
-    console.log(`[salesBackfillService] Tranche ${chunk.chunkIndex}/${run.totalChunks} (${chunk.periodStart.toISOString()} -> ${chunk.periodEnd.toISOString()})...`);
+    console.log(`[salesBackfillService] Tranche ${chunk.chunkIndex}/${run.totalChunks} (${chunk.periodStart.toISOString().slice(0, 10)} -> ${chunk.periodEnd.toISOString().slice(0, 10)})...`);
     try {
       await processChunk(run.rposPosId, run.rposShopId, chunk);
     } catch (err) {
       if (err instanceof PauseRequestedError) {
-        console.log(`[salesBackfillService] Run ${runId} mis en pause (progression conservée).`);
+        console.log(`[salesBackfillService] PAUSE run ${runId} (progression conservée, reprise possible à l'identique).`);
         await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'PAUSED', pauseRequested: false } });
         return;
       }
-      console.error(`[salesBackfillService] Échec tranche ${chunk.chunkIndex} du run ${runId}:`, err.message);
-      await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'ERROR' } });
-      return;
+      // Ne bloque plus tout le run : continue avec les tranches suivantes (demande explicite du
+      // 21/09/2026) — cette tranche reste ERROR en base (visible et reprenable individuellement,
+      // cf. getRunStatus), mais le reste de la période est quand même récupéré dans cette exécution
+      // plutôt que d'attendre une reprise manuelle pour avancer ne serait-ce que d'une tranche.
+      console.error(`[salesBackfillService] ABANDON DÉFINITIF tranche ${chunk.chunkIndex}/${run.totalChunks} du run ${runId} après ${MAX_CHUNK_RETRIES} tentative(s) — passage à la tranche suivante. Erreur : ${err.message}`);
+      failedChunks.push(chunk.chunkIndex);
     }
   }
 
+  if (failedChunks.length) {
+    console.error(`[salesBackfillService] FIN run ${runId} avec ${failedChunks.length} tranche(s) en échec définitif (index : ${failedChunks.join(', ')}) — reprise possible sur ces tranches précises.`);
+    await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'ERROR' } });
+    return;
+  }
+
   await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'DONE', completedAt: new Date() } });
-  console.log(`[salesBackfillService] Run ${runId} terminé.`);
+  console.log(`[salesBackfillService] FIN run ${runId} — toutes les tranches terminées avec succès.`);
 }
 
 /**
