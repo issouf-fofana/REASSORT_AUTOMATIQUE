@@ -1151,7 +1151,39 @@ model AiProviderKey {
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String?  @map("created_by")
 
+  usageLogs AiUsageLog[]
+
   @@map("ai_provider_keys")
+}
+
+// Suivi de consommation de tokens par appel LLM réussi (demande du 21/09/2026 : "j'ai l'impression
+// qui fini assez rapidement... il doit voir l'utilisation et ce qui reste, sur une période,
+// globale") — une ligne par appel, jamais agrégée à l'écriture (l'agrégation par période se fait à
+// la lecture, cf. aiUsageService.js) pour garder l'historique détaillé exploitable de plusieurs
+// façons (par jour, par fournisseur, par clé précise) sans avoir à re-décider a priori quelle
+// granularité sera utile plus tard.
+model AiUsageLog {
+  id String @id @default(cuid())
+
+  providerKeyId String?        @map("provider_key_id")
+  providerKey   AiProviderKey? @relation(fields: [providerKeyId], references: [id], onDelete: SetNull)
+
+  provider String // "gemini" | "openai" | "anthropic" — dupliqué depuis providerKey (jamais perdu si la clé est supprimée ensuite)
+  model    String? // modèle réellement utilisé pour cet appel
+
+  promptTokens     Int @map("prompt_tokens")     // tokens d'entrée (prompt envoyé)
+  completionTokens Int @map("completion_tokens") // tokens de sortie (réponse générée)
+  totalTokens      Int @map("total_tokens")
+
+  // Contexte de l'appel (ex: "chatbot", "forecast", "improvement") — permet de voir plus tard QUEL
+  // usage de la plateforme consomme le plus, pas seulement le total brut.
+  context String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([provider, createdAt])
+  @@index([providerKeyId, createdAt])
+  @@map("ai_usage_logs")
 }
 
 // Résultat d'une analyse IA "à la demande" sur une proposition : garde une trace de ce qui a été

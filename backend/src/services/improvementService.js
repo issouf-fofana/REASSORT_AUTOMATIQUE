@@ -466,7 +466,7 @@ async function resolveEnrichmentPrompt(f) {
 async function enrichWithAi(finding) {
   const prompt = await resolveEnrichmentPrompt(finding);
   try {
-    const { fullText, providerUsed } = await streamWithFallback(prompt, null);
+    const { fullText, providerUsed } = await streamWithFallback(prompt, null, 'improvement-enrichment');
     const expl = (fullText.match(/^EXPLOITATION:(.*)$/m) || [])[1];
     const dev = (fullText.match(/^DEV:(.*)$/m) || [])[1];
     const confRaw = (fullText.match(/^CONFIANCE:\s*(\d{1,3})/m) || [])[1];

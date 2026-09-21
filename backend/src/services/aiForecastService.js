@@ -234,7 +234,29 @@ function geminiErrorMessage(status, bodyText) {
   return `Gemini ${status}: ${body.slice(0, 500)}`;
 }
 
-async function callGemini(apiKey, model, prompt) {
+/**
+ * Enregistre la consommation de tokens d'un appel LLM réussi (demande du 21/09/2026 : "j'ai
+ * l'impression qui finit assez rapidement... il doit voir l'utilisation et ce qui reste, sur une
+ * période, globale"). Fire-and-forget volontaire (jamais awaité par l'appelant) : une erreur
+ * d'écriture ici ne doit JAMAIS faire échouer l'appel LLM qui vient de réussir — le suivi d'usage
+ * est un bonus d'observabilité, pas une condition de fonctionnement du réassort.
+ */
+function recordAiUsage({ providerKeyId, provider, model, promptTokens, completionTokens, context }) {
+  if (!promptTokens && !completionTokens) return; // rien à enregistrer si le fournisseur n'a rien renvoyé
+  prisma.aiUsageLog.create({
+    data: {
+      providerKeyId: providerKeyId || null,
+      provider,
+      model: model || null,
+      promptTokens: promptTokens || 0,
+      completionTokens: completionTokens || 0,
+      totalTokens: (promptTokens || 0) + (completionTokens || 0),
+      context: context || null,
+    },
+  }).catch((err) => console.error(`[aiForecastService] Échec d'enregistrement d'usage tokens (${provider}) : ${err.message}`));
+}
+
+async function callGemini(apiKey, model, prompt, usageCtx) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:generateContent?key=${apiKey}`;
   const res = await fetchWithTimeout(url, {
     method: 'POST',
@@ -251,10 +273,14 @@ async function callGemini(apiKey, model, prompt) {
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Réponse Gemini vide ou inattendue');
+  recordAiUsage({
+    ...usageCtx, provider: 'gemini', model: model || DEFAULT_MODEL_BY_PROVIDER.gemini,
+    promptTokens: data.usageMetadata?.promptTokenCount, completionTokens: data.usageMetadata?.candidatesTokenCount,
+  });
   return parseJsonArrayFromText(text);
 }
 
-async function callOpenAi(apiKey, model, prompt) {
+async function callOpenAi(apiKey, model, prompt, usageCtx) {
   const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -271,10 +297,14 @@ async function callOpenAi(apiKey, model, prompt) {
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('Réponse OpenAI vide ou inattendue');
+  recordAiUsage({
+    ...usageCtx, provider: 'openai', model: model || DEFAULT_MODEL_BY_PROVIDER.openai,
+    promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens,
+  });
   return parseJsonArrayFromText(text);
 }
 
-async function callAnthropic(apiKey, model, prompt) {
+async function callAnthropic(apiKey, model, prompt, usageCtx) {
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
@@ -291,6 +321,10 @@ async function callAnthropic(apiKey, model, prompt) {
   const data = await res.json();
   const text = data.content?.[0]?.text;
   if (!text) throw new Error('Réponse Anthropic vide ou inattendue');
+  recordAiUsage({
+    ...usageCtx, provider: 'anthropic', model: model || DEFAULT_MODEL_BY_PROVIDER.anthropic,
+    promptTokens: data.usage?.input_tokens, completionTokens: data.usage?.output_tokens,
+  });
   return parseJsonArrayFromText(text);
 }
 
@@ -303,11 +337,16 @@ const CALLERS = { gemini: callGemini, openai: callOpenAi, anthropic: callAnthrop
  * flux différemment (extractText reçoit l'objet JSON d'un événement SSE et renvoie le texte à en
  * extraire, ou null si l'événement ne contient pas de texte exploitable).
  */
-async function readSseStream(res, extractText, onChunk) {
+// extractUsage (optionnel) reçoit chaque événement SSE et renvoie { promptTokens, completionTokens }
+// ou null — chaque fournisseur envoie l'usage total dans son DERNIER événement de flux (le seul qui
+// connaît le total final), donc la valeur retenue est TOUJOURS la dernière non-nulle vue, jamais
+// une somme cumulée (qui compterait le total plusieurs fois si le fournisseur le répète).
+async function readSseStream(res, extractText, onChunk, extractUsage) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let usage = null;
 
   // Boucle de lecture du flux SSE : `while (true)` volontaire (sortie par `break`
   // quand le flux est terminé) — pas une condition constante oubliée.
@@ -331,16 +370,20 @@ async function readSseStream(res, extractText, onChunk) {
           fullText += text;
           onChunk(text);
         }
+        if (extractUsage) {
+          const eventUsage = extractUsage(event);
+          if (eventUsage) usage = eventUsage;
+        }
       } catch {
         // fragment JSON incomplet à cheval sur deux chunks réseau : ignoré, la ligne complète
         // arrivera dans un prochain chunk (comportement SSE normal, pas une vraie erreur).
       }
     }
   }
-  return fullText;
+  return { fullText, usage };
 }
 
-async function streamGemini(apiKey, model, prompt, onChunk) {
+async function streamGemini(apiKey, model, prompt, onChunk, usageCtx) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:streamGenerateContent?alt=sse&key=${apiKey}`;
   const res = await fetchWithTimeout(url, {
     method: 'POST',
@@ -354,10 +397,15 @@ async function streamGemini(apiKey, model, prompt, onChunk) {
     const errText = await res.text().catch(() => res.statusText);
     throw new Error(`Gemini ${res.status}: ${errText}`);
   }
-  return readSseStream(res, (event) => event.candidates?.[0]?.content?.parts?.[0]?.text, onChunk);
+  const { fullText, usage } = await readSseStream(
+    res, (event) => event.candidates?.[0]?.content?.parts?.[0]?.text, onChunk,
+    (event) => (event.usageMetadata ? { promptTokens: event.usageMetadata.promptTokenCount, completionTokens: event.usageMetadata.candidatesTokenCount } : null),
+  );
+  recordAiUsage({ ...usageCtx, provider: 'gemini', model: model || DEFAULT_MODEL_BY_PROVIDER.gemini, ...usage });
+  return fullText;
 }
 
-async function streamOpenAi(apiKey, model, prompt, onChunk) {
+async function streamOpenAi(apiKey, model, prompt, onChunk, usageCtx) {
   const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -366,16 +414,25 @@ async function streamOpenAi(apiKey, model, prompt, onChunk) {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
       stream: true,
+      // include_usage (demande du 21/09/2026) : sans cette option, OpenAI ne renvoie JAMAIS l'usage
+      // en mode streaming (seulement en appel classique) — un dernier événement supplémentaire avec
+      // choices:[] et le total de tokens est ajouté au flux quand elle est activée.
+      stream_options: { include_usage: true },
     }),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText);
     throw new Error(`OpenAI ${res.status}: ${errText}`);
   }
-  return readSseStream(res, (event) => event.choices?.[0]?.delta?.content, onChunk);
+  const { fullText, usage } = await readSseStream(
+    res, (event) => event.choices?.[0]?.delta?.content, onChunk,
+    (event) => (event.usage ? { promptTokens: event.usage.prompt_tokens, completionTokens: event.usage.completion_tokens } : null),
+  );
+  recordAiUsage({ ...usageCtx, provider: 'openai', model: model || DEFAULT_MODEL_BY_PROVIDER.openai, ...usage });
+  return fullText;
 }
 
-async function streamAnthropic(apiKey, model, prompt, onChunk) {
+async function streamAnthropic(apiKey, model, prompt, onChunk, usageCtx) {
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
@@ -390,7 +447,24 @@ async function streamAnthropic(apiKey, model, prompt, onChunk) {
     const errText = await res.text().catch(() => res.statusText);
     throw new Error(`Anthropic ${res.status}: ${errText}`);
   }
-  return readSseStream(res, (event) => (event.type === 'content_block_delta' ? event.delta?.text : null), onChunk);
+  // Anthropic répartit l'usage sur DEUX événements (input_tokens dans message_start, output_tokens
+  // dans message_delta final) — jamais les deux ensemble dans le même événement, contrairement à
+  // Gemini/OpenAI. On fusionne les deux avec le dernier usage vu qui garde les champs déjà connus.
+  let partialUsage = {};
+  const { fullText } = await readSseStream(
+    res, (event) => (event.type === 'content_block_delta' ? event.delta?.text : null), onChunk,
+    (event) => {
+      if (event.type === 'message_start' && event.message?.usage?.input_tokens !== undefined) {
+        partialUsage = { ...partialUsage, promptTokens: event.message.usage.input_tokens };
+      }
+      if (event.type === 'message_delta' && event.usage?.output_tokens !== undefined) {
+        partialUsage = { ...partialUsage, completionTokens: event.usage.output_tokens };
+      }
+      return Object.keys(partialUsage).length ? partialUsage : null;
+    },
+  );
+  recordAiUsage({ ...usageCtx, provider: 'anthropic', model: model || DEFAULT_MODEL_BY_PROVIDER.anthropic, ...partialUsage });
+  return fullText;
 }
 
 const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: streamAnthropic };
@@ -403,7 +477,7 @@ const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: 
  * (annuler un flux partiellement affiché à l'utilisateur pour le recommencer ailleurs serait plus
  * déroutant qu'un message d'erreur clair à ce stade).
  */
-async function streamWithFallbackImpl(prompt, onChunk) {
+async function streamWithFallbackImpl(prompt, onChunk, context) {
   const keys = await prisma.aiProviderKey.findMany({
     where: { isActive: true },
     orderBy: { priority: 'asc' },
@@ -425,7 +499,7 @@ async function streamWithFallbackImpl(prompt, onChunk) {
       const fullText = await streamer(apiKey, key.model, prompt, (chunk) => {
         startedStreaming = true;
         onChunk(chunk);
-      });
+      }, { providerKeyId: key.id, context });
       await prisma.aiProviderKey.update({
         where: { id: key.id },
         data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
@@ -447,8 +521,8 @@ async function streamWithFallbackImpl(prompt, onChunk) {
 // que d'appeler le fournisseur directement, pour qu'un pic de demandes simultanées (plusieurs
 // utilisateurs sur le chatbot, génération de proposition en cours) ne parte pas toutes en parallèle
 // sur la même clé API sans coordination — voir utils/aiRequestQueue.js pour le principe complet.
-function streamWithFallback(prompt, onChunk) {
-  return enqueueAiRequest(() => streamWithFallbackImpl(prompt, onChunk));
+function streamWithFallback(prompt, onChunk, context) {
+  return enqueueAiRequest(() => streamWithFallbackImpl(prompt, onChunk, context));
 }
 
 /**
@@ -456,7 +530,7 @@ function streamWithFallback(prompt, onChunk) {
  * Journalise l'échec (lastError/lastErrorAt) sur la clé fautive pour visibilité côté UI, sans
  * bloquer l'essai des clés suivantes.
  */
-async function callWithFallbackImpl(prompt) {
+async function callWithFallbackImpl(prompt, context) {
   const keys = await prisma.aiProviderKey.findMany({
     where: { isActive: true },
     orderBy: { priority: 'asc' },
@@ -474,7 +548,7 @@ async function callWithFallbackImpl(prompt) {
     }
     try {
       const apiKey = crypto.decrypt(key.encryptedApiKey);
-      const result = await caller(apiKey, key.model, prompt);
+      const result = await caller(apiKey, key.model, prompt, { providerKeyId: key.id, context });
       await prisma.aiProviderKey.update({
         where: { id: key.id },
         data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
@@ -493,8 +567,8 @@ async function callWithFallbackImpl(prompt) {
 
 // Même file d'attente globale que streamWithFallback (voir son commentaire ci-dessus) — les deux
 // fonctions sont les deux seuls points d'entrée réels vers un fournisseur IA dans tout le backend.
-function callWithFallback(prompt) {
-  return enqueueAiRequest(() => callWithFallbackImpl(prompt));
+function callWithFallback(prompt, context) {
+  return enqueueAiRequest(() => callWithFallbackImpl(prompt, context));
 }
 
 /**
@@ -570,7 +644,7 @@ async function analyzeArticlesBatch(lines, shopReference, shopName, shopConfig, 
   await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
     try {
       const prompt = await buildPrompt(shopReference, shopName, batch);
-      const { result, providerUsed: usedForBatch } = await callWithFallback(prompt);
+      const { result, providerUsed: usedForBatch } = await callWithFallback(prompt, 'ai-forecast-batch');
       providerUsed = providerUsed || usedForBatch;
       for (const r of result) byEan.set(String(r.ean), r);
     } catch (err) {
@@ -670,7 +744,7 @@ async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfi
   }
   const summary = buildArticleSummary(line, shopConfig, shopActivity);
   const prompt = await buildPrompt(shopReference, shopName, [summary]);
-  const { result, providerUsed } = await callWithFallback(prompt);
+  const { result, providerUsed } = await callWithFallback(prompt, 'ai-forecast-realtime');
   const suggestion = result.find((r) => String(r.ean) === String(line.ean)) || result[0];
   if (!suggestion) throw new Error('Réponse IA sans suggestion exploitable pour cet article');
   return {
@@ -728,7 +802,7 @@ async function analyzeArticleRealtimeStream({ shopReference, shopName, line, sho
       return;
     }
     if (reasoningStarted && onTextChunk) onTextChunk(chunk);
-  });
+  }, 'ai-forecast-realtime-stream');
 
   if (quantity === null) {
     // Le modèle n'a pas respecté le format demandé : tentative de repli sur un nombre trouvé en
@@ -784,7 +858,7 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);
-  });
+  }, 'ai-forecast-followup');
 
   return { answer: fullText.trim(), providerUsed };
 }

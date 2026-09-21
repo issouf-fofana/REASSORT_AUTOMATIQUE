@@ -14,6 +14,7 @@ const errorReportService = require('../../services/errorReportService');
 const correctionRecordService = require('../../services/correctionRecordService');
 const aiMasteryService = require('../../services/aiMasteryService');
 const autonomyReadinessService = require('../../services/autonomyReadinessService');
+const aiUsageService = require('../../services/aiUsageService');
 const { filterProposalLinesForUser, getCapabilityGuide, getPlatformGuide } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir faire analyser par l'IA (ou poser une
@@ -626,6 +627,23 @@ router.get('/corrections/:id', requireAdmin, async (req, res) => {
       (record.similarPastCorrectionIds || []).map((id) => correctionRecordService.getCorrection(id)),
     );
     res.json({ success: true, data: { ...record, similarPastCorrections: similar.filter(Boolean) } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/ai-usage - consommation de tokens IA sur une période (demande du 21/09/2026 :
+// "il doit voir l'utilisation et ce qui reste, sur une période, globale") — days=0 ou absent
+// renvoie le résumé sur 30 jours par défaut, days=all renvoie le cumul depuis toujours.
+router.get('/ai-usage', requireAdmin, async (req, res) => {
+  try {
+    const { days, provider } = req.query;
+    if (days === 'all') {
+      const data = await aiUsageService.getUsageAllTime({ provider: provider || undefined });
+      return res.json({ success: true, data });
+    }
+    const data = await aiUsageService.getUsageSummary({ days: days ? parseInt(days, 10) : 30, provider: provider || undefined });
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

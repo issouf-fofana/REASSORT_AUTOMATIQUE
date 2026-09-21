@@ -321,7 +321,7 @@ Si un outil exige un EAN "OBLIGATOIRE" et qu'aucun code EAN n'est identifiable d
 async function detectIntentViaLlm(question) {
   try {
     const prompt = TOOL_CALL_SYSTEM_PROMPT_HEADER + question + TOOL_CALL_INSTRUCTIONS;
-    const { result } = await callWithFallback(prompt);
+    const { result } = await callWithFallback(prompt, 'chatbot-intent-routing');
     const choice = Array.isArray(result) ? result[0] : null;
     if (!choice || !choice.tool) return null;
     if (!VALID_INTENT_TOOLS.has(choice.tool)) return null;
@@ -598,7 +598,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);
-  });
+  }, 'chatbot-answer');
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
