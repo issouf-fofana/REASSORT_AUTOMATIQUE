@@ -631,6 +631,29 @@ router.get('/corrections/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/error-reports - journal des erreurs API 5xx réellement survenues (demande du
+// 21/09/2026 : "il faut loger les erreurs... il est vide or j'ai des erreurs") — déjà capturées
+// automatiquement en base par le hook global (server.js), mais jamais consultables depuis l'UI
+// jusqu'ici (seulement via une requête SQL directe). Filtrable par code statut et texte de recherche
+// dans l'URL/message, tri anti-chronologique (les plus récentes en premier).
+router.get('/error-reports', requireAdmin, async (req, res) => {
+  try {
+    const { statusCode, search, limit } = req.query;
+    const where = {
+      ...(statusCode ? { statusCode: parseInt(statusCode, 10) } : {}),
+      ...(search ? { OR: [{ url: { contains: search, mode: 'insensitive' } }, { message: { contains: search, mode: 'insensitive' } }] } : {}),
+    };
+    const data = await prisma.errorReport.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit ? Math.min(parseInt(limit, 10), 200) : 100,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/corrections - ajoute une entrée DEV_FIX au journal (correction de code faite en
 // développement, ex: par Claude) — saisie manuelle au moment du fix, jamais générée automatiquement
 // contrairement aux entrées AI_AUTO (cf. improvementService.js, transition vers IMPROVED).
