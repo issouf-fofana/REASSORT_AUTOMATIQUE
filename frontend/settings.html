@@ -2123,7 +2123,10 @@
                                    errBox.style.display = 'none';
                                    okBox.style.display = 'none';
                                    try {
-                                        const pctValue = parseFloat(document.getElementById('system-admin-stockout-threshold').value) / 100;
+                                        // .toString() explicite : même bug que REVISION_CHANGE_THRESHOLD (21/09/2026) —
+                                        // systemConfig.value est un champ String en base, un Number JS non converti fait
+                                        // échouer l'écriture Prisma ("Expected String, provided Float").
+                                        const pctValue = (parseFloat(document.getElementById('system-admin-stockout-threshold').value) / 100).toString();
                                         await saveSystemConfigKey('ADMIN_DASHBOARD_STOCKOUT_ALERT_THRESHOLD', pctValue);
                                         okBox.textContent = 'Réglage enregistré.';
                                         okBox.style.display = 'block';
@@ -2195,7 +2198,10 @@
                                    okBox.style.display = 'none';
                                    try {
                                         await saveSystemConfigKey('DAILY_REVIEW_CRON', document.getElementById('system-daily-review-cron').value);
-                                        const pctValue = parseFloat(document.getElementById('system-revision-threshold').value) / 100;
+                                        // .toString() explicite (bug trouvé le 21/09/2026) : systemConfig.value est un champ
+                                        // String en base — sans conversion, ce nombre JS (Number) partait tel quel dans le
+                                        // JSON envoyé au serveur, que Prisma refusait ("Expected String, provided Float").
+                                        const pctValue = (parseFloat(document.getElementById('system-revision-threshold').value) / 100).toString();
                                         await saveSystemConfigKey('REVISION_CHANGE_THRESHOLD', pctValue);
                                         okBox.textContent = 'Planification mise à jour.';
                                         okBox.style.display = 'block';

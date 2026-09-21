@@ -206,13 +206,19 @@ router.get('/system-config/jobs-health', requireAdmin, async (req, res) => {
 // body: { key, value }
 router.put('/system-config', requireAdmin, async (req, res) => {
   try {
-    const { key, value } = req.body;
+    let { key, value } = req.body;
     if (!key || value === undefined) {
       return res.status(400).json({ success: false, message: 'key et value sont requis' });
     }
     if (!Object.values(systemConfig.KEYS).includes(key)) {
       return res.status(400).json({ success: false, message: 'Clé de configuration inconnue' });
     }
+    // systemConfig.value est un champ String en base — un appelant qui envoie un Number/Boolean JS
+    // brut (ex: JSON.stringify({ value: 0.1 }) sans .toString()) faisait planter Prisma avec une
+    // erreur peu claire ("Expected String, provided Float"), jamais renvoyée proprement au client
+    // (bug trouvé le 21/09/2026 : REVISION_CHANGE_THRESHOLD). Conversion défensive ici, en plus du
+    // correctif côté frontend — jamais faire confiance uniquement au client pour le bon type.
+    if (typeof value !== 'string') value = String(value);
 
     const CRON_KEYS = [
       systemConfig.KEYS.NIGHTLY_PROPOSAL_CRON,
