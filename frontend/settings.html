@@ -239,7 +239,7 @@
                                                        négatif et peu fiable pour cet article.<br>
                                                        <strong>"Ramener à 0" :</strong> le besoin est calculé uniquement sur la vente moyenne, sans tenir compte
                                                        du stock négatif (comportement historique, plus prudent) — la page Proposition de commande signale ces
-                                                       articles avec un badge "⚠️ Stock non fiable".<br>
+                                                       articles avec un badge "<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable".<br>
                                                        <strong>"Garder la valeur négative" :</strong> le déficit réel s'ajoute à la quantité à commander, et le
                                                        stock négatif reste visible tel quel dans la colonne "Stock actuel" pour signaler l'anomalie.
                                                   </div>
@@ -273,7 +273,7 @@
                                                   <div class="alert alert-light border mt-2 mb-0 small">
                                                        <strong>À quoi ça sert :</strong> avant de proposer un article, le système vérifie s'il a déjà une
                                                        commande passée dans RPOS sur ce nombre de jours en arrière — si oui, l'article est considéré
-                                                       "déjà commandé" et son besoin est ramené à 0 (visible avec un bouton "🔓 Débloquer et commander
+                                                       "déjà commandé" et son besoin est ramené à 0 (visible avec un bouton "<iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander
                                                        quand même" sur la page Proposition de commande).<br>
                                                        <strong>Pourquoi une limite :</strong> une commande RPOS, même très ancienne (parfois plusieurs
                                                        mois), reste indéfiniment "en attente" tant qu'elle n'est pas marquée "livrée" — ce qui n'arrive
@@ -307,7 +307,7 @@
                                                        lentement). <strong>Par défaut : 0.3.</strong><br>
                                                        <strong>Sécurité :</strong> retombe automatiquement sur la moyenne plate habituelle si l'historique de
                                                        vente disponible est trop court (moins de 14 jours) pour que le lissage soit fiable. Un badge
-                                                       "📈 Prévision lissée" apparaît sur la page Proposition de commande pour les articles concernés.
+                                                       "<iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée" apparaît sur la page Proposition de commande pour les articles concernés.
                                                   </div>
                                              </div>
 
@@ -1966,7 +1966,7 @@
                                                             const importJson = await importRes.json();
                                                             if (!importJson.success) throw new Error(importJson.message);
                                                             importResultBox.innerHTML = '<span class="text-success">' + importJson.message + '</span>';
-                                                            btn.textContent = '✓ Intégré';
+                                                            btn.innerHTML = '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Intégré';
                                                        } catch (err) {
                                                             importResultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
                                                             btn.disabled = false;
@@ -2372,7 +2372,7 @@
                                              '<td>' + new Date(c.periodStart).toLocaleDateString('fr-FR') + ' → ' + new Date(c.periodEnd).toLocaleDateString('fr-FR') + '</td>' +
                                              '<td class="text-end">' + (c.expectedLines || 0).toLocaleString('fr-FR') + '</td>' +
                                              '<td class="text-end">' + c.fetchedLines.toLocaleString('fr-FR') + '</td>' +
-                                             '<td>' + (chunkStatusLabel[c.status] || c.status) + (c.errorMessage ? ' <span class="text-danger" title="' + c.errorMessage.replace(/"/g, '&quot;') + '">⚠</span>' : '') + '</td>' +
+                                             '<td>' + (chunkStatusLabel[c.status] || c.status) + (c.errorMessage ? ' <span class="text-danger" title="' + c.errorMessage.replace(/"/g, '&quot;') + '"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon></span>' : '') + '</td>' +
                                              '</tr>';
                                    }).join('');
 

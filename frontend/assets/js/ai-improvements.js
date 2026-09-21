@@ -13,7 +13,7 @@
     MEDIUM: { label: 'Moyenne', badge: 'bg-info' },
     LOW: { label: 'Faible', badge: 'bg-secondary' },
   };
-  const STATUS_LABEL = { PROPOSED: 'Proposée', IN_PROGRESS: 'En cours', TO_VERIFY: 'À vérifier', APPLIED: 'Appliquée', DISMISSED: 'Ignorée', IMPROVED: 'Améliorée ✓', NO_EFFECT: 'Sans effet' };
+  const STATUS_LABEL = { PROPOSED: 'Proposée', IN_PROGRESS: 'En cours', TO_VERIFY: 'À vérifier', APPLIED: 'Appliquée', DISMISSED: 'Ignorée', IMPROVED: 'Améliorée <iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon>', NO_EFFECT: 'Sans effet' };
   const EVENT_LABEL = { DETECTED: 'Détection', ENRICHED: 'Analyse IA', EDITED: 'Modification', STATUS_CHANGED: 'Changement de statut', EVALUATED: 'Vérification' };
 
   function esc(s) {

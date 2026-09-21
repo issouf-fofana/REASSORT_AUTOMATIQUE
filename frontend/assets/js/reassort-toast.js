@@ -52,7 +52,11 @@
     .reassort-confirm-ok.danger:hover { background-color: #b91c1c; }
   `;
 
-  const ICONS = { success: '✓', error: '✗', info: 'ℹ' };
+  const ICONS = {
+    success: '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon>',
+    error: '<iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon>',
+    info: '<iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon>',
+  };
   const AUTO_DISMISS_MS = 5000;
 
   function ensureContainer() {

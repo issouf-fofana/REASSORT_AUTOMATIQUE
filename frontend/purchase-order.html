@@ -792,7 +792,7 @@
                                                        box.style.display = 'none';
                                                        return;
                                                   }
-                                                  box.innerHTML = '<strong>⚠️ ' + count + ' article(s) à stock non fiable</strong> — ces articles continuent d\'être vendus alors que ' +
+                                                  box.innerHTML = '<strong><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + count + ' article(s) à stock non fiable</strong> — ces articles continuent d\'être vendus alors que ' +
                                                        'RPOS indique un stock négatif. Cela ne peut se corriger que par une <strong>intégration de facture</strong> ' +
                                                        '(réception d\'une commande fournisseur) ou un <strong>inventaire physique</strong> côté RPOS. En attendant, la quantité ' +
                                                        'proposée pour ces articles est basée uniquement sur la vente moyenne, sans tenir compte du stock affiché.';
@@ -807,10 +807,10 @@
                                                        box.style.display = 'none';
                                                        return;
                                                   }
-                                                  box.innerHTML = '<strong>📦 ' + count + ' article(s) bloqué(s) par une commande RPOS récente</strong> — ' +
+                                                  box.innerHTML = '<strong><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> ' + count + ' article(s) bloqué(s) par une commande RPOS récente</strong> — ' +
                                                        'ces articles ont une commande passée dans RPOS il y a moins de 7 jours (hors de cette plateforme), ' +
                                                        'donc leur besoin calculé est ramené à 0. Ils restent visibles ci-dessous avec le bouton ' +
-                                                       '<strong>« 🔓 Débloquer et commander quand même »</strong> si le magasin souhaite les commander malgré tout.';
+                                                       '<strong>« <iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même »</strong> si le magasin souhaite les commander malgré tout.';
                                                   box.style.display = '';
                                              }
 
@@ -995,7 +995,7 @@
                                                        const actualStart = new Date(proposal.actualDataStart);
                                                        const actualEnd = proposal.actualDataEnd ? new Date(proposal.actualDataEnd) : end;
                                                        coverageHtml = '<div class="alert alert-warning small mt-2 mb-0">' +
-                                                            '<strong>⚠ Données incomplètes :</strong> cette génération demandait des ventes depuis le ' + start.toLocaleDateString('fr-FR') +
+                                                            '<strong><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données incomplètes :</strong> cette génération demandait des ventes depuis le ' + start.toLocaleDateString('fr-FR') +
                                                             ', mais les données réellement disponibles ne remontent qu\'au <strong>' + actualStart.toLocaleDateString('fr-FR') + '</strong>' +
                                                             ' (jusqu\'au ' + actualEnd.toLocaleDateString('fr-FR') + ') — soit ' + proposal.coverageGapDays + ' jour(s) manquant(s). ' +
                                                             'Le calcul (Pareto, quantités proposées) porte donc sur une période plus courte que celle affichée ci-dessus. ' +
@@ -1152,23 +1152,23 @@
                                                             ? l.revenueSharePct.toFixed(2) + ' %'
                                                             : '—';
                                                        const stockCellFull = stockCell + (unreliableStock
-                                                            ? '<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS">⚠️ Stock non fiable</span>'
+                                                            ? '<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>'
                                                             : '');
                                                        const activityCellClass = unreliableStock ? ' class="border border-warning-subtle bg-warning-subtle bg-opacity-25"' : '';
                                                        const avgSalesCell = l.avgWeeklySales !== null && l.avgWeeklySales !== undefined
                                                             ? l.avgWeeklySales.toFixed(1) + (l.seasonalityAdjusted
-                                                                 ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l\'année dernière (écart ' + (l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?') + ')">📅 Saisonnalité</span>'
+                                                                 ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l\'année dernière (écart ' + (l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?') + ')"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saisonnalité</span>'
                                                                  : '') + (l.forecastMethod === 'smoothed'
-                                                                 ? '<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu\'à une moyenne plate">📈 Prévision lissée</span>'
+                                                                 ? '<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu\'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>'
                                                                  : '')
                                                             : '—';
                                                        const alreadyOrderedBadge = l.excludedAsAlreadyOrdered
-                                                            ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Déjà en commande sur cette plateforme, pas encore reçue">📦 Déjà commandé (qté ' + (l.quantityInTransit || 0) + ')' +
+                                                            ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Déjà en commande sur cette plateforme, pas encore reçue"><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Déjà commandé (qté ' + (l.quantityInTransit || 0) + ')' +
                                                                  (l.platformOrderReference ? ' — cmd ' + l.platformOrderReference : '') +
                                                                  (l.platformOrderDate ? ' du ' + new Date(l.platformOrderDate).toLocaleDateString('fr-FR') : '') +
                                                                  '</span>'
                                                             : (l.excludedAsAlreadyOrderedRpos
-                                                                 ? '<br><span class="badge bg-secondary-subtle text-secondary mt-1" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme.">📦 Commandé le ' +
+                                                                 ? '<br><span class="badge bg-secondary-subtle text-secondary mt-1" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme."><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Commandé le ' +
                                                                       (l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?') +
                                                                       (l.rposOrderReference ? ' (réf. ' + l.rposOrderReference + ')' : '') +
                                                                       (l.rposOrderCount && l.rposOrderCount > 1 ? ' + ' + (l.rposOrderCount - 1) + ' autre(s)' : '') +
@@ -1177,14 +1177,14 @@
                                                                       // absent (commande ancienne, avant l'ajout de ce champ) : rien affiché.
                                                                       (l.rposOrderStatus === 2 ? ' — validée' : l.rposOrderStatus === 1 ? ' — en préparation (pas encore validée)' : l.rposOrderStatus === 6 ? ' — annulée' : '') +
                                                                       '</span>' +
-                                                                      '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '">🔓 Débloquer et commander quand même</button>'
+                                                                      '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '"><iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même</button>'
                                                                  : '');
                                                        // Anomalie de commande (backend/amelioration.md, 18/09/2026) : quantité proposée qui
                                                        // s'écarte significativement de l'historique validé pour cet article — jamais "erreur",
                                                        // juste un signal à vérifier avant de valider. Visible directement sur la ligne, avant
                                                        // toute décision (contrairement à un blocage après-coup).
                                                        const orderAnomalyBadge = l.orderAnomaly
-                                                            ? '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))">⚠️ ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>'
+                                                            ? '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>'
                                                             : '';
                                                        // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
                                                        // uniquement si une commande RPOS/POS est déjà en cours pour cet article. Affiché comme
@@ -1196,7 +1196,7 @@
                                                        // s'affiche seulement en l'absence totale de commande en cours (orderSufficiencyReasoning
                                                        // null, cas normal sans commande à comparer).
                                                        const orderSufficiencyBadge = l.orderSufficiencyReasoning
-                                                            ? '<br><span class="badge ' + (l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success') + ' mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">' + (l.orderSufficient === false ? '⚠️ Commande insuffisante' : '✅ Commande suffisante') + '</span>'
+                                                            ? '<br><span class="badge ' + (l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success') + ' mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">' + (l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante') + '</span>'
                                                             : '';
                                                        return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
                                                             '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
@@ -1305,7 +1305,7 @@
                                                   if (check) check.checked = true;
                                                   setLineQuantity(lineId, quantity);
                                                   btn.disabled = true;
-                                                  btn.textContent = '✅ Débloqué — inclus dans la commande';
+                                                  btn.innerHTML = '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Débloqué — inclus dans la commande';
                                                   btn.classList.remove('btn-warning');
                                                   btn.classList.add('btn-success');
                                                   updateOrderTotal();
@@ -1478,7 +1478,7 @@
                                                        // uniquement si une commande RPOS est déjà en cours pour cet article.
                                                        (p.orderSufficiencyReasoning
                                                             ? '<div class="alert ' + (p.orderSufficiencyReasoning.sufficient ? 'alert-success' : 'alert-warning') + ' mt-2 mb-0">' +
-                                                                 '<strong>' + (p.orderSufficiencyReasoning.sufficient ? '✓ Commande suffisante' : '⚠️ Commande insuffisante') + ' :</strong> ' + p.orderSufficiencyReasoning.message +
+                                                                 '<strong>' + (p.orderSufficiencyReasoning.sufficient ? '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante' : '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante') + ' :</strong> ' + p.orderSufficiencyReasoning.message +
                                                                  '</div>'
                                                             : '') +
                                                        '<div class="border rounded p-3 mt-2 bg-light-subtle">' +
@@ -1974,7 +1974,7 @@
                                                        // évite de le découvrir seulement après la génération (bug constaté : calcul silencieux
                                                        // sur des données partielles présentées comme complètes).
                                                        if (json.data.coverageWarning) {
-                                                            genCoverageWarning.innerHTML = '<strong>⚠ ' + json.data.coverageWarning.message + '</strong>';
+                                                            genCoverageWarning.innerHTML = '<strong><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + json.data.coverageWarning.message + '</strong>';
                                                             genCoverageWarning.style.display = '';
                                                        }
                                                   } catch (err) {
@@ -2072,7 +2072,7 @@
                                                             // la génération, mais l'ancien message générique "✓ Terminé" laissait croire à tort que
                                                             // l'IA avait bien analysé les articles : on l'affiche maintenant explicitement pour ne
                                                             // pas induire en erreur sur l'origine réelle des quantités proposées.
-                                                            genProgressText.innerHTML = '<span class="text-warning fw-semibold">⚠ IA non disponible' +
+                                                            genProgressText.innerHTML = '<span class="text-warning fw-semibold"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> IA non disponible' +
                                                                  (status.aiErrorMessage ? ' (' + status.aiErrorMessage + ')' : '') + '.</span> ' +
                                                                  'Les quantités proposées restent basées sur le calcul statistique classique (ventes réelles), sans ajustement IA.';
                                                        } else {
@@ -2100,10 +2100,10 @@
                                                   genProgressBar.classList.remove('bg-danger', 'bg-primary', 'progress-bar-striped', 'progress-bar-animated');
                                                   genProgressBar.classList.add('bg-success');
                                                   const lineCount = (status.proposal && status.proposal.lines) ? status.proposal.lines.length : 0;
-                                                  genProgressText.innerHTML = '<span class="text-success fw-semibold">✓ Génération terminée avec succès.</span> ' +
+                                                  genProgressText.innerHTML = '<span class="text-success fw-semibold"><iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Génération terminée avec succès.</span> ' +
                                                        (lineCount ? lineCount + ' article(s) proposé(s).' : 'Aucun article à proposer pour le moment.') +
                                                        (status.aiUnavailable
-                                                            ? '<br><span class="text-warning small">⚠ IA non disponible' + (status.aiErrorMessage ? ' (' + status.aiErrorMessage + ')' : '') + ' — quantités basées sur le calcul statistique classique uniquement.</span>'
+                                                            ? '<br><span class="text-warning small"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> IA non disponible' + (status.aiErrorMessage ? ' (' + status.aiErrorMessage + ')' : '') + ' — quantités basées sur le calcul statistique classique uniquement.</span>'
                                                             : '');
                                                   genProgressHint.style.display = 'none';
                                              }
@@ -2113,7 +2113,7 @@
                                                   setGenStepState(activeStep, 'error');
                                                   genProgressBar.classList.remove('bg-success', 'bg-primary', 'progress-bar-striped', 'progress-bar-animated');
                                                   genProgressBar.classList.add('bg-danger');
-                                                  genProgressText.innerHTML = '<span class="text-danger fw-semibold">✗ Échec de la génération.</span> ' + (status.errorMessage || 'Erreur inconnue');
+                                                  genProgressText.innerHTML = '<span class="text-danger fw-semibold"><iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon> Échec de la génération.</span> ' + (status.errorMessage || 'Erreur inconnue');
                                                   genProgressHint.style.display = 'none';
                                              }
 
@@ -2318,7 +2318,7 @@
                                                   const deptWarning = document.getElementById('confirm-modal-dept-warning');
                                                   if (selectedDepartment) {
                                                        const totalLines = currentProposal.lines.length;
-                                                       deptWarning.innerHTML = '⚠️ Filtre actif : seul le rayon <strong>' + selectedDepartment + '</strong> sera envoyé (' +
+                                                       deptWarning.innerHTML = '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Filtre actif : seul le rayon <strong>' + selectedDepartment + '</strong> sera envoyé (' +
                                                             selected.length + '/' + totalLines + ' article(s) au total). Les autres rayons ne seront pas inclus dans cette commande.';
                                                        deptWarning.style.display = '';
                                                   } else {
@@ -2425,7 +2425,7 @@
                                                                  let ordersDetail = '';
                                                                  if (orders.length > 1) {
                                                                       ordersDetail = '<ul class="mb-0 mt-2 small">' + orders.map(function (o) {
-                                                                           const badge = o.status === 'DONE' ? '✅' : '❌';
+                                                                           const badge = o.status === 'DONE' ? '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon>' : '<iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon>';
                                                                            const label = o.rposOrderReference
                                                                                 ? 'commande <strong>' + o.rposOrderReference + '</strong>'
                                                                                 : '<span class="text-danger">échec de création' + (o.errorMessage ? ' — ' + o.errorMessage : '') + '</span>';

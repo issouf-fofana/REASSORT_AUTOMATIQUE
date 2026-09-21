@@ -234,7 +234,7 @@
     const fallbackQuantity = item ? (item.classicQuantitySuggested ?? item.predictedQuantity) : null;
     const fallbackCard = (fallbackQuantity !== null && fallbackQuantity !== undefined)
       ? '<div class="aip-ai-error-card mb-3">' +
-          '<p class="small mb-0"><strong>⚠ L\'IA n\'est pas disponible actuellement</strong> (' + escapeHtml(message) + ').<br>' +
+          '<p class="small mb-0"><strong><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> L\'IA n\'est pas disponible actuellement</strong> (' + escapeHtml(message) + ').<br>' +
           'La quantité ci-dessous reste basée sur une vraie analyse statistique des ventes réelles de cet article (moyenne, tendance, stock) — ce n\'est pas un calcul au hasard, seule l\'interprétation supplémentaire de l\'IA manque pour le moment.</p>' +
         '</div>' +
         '<div class="aip-reco-card">' +
@@ -244,7 +244,7 @@
           '<div class="aip-reco-quantity-unit">unités — calcul statistique, IA indisponible</div>' +
         '</div>'
       : '<div class="aip-ai-error-card mb-3">' +
-          '<p class="small mb-0"><strong>⚠ L\'IA n\'est pas disponible actuellement</strong> (' + escapeHtml(message) + ').<br>' +
+          '<p class="small mb-0"><strong><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> L\'IA n\'est pas disponible actuellement</strong> (' + escapeHtml(message) + ').<br>' +
           'Aucun calcul de repli n\'est disponible pour cet article — voir tout de même l\'historique de ventes ci-dessous.</p>' +
         '</div>';
     return fallbackCard +
