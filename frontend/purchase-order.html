@@ -1188,13 +1188,15 @@
                                                             : '';
                                                        // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
                                                        // uniquement si une commande RPOS/POS est déjà en cours pour cet article. Affiché comme
-                                                       // un badge cliquable (pas du texte brut qui déborde, corrigé le 21/09/2026) — RIEN affiché
-                                                       // si suffisant ("si c'est bon je propose rien"), un badge "Commande insuffisante" sinon,
-                                                       // cliquable pour ouvrir le détail complet en modale (cf. order-sufficiency-modal). Toujours
-                                                       // affiché indépendamment de excludedAsAlreadyOrderedRpos (bug corrigé plus tôt le même
-                                                       // jour : ce raisonnement ne doit jamais être masqué quand l'article est bloqué à 0).
-                                                       const orderSufficiencyBadge = (l.orderSufficiencyReasoning && l.orderSufficient === false)
-                                                            ? '<br><span class="badge bg-warning-subtle text-warning mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">⚠️ Commande insuffisante</span>'
+                                                       // un badge cliquable (pas du texte brut qui déborde, corrigé le 21/09/2026). Correction du
+                                                       // 21/09/2026 (retour utilisateur : "j'ai des article deja commander et validé rien ne me
+                                                       // dis que il est suffisant ou pas") : un badge est TOUJOURS affiché dès qu'un raisonnement
+                                                       // existe, vert "Commande suffisante" ou orange "Commande insuffisante" selon le cas — les
+                                                       // deux cliquables pour ouvrir le détail en modale (cf. order-sufficiency-modal). Rien ne
+                                                       // s'affiche seulement en l'absence totale de commande en cours (orderSufficiencyReasoning
+                                                       // null, cas normal sans commande à comparer).
+                                                       const orderSufficiencyBadge = l.orderSufficiencyReasoning
+                                                            ? '<br><span class="badge ' + (l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success') + ' mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">' + (l.orderSufficient === false ? '⚠️ Commande insuffisante' : '✅ Commande suffisante') + '</span>'
                                                             : '';
                                                        return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
                                                             '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
