@@ -409,11 +409,27 @@ router.post('/system-config/sales-files-upload', requireAdmin, salesFileUpload.s
       console.error(`[sales-files-upload] Échec de l'import en base pour ${req.file.filename} : ${err.message}`);
     }
 
+    // Détail structuré (demande du 21/09/2026 : "affiche une fenêtre pour montrer les détails,
+    // taille du fichier, nombre de ligne et nombre de ligne intégré et... si la donnée existe
+    // déjà") — le frontend construit sa propre modale à partir de ces champs plutôt que de
+    // parser le texte de "message" (conservé pour compatibilité/logs, mais plus la source de vérité
+    // pour l'affichage détaillé).
     res.json({
       success: true,
       message: importResult
         ? `Fichier "${req.file.filename}" importé avec succès : ${importResult.imported} ligne(s) de vente ajoutée(s) pour le magasin ${importResult.shopReference} (${importResult.shopName})${importResult.imported < importResult.totalLinesInFile ? ` — ${importResult.totalLinesInFile - importResult.imported} ligne(s) déjà présente(s), ignorée(s).` : '.'}`
         : `Fichier "${req.file.filename}" déposé, mais son import dans les ventes synchronisées a échoué : ${importError}`,
+      data: {
+        fileName: req.file.filename,
+        fileSizeBytes: req.file.size,
+        importSucceeded: !!importResult,
+        importError: importError || null,
+        shopReference: importResult?.shopReference || shopReference,
+        shopName: importResult?.shopName || null,
+        totalLinesInFile: importResult?.totalLinesInFile ?? null,
+        linesImported: importResult?.imported ?? null,
+        linesAlreadyPresent: importResult ? (importResult.totalLinesInFile - importResult.imported) : null,
+      },
     });
   } catch (error) {
     console.error('Sales file upload error:', error);

@@ -1810,6 +1810,48 @@
                                    }
                               });
 
+                              // Formate une taille en octets en unité lisible (Ko/Mo/Go) — un export de ventes réel
+                              // dépasse régulièrement 100 Mo, jamais pertinent d'afficher un nombre d'octets brut.
+                              function formatFileSize(bytes) {
+                                   if (bytes === null || bytes === undefined) return '—';
+                                   if (bytes < 1024) return bytes + ' o';
+                                   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' Ko';
+                                   if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' Mo';
+                                   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' Go';
+                              }
+
+                              // Fenêtre de détail d'import (demande du 21/09/2026) : remplace le simple message texte
+                              // par une vraie modale — taille du fichier, lignes lues, lignes intégrées, lignes déjà
+                              // présentes (doublons ignorés), et le magasin concerné.
+                              function showSalesImportDetail(data, fallbackMessage) {
+                                   const titleEl = document.getElementById('sales-import-detail-title');
+                                   const bodyEl = document.getElementById('sales-import-detail-body');
+                                   if (!data) {
+                                        titleEl.textContent = 'Échec de l\'import';
+                                        bodyEl.innerHTML = '<div class="alert alert-danger mb-0">' + fallbackMessage + '</div>';
+                                   } else if (data.importSucceeded) {
+                                        titleEl.textContent = 'Import réussi';
+                                        bodyEl.innerHTML =
+                                             '<table class="table table-sm mb-0">' +
+                                             '<tr><td>Fichier</td><td class="text-end fw-semibold">' + data.fileName + '</td></tr>' +
+                                             '<tr><td>Taille du fichier</td><td class="text-end">' + formatFileSize(data.fileSizeBytes) + '</td></tr>' +
+                                             '<tr><td>Magasin</td><td class="text-end">' + data.shopReference + (data.shopName ? ' (' + data.shopName + ')' : '') + '</td></tr>' +
+                                             '<tr><td>Lignes lues dans le fichier</td><td class="text-end">' + data.totalLinesInFile.toLocaleString('fr-FR') + '</td></tr>' +
+                                             '<tr><td class="text-success">Lignes intégrées en base</td><td class="text-end text-success fw-semibold">' + data.linesImported.toLocaleString('fr-FR') + '</td></tr>' +
+                                             '<tr><td class="text-muted">Déjà présentes (ignorées)</td><td class="text-end text-muted">' + data.linesAlreadyPresent.toLocaleString('fr-FR') + '</td></tr>' +
+                                             '</table>';
+                                   } else {
+                                        titleEl.textContent = 'Fichier déposé, import en base échoué';
+                                        bodyEl.innerHTML =
+                                             '<table class="table table-sm mb-2">' +
+                                             '<tr><td>Fichier</td><td class="text-end fw-semibold">' + data.fileName + '</td></tr>' +
+                                             '<tr><td>Taille du fichier</td><td class="text-end">' + formatFileSize(data.fileSizeBytes) + '</td></tr>' +
+                                             '</table>' +
+                                             '<div class="alert alert-warning mb-0">Le fichier reste utilisable pour une génération de proposition (lecture directe), mais n\'est pas encore visible dans "Ventes synchronisées".<br><strong>Erreur :</strong> ' + data.importError + '</div>';
+                                   }
+                                   new bootstrap.Modal(document.getElementById('sales-import-detail-modal')).show();
+                              }
+
                               document.getElementById('system-sales-file-upload-btn').addEventListener('click', async function () {
                                    const input = document.getElementById('system-sales-file-input');
                                    const resultBox = document.getElementById('system-sales-file-upload-result');
@@ -1821,7 +1863,7 @@
                                    const btn = this;
                                    const originalText = btn.textContent;
                                    btn.disabled = true;
-                                   btn.textContent = 'Import en cours...';
+                                   btn.textContent = 'Import en cours (peut prendre plusieurs minutes sur un gros fichier)...';
                                    resultBox.innerHTML = '';
                                    try {
                                         const formData = new FormData();
@@ -1834,10 +1876,10 @@
                                         });
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
-                                        resultBox.innerHTML = '<span class="text-success">' + json.message + '</span>';
+                                        showSalesImportDetail(json.data, json.message);
                                         input.value = '';
                                    } catch (err) {
-                                        resultBox.innerHTML = '<span class="text-danger">Erreur: ' + err.message + '</span>';
+                                        showSalesImportDetail(null, err.message);
                                    } finally {
                                         btn.disabled = false;
                                         btn.textContent = originalText;
@@ -3622,6 +3664,24 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
      <!-- /py-4 -->
      </main>
      <!-- ========== /Volt main content ========== -->
+
+     <!-- Détail d'import d'un fichier de ventes (demande du 21/09/2026) : remplace le simple
+          message texte par une vraie fenêtre montrant taille du fichier, lignes lues, lignes
+          intégrées et lignes déjà présentes ignorées. -->
+     <div class="modal fade" id="sales-import-detail-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title" id="sales-import-detail-title">Résultat de l'import</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="sales-import-detail-body"></div>
+                    <div class="modal-footer">
+                         <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Fermer</button>
+                    </div>
+               </div>
+          </div>
+     </div>
 
      <!-- Volt vendor JS (Require in all Page) -->
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
