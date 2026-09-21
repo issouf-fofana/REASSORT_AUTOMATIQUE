@@ -319,8 +319,12 @@ Les commandes passées deviennent ainsi une source d'information importante pour
 ### Contexte
 
 L'utilisateur a confirmé que les DLV (dates limites de vente) sont disponibles côté API RPOS —
-reste à identifier l'endpoint exact et la structure des données une fois l'accès réseau
-disponible (VPN ou connexion directe au serveur RPOS).
+**endpoint identifié le 21/09/2026** : `end_of_life_product` (vu via l'URL d'administration RPOS :
+`https://pos1-prod-prosuma.prosuma.pos/administration/#!/end_of_life_product?page=1&created_at_0=...&created_at_1=...&is_deleted=false&page_size=250&search_options_view=normal`).
+Reste à explorer l'API REST correspondante (probablement `/api/end_of_life_product/`, à confirmer —
+même convention que les autres endpoints déjà utilisés dans rposClient.js, ex: `/api/product/`,
+`/api/product_addressing/`) une fois l'accès réseau RPOS disponible : structure exacte des champs
+(date de péremption par lot ou par article ?, quantité concernée, lien avec ProductCache.ean).
 
 ### Pourquoi c'est important (analyse du 19/09/2026)
 
