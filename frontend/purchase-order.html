@@ -466,6 +466,21 @@
                                         </div>
                                    </div>
 
+                                   <!-- Détail de suffisance de commande (demande du 21/09/2026) : au lieu d'un texte brut qui
+                                        déborde sur la ligne du tableau, un badge cliquable ouvre cette modale avec l'explication
+                                        complète — rien affiché sur la ligne quand c'est suffisant. -->
+                                   <div class="modal fade" id="order-sufficiency-modal" tabindex="-1" aria-hidden="true">
+                                        <div class="modal-dialog modal-dialog-centered">
+                                             <div class="modal-content">
+                                                  <div class="modal-header">
+                                                       <h5 class="modal-title" id="os-modal-title">Commande déjà en cours</h5>
+                                                       <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                  </div>
+                                                  <div class="modal-body" id="os-modal-body"></div>
+                                             </div>
+                                        </div>
+                                   </div>
+
                                    <div class="modal fade" id="generate-progress-modal" tabindex="-1" aria-hidden="true">
                                         <div class="modal-dialog modal-dialog-centered">
                                              <div class="modal-content">
@@ -1172,19 +1187,14 @@
                                                             ? '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))">⚠️ ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>'
                                                             : '';
                                                        // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
-                                                       // uniquement si une commande RPOS/POS est déjà en cours pour cet article — explique en
-                                                       // langage naturel si elle suffit ou non, plutôt qu'une simple soustraction silencieuse.
-                                                       // Affiché même quand l'article reste dans la liste (quantité complémentaire proposée),
-                                                       // pas seulement quand il est totalement exclu (cf. alreadyOrderedBadge ci-dessus).
-                                                       // TOUJOURS affiché, y compris quand excludedAsAlreadyOrderedRpos est vrai (correctif du
-                                                       // 21/09/2026) : masquer ce raisonnement précisément dans CE cas était le vrai bug —
-                                                       // "au lieu de dire directement qu'il est dans une commande donc pas de quantité à
-                                                       // proposer, il doit d'abord dire si la quantité commandée est suffisante ou pas, et
-                                                       // c'est après ça qu'il propose une quantité". alreadyOrderedBadge annonce QUAND/COMBIEN
-                                                       // a été commandé ; orderSufficiencyReasoning dit SI c'est suffisant — deux informations
-                                                       // complémentaires, jamais redondantes, qui doivent apparaître ensemble.
-                                                       const orderSufficiencyBadge = l.orderSufficiencyReasoning
-                                                            ? '<br><div class="small text-muted mt-1" style="max-width: 320px;">🧮 ' + l.orderSufficiencyReasoning + '</div>'
+                                                       // uniquement si une commande RPOS/POS est déjà en cours pour cet article. Affiché comme
+                                                       // un badge cliquable (pas du texte brut qui déborde, corrigé le 21/09/2026) — RIEN affiché
+                                                       // si suffisant ("si c'est bon je propose rien"), un badge "Commande insuffisante" sinon,
+                                                       // cliquable pour ouvrir le détail complet en modale (cf. order-sufficiency-modal). Toujours
+                                                       // affiché indépendamment de excludedAsAlreadyOrderedRpos (bug corrigé plus tôt le même
+                                                       // jour : ce raisonnement ne doit jamais être masqué quand l'article est bloqué à 0).
+                                                       const orderSufficiencyBadge = (l.orderSufficiencyReasoning && l.orderSufficient === false)
+                                                            ? '<br><span class="badge bg-warning-subtle text-warning mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">⚠️ Commande insuffisante</span>'
                                                             : '';
                                                        return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
                                                             '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
@@ -1297,6 +1307,16 @@
                                                   btn.classList.remove('btn-warning');
                                                   btn.classList.add('btn-success');
                                                   updateOrderTotal();
+                                             });
+
+                                             // Badge "Commande insuffisante" cliquable (demande du 21/09/2026) : ouvre le détail complet
+                                             // en modale plutôt que du texte brut affiché en permanence sur la ligne.
+                                             const osModalEl = document.getElementById('order-sufficiency-modal');
+                                             tbody.addEventListener('click', function (e) {
+                                                  const badge = e.target.closest('.os-badge');
+                                                  if (!badge) return;
+                                                  document.getElementById('os-modal-body').textContent = badge.dataset.reasoning;
+                                                  new bootstrap.Modal(osModalEl).show();
                                              });
 
                                              // --- Recommandation IA à la demande, article par article : au clic sur "Analyser"

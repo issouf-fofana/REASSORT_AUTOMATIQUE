@@ -733,7 +733,12 @@ model ProposalLine {
   // "il doit voir la quantité commandée... et me dire que la quantité commandée en premier est
   // insuffisante"). Distinct de aiReasoning (celui-ci vient du LLM, sur la quantité finale ; celui-ci
   // est calculé, sur la suffisance d'une commande déjà passée). Null si aucune commande en cours.
-  orderSufficiencyReasoning String? @map("order_sufficiency_reasoning")
+  orderSufficiencyReasoning String?  @map("order_sufficiency_reasoning")
+  // true = suffisant, false = insuffisant, null = aucune commande en cours (cohérent avec
+  // orderSufficiencyReasoning ci-dessus). Ajouté le 21/09/2026 : sans ce booléen séparé, le
+  // frontend ne pouvait décider d'afficher un badge QUE si insuffisant (demande explicite :
+  // "si c'est bon je propose rien, sinon j'ai un badge") sans reparser le texte du message.
+  orderSufficient           Boolean? @map("order_sufficient")
 
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).
