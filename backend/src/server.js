@@ -56,14 +56,25 @@ app.use((req, res, next) => {
   res.json = (body) => { res.locals.responseBody = body; return origJson(body); };
   res.on('finish', () => {
     if (res.statusCode < 500 || !req.originalUrl.startsWith('/api/')) return;
+    const body = res.locals.responseBody;
+    const message = (body && body.message) || (res.locals.errorStack || '').split('\n')[0] || `HTTP ${res.statusCode}`;
+    // Écrit AUSSI dans stderr (demande du 21/09/2026 : "il faut loger les erreurs dans les logs de
+    // mon dokploy aussi il est vide or j'ai des erreurs") — jusqu'ici, une route qui gérait son
+    // propre catch et répondait res.status(500).json(...) directement (la majorité des routes de ce
+    // projet) ne passait jamais par le error handler central d'Express (celui-là logue déjà
+    // correctement via logger.error, cf. plus bas dans ce fichier), donc n'apparaissait JAMAIS dans
+    // les logs du conteneur — seulement dans la réponse HTTP renvoyée au navigateur. Dokploy (et
+    // `docker logs`) ne lit que stdout/stderr, jamais la table ErrorReport ci-dessous : sans cette
+    // ligne, une vraie erreur 500 pouvait rester invisible côté logs alors qu'elle cassait déjà
+    // l'écran d'un utilisateur (ex: REVISION_CHANGE_THRESHOLD, type Float au lieu de String).
+    console.error(`[5xx] ${req.method} ${req.originalUrl} -> ${res.statusCode} : ${message}`);
     try {
-      const body = res.locals.responseBody;
       require('./services/errorReportService').reportError({
         source: 'backend',
         url: `${req.method} ${req.originalUrl}`.slice(0, 500),
         method: req.method,
         statusCode: res.statusCode,
-        message: (body && body.message) || (res.locals.errorStack || '').split('\n')[0] || `HTTP ${res.statusCode}`,
+        message,
         stack: res.locals.errorStack || null,
         userEmail: (req.user && req.user.email) || null,
         shopRef: (req.user && req.user.rposShopReference) || null,
