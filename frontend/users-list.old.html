@@ -19,16 +19,6 @@
           via vendor.js, absent du build Volt. Chargée séparément pour ne pas réécrire ~30 icônes. -->
      <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
-     <!-- AG Grid Community (migration du tableau "Comptes existants", demande du 21/09/2026, même
-          pattern que purchase-order-v2.html) : tri/filtre par colonne + export CSV en JS vanilla.
-          L'export .xlsx stylé est réservé à AG Grid Enterprise (licence payante, absente de ce
-          projet) — le CSV, gratuit avec Community, s'ouvre directement dans Excel. -->
-     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
-     <script src="assets/js/ag-grid-setup.js"></script>
-     <script src="assets/js/ag-grid-locale-fr.js"></script>
-
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
@@ -47,34 +37,6 @@
             ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
             le débordement horizontal du panneau latéral. */
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
-
-         /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun
-            coin arrondi, police Inter) — même règle que purchase-order-v2.html. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 13.5px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: #f3f4f6;
-              --ag-row-hover-color: #f8f9fa;
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #dee2e6;
-              --ag-border-color: #dee2e6;
-              --ag-row-border-color: #eef0f2;
-              --ag-cell-horizontal-border: #eef0f2;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-         }
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         #users-grid.ag-theme-quartz {
-              width: 100%;
-         }
     </style>
 </head>
 
@@ -197,15 +159,26 @@
                                    <div class="card">
                                         <div class="d-flex card-header justify-content-between align-items-center">
                                              <h4 class="card-title">Comptes existants</h4>
-                                             <div class="d-flex gap-2">
-                                                  <button id="users-export-csv" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
-                                                       <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
-                                                  </button>
-                                                  <button id="users-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
-                                             </div>
+                                             <button id="users-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
                                         </div>
                                         <div class="card-body p-0">
-                                             <div id="users-grid" class="ag-theme-quartz"></div>
+                                             <div class="table-responsive">
+                                                  <table class="table align-middle mb-0 table-hover table-centered">
+                                                       <thead class="bg-light-subtle">
+                                                            <tr>
+                                                                 <th>Nom</th>
+                                                                 <th>Email</th>
+                                                                 <th>Rôle</th>
+                                                                 <th>Magasin</th>
+                                                                 <th>Statut</th>
+                                                                 <th>Action</th>
+                                                            </tr>
+                                                       </thead>
+                                                       <tbody id="users-tbody">
+                                                            <tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>
+                                                       </tbody>
+                                                  </table>
+                                             </div>
                                         </div>
                                    </div>
                               </div>
@@ -354,131 +327,8 @@
                               const form = document.getElementById('create-user-form');
                               const errorBox = document.getElementById('create-user-error');
                               const submitBtn = document.getElementById('create-user-submit');
+                              const usersTbody = document.getElementById('users-tbody');
                               const refreshBtn = document.getElementById('users-refresh');
-
-                              // --- Grille AG Grid "Comptes existants" (migration du 21/09/2026, même pattern que
-                              // purchase-order-v2.html) : tri/filtre par colonne + export CSV, remplace le tableau
-                              // HTML + la délégation d'événements sur tbody (les boutons Modifier/Désactiver/
-                              // Réinitialiser sont maintenant recréés dans un cellRenderer avec leurs propres
-                              // écouteurs, AG Grid virtualisant les lignes hors écran). ---
-                              const ROLE_LABELS = {
-                                   ADMIN: 'Administrateur', SUPERVISOR: 'Superviseur', DIRECTOR: 'Directeur',
-                                   DEPARTMENT_HEAD: 'Chef de département', SHELF_STOCKER: 'Rayonniste',
-                                   STORE: 'Magasin (ancien rôle)', // ne devrait plus apparaître après migration, gardé par prudence
-                              };
-
-                              function shopLabelFor(u) {
-                                   if (u.role === 'ADMIN') return 'Tous magasins';
-                                   if (u.role === 'SUPERVISOR') {
-                                        const shops = u.supervisedShops || [];
-                                        return shops.length ? shops.map(function (s) { return s.rposShopReference; }).join(', ') : 'Aucun magasin';
-                                   }
-                                   let label = u.rposShopReference ? u.rposShopReference + ' - ' + u.rposShopName : 'Non assigné';
-                                   if (u.assignedDepartment) label += ' (' + u.assignedDepartment + ')';
-                                   return label;
-                              }
-
-                              function shopCellRenderer(params) {
-                                   const u = params.data;
-                                   const span = document.createElement('span');
-                                   if (u.role !== 'ADMIN' && ((u.role === 'SUPERVISOR' && !(u.supervisedShops || []).length) || (u.role !== 'SUPERVISOR' && !u.rposShopReference))) {
-                                        span.className = 'text-danger';
-                                   }
-                                   span.textContent = shopLabelFor(u);
-                                   return span;
-                              }
-
-                              function statusCellRenderer(params) {
-                                   const u = params.data;
-                                   const span = document.createElement('span');
-                                   span.className = 'badge py-1 px-2 ' + (u.isActive ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary');
-                                   span.textContent = u.isActive ? 'Actif' : 'Désactivé';
-                                   return span;
-                              }
-
-                              function actionsCellRenderer(params) {
-                                   const u = params.data;
-                                   const wrap = document.createElement('div');
-                                   wrap.className = 'd-flex gap-1';
-
-                                   const editBtn = document.createElement('button');
-                                   editBtn.type = 'button';
-                                   editBtn.className = 'btn btn-sm btn-outline-dark';
-                                   editBtn.textContent = 'Modifier';
-                                   editBtn.addEventListener('click', function () { openEditModal(u); });
-
-                                   const toggleBtn = document.createElement('button');
-                                   toggleBtn.type = 'button';
-                                   toggleBtn.className = 'btn btn-sm btn-outline-secondary';
-                                   toggleBtn.textContent = u.isActive ? 'Désactiver' : 'Réactiver';
-                                   toggleBtn.addEventListener('click', async function () {
-                                        toggleBtn.disabled = true;
-                                        try {
-                                             await window.reassortFetch('/users/' + u.id, {
-                                                  method: 'PUT',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify({ isActive: !u.isActive }),
-                                             });
-                                             loadUsers();
-                                        } catch (err) {
-                                             toggleBtn.disabled = false;
-                                        }
-                                   });
-
-                                   const resetBtn = document.createElement('button');
-                                   resetBtn.type = 'button';
-                                   resetBtn.className = 'btn btn-sm btn-outline-primary';
-                                   resetBtn.textContent = 'Réinitialiser le mot de passe';
-                                   resetBtn.addEventListener('click', function () {
-                                        resetPasswordTargetId = u.id;
-                                        resetPasswordError.style.display = 'none';
-                                        resetPasswordForm.reset();
-                                        resetPasswordTargetLabel.textContent = 'Compte : ' + u.name + ' (' + u.email + ')';
-                                        getResetPasswordModal().show();
-                                   });
-
-                                   wrap.appendChild(editBtn);
-                                   wrap.appendChild(toggleBtn);
-                                   wrap.appendChild(resetBtn);
-                                   return wrap;
-                              }
-
-                              const usersGridColumnDefs = [
-                                   { headerName: 'Nom', field: 'name', flex: 1, minWidth: 150, filter: 'agTextColumnFilter' },
-                                   { headerName: 'Email', field: 'email', flex: 1, minWidth: 200, filter: 'agTextColumnFilter' },
-                                   { headerName: 'Rôle', field: 'role', width: 180, filter: 'agTextColumnFilter',
-                                        valueFormatter: function (p) { return ROLE_LABELS[p.value] || p.value; } },
-                                   { headerName: 'Magasin', width: 220, filter: 'agTextColumnFilter', cellRenderer: shopCellRenderer,
-                                        valueGetter: function (p) { return shopLabelFor(p.data); } },
-                                   { headerName: 'Statut', width: 110, filter: 'agTextColumnFilter', cellRenderer: statusCellRenderer,
-                                        valueGetter: function (p) { return p.data.isActive ? 'Actif' : 'Désactivé'; } },
-                                   { headerName: 'Action', width: 340, sortable: false, filter: false, cellRenderer: actionsCellRenderer,
-                                        valueGetter: function () { return ''; } },
-                              ];
-
-                              let usersGridApi = null;
-                              function ensureUsersGrid() {
-                                   if (usersGridApi) return usersGridApi;
-                                   usersGridApi = agGrid.createGrid(document.getElementById('users-grid'), {
-                                        columnDefs: usersGridColumnDefs,
-                                        rowData: [],
-                                        localeText: window.AG_GRID_LOCALE_FR,
-                                        domLayout: 'autoHeight',
-                                        pagination: true,
-                                        paginationPageSize: 50,
-                                        paginationPageSizeSelector: [25, 50, 100, 200],
-                                        animateRows: false,
-                                        getRowId: function (params) { return params.data.id; },
-                                   });
-                                   return usersGridApi;
-                              }
-
-                              document.getElementById('users-export-csv').addEventListener('click', function () {
-                                   if (!usersGridApi) return;
-                                   usersGridApi.exportDataAsCsv({
-                                        fileName: 'utilisateurs-' + new Date().toISOString().slice(0, 10) + '.csv',
-                                   });
-                              });
 
                               // --- Mode "Compte Active Directory" (ajout du 17/09/2026, STEP 10) : recherche dans
                               // l'annuaire Prosuma au lieu d'une saisie manuelle nom/email/mot de passe. ---
@@ -740,16 +590,98 @@
 
                               let usersList = [];
                               async function loadUsers() {
-                                   ensureUsersGrid();
-                                   usersGridApi.setGridOption('rowData', []);
+                                   usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
                                    try {
                                         const res = await window.reassortFetch('/users');
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
                                         usersList = json.data;
-                                        usersGridApi.setGridOption('rowData', usersList);
+
+                                        if (!json.data.length) {
+                                             usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucun compte.</td></tr>';
+                                             return;
+                                        }
+
+                                        const ROLE_LABELS = {
+                                             ADMIN: 'Administrateur', SUPERVISOR: 'Superviseur', DIRECTOR: 'Directeur',
+                                             DEPARTMENT_HEAD: 'Chef de département', SHELF_STOCKER: 'Rayonniste',
+                                             STORE: 'Magasin (ancien rôle)', // ne devrait plus apparaître après migration, gardé par prudence
+                                        };
+                                        usersTbody.innerHTML = json.data.map(function (u) {
+                                             let shopLabel;
+                                             if (u.role === 'ADMIN') {
+                                                  shopLabel = '<span class="text-muted">Tous magasins</span>';
+                                             } else if (u.role === 'SUPERVISOR') {
+                                                  const shops = u.supervisedShops || [];
+                                                  shopLabel = shops.length
+                                                       ? shops.map(function (s) { return s.rposShopReference; }).join(', ')
+                                                       : '<span class="text-danger">Aucun magasin</span>';
+                                             } else {
+                                                  shopLabel = u.rposShopReference ? u.rposShopReference + ' - ' + u.rposShopName : '<span class="text-danger">Non assigné</span>';
+                                                  if (u.assignedDepartment) shopLabel += ' <span class="text-muted small">(' + u.assignedDepartment + ')</span>';
+                                             }
+                                             const roleLabel = ROLE_LABELS[u.role] || u.role;
+                                             const statusBadge = u.isActive
+                                                  ? '<span class="badge bg-success-subtle text-success py-1 px-2">Actif</span>'
+                                                  : '<span class="badge bg-secondary-subtle text-secondary py-1 px-2">Désactivé</span>';
+                                             return '<tr>' +
+                                                  '<td>' + u.name + '</td>' +
+                                                  '<td>' + u.email + '</td>' +
+                                                  '<td>' + roleLabel + '</td>' +
+                                                  '<td>' + shopLabel + '</td>' +
+                                                  '<td>' + statusBadge + '</td>' +
+                                                  '<td>' +
+                                                       '<div class="d-flex gap-1">' +
+                                                       '<button class="btn btn-sm btn-outline-dark edit-user-btn" data-id="' + u.id + '">' +
+                                                            'Modifier' +
+                                                       '</button>' +
+                                                       '<button class="btn btn-sm btn-outline-secondary toggle-user-btn" data-id="' + u.id + '" data-active="' + u.isActive + '">' +
+                                                            (u.isActive ? 'Désactiver' : 'Réactiver') +
+                                                       '</button>' +
+                                                       '<button class="btn btn-sm btn-outline-primary reset-password-btn" data-id="' + u.id + '" data-email="' + u.email + '" data-name="' + u.name + '">' +
+                                                            'Réinitialiser le mot de passe' +
+                                                       '</button>' +
+                                                       '</div>' +
+                                                  '</td>' +
+                                                  '</tr>';
+                                        }).join('');
+
+                                        document.querySelectorAll('.toggle-user-btn').forEach(function (btn) {
+                                             btn.addEventListener('click', async function () {
+                                                  const id = btn.dataset.id;
+                                                  const isActive = btn.dataset.active === 'true';
+                                                  btn.disabled = true;
+                                                  try {
+                                                       await window.reassortFetch('/users/' + id, {
+                                                            method: 'PUT',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ isActive: !isActive }),
+                                                       });
+                                                       loadUsers();
+                                                  } catch (err) {
+                                                       btn.disabled = false;
+                                                  }
+                                             });
+                                        });
+
+                                        document.querySelectorAll('.edit-user-btn').forEach(function (btn) {
+                                             btn.addEventListener('click', function () {
+                                                  const u = usersList.find(function (x) { return x.id === btn.dataset.id; });
+                                                  if (u) openEditModal(u);
+                                             });
+                                        });
+
+                                        document.querySelectorAll('.reset-password-btn').forEach(function (btn) {
+                                             btn.addEventListener('click', function () {
+                                                  resetPasswordTargetId = btn.dataset.id;
+                                                  resetPasswordError.style.display = 'none';
+                                                  resetPasswordForm.reset();
+                                                  resetPasswordTargetLabel.textContent = 'Compte : ' + btn.dataset.name + ' (' + btn.dataset.email + ')';
+                                                  getResetPasswordModal().show();
+                                             });
+                                        });
                                    } catch (err) {
-                                        console.error('[users-list] Erreur lors du chargement des comptes:', err);
+                                        usersTbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                    }
                               }
 

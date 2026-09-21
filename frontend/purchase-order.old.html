@@ -23,19 +23,6 @@
           ni empaquetée localement dans ce projet, chargée depuis un CDN comme Iconify ci-dessus. -->
      <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js"></script>
 
-     <!-- AG Grid Community (page pilote de migration des tableaux, demande du 21/09/2026) : tri/filtre
-          par colonne sur toutes les colonnes + export CSV, en JS vanilla (pas de Vue dans ce projet)
-          plutôt que le paquet @ag-grid-community/vue3 montré dans la doc partagée par l'utilisateur
-          (https://www.ag-grid.com/javascript-data-grid/excel-export-styles/). L'export .xlsx avec
-          styles conditionnels montré dans ce lien fait partie d'AG Grid Enterprise (licence payante,
-          pas configurée sur ce projet) — le CSV, gratuit avec la version Community, reste ouvrable
-          directement dans Excel avec toutes les mêmes données. -->
-     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
-     <script src="assets/js/ag-grid-setup.js"></script>
-     <script src="assets/js/ag-grid-locale-fr.js"></script>
-
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
@@ -105,43 +92,6 @@
               color: #a8adb3;
               font-size: .78rem;
               margin-top: .1rem;
-         }
-
-         /* Habillage AG Grid pour coller au thème du site (THEME_SYSTEM.md : palette noir/blanc/gris
-            stricte, aucun coin arrondi, police Inter) — le thème "Quartz" par défaut d'AG Grid a des
-            coins arrondis et un accent bleu, tous deux hors charte ici. Surcharge via les variables
-            CSS du thème (--ag-*, cf. https://www.ag-grid.com/javascript-data-grid/theming-css/)
-            plutôt que de réécrire chaque règle interne d'AG Grid. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 13.5px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: #f3f4f6;
-              --ag-row-hover-color: #f8f9fa;
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #dee2e6;
-              --ag-border-color: #dee2e6;
-              --ag-row-border-color: #eef0f2;
-              --ag-cell-horizontal-border: #eef0f2;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-         }
-         /* La variable de thème --ag-border-radius (ci-dessus) ne couvre pas tous les coins internes
-            générés par AG Grid (menus de filtre, popups) : filet de sécurité générique, même
-            logique que le sélecteur global de theme-override.css pour le reste du site. */
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         /* La grille n'a plus besoin d'une hauteur fixe avec du vide en dessous (720px quel que soit
-            le nombre de lignes) : domLayout: 'autoHeight' (posé côté JS) fait grandir/rétrécir la
-            grille avec son contenu réel, comme le reste des tableaux du site. */
-         #reassort-grid.ag-theme-quartz {
-              width: 100%;
          }
     </style>
 </head>
@@ -581,18 +531,46 @@
                                    <div id="reassort-rpos-blocked-banner" class="alert alert-secondary mx-3 mt-3 mb-0 small" style="display:none;"></div>
 
                                    <div class="card-body p-0">
-                                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 pt-3">
-                                             <div class="text-muted small" id="reassort-total-value">Total commande : —</div>
-                                             <div class="d-flex gap-2">
-                                                  <button type="button" id="reassort-select-all-btn" class="btn btn-sm btn-outline-secondary">
-                                                       <iconify-icon icon="solar:check-square-bold-duotone" class="align-middle"></iconify-icon> Tout cocher/décocher
-                                                  </button>
-                                                  <button type="button" id="reassort-export-excel" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
-                                                       <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
-                                                  </button>
-                                             </div>
+                                        <div class="table-responsive">
+                                             <table class="table align-middle mb-0 table-hover table-centered">
+                                                  <thead class="bg-light-subtle">
+                                                       <tr>
+                                                            <th><input type="checkbox" id="reassort-select-all" class="form-check-input"></th>
+                                                            <th>#</th>
+                                                            <th>EAN</th>
+                                                            <th>Article</th>
+                                                            <th class="text-end">Prix vente</th>
+                                                            <th class="text-end">Vente moy./sem.</th>
+                                                            <th class="text-end">Stock actuel</th>
+                                                            <th class="text-end">Rupture dans</th>
+                                                            <th>Dernier achat</th>
+                                                            <th>Dernière vente</th>
+                                                            <th class="text-end">% CA magasin</th>
+                                                            <th class="text-end"><iconify-icon icon="solar:magic-stick-3-bold" class="align-middle me-1"></iconify-icon>IA</th>
+                                                            <th class="text-end">Qté proposée</th>
+                                                            <th class="text-end">Valeur commande</th>
+                                                       </tr>
+                                                  </thead>
+                                                  <tbody id="reassort-tbody">
+                                                       <tr>
+                                                            <td colspan="13" class="text-center text-muted py-4">Chargement...</td>
+                                                       </tr>
+                                                  </tbody>
+                                                  <tfoot>
+                                                       <tr class="fw-semibold">
+                                                            <td colspan="11" class="text-end">Total commande</td>
+                                                            <td class="text-end" id="reassort-total-value">—</td>
+                                                       </tr>
+                                                  </tfoot>
+                                             </table>
                                         </div>
-                                        <div id="reassort-grid" class="ag-theme-quartz m-3"></div>
+                                        <!-- end table-responsive -->
+                                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 border-top" id="reassort-pagination-bar" style="display:none;">
+                                             <div class="text-muted small" id="reassort-pagination-info"></div>
+                                             <nav>
+                                                  <ul class="pagination pagination-sm mb-0" id="reassort-pagination-controls"></ul>
+                                             </nav>
+                                        </div>
                                    </div>
                                    <script>
                                         (function () {
@@ -605,28 +583,51 @@
                                              let reassortCurrentPage = 1;
                                              let reassortCurrentLines = [];
 
-                                             // Quantité décidée par ligne, tenue à part de currentProposal.lines (source de vérité pour
-                                             // la validation, cf. validateProposal) : AG Grid virtualise les lignes hors écran, donc on
-                                             // ne peut plus lire l'état depuis le DOM comme avant (querySelector sur des inputs qui
-                                             // n'existent plus une fois la ligne scrollée hors vue) — corrigé le 21/09/2026 lors de la
-                                             // migration AG Grid (backend/amelioration.md : "il faut bien fait les tableau").
-                                             const lineState = new Map(); // lineId -> { quantity, excluded }
+                                             // Champ de quantité en nombre de colis, avec le colisage affiché à côté (comme RPOS :
+                                             // "Quantité UC" x colisage = quantité totale) : on saisit "3" pour un article en carton
+                                             // de 10, le système calcule et envoie 30 unités — plus lisible que de deviner soi-même
+                                             // le multiple exact à taper dans un champ unique en unités.
+                                             function qtyInputCell(l) {
+                                                  const unit = Number(l.orderingUnit) || 1;
+                                                  // Affiche TOUJOURS quantitySuggested (la vraie quantité finale décidée — calcul classique,
+                                                  // ou l'IA si AI_QUANTITY_ADJUSTMENT_ENABLED est actif), jamais quantityIfUnblocked par
+                                                  // défaut : un article bloqué par une commande RPOS récente a normalement 0 ici (l'IA/le
+                                                  // calcul en a déjà tenu compte), et quantityIfUnblocked n'est qu'une valeur hypothétique
+                                                  // ("si on ignorait cette commande") préremplie SEULEMENT après un clic explicite sur
+                                                  // "Débloquer et commander quand même" (cf. reassort-unblock-btn plus bas) — l'afficher par
+                                                  // défaut avant ce clic laissait croire à tort que c'était la proposition normale, alors que
+                                                  // le panneau IA (même article) répondait cohéremment 0, créant une contradiction visible.
+                                                  const suggestedQty = l.quantitySuggested;
+                                                  const nbColis = Math.round((suggestedQty / unit) * 100) / 100;
 
-                                             function lineUnit(l) { return Number(l.orderingUnit) || 1; }
-                                             function nbColisFor(l, quantity) { return Math.round((quantity / lineUnit(l)) * 100) / 100; }
-
-                                             function getLineState(l) {
-                                                  if (!lineState.has(l.id)) {
-                                                       lineState.set(l.id, { quantity: l.quantitySuggested, excluded: !(l.quantitySuggested > 0) });
-                                                  }
-                                                  return lineState.get(l.id);
+                                                  // Affiché systématiquement, même pour un colisage de 1 (vendu à l'unité) : "× 1" rend
+                                                  // la colonne cohérente sur toutes les lignes plutôt que de changer de forme selon
+                                                  // l'article, ce qui rendait plus difficile de comparer les lignes entre elles.
+                                                  return '<div class="d-flex align-items-center justify-content-end gap-1">' +
+                                                       '<input type="number" min="0" step="1" class="form-control form-control-sm text-end reassort-colis-input" data-line-id="' + l.id + '" data-unit="' + unit + '" value="' + nbColis + '" style="width: 65px;" title="Nombre de colis">' +
+                                                       '<span class="text-muted small">× ' + unit + '</span>' +
+                                                       '<input type="number" min="0" readonly class="form-control form-control-sm text-end bg-light reassort-qty-input" data-line-id="' + l.id + '" data-product-id="' + l.productId + '" data-price="' + (l.sellingPrice || 0) + '" value="' + suggestedQty + '" style="width: 70px;" title="Quantité totale en unités (calculée à partir du nombre de colis)">' +
+                                                       '</div>';
                                              }
 
+                                             // Ouvre le panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js,
+                                             // même composant que ai-predictions.html) : le tableau n'affiche plus jamais le résultat
+                                             // technique en cellule (quantité + raison tronquée dans un title="...") — l'IA lance son
+                                             // analyse à l'ouverture du panneau, avec la recommandation en gros, un bouton "Pourquoi ?"
+                                             // pour le détail, et un champ pour appliquer une quantité ajustée à la ligne.
+                                             function aiSuggestionCell(l) {
+                                                  return '<button type="button" class="btn btn-sm btn-outline-dark ai-analyze-line-btn" data-ean="' + l.ean + '" title="Demander une recommandation IA pour cet article">' +
+                                                       '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle"></iconify-icon> Analyser' +
+                                                       '</button>';
+                                             }
+
+                                             const tbody = document.getElementById('reassort-tbody');
                                              const status = document.getElementById('reassort-status');
                                              const refreshBtn = document.getElementById('reassort-refresh');
                                              const sendBtn = document.getElementById('reassort-send');
                                              const generateBtn = document.getElementById('reassort-generate');
                                              const forceGenerateBtn = document.getElementById('reassort-force-generate');
+                                             const selectAll = document.getElementById('reassort-select-all');
                                              const resultBox = document.getElementById('reassort-result');
                                              const orderDateInput = document.getElementById('reassort-order-date');
                                              const deliveryDateInput = document.getElementById('reassort-delivery-date');
@@ -1050,309 +1051,51 @@
                                                   renderTileGrid(tiles, rayons, proposal, proposal);
                                              }
 
-                                             // --- Grille AG Grid (remplace le tableau HTML + la pagination client, demande du
-                                             // 21/09/2026 : tri/filtre sur toutes les colonnes + export Excel stylé, cf.
-                                             // https://www.ag-grid.com/javascript-data-grid/excel-export-styles/). ---
-                                             const osModalEl = document.getElementById('order-sufficiency-modal');
+                                             // Génère les boutons Précédent/1..N/Suivant. Change de page sans recharger les données
+                                             // (currentProposal reste en mémoire), juste un nouveau renderRows().
+                                             function renderPaginationControls(totalLines) {
+                                                  const bar = document.getElementById('reassort-pagination-bar');
+                                                  const info = document.getElementById('reassort-pagination-info');
+                                                  const controls = document.getElementById('reassort-pagination-controls');
+                                                  const totalPages = Math.max(1, Math.ceil(totalLines / REASSORT_PAGE_SIZE));
 
-                                             function checkCellRenderer(params) {
-                                                  const input = document.createElement('input');
-                                                  input.type = 'checkbox';
-                                                  input.className = 'form-check-input';
-                                                  const st = getLineState(params.data);
-                                                  input.checked = !st.excluded;
-                                                  input.addEventListener('change', function () {
-                                                       st.excluded = !input.checked;
-                                                       updateOrderTotal();
-                                                  });
-                                                  return input;
-                                             }
+                                                  if (totalPages <= 1) {
+                                                       bar.style.display = 'none';
+                                                       return;
+                                                  }
+                                                  bar.style.display = '';
 
-                                             function labelCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const wrap = document.createElement('div');
-                                                  wrap.style.lineHeight = '1.5';
-                                                  let html = l.label;
-                                                  html += ' <button type="button" class="btn btn-sm btn-link p-0 ms-1 pa-open-btn" data-ean="' + l.ean + '" data-product-id="' + l.productId + '" data-label="' + l.label.replace(/"/g, '&quot;') + '" title="Voir l\'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>';
+                                                  const pageStart = (reassortCurrentPage - 1) * REASSORT_PAGE_SIZE;
+                                                  const pageEnd = Math.min(totalLines, pageStart + REASSORT_PAGE_SIZE);
+                                                  info.textContent = (pageStart + 1) + '–' + pageEnd + ' sur ' + totalLines + ' article(s)';
 
-                                                  if (l.excludedAsAlreadyOrdered) {
-                                                       html += '<br><span class="badge bg-info-subtle text-info mt-1" title="Déjà en commande sur cette plateforme, pas encore reçue"><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Déjà commandé (qté ' + (l.quantityInTransit || 0) + ')' +
-                                                            (l.platformOrderReference ? ' — cmd ' + l.platformOrderReference : '') +
-                                                            (l.platformOrderDate ? ' du ' + new Date(l.platformOrderDate).toLocaleDateString('fr-FR') : '') +
-                                                            '</span>';
-                                                  } else if (l.excludedAsAlreadyOrderedRpos) {
-                                                       html += '<br><span class="badge bg-secondary-subtle text-secondary mt-1" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme."><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Commandé le ' +
-                                                            (l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?') +
-                                                            (l.rposOrderReference ? ' (réf. ' + l.rposOrderReference + ')' : '') +
-                                                            (l.rposOrderCount && l.rposOrderCount > 1 ? ' + ' + (l.rposOrderCount - 1) + ' autre(s)' : '') +
-                                                            // 1=en préparation, 2=validée/en attente de livraison, 6=annulée (cf.
-                                                            // rposClient.validateSupplierOrder/cancelSupplierOrder) ; statut absent
-                                                            // (commande ancienne, avant l'ajout de ce champ) : rien affiché.
-                                                            (l.rposOrderStatus === 2 ? ' — validée' : l.rposOrderStatus === 1 ? ' — en préparation (pas encore validée)' : l.rposOrderStatus === 6 ? ' — annulée' : '') +
-                                                            '</span>' +
-                                                            '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '"><iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même</button>';
+                                                  function pageItem(page, label, disabled, active) {
+                                                       return '<li class="page-item' + (disabled ? ' disabled' : '') + (active ? ' active' : '') + '">' +
+                                                            '<a href="#" class="page-link reassort-page-link" data-page="' + page + '">' + label + '</a></li>';
                                                   }
 
-                                                  // Anomalie de commande (backend/amelioration.md, 18/09/2026) : quantité proposée qui
-                                                  // s'écarte significativement de l'historique validé pour cet article — jamais "erreur",
-                                                  // juste un signal à vérifier avant de valider.
-                                                  if (l.orderAnomaly) {
-                                                       html += '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>';
+                                                  let html = pageItem(reassortCurrentPage - 1, '«', reassortCurrentPage <= 1, false);
+                                                  const maxButtons = 7;
+                                                  let start = Math.max(1, reassortCurrentPage - Math.floor(maxButtons / 2));
+                                                  let end = Math.min(totalPages, start + maxButtons - 1);
+                                                  start = Math.max(1, end - maxButtons + 1);
+                                                  for (let p = start; p <= end; p++) {
+                                                       html += pageItem(p, String(p), false, p === reassortCurrentPage);
                                                   }
-
-                                                  // Raisonnement de suffisance de commande : badge TOUJOURS affiché dès qu'un raisonnement
-                                                  // existe (donc dès qu'une commande est en cours), vert "suffisante" ou orange
-                                                  // "insuffisante" — cliquable pour ouvrir le détail en modale (cf. order-sufficiency-modal).
-                                                  if (l.orderSufficiencyReasoning) {
-                                                       html += '<br><span class="badge ' + (l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success') + ' mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">' + (l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante') + '</span>';
-                                                  }
-
-                                                  wrap.innerHTML = html;
-                                                  return wrap;
+                                                  html += pageItem(reassortCurrentPage + 1, '»', reassortCurrentPage >= totalPages, false);
+                                                  controls.innerHTML = html;
                                              }
 
-                                             function stockCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const unreliableStock = !!l.hadNegativeStock;
-                                                  const stockValue = unreliableStock && l.actualStock !== null && l.actualStock !== undefined
-                                                       ? l.actualStock
-                                                       : l.stockAtGeneration;
-                                                  const wrap = document.createElement('div');
-                                                  let html = stockValue !== null && stockValue !== undefined
-                                                       ? (stockValue < 0 ? '<span class="text-danger fw-semibold">' + stockValue.toFixed(1) + '</span>' : stockValue.toFixed(1))
-                                                       : '—';
-                                                  if (unreliableStock) {
-                                                       html += '<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>';
-                                                  }
-                                                  wrap.innerHTML = html;
-                                                  return wrap;
-                                             }
-
-                                             function avgSalesCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const wrap = document.createElement('div');
-                                                  if (l.avgWeeklySales === null || l.avgWeeklySales === undefined) {
-                                                       wrap.textContent = '—';
-                                                       return wrap;
-                                                  }
-                                                  let html = l.avgWeeklySales.toFixed(1);
-                                                  if (l.seasonalityAdjusted) {
-                                                       html += '<br><span class="badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l\'année dernière (écart ' + (l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?') + ')"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saisonnalité</span>';
-                                                  }
-                                                  if (l.forecastMethod === 'smoothed') {
-                                                       html += '<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu\'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>';
-                                                  }
-                                                  wrap.innerHTML = html;
-                                                  return wrap;
-                                             }
-
-                                             function stockoutCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const wrap = document.createElement('div');
-                                                  if (l.daysUntilStockout === null || l.daysUntilStockout === undefined) {
-                                                       wrap.innerHTML = '<span class="text-muted">—</span>';
-                                                       return wrap;
-                                                  }
-                                                  const days = Math.round(l.daysUntilStockout);
-                                                  const badgeClass = days <= 3 ? 'bg-danger-subtle text-danger' : (days <= 7 ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success');
-                                                  wrap.innerHTML = '<span class="badge ' + badgeClass + ' py-1 px-2">' + (days <= 0 ? 'en rupture' : days + ' j') + '</span>';
-                                                  return wrap;
-                                             }
-
-                                             function lastPurchaseCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const span = document.createElement('span');
-                                                  span.className = 'last-purchase-result small text-muted';
-                                                  span.dataset.productId = l.productId;
-                                                  span.dataset.ean = l.ean;
-                                                  span.textContent = 'Chargement...';
-                                                  return span;
-                                             }
-
-                                             function lastSaleCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const span = document.createElement('span');
-                                                  span.className = 'last-sale-result small text-muted';
-                                                  span.dataset.productId = l.productId;
-                                                  span.textContent = 'Chargement...';
-                                                  return span;
-                                             }
-
-                                             // Ouvre le panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js, même
-                                             // composant que ai-predictions.html) pour CET article seul.
-                                             function aiCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const btn = document.createElement('button');
-                                                  btn.type = 'button';
-                                                  btn.className = 'btn btn-sm btn-outline-dark';
-                                                  btn.title = 'Demander une recommandation IA pour cet article';
-                                                  btn.innerHTML = '<iconify-icon icon="solar:magic-stick-3-bold" class="align-middle"></iconify-icon> Analyser';
-                                                  btn.addEventListener('click', function () {
-                                                       if (!currentProposal) return;
-                                                       window.openAiRecommendationPanel({
-                                                            proposalId: currentProposal.id,
-                                                            shopId: selectedShopId(),
-                                                            ean: l.ean,
-                                                            label: l.label,
-                                                            predictedQuantity: l.quantitySuggested,
-                                                            generationAiAdjusted: l.aiAdjusted,
-                                                            generationAiReasoning: l.aiReasoning,
-                                                            classicQuantitySuggested: l.classicQuantitySuggested,
-                                                            stockAtPrediction: l.stockAtGeneration,
-                                                            avgWeeklySales: l.avgWeeklySales,
-                                                            orderingUnit: l.orderingUnit,
-                                                            daysUntilStockout: l.daysUntilStockout,
-                                                            hasRecentOrder: !!l.excludedAsAlreadyOrderedRpos,
-                                                            recentOrderReference: l.rposOrderReference,
-                                                            recentOrderDate: l.rposOrderDate,
-                                                            recentOrderCount: l.rposOrderCount,
-                                                            onApply: function (quantity) {
-                                                                 setLineQuantity(l, quantity);
-                                                                 gridApi.refreshCells({ rowNodes: [params.node], force: true });
-                                                                 updateOrderTotal();
-                                                            },
-                                                       });
-                                                  });
-                                                  return btn;
-                                             }
-
-                                             // Champ de quantité en nombre de colis, avec le colisage affiché à côté (comme RPOS :
-                                             // "Quantité UC" x colisage = quantité totale) : on saisit "3" pour un article en carton de
-                                             // 10, le système calcule et envoie 30 unités.
-                                             function qtyCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const unit = lineUnit(l);
-                                                  const st = getLineState(l);
-                                                  const wrap = document.createElement('div');
-                                                  wrap.className = 'd-flex align-items-center justify-content-end gap-1';
-                                                  wrap.innerHTML =
-                                                       '<input type="number" min="0" step="1" class="form-control form-control-sm text-end" style="width: 65px;" title="Nombre de colis">' +
-                                                       '<span class="text-muted small">× ' + unit + '</span>' +
-                                                       '<input type="number" min="0" class="form-control form-control-sm text-end bg-light" style="width: 70px;" title="Quantité totale en unités (calculée à partir du nombre de colis)">';
-                                                  const colisInput = wrap.children[0];
-                                                  const qtyInput = wrap.children[2];
-                                                  colisInput.value = nbColisFor(l, st.quantity);
-                                                  qtyInput.value = st.quantity;
-                                                  colisInput.addEventListener('input', function () {
-                                                       const nbColis = parseFloat(colisInput.value) || 0;
-                                                       st.quantity = Math.round(nbColis * unit);
-                                                       qtyInput.value = st.quantity;
-                                                       updateOrderTotal();
-                                                  });
-                                                  qtyInput.addEventListener('input', function () {
-                                                       st.quantity = parseFloat(qtyInput.value) || 0;
-                                                       colisInput.value = nbColisFor(l, st.quantity);
-                                                       updateOrderTotal();
-                                                  });
-                                                  return wrap;
-                                             }
-
-                                             function valueCellRenderer(params) {
-                                                  const l = params.data;
-                                                  const st = getLineState(l);
-                                                  const span = document.createElement('span');
-                                                  span.dataset.lineId = l.id;
-                                                  span.className = 'reassort-line-value-cell';
-                                                  span.textContent = l.sellingPrice ? (l.sellingPrice * st.quantity).toLocaleString('fr-FR') + ' CFA' : '—';
-                                                  return span;
-                                             }
-
-                                             // Met à jour la quantité décidée pour une ligne (débloquer, appliquer une suggestion IA) :
-                                             // état tenu dans lineState, jamais dans le DOM (cf. commentaire sur lineState plus haut).
-                                             function setLineQuantity(l, quantity) {
-                                                  const st = getLineState(l);
-                                                  st.quantity = quantity;
-                                                  st.excluded = false;
-                                             }
-
-                                             // valueGetter dédiés à l'export CSV : les cellRenderer ci-dessus produisent du HTML/DOM
-                                             // (badges, boutons), qu'AG Grid ne sait pas traduire en cellule CSV — l'export lit la
-                                             // valeur "brute" de la colonne (field ou valueGetter), jamais le rendu DOM d'un cellRenderer.
-                                             const gridColumnDefs = [
-                                                  { headerName: '', field: '_check', width: 46, pinned: 'left', sortable: false, filter: false, resizable: false,
-                                                       cellRenderer: checkCellRenderer,
-                                                       valueGetter: function (p) { return getLineState(p.data).excluded ? 'Non' : 'Oui'; } },
-                                                  { headerName: '#', valueGetter: function (p) { return p.node.rowIndex + 1; }, width: 60, sortable: false, filter: false },
-                                                  { headerName: 'EAN', field: 'ean', width: 130, filter: 'agTextColumnFilter' },
-                                                  { headerName: 'Article', field: 'label', flex: 2, minWidth: 260, filter: 'agTextColumnFilter', autoHeight: true, wrapText: true, cellRenderer: labelCellRenderer },
-                                                  { headerName: 'Prix vente', field: 'sellingPrice', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 120,
-                                                       valueFormatter: function (p) { return p.value ? p.value.toLocaleString('fr-FR') + ' CFA' : '—'; } },
-                                                  { headerName: 'Vente moy./sem.', field: 'avgWeeklySales', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 150, autoHeight: true, cellRenderer: avgSalesCellRenderer },
-                                                  { headerName: 'Stock actuel', field: 'stockAtGeneration', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 140, autoHeight: true, cellRenderer: stockCellRenderer },
-                                                  { headerName: 'Rupture dans', field: 'daysUntilStockout', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, cellRenderer: stockoutCellRenderer },
-                                                  { headerName: 'Dernier achat', width: 170, sortable: false, filter: false, cellRenderer: lastPurchaseCellRenderer,
-                                                       valueGetter: function (p) { const el = document.querySelector('.last-purchase-result[data-product-id="' + p.data.productId + '"]'); return el ? el.textContent : ''; } },
-                                                  { headerName: 'Dernière vente', width: 170, sortable: false, filter: false, cellRenderer: lastSaleCellRenderer,
-                                                       valueGetter: function (p) { const el = document.querySelector('.last-sale-result[data-product-id="' + p.data.productId + '"]'); return el ? el.textContent : ''; } },
-                                                  { headerName: '% CA magasin', field: 'revenueSharePct', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130,
-                                                       valueFormatter: function (p) { return p.value !== null && p.value !== undefined ? p.value.toFixed(2) + ' %' : '—'; } },
-                                                  { headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer,
-                                                       valueGetter: function () { return ''; } },
-                                                  { headerName: 'Qté proposée', type: 'numericColumn', width: 170, sortable: false, filter: false, cellRenderer: qtyCellRenderer,
-                                                       valueGetter: function (p) { return getLineState(p.data).quantity; } },
-                                                  { headerName: 'Valeur commande', type: 'numericColumn', width: 150, sortable: false, filter: false, cellRenderer: valueCellRenderer,
-                                                       valueGetter: function (p) { const st = getLineState(p.data); return p.data.sellingPrice ? p.data.sellingPrice * st.quantity : 0; } },
-                                             ];
-
-                                             let gridApi = null;
-                                             function ensureGrid() {
-                                                  if (gridApi) return gridApi;
-                                                  gridApi = agGrid.createGrid(document.getElementById('reassort-grid'), {
-                                                       columnDefs: gridColumnDefs,
-                                                       rowData: [],
-                                                       localeText: window.AG_GRID_LOCALE_FR,
-                                                       // La grille prend la hauteur de son contenu réel (comme les autres tableaux du site)
-                                                       // plutôt qu'une hauteur fixe avec un grand vide en dessous quand peu de lignes.
-                                                       domLayout: 'autoHeight',
-                                                       pagination: true,
-                                                       paginationPageSize: REASSORT_PAGE_SIZE,
-                                                       paginationPageSizeSelector: [25, 50, 100, 200],
-                                                       animateRows: false,
-                                                       suppressCellFocus: true,
-                                                       getRowId: function (params) { return params.data.id; },
-                                                       // Dernier achat/dernière vente chargés à la demande, seulement pour les lignes
-                                                       // RÉELLEMENT affichées (page courante) : re-déclenché à chaque changement de page,
-                                                       // puisque AG Grid ne garde dans le DOM que les lignes de la page visible.
-                                                       onPaginationChanged: function () { loadLastPurchasesAutomatically(); },
-                                                       onCellClicked: function (e) {
-                                                            const target = e.event.target;
-                                                            const unblockBtn = target.closest && target.closest('.reassort-unblock-btn');
-                                                            if (unblockBtn) {
-                                                                 const quantity = parseFloat(unblockBtn.dataset.quantity) || 0;
-                                                                 setLineQuantity(e.data, quantity);
-                                                                 unblockBtn.disabled = true;
-                                                                 unblockBtn.innerHTML = '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Débloqué — inclus dans la commande';
-                                                                 unblockBtn.classList.remove('btn-warning');
-                                                                 unblockBtn.classList.add('btn-success');
-                                                                 gridApi.refreshCells({ rowNodes: [e.node], force: true });
-                                                                 updateOrderTotal();
-                                                                 return;
-                                                            }
-                                                            const osBadge = target.closest && target.closest('.os-badge');
-                                                            if (osBadge) {
-                                                                 document.getElementById('os-modal-body').textContent = osBadge.dataset.reasoning;
-                                                                 new bootstrap.Modal(osModalEl).show();
-                                                            }
-                                                       },
-                                                  });
-                                                  return gridApi;
-                                             }
-
-                                             // Recalcule la valeur de chaque ligne cochée (qté × prix vente) et le total de la commande,
-                                             // pour visualiser l'importance de chaque article et de la commande globale.
-                                             function updateOrderTotal() {
-                                                  let total = 0;
-                                                  reassortCurrentLines.forEach(function (l) {
-                                                       const st = getLineState(l);
-                                                       if (!st.excluded) total += (l.sellingPrice || 0) * st.quantity;
-                                                  });
-                                                  const totalEl = document.getElementById('reassort-total-value');
-                                                  if (totalEl) totalEl.textContent = 'Total commande : ' + total.toLocaleString('fr-FR') + ' CFA';
-                                                  // Les cellules "Valeur commande" affichées dépendent de st.quantity, potentiellement
-                                                  // modifié hors de leur propre cellRenderer (débloquer, panneau IA) : on les rafraîchit
-                                                  // toutes plutôt que de suivre au cas par cas quelle ligne a changé.
-                                                  if (gridApi) gridApi.refreshCells({ columns: ['Valeur commande'], force: true });
-                                             }
+                                             document.getElementById('reassort-pagination-controls').addEventListener('click', function (e) {
+                                                  const link = e.target.closest('.reassort-page-link');
+                                                  if (!link || link.closest('.page-item').classList.contains('disabled')) return;
+                                                  e.preventDefault();
+                                                  const page = parseInt(link.dataset.page, 10);
+                                                  const totalPages = Math.max(1, Math.ceil(reassortCurrentLines.length / REASSORT_PAGE_SIZE));
+                                                  if (page < 1 || page > totalPages || page === reassortCurrentPage) return;
+                                                  reassortCurrentPage = page;
+                                                  renderRows(currentProposal);
+                                             });
 
                                              function renderRows(proposal) {
                                                   currentProposal = proposal;
@@ -1373,14 +1116,247 @@
 
                                                   const lines = allLines.filter(function (l) { return (l.department || 'Sans rayon') === selectedDepartment; });
                                                   reassortCurrentLines = lines;
-                                                  lineState.clear();
-                                                  const api = ensureGrid();
-                                                  api.setGridOption('rowData', lines);
-                                                  sendBtn.disabled = !lines.length;
+                                                  if (!allLines.length) {
+                                                       tbody.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-4">Aucune proposition en attente. Elle sera générée automatiquement cette nuit.</td></tr>';
+                                                       sendBtn.disabled = true;
+                                                       document.getElementById('reassort-pagination-bar').style.display = 'none';
+                                                       return;
+                                                  }
+                                                  if (!lines.length) {
+                                                       tbody.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-4">Aucun article dans ce rayon.</td></tr>';
+                                                       sendBtn.disabled = true;
+                                                       document.getElementById('reassort-pagination-bar').style.display = 'none';
+                                                       return;
+                                                  }
+                                                  if (reassortCurrentPage > Math.ceil(lines.length / REASSORT_PAGE_SIZE)) reassortCurrentPage = 1;
+                                                  renderPaginationControls(lines.length);
+                                                  const pageStart = (reassortCurrentPage - 1) * REASSORT_PAGE_SIZE;
+                                                  const pageLines = lines.slice(pageStart, pageStart + REASSORT_PAGE_SIZE);
+                                                  tbody.innerHTML = pageLines.map(function (l, idx) {
+                                                       let stockoutBadge = '<span class="text-muted">—</span>';
+                                                       if (l.daysUntilStockout !== null && l.daysUntilStockout !== undefined) {
+                                                            const days = Math.round(l.daysUntilStockout);
+                                                            const badgeClass = days <= 3 ? 'bg-danger-subtle text-danger' : (days <= 7 ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success');
+                                                            stockoutBadge = '<span class="badge ' + badgeClass + ' py-1 px-2">' + (days <= 0 ? 'en rupture' : days + ' j') + '</span>';
+                                                       }
+                                                       const unreliableStock = !!l.hadNegativeStock;
+                                                       // Affiche le vrai stock RPOS (négatif) quand disponible, plutôt que la valeur ramenée à 0
+                                                       // utilisée pour le calcul — pour ne jamais masquer l'anomalie au responsable magasin.
+                                                       const stockValue = unreliableStock && l.actualStock !== null && l.actualStock !== undefined
+                                                            ? l.actualStock
+                                                            : l.stockAtGeneration;
+                                                       const stockCell = stockValue !== null && stockValue !== undefined
+                                                            ? (stockValue < 0 ? '<span class="text-danger fw-semibold">' + stockValue.toFixed(1) + '</span>' : stockValue.toFixed(1))
+                                                            : '—';
+                                                       const revenueShareCell = l.revenueSharePct !== null && l.revenueSharePct !== undefined
+                                                            ? l.revenueSharePct.toFixed(2) + ' %'
+                                                            : '—';
+                                                       const stockCellFull = stockCell + (unreliableStock
+                                                            ? '<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>'
+                                                            : '');
+                                                       const activityCellClass = unreliableStock ? ' class="border border-warning-subtle bg-warning-subtle bg-opacity-25"' : '';
+                                                       const avgSalesCell = l.avgWeeklySales !== null && l.avgWeeklySales !== undefined
+                                                            ? l.avgWeeklySales.toFixed(1) + (l.seasonalityAdjusted
+                                                                 ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l\'année dernière (écart ' + (l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?') + ')"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saisonnalité</span>'
+                                                                 : '') + (l.forecastMethod === 'smoothed'
+                                                                 ? '<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu\'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>'
+                                                                 : '')
+                                                            : '—';
+                                                       const alreadyOrderedBadge = l.excludedAsAlreadyOrdered
+                                                            ? '<br><span class="badge bg-info-subtle text-info mt-1" title="Déjà en commande sur cette plateforme, pas encore reçue"><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Déjà commandé (qté ' + (l.quantityInTransit || 0) + ')' +
+                                                                 (l.platformOrderReference ? ' — cmd ' + l.platformOrderReference : '') +
+                                                                 (l.platformOrderDate ? ' du ' + new Date(l.platformOrderDate).toLocaleDateString('fr-FR') : '') +
+                                                                 '</span>'
+                                                            : (l.excludedAsAlreadyOrderedRpos
+                                                                 ? '<br><span class="badge bg-secondary-subtle text-secondary mt-1" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme."><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Commandé le ' +
+                                                                      (l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?') +
+                                                                      (l.rposOrderReference ? ' (réf. ' + l.rposOrderReference + ')' : '') +
+                                                                      (l.rposOrderCount && l.rposOrderCount > 1 ? ' + ' + (l.rposOrderCount - 1) + ' autre(s)' : '') +
+                                                                      // 1=en préparation, 2=validée/en attente de livraison, 6=annulée
+                                                                      // (cf. rposClient.validateSupplierOrder/cancelSupplierOrder) ; statut
+                                                                      // absent (commande ancienne, avant l'ajout de ce champ) : rien affiché.
+                                                                      (l.rposOrderStatus === 2 ? ' — validée' : l.rposOrderStatus === 1 ? ' — en préparation (pas encore validée)' : l.rposOrderStatus === 6 ? ' — annulée' : '') +
+                                                                      '</span>' +
+                                                                      '<br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="' + l.id + '" data-quantity="' + (l.quantityIfUnblocked || l.quantitySuggested || 0) + '"><iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même</button>'
+                                                                 : '');
+                                                       // Anomalie de commande (backend/amelioration.md, 18/09/2026) : quantité proposée qui
+                                                       // s'écarte significativement de l'historique validé pour cet article — jamais "erreur",
+                                                       // juste un signal à vérifier avant de valider. Visible directement sur la ligne, avant
+                                                       // toute décision (contrairement à un blocage après-coup).
+                                                       const orderAnomalyBadge = l.orderAnomaly
+                                                            ? '<br><span class="badge ' + (l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger') + ' mt-1" title="Habituellement entre ' + l.orderAnomaly.historicalMin.toFixed(0) + ' et ' + l.orderAnomaly.historicalMax.toFixed(0) + ' (moyenne ' + l.orderAnomaly.historicalMean.toFixed(0) + ', sur ' + l.orderAnomaly.sampleSize + ' commande(s) passée(s))"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + (l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible') + '</span>'
+                                                            : '';
+                                                       // Raisonnement de suffisance de commande (backend/amelioration.md, 18/09/2026) : présent
+                                                       // uniquement si une commande RPOS/POS est déjà en cours pour cet article. Affiché comme
+                                                       // un badge cliquable (pas du texte brut qui déborde, corrigé le 21/09/2026). Correction du
+                                                       // 21/09/2026 (retour utilisateur : "j'ai des article deja commander et validé rien ne me
+                                                       // dis que il est suffisant ou pas") : un badge est TOUJOURS affiché dès qu'un raisonnement
+                                                       // existe, vert "Commande suffisante" ou orange "Commande insuffisante" selon le cas — les
+                                                       // deux cliquables pour ouvrir le détail en modale (cf. order-sufficiency-modal). Rien ne
+                                                       // s'affiche seulement en l'absence totale de commande en cours (orderSufficiencyReasoning
+                                                       // null, cas normal sans commande à comparer).
+                                                       const orderSufficiencyBadge = l.orderSufficiencyReasoning
+                                                            ? '<br><span class="badge ' + (l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success') + ' mt-1 os-badge" style="cursor:pointer;" data-reasoning="' + l.orderSufficiencyReasoning.replace(/"/g, '&quot;') + '">' + (l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante') + '</span>'
+                                                            : '';
+                                                       return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
+                                                            '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
+                                                            '<td class="text-muted">' + (pageStart + idx + 1) + '</td>' +
+                                                            '<td>' + l.ean + '</td>' +
+                                                            '<td>' + l.label +
+                                                                 ' <button type="button" class="btn btn-sm btn-link p-0 ms-1 pa-open-btn" data-ean="' + l.ean + '" data-product-id="' + l.productId + '" data-label="' + l.label.replace(/"/g, '&quot;') + '" title="Voir l\'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>' +
+                                                                 alreadyOrderedBadge +
+                                                                 orderAnomalyBadge +
+                                                                 orderSufficiencyBadge +
+                                                            '</td>' +
+                                                            '<td class="text-end">' + (l.sellingPrice ? l.sellingPrice.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
+                                                            '<td class="text-end">' + avgSalesCell + '</td>' +
+                                                            '<td class="text-end">' + stockCellFull + '</td>' +
+                                                            '<td class="text-end">' + stockoutBadge + '</td>' +
+                                                            '<td' + activityCellClass + '>' +
+                                                                 '<span class="last-purchase-result small text-muted" data-product-id="' + l.productId + '" data-ean="' + l.ean + '">Chargement...</span>' +
+                                                            '</td>' +
+                                                            '<td' + activityCellClass + '>' +
+                                                                 '<span class="last-sale-result small text-muted" data-product-id="' + l.productId + '">Chargement...</span>' +
+                                                            '</td>' +
+                                                            '<td class="text-end">' + revenueShareCell + '</td>' +
+                                                            '<td class="text-end">' + aiSuggestionCell(l) + '</td>' +
+                                                            '<td class="text-end">' + qtyInputCell(l) + '</td>' +
+                                                            '<td class="text-end reassort-line-value" data-line-id="' + l.id + '">' +
+                                                                 (l.sellingPrice ? (l.sellingPrice * l.quantitySuggested).toLocaleString('fr-FR') + ' CFA' : '—') +
+                                                            '</td>' +
+                                                            '</tr>';
+                                                  }).join('');
+                                                  selectAll.checked = true;
+                                                  sendBtn.disabled = false;
 
                                                   loadLastPurchasesAutomatically();
                                                   updateOrderTotal();
                                              }
+
+                                             // Recalcule la valeur de chaque ligne cochée (qté × prix vente) et le total de la commande,
+                                             // pour visualiser l'importance de chaque article et de la commande globale.
+                                             function updateOrderTotal() {
+                                                  let total = 0;
+                                                  document.querySelectorAll('.reassort-qty-input').forEach(function (input) {
+                                                       const lineId = input.dataset.lineId;
+                                                       const check = document.querySelector('.reassort-line-check[data-line-id="' + lineId + '"]');
+                                                       const price = parseFloat(input.dataset.price) || 0;
+                                                       const qty = parseFloat(input.value) || 0;
+                                                       const valueCell = document.querySelector('.reassort-line-value[data-line-id="' + lineId + '"]');
+                                                       const lineValue = price * qty;
+                                                       if (valueCell) valueCell.textContent = price ? lineValue.toLocaleString('fr-FR') + ' CFA' : '—';
+                                                       if (!check || check.checked) total += lineValue;
+                                                  });
+                                                  const totalEl = document.getElementById('reassort-total-value');
+                                                  if (totalEl) totalEl.textContent = total.toLocaleString('fr-FR') + ' CFA';
+                                             }
+
+                                             tbody.addEventListener('input', function (e) {
+                                                  if (e.target.classList.contains('reassort-colis-input')) {
+                                                       // Saisie en nombre de colis : recalcule la quantité totale en unités (source de
+                                                       // vérité envoyée à la validation) et la reporte dans le champ associé.
+                                                       const lineId = e.target.dataset.lineId;
+                                                       const unit = Number(e.target.dataset.unit) || 1;
+                                                       const nbColis = parseFloat(e.target.value) || 0;
+                                                       const qtyInput = document.querySelector('.reassort-qty-input[data-line-id="' + lineId + '"]');
+                                                       if (qtyInput) qtyInput.value = Math.round(nbColis * unit);
+                                                       updateOrderTotal();
+                                                       return;
+                                                  }
+                                                  if (e.target.classList.contains('reassort-qty-input')) {
+                                                       // Saisie directe en unités : reporte le nombre de colis équivalent (arrondi
+                                                       // indicatif, ne bloque jamais la saisie d'une quantité non multiple du colisage).
+                                                       const lineId = e.target.dataset.lineId;
+                                                       const colisInput = document.querySelector('.reassort-colis-input[data-line-id="' + lineId + '"]');
+                                                       if (colisInput) {
+                                                            const unit = Number(colisInput.dataset.unit) || 1;
+                                                            const qty = parseFloat(e.target.value) || 0;
+                                                            colisInput.value = Math.round((qty / unit) * 100) / 100;
+                                                       }
+                                                       updateOrderTotal();
+                                                  }
+                                             });
+                                             tbody.addEventListener('change', function (e) {
+                                                  if (e.target.classList.contains('reassort-line-check')) updateOrderTotal();
+                                             });
+
+                                             // Met à jour le champ unités ET le champ colis associé (si présent) pour une ligne
+                                             // donnée, pour que les deux restent cohérents peu importe d'où vient le changement
+                                             // (débloquer, appliquer une suggestion IA, saisie manuelle).
+                                             function setLineQuantity(lineId, quantity) {
+                                                  const qtyInput = document.querySelector('.reassort-qty-input[data-line-id="' + lineId + '"]');
+                                                  const colisInput = document.querySelector('.reassort-colis-input[data-line-id="' + lineId + '"]');
+                                                  if (qtyInput) qtyInput.value = quantity;
+                                                  if (colisInput) {
+                                                       const unit = Number(colisInput.dataset.unit) || 1;
+                                                       colisInput.value = Math.round((quantity / unit) * 100) / 100;
+                                                  }
+                                             }
+
+                                             // Débloquer un article bloqué par une commande RPOS récente (hors plateforme) : le magasin
+                                             // valide explicitement qu'il veut quand même le commander, plutôt que de deviner qu'il doit
+                                             // cocher la case et retaper une quantité lui-même.
+                                             tbody.addEventListener('click', function (e) {
+                                                  const btn = e.target.closest('.reassort-unblock-btn');
+                                                  if (!btn) return;
+                                                  const lineId = btn.dataset.lineId;
+                                                  const quantity = parseFloat(btn.dataset.quantity) || 0;
+                                                  const check = document.querySelector('.reassort-line-check[data-line-id="' + lineId + '"]');
+                                                  if (check) check.checked = true;
+                                                  setLineQuantity(lineId, quantity);
+                                                  btn.disabled = true;
+                                                  btn.innerHTML = '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Débloqué — inclus dans la commande';
+                                                  btn.classList.remove('btn-warning');
+                                                  btn.classList.add('btn-success');
+                                                  updateOrderTotal();
+                                             });
+
+                                             // Badge "Commande insuffisante" cliquable (demande du 21/09/2026) : ouvre le détail complet
+                                             // en modale plutôt que du texte brut affiché en permanence sur la ligne.
+                                             const osModalEl = document.getElementById('order-sufficiency-modal');
+                                             tbody.addEventListener('click', function (e) {
+                                                  const badge = e.target.closest('.os-badge');
+                                                  if (!badge) return;
+                                                  document.getElementById('os-modal-body').textContent = badge.dataset.reasoning;
+                                                  new bootstrap.Modal(osModalEl).show();
+                                             });
+
+                                             // --- Recommandation IA à la demande, article par article : au clic sur "Analyser"
+                                             // (colonne IA), ouvre le panneau partagé (assets/js/ai-recommendation-panel.js) qui lance
+                                             // l'analyse pour CET article seul — jamais toute la proposition d'un coup. N'écrase la
+                                             // quantité de la ligne que si l'utilisateur clique explicitement sur "Appliquer" dans le
+                                             // panneau (onApply ci-dessous).
+                                             tbody.addEventListener('click', function (e) {
+                                                  const analyzeBtn = e.target.closest('.ai-analyze-line-btn');
+                                                  if (!analyzeBtn) return;
+                                                  const ean = analyzeBtn.dataset.ean;
+                                                  const line = (currentProposal ? currentProposal.lines : []).find(function (l) { return l.ean === ean; });
+                                                  if (!line || !currentProposal) return;
+                                                  window.openAiRecommendationPanel({
+                                                       proposalId: currentProposal.id,
+                                                       shopId: selectedShopId(),
+                                                       ean: ean,
+                                                       label: line.label,
+                                                       predictedQuantity: line.quantitySuggested,
+                                                       generationAiAdjusted: line.aiAdjusted,
+                                                       generationAiReasoning: line.aiReasoning,
+                                                       classicQuantitySuggested: line.classicQuantitySuggested,
+                                                       stockAtPrediction: line.stockAtGeneration,
+                                                       avgWeeklySales: line.avgWeeklySales,
+                                                       orderingUnit: line.orderingUnit,
+                                                       daysUntilStockout: line.daysUntilStockout,
+                                                       hasRecentOrder: !!line.excludedAsAlreadyOrderedRpos,
+                                                       recentOrderReference: line.rposOrderReference,
+                                                       recentOrderDate: line.rposOrderDate,
+                                                       recentOrderCount: line.rposOrderCount,
+                                                       onApply: function (quantity) {
+                                                            const check = document.querySelector('.reassort-line-check[data-line-id="' + line.id + '"]');
+                                                            setLineQuantity(line.id, quantity);
+                                                            if (check) check.checked = true;
+                                                            updateOrderTotal();
+                                                       },
+                                                  });
+                                             });
 
                                              // --- Évolution d'un article (courbe de ventes, historique de commandes, prédiction) ---
                                              const paModalEl = document.getElementById('product-analytics-modal');
@@ -1575,10 +1551,7 @@
                                              });
                                              document.getElementById('pa-reload-btn').addEventListener('click', loadProductAnalytics);
 
-                                             // Délégué sur le conteneur de la grille (pas "tbody", qui n'existe plus depuis la migration
-                                             // AG Grid) : les lignes sont recréées dynamiquement par AG Grid, jamais présentes au
-                                             // chargement de la page.
-                                             document.getElementById('reassort-grid').addEventListener('click', function (e) {
+                                             tbody.addEventListener('click', function (e) {
                                                   const btn = e.target.closest('.pa-open-btn');
                                                   if (!btn) return;
                                                   paCurrentArticle = { ean: btn.dataset.ean, productId: btn.dataset.productId, label: btn.dataset.label };
@@ -1688,14 +1661,11 @@
                                              // le désordre — sans ce garde-fou, la réponse d'un magasin déjà quitté pouvait écraser
                                              // l'affichage après coup (même bug que sales-history.html, corrigé le 15/09/2026).
                                              let pendingProposalToken = 0;
-                                             // Remplace les anciens messages "Chargement...", "Erreur", "Sélectionnez un magasin" écrits
-                                             // dans tbody.innerHTML (n'existe plus depuis la migration AG Grid) : status.textContent
-                                             // porte déjà ce message ailleurs sur la page, la grille elle-même reste vide entre-temps.
                                              async function loadPendingProposal() {
                                                   updateTitle();
                                                   const shopId = selectedShopId();
                                                   if (!shopId) {
-                                                       status.textContent = 'Sélectionnez un magasin.';
+                                                       tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
                                                        return;
                                                   }
                                                   const token = ++pendingProposalToken;
@@ -1704,6 +1674,7 @@
                                                   refreshBtn.disabled = true;
                                                   sendBtn.disabled = true;
                                                   resultBox.innerHTML = '';
+                                                  tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Chargement...</td></tr>';
                                                   document.getElementById('reassort-generation-notice').style.display = 'none';
                                                   try {
                                                        const res = await window.reassortFetch('/reassort/proposal/pending?' + shopQueryParam());
@@ -1717,7 +1688,8 @@
                                                        generateBtn.style.display = json.data ? 'none' : '';
                                                   } catch (err) {
                                                        if (token !== pendingProposalToken) return;
-                                                       status.textContent = 'Erreur: ' + err.message;
+                                                       tbody.innerHTML = '<tr><td colspan="12" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+                                                       status.textContent = '';
                                                   } finally {
                                                        if (token === pendingProposalToken) refreshBtn.disabled = false;
                                                   }
@@ -1754,6 +1726,7 @@
 
                                              async function loadProposalById(id) {
                                                   status.textContent = 'Chargement...';
+                                                  tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Chargement...</td></tr>';
                                                   try {
                                                        const res = await window.reassortFetch('/reassort/proposal/' + id + '?' + shopQueryParam());
                                                        const json = await res.json();
@@ -1765,7 +1738,8 @@
                                                        sendBtn.disabled = viewingPastGeneration || sendBtn.disabled;
                                                        generateBtn.style.display = 'none';
                                                   } catch (err) {
-                                                       status.textContent = 'Erreur: ' + err.message;
+                                                       tbody.innerHTML = '<tr><td colspan="12" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+                                                       status.textContent = '';
                                                   }
                                              }
 
@@ -2315,12 +2289,11 @@
                                                   if (!currentProposal) return;
 
                                                   const decisions = currentProposal.lines.map(function (l) {
-                                                       // lineState n'a une entrée que pour les lignes déjà affichées dans la grille (rayon
-                                                       // sélectionné) : une ligne jamais affichée dans cette session garde sa valeur par
-                                                       // défaut (quantitySuggested, incluse ssi > 0), identique au comportement précédent
-                                                       // où une ligne hors du DOM filtré par rayon était traitée comme non cochée/non éditée.
-                                                       const st = lineState.has(l.id) ? lineState.get(l.id) : { quantity: l.quantitySuggested, excluded: !(l.quantitySuggested > 0) };
-                                                       return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0 };
+                                                       const check = document.querySelector('.reassort-line-check[data-line-id="' + l.id + '"]');
+                                                       const qtyInput = document.querySelector('.reassort-qty-input[data-line-id="' + l.id + '"]');
+                                                       const excluded = !check || !check.checked;
+                                                       const quantity = qtyInput ? parseFloat(qtyInput.value) : l.quantitySuggested;
+                                                       return { lineId: l.id, quantity: quantity, excluded: excluded, price: qtyInput ? parseFloat(qtyInput.dataset.price) || 0 : 0 };
                                                   });
 
                                                   const selected = decisions.filter(function (d) { return !d.excluded; });
@@ -2477,8 +2450,7 @@
                                                                                   s.linesProcessed + ' article(s) traité(s), ' + s.linesFailed + ' échec(s).' + singleOrderErrorHtml)
                                                                       ) +
                                                                       '</div>';
-                                                                 if (gridApi) gridApi.setGridOption('rowData', []);
-                                                                 status.textContent = 'Proposition validée. La prochaine sera disponible demain matin.';
+                                                                 tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">Proposition validée. La prochaine sera disponible demain matin.</td></tr>';
                                                                  refreshBtn.disabled = false;
                                                             } else if (s.status === 'VALIDATION_FAILED') {
                                                                  clearInterval(interval);
@@ -2497,29 +2469,11 @@
                                                   }, 3000);
                                              }
 
-                                             // Remplace l'ancienne case "tout cocher" de l'en-tête de colonne (perdue avec la migration
-                                             // AG Grid, la case à cocher de colonne ne coche que les lignes de la page courante par
-                                             // défaut) : ce bouton coche/décoche explicitement TOUTES les lignes du rayon affiché, pas
-                                             // seulement la page courante — même portée que l'ancien comportement.
-                                             document.getElementById('reassort-select-all-btn').addEventListener('click', function () {
-                                                  const allExcluded = reassortCurrentLines.every(function (l) { return getLineState(l).excluded; });
-                                                  reassortCurrentLines.forEach(function (l) { getLineState(l).excluded = !allExcluded; });
-                                                  if (gridApi) gridApi.refreshCells({ force: true });
-                                                  updateOrderTotal();
-                                             });
-
-                                             // Export CSV (demande du 21/09/2026) : l'export .xlsx avec styles conditionnels de la doc AG
-                                             // Grid (https://www.ag-grid.com/javascript-data-grid/excel-export-styles/) fait partie d'AG
-                                             // Grid Enterprise (licence payante), indisponible avec la version Community utilisée ici.
-                                             // Le CSV reste gratuit, s'ouvre directement dans Excel et exporte toutes les mêmes données
-                                             // (sans la mise en forme conditionnelle). Exporte TOUTES les lignes du rayon affiché, pas
-                                             // seulement la page visible à l'écran.
-                                             document.getElementById('reassort-export-excel').addEventListener('click', function () {
-                                                  if (!gridApi) return;
-                                                  const shopRef = (currentUser && currentUser.rposShopReference) || 'magasin';
-                                                  gridApi.exportDataAsCsv({
-                                                       fileName: 'proposition-commande-' + shopRef + '-' + new Date().toISOString().slice(0, 10) + '.csv',
+                                             selectAll.addEventListener('change', function () {
+                                                  document.querySelectorAll('.reassort-line-check').forEach(function (c) {
+                                                       c.checked = selectAll.checked;
                                                   });
+                                                  updateOrderTotal();
                                              });
 
                                              refreshBtn.addEventListener('click', loadPendingProposal);

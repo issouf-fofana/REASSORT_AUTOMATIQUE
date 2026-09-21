@@ -1,22 +1,30 @@
 (function () {
   const shopSelect = document.getElementById('aip-shop');
   const proposalSelect = document.getElementById('aip-proposal');
-  const tbody = document.getElementById('aip-tbody');
   const infoBox = document.getElementById('aip-proposal-info');
   const pageLabel = document.getElementById('aip-page-label');
-  const prevBtn = document.getElementById('aip-prev-page');
-  const nextBtn = document.getElementById('aip-next-page');
+  const emptyBox = document.getElementById('aip-empty');
+  const gridEl = document.getElementById('aip-grid');
 
-  const DEPARTMENTS_PER_PAGE = 5;
   let allPredictions = [];
-  let groupedByDepartment = []; // [{ department, predictions: [...] }], trié par nb d'articles décroissant
-  let currentPage = 1;
   let currentProposalId = null;
   // Jeton de requête : un changement rapide de magasin peut faire partir plusieurs chargements en
   // parallèle dont les réponses reviennent dans le désordre — sans ce garde-fou, la réponse d'un
   // magasin déjà quitté pouvait écraser l'affichage après coup (même bug que sales-history.html,
   // corrigé le 15/09/2026).
   let loadToken = 0;
+
+  function showEmpty(message) {
+    emptyBox.textContent = message;
+    emptyBox.style.display = '';
+    gridEl.style.display = 'none';
+    pageLabel.textContent = '—';
+  }
+
+  function showGrid() {
+    emptyBox.style.display = 'none';
+    gridEl.style.display = '';
+  }
 
   async function loadShopList() {
     try {
@@ -68,7 +76,7 @@
       if (token !== loadToken) return; // un changement de magasin plus récent a déjà démarré, réponse ignorée
       if (!json.success) throw new Error(json.message);
       if (!json.data.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
+        showEmpty('Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.');
         infoBox.textContent = '';
         return;
       }
@@ -80,7 +88,7 @@
       loadPredictions();
     } catch (err) {
       if (token !== loadToken) return;
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+      showEmpty('Erreur: ' + err.message);
     }
   }
 
@@ -93,12 +101,12 @@
   async function loadPredictions() {
     const shopId = shopSelect.value;
     if (!shopId) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses prédictions.</td></tr>';
+      showEmpty('Sélectionnez un magasin pour afficher ses prédictions.');
       infoBox.textContent = '';
       return;
     }
     const token = ++loadToken;
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Chargement...</td></tr>';
+    showEmpty('Chargement...');
     try {
       const proposalId = proposalSelect.value;
       const url = '/reassort/predictions?shop=' + encodeURIComponent(shopId) + (proposalId ? '&proposalId=' + encodeURIComponent(proposalId) : '');
@@ -109,7 +117,7 @@
       const d = json.data;
 
       if (!d.proposalId || !d.predictions.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.</td></tr>';
+        showEmpty('Aucune prédiction enregistrée pour ce magasin. Générez une proposition pour en créer.');
         infoBox.textContent = '';
         return;
       }
@@ -122,29 +130,11 @@
       infoBox.textContent = d.predictions.length + ' article(s) — génération du ' + new Date(d.generatedAt).toLocaleString('fr-FR') + '.';
 
       allPredictions = d.predictions;
-      groupedByDepartment = groupByDepartment(allPredictions);
-      currentPage = 1;
-      renderPage();
+      renderGrid();
     } catch (err) {
       if (token !== loadToken) return;
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
+      showEmpty('Erreur: ' + err.message);
     }
-  }
-
-  // Regroupe par rayon (department) plutôt que de mélanger tous les articles du magasin en vrac :
-  // sinon un article "PRODUITS FRAIS" à faible confiance apparaît juste au-dessus d'un article
-  // "BAZAR" sans aucun rapport, rendant le tableau difficile à parcourir par un responsable de
-  // rayon. Chaque groupe garde le tri par confiance croissante (les moins fiables d'abord).
-  function groupByDepartment(predictions) {
-    const byDept = new Map();
-    predictions.forEach(function (p) {
-      const dept = p.department || 'Autre';
-      if (!byDept.has(dept)) byDept.set(dept, []);
-      byDept.get(dept).push(p);
-    });
-    return Array.from(byDept.entries())
-      .map(function ([department, items]) { return { department, predictions: items }; })
-      .sort(function (a, b) { return a.department.localeCompare(b.department); });
   }
 
   // Type d'action structuré (§18 du cahier des charges) : badge coloré par famille sémantique
@@ -177,95 +167,181 @@
     VERIFY_STOCK: 'bg-danger',
     NO_ACTION: 'bg-light text-dark border',
   };
-  function aiActionBadgeHtml(action) {
-    if (!action || !AI_ACTION_LABELS[action]) return '<span class="text-muted small">—</span>';
-    return '<span class="badge ' + AI_ACTION_BADGE_CLASS[action] + '">' + AI_ACTION_LABELS[action] + '</span>';
+  function aiActionLabel(action) {
+    return (action && AI_ACTION_LABELS[action]) || '—';
   }
 
-  function predictionRowHtml(p) {
-    const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
+  function labelCellRenderer(params) {
+    const p = params.data;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div>';
+    return wrap;
+  }
+
+  function gapCellRenderer(params) {
+    const p = params.data;
     const outcome = p.outcome;
-    const actual = outcome ? outcome.actualSales.toLocaleString('fr-FR') : '—';
-    const gap = outcome
-      ? '<span class="' + (outcome.forecastError > 0 ? 'text-success' : outcome.forecastError < 0 ? 'text-danger' : '') + '">' + (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError) + '</span>'
-      : '<span class="text-muted">en attente</span>';
-    return '<tr data-ean="' + p.ean + '">' +
-      '<td>' + (p.label || '—') + '<div class="text-muted small">' + p.ean + '</div></td>' +
-      '<td class="text-end fw-semibold">' + Math.round(p.predictedQuantity) + '</td>' +
-      '<td class="text-end text-muted">' + Math.round(p.predictedWeeklyDemand) + '</td>' +
-      '<td class="text-end">' + actual + '</td>' +
-      '<td class="text-end">' + gap + '</td>' +
-      '<td style="min-width:140px;">' +
-        '<div class="d-flex align-items-center gap-2">' +
-          '<div class="confidence-bar flex-grow-1"><div class="confidence-bar-fill" style="width:' + score + '%; background-color:' + confidenceColor(score) + ';"></div></div>' +
-          '<span class="small fw-semibold">' + score + '%</span>' +
-        '</div>' +
-      '</td>' +
-      '<td class="small text-muted">' + (p.model === 'flat' ? 'Moyenne simple' : 'Lissage exponentiel') + '</td>' +
-      '<td>' + aiActionBadgeHtml(p.aiAction) + '</td>' +
-      '</tr>';
+    const span = document.createElement('span');
+    if (!outcome) {
+      span.className = 'text-muted';
+      span.textContent = 'en attente';
+      return span;
+    }
+    span.className = outcome.forecastError > 0 ? 'text-success' : (outcome.forecastError < 0 ? 'text-danger' : '');
+    span.textContent = (outcome.forecastError > 0 ? '+' : '') + Math.round(outcome.forecastError);
+    return span;
   }
 
-  // Pagination par groupe de département (pas par ligne) : un rayon n'est jamais coupé entre deux
-  // pages, ce qui rendrait sa lecture incohérente pour un responsable de rayon donné.
-  function renderPage() {
-    const totalPages = Math.max(1, Math.ceil(groupedByDepartment.length / DEPARTMENTS_PER_PAGE));
-    currentPage = Math.min(currentPage, totalPages);
-    const start = (currentPage - 1) * DEPARTMENTS_PER_PAGE;
-    const pageGroups = groupedByDepartment.slice(start, start + DEPARTMENTS_PER_PAGE);
+  function confidenceCellRenderer(params) {
+    const p = params.data;
+    const score = p.confidenceScore !== null && p.confidenceScore !== undefined ? p.confidenceScore : 0;
+    const wrap = document.createElement('div');
+    wrap.className = 'd-flex align-items-center gap-2';
+    wrap.style.minWidth = '140px';
+    wrap.innerHTML =
+      '<div class="confidence-bar flex-grow-1"><div class="confidence-bar-fill" style="width:' + score + '%; background-color:' + confidenceColor(score) + ';"></div></div>' +
+      '<span class="small fw-semibold">' + score + '%</span>';
+    return wrap;
+  }
 
-    tbody.innerHTML = pageGroups.map(function (group) {
-      const headerRow = '<tr class="table-light"><td colspan="7" class="fw-semibold py-2">' +
-        group.department + ' <span class="text-muted fw-normal">(' + group.predictions.length + ' article(s))</span></td></tr>';
-      return headerRow + group.predictions.map(predictionRowHtml).join('');
-    }).join('');
+  function aiActionCellRenderer(params) {
+    const p = params.data;
+    const action = p.aiAction;
+    if (!action || !AI_ACTION_LABELS[action]) {
+      const span = document.createElement('span');
+      span.className = 'text-muted small';
+      span.textContent = '—';
+      return span;
+    }
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + AI_ACTION_BADGE_CLASS[action];
+    badge.textContent = AI_ACTION_LABELS[action];
+    return badge;
+  }
 
-    const totalArticles = allPredictions.length;
-    pageLabel.textContent = 'Page ' + currentPage + ' / ' + totalPages + ' (' + groupedByDepartment.length + ' rayon(s), ' + totalArticles + ' article(s))';
-    prevBtn.disabled = currentPage <= 1;
-    nextBtn.disabled = currentPage >= totalPages;
-
-    // L'ouverture du panneau et toute la logique d'analyse IA / détail vivent dans le module
-    // partagé ai-recommendation-panel.js (réutilisé aussi sur purchase-order.html) : cette page ne
-    // fait que fournir les données de la ligne cliquée.
-    tbody.querySelectorAll('tr[data-ean]').forEach(function (row) {
-      row.addEventListener('click', function () {
-        const prediction = allPredictions.find(function (p) { return p.ean === row.dataset.ean; });
-        if (!prediction) return;
-        window.openAiRecommendationPanel({
-          proposalId: currentProposalId,
-          shopId: shopSelect.value,
-          ean: prediction.ean,
-          label: prediction.label,
-          predictedQuantity: prediction.predictedQuantity,
-          predictedWeeklyDemand: prediction.predictedWeeklyDemand,
-          stockAtPrediction: prediction.stockAtPrediction,
-          ordersAtPrediction: prediction.ordersAtPrediction,
-          confidenceScore: prediction.confidenceScore,
-          reasoning: prediction.reasoning,
-          dailyHistory: prediction.dailyHistory,
-          outcome: prediction.outcome,
-          classicQuantitySuggested: prediction.classicQuantitySuggested,
-          generationAiAdjusted: prediction.aiAdjusted,
-          generationAiReasoning: prediction.aiReasoningAtGeneration,
-          generationAiAction: prediction.aiAction,
-          hasRecentOrder: prediction.hasRecentOrder,
-          recentOrderReference: prediction.recentOrderReference,
-          recentOrderDate: prediction.recentOrderDate,
-          recentOrderCount: prediction.recentOrderCount,
-          orderingUnit: prediction.orderingUnit,
-          avgWeeklySales: prediction.avgWeeklySales,
-          daysUntilStockout: prediction.daysUntilStockout,
-        });
-      });
+  // Ouvre le panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js, même
+  // composant que purchase-order-v2.html) pour la ligne cliquée. Attaché directement sur la
+  // cellule via onCellClicked (AG Grid virtualise les lignes, donc pas de délégation sur un
+  // tbody parent comme dans l'ancienne version).
+  function openPanelForRow(prediction) {
+    if (!prediction) return;
+    window.openAiRecommendationPanel({
+      proposalId: currentProposalId,
+      shopId: shopSelect.value,
+      ean: prediction.ean,
+      label: prediction.label,
+      predictedQuantity: prediction.predictedQuantity,
+      predictedWeeklyDemand: prediction.predictedWeeklyDemand,
+      stockAtPrediction: prediction.stockAtPrediction,
+      ordersAtPrediction: prediction.ordersAtPrediction,
+      confidenceScore: prediction.confidenceScore,
+      reasoning: prediction.reasoning,
+      dailyHistory: prediction.dailyHistory,
+      outcome: prediction.outcome,
+      classicQuantitySuggested: prediction.classicQuantitySuggested,
+      generationAiAdjusted: prediction.aiAdjusted,
+      generationAiReasoning: prediction.aiReasoningAtGeneration,
+      generationAiAction: prediction.aiAction,
+      hasRecentOrder: prediction.hasRecentOrder,
+      recentOrderReference: prediction.recentOrderReference,
+      recentOrderDate: prediction.recentOrderDate,
+      recentOrderCount: prediction.recentOrderCount,
+      orderingUnit: prediction.orderingUnit,
+      avgWeeklySales: prediction.avgWeeklySales,
+      daysUntilStockout: prediction.daysUntilStockout,
     });
   }
+
+  const gridColumnDefs = [
+    { headerName: 'Rayon', field: 'department', width: 160, filter: 'agTextColumnFilter',
+      valueGetter: function (p) { return p.data ? (p.data.department || 'Autre') : ''; } },
+    { headerName: 'Article', field: 'label', flex: 2, minWidth: 260, filter: 'agTextColumnFilter', cellRenderer: labelCellRenderer },
+    { headerName: 'Qté à commander', field: 'predictedQuantity', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 160,
+      valueFormatter: function (p) { return p.value !== null && p.value !== undefined ? String(Math.round(p.value)) : '—'; },
+      cellClass: 'fw-semibold' },
+    { headerName: 'Vente prévue/sem.', field: 'predictedWeeklyDemand', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 160,
+      valueFormatter: function (p) { return p.value !== null && p.value !== undefined ? String(Math.round(p.value)) : '—'; } },
+    { headerName: 'Réel', width: 110, type: 'numericColumn', sortable: false, filter: false,
+      valueGetter: function (p) { return p.data && p.data.outcome ? p.data.outcome.actualSales : null; },
+      valueFormatter: function (p) { return p.value !== null && p.value !== undefined ? p.value.toLocaleString('fr-FR') : '—'; } },
+    { headerName: 'Écart', width: 110, sortable: false, filter: false, cellRenderer: gapCellRenderer,
+      valueGetter: function (p) { return p.data && p.data.outcome ? Math.round(p.data.outcome.forecastError) : null; } },
+    { headerName: 'Confiance', field: 'confidenceScore', width: 170, filter: 'agNumberColumnFilter', cellRenderer: confidenceCellRenderer,
+      valueFormatter: function (p) { return (p.value !== null && p.value !== undefined ? p.value : 0) + ' %'; } },
+    { headerName: 'Méthode', field: 'model', width: 160, filter: 'agTextColumnFilter',
+      valueFormatter: function (p) { return p.value === 'flat' ? 'Moyenne simple' : 'Lissage exponentiel'; } },
+    { headerName: 'Action IA', field: 'aiAction', width: 170, filter: 'agTextColumnFilter', cellRenderer: aiActionCellRenderer,
+      valueFormatter: function (p) { return aiActionLabel(p.value); } },
+  ];
+
+  let gridApi = null;
+  function ensureGrid() {
+    if (gridApi) return gridApi;
+    gridApi = agGrid.createGrid(gridEl, {
+      columnDefs: gridColumnDefs,
+      rowData: [],
+      localeText: window.AG_GRID_LOCALE_FR,
+      // La grille prend la hauteur de son contenu réel plutôt qu'une hauteur fixe avec du vide en
+      // dessous, comme les autres tableaux du site migrés vers AG Grid (purchase-order-v2.html).
+      domLayout: 'autoHeight',
+      pagination: true,
+      paginationPageSize: 50,
+      paginationPageSizeSelector: [25, 50, 100, 200],
+      animateRows: false,
+      suppressCellFocus: true,
+      getRowId: function (params) { return params.data.ean; },
+      // Tri par défaut : rayon (regroupement visuel équivalent à l'ancien groupByDepartment), puis
+      // confiance croissante (donnée interne) — les articles les moins fiables d'abord dans chaque
+      // rayon, comme l'ancien tri manuel.
+      onGridReady: function () {
+        gridApi.applyColumnState({ state: [
+          { colId: 'department', sort: 'asc', sortIndex: 0 },
+          { colId: 'confidenceScore', sort: 'asc', sortIndex: 1 },
+        ] });
+      },
+      // Clic sur une ligne : ouvre le panneau de recommandation IA pour cet article, attaché
+      // directement par AG Grid (plus de délégation sur un tbody parent comme dans l'ancienne
+      // version, dont les lignes n'existent plus une fois virtualisées hors écran).
+      onCellClicked: function (e) {
+        openPanelForRow(e.data);
+      },
+      onPaginationChanged: function () {
+        updatePageLabel();
+      },
+      onModelUpdated: function () {
+        updatePageLabel();
+      },
+    });
+    return gridApi;
+  }
+
+  function updatePageLabel() {
+    if (!gridApi) return;
+    const totalArticles = allPredictions.length;
+    const deptCount = new Set(allPredictions.map(function (p) { return p.department || 'Autre'; })).size;
+    const totalPages = gridApi.paginationGetTotalPages() || 1;
+    const currentPage = gridApi.paginationGetCurrentPage() + 1;
+    pageLabel.textContent = 'Page ' + currentPage + ' / ' + totalPages + ' (' + deptCount + ' rayon(s), ' + totalArticles + ' article(s))';
+  }
+
+  function renderGrid() {
+    showGrid();
+    const api = ensureGrid();
+    api.setGridOption('rowData', allPredictions);
+    updatePageLabel();
+  }
+
+  document.getElementById('aip-export-csv').addEventListener('click', function () {
+    if (!gridApi) return;
+    const shopRef = (shopSelect.selectedOptions.length && shopSelect.selectedOptions[0].textContent) || 'magasin';
+    gridApi.exportDataAsCsv({
+      fileName: 'predictions-ia-' + shopRef.replace(/[^a-z0-9]+/gi, '-') + '-' + new Date().toISOString().slice(0, 10) + '.csv',
+    });
+  });
 
   shopSelect.addEventListener('change', loadProposalList);
   proposalSelect.addEventListener('change', loadPredictions);
   document.getElementById('aip-refresh').addEventListener('click', loadPredictions);
-  prevBtn.addEventListener('click', function () { if (currentPage > 1) { currentPage--; renderPage(); } });
-  nextBtn.addEventListener('click', function () { currentPage++; renderPage(); });
 
   loadShopList();
 })();

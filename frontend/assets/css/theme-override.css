@@ -327,3 +327,119 @@ a:not(.sidebar *),
 body {
      background-color: #f5f5f5;
 }
+
+/* ==========================================================================
+   Passe de polish UX (demande du 21/09/2026 : "utilise impeccable" — garder
+   noir/blanc/gris partout, mais un peu de couleur ciblée sur les indicateurs
+   d'état on/off et actions critiques, + plus de relief/hiérarchie ailleurs).
+   ========================================================================== */
+
+/* Accent vert/rouge RÉSERVÉ aux indicateurs d'état binaire (interrupteurs on/off,
+   actions destructives, badges critique/suffisant) — jamais sur les boutons
+   principaux, liens ou textes normaux, qui restent noir/blanc/gris comme avant.
+   Vert et rouge volontairement désaturés/foncés pour rester "sérieux", pas
+   "coloré" : ce sont des signaux d'état, pas une identité de marque. */
+:root {
+     --accent-on: #16A34A;
+     --accent-on-rgb: 22, 163, 74;
+     --accent-off: #B91C1C;
+     --accent-off-rgb: 185, 28, 28;
+}
+
+/* Interrupteurs on/off (form-switch, ex: Paramètres, activer/désactiver un compte) :
+   vert quand actif, gris neutre quand inactif (jamais rouge à l'état "off" — le
+   rouge est réservé aux actions destructives, pas à un simple état neutre). */
+.form-check-input[role="switch"]:checked,
+.form-switch .form-check-input:checked {
+     background-color: var(--accent-on) !important;
+     border-color: var(--accent-on) !important;
+}
+.form-check-input[role="switch"]:focus,
+.form-switch .form-check-input:focus {
+     border-color: var(--accent-on) !important;
+     box-shadow: 0 0 0 2px rgba(var(--accent-on-rgb), 0.25) !important;
+}
+
+/* Actions destructives (désactiver un compte, supprimer, purger...) : contour rouge
+   au repos, plein au survol/focus — jamais de bouton rouge plein par défaut, pour
+   qu'une action irréversible demande un geste conscient (survol) avant de "s'allumer". */
+.btn-destructive {
+     color: var(--accent-off) !important;
+     border-color: var(--accent-off) !important;
+     background-color: transparent;
+}
+.btn-destructive:hover,
+.btn-destructive:focus {
+     background-color: var(--accent-off) !important;
+     border-color: var(--accent-off) !important;
+     color: #ffffff !important;
+}
+
+/* Badges d'état critique/insuffisant vs. suffisant/ok (ex: badge de suffisance de
+   commande sur Proposition de commande) : mêmes teintes que les interrupteurs, pour
+   que "vert = bon" et "rouge = à vérifier" restent cohérents dans toute l'appli. */
+.badge-ok {
+     background-color: var(--accent-on) !important;
+     color: #ffffff !important;
+}
+.badge-critical {
+     background-color: var(--accent-off) !important;
+     color: #ffffff !important;
+}
+
+/* Relief des cartes : ombre légère au repos (au lieu de "aucune ombre" ci-dessus, qui
+   rendait la zone de contenu plate face à la sidebar noire), plus marquée au survol
+   uniquement sur les cartes cliquables (ex: tuiles secteurs/rayons). border-radius
+   reste à 0 (contrainte du thème) — l'ombre seule suffit à signaler l'élévation. */
+.card {
+     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+a.card:hover,
+.card[role="button"]:hover,
+.card.reassort-dept-tile:hover {
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10) !important;
+}
+
+/* Rangées de tableau : surbrillance neutre au survol (gris, pas bleu par défaut de
+   Bootstrap), curseur pointeur seulement si la ligne est cliquable. */
+.table-hover > tbody > tr:hover > * {
+     background-color: rgba(0, 0, 0, 0.035) !important;
+}
+.table-hover > tbody > tr[data-clickable="1"]:hover,
+.table-hover > tbody > tr.order-row:hover,
+.table-hover > tbody > tr.shop-picker-row:hover {
+     cursor: pointer;
+}
+
+/* Focus clavier/souris cohérent avec la palette noir/blanc (au lieu de l'anneau bleu
+   par défaut de Bootstrap) sur les champs et boutons standards — les interrupteurs et
+   boutons destructifs gardent leur propre anneau coloré défini plus haut. */
+.form-control:focus,
+.form-select:focus,
+.btn:focus-visible {
+     border-color: #000000 !important;
+     box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Hiérarchie typographique : Volt applique des graisses/tailles assez plates entre les
+   niveaux de titre, ce qui aplatit la lecture d'une page. Échelle resserrée mais
+   clairement distincte, sans toucher aux couleurs. */
+h1, .h1 { font-size: 1.75rem; font-weight: 700; }
+h2, .h2 { font-size: 1.375rem; font-weight: 600; }
+h3, .h3, .card-title { font-size: 1.0625rem; font-weight: 600; }
+.text-muted, .small.text-muted { font-size: 0.8125rem; }
+
+/* Espacement standardisé des cartes/tableaux : Volt varie selon les pages (certaines
+   en p-2, d'autres en p-4 sans raison fonctionnelle) — un rythme vertical régulier
+   entre sections rend l'ensemble plus posé, moins "bricolé page par page". */
+.card-body {
+     padding: 1.5rem;
+}
+.card + .card,
+.card + .table-responsive,
+.table-responsive + .card {
+     margin-top: 1.5rem;
+}
+.table > :not(caption) > * > * {
+     padding: 0.75rem 1rem;
+}

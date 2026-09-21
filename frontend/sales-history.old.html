@@ -19,15 +19,6 @@
           via vendor.js, absent du build Volt. Chargée séparément pour ne pas réécrire ~30 icônes. -->
      <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
-     <!-- AG Grid Community (migration du tableau des ventes, même pattern que purchase-order-v2.html) :
-          tri/filtre par colonne + export CSV en JS vanilla. Pas d'Enterprise (licence payante non
-          configurée sur ce projet) : export CSV uniquement, ouvrable directement dans Excel. -->
-     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
-     <script src="assets/js/ag-grid-setup.js"></script>
-     <script src="assets/js/ag-grid-locale-fr.js"></script>
-
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
@@ -46,46 +37,6 @@
             ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
             le débordement horizontal du panneau latéral. */
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
-
-         /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun
-            coin arrondi, police Inter) — même surcharge que purchase-order-v2.html. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 13.5px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: #f3f4f6;
-              --ag-row-hover-color: #f8f9fa;
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #dee2e6;
-              --ag-border-color: #dee2e6;
-              --ag-row-border-color: #eef0f2;
-              --ag-cell-horizontal-border: #eef0f2;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-         }
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         #sh-grid.ag-theme-quartz {
-              width: 100%;
-         }
-         /* Ligne d'en-tête de groupe par rayon (voir groupHeaderRow/withDepartmentGroupHeaders) : fond
-            gris + gras, même esprit visuel que l'ancien table-secondary Bootstrap. */
-         .sh-group-header-row {
-              display: flex;
-              align-items: center;
-              height: 100%;
-              padding: 0 12px;
-              background-color: #f1f3f5;
-              font-weight: 600;
-              color: #1a1a1a;
-              border-bottom: 1px solid #dee2e6;
-         }
     </style>
 </head>
 
@@ -179,177 +130,39 @@
                          <div class="card-header d-flex justify-content-between align-items-center">
                               <h4 class="card-title mb-0">Ventes synchronisées</h4>
                               <div class="d-flex align-items-center gap-2">
-                                   <button type="button" class="btn btn-sm btn-outline-dark" id="sh-export-csv" title="Export CSV, ouvrable directement dans Excel">
-                                        <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
-                                   </button>
                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="sh-prev-page" disabled>&laquo; Précédent</button>
                                    <span class="small text-muted" id="sh-page-label">—</span>
                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="sh-next-page" disabled>Suivant &raquo;</button>
                               </div>
                          </div>
                          <div class="card-body p-0">
-                              <div id="sh-empty-message" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</div>
-                              <div id="sh-grid" class="ag-theme-quartz" style="display:none;"></div>
+                              <div class="table-responsive">
+                                   <table class="table align-middle mb-0 table-hover">
+                                        <thead class="bg-light-subtle">
+                                             <tr>
+                                                  <th>Date</th>
+                                                  <th>EAN</th>
+                                                  <th>Article</th>
+                                                  <th class="text-end">Quantité</th>
+                                                  <th class="text-end">CA (HT)</th>
+                                                  <th class="text-end">CA (TTC)</th>
+                                             </tr>
+                                        </thead>
+                                        <tbody id="sh-tbody">
+                                             <tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>
+                                        </tbody>
+                                   </table>
+                              </div>
                          </div>
                     </div>
 
                     <script>
                          (function () {
                               const shopSelect = document.getElementById('sh-shop');
-                              const emptyMessage = document.getElementById('sh-empty-message');
-                              const gridDiv = document.getElementById('sh-grid');
+                              const tbody = document.getElementById('sh-tbody');
                               let currentPage = 1;
                               const pageSize = 100;
                               let lastTotal = 0;
-
-                              function setEmptyMessage(msg) {
-                                   gridDiv.style.display = 'none';
-                                   emptyMessage.style.display = '';
-                                   emptyMessage.textContent = msg;
-                              }
-
-                              function showGrid() {
-                                   emptyMessage.style.display = 'none';
-                                   gridDiv.style.display = '';
-                              }
-
-                              // Regroupement "par rayon" (case à cocher) : rowGroup + groupDisplayType: 'groupRows'
-                              // (essayé le 21/09/2026) ne fonctionne PAS avec AG Grid Community — vérifié dans le
-                              // bundle CDN chargé ici, RowGroupingModule n'y existe pas du tout (seul
-                              // ClientSideRowModelModule est présent) : le regroupement visuel de lignes fait
-                              // partie d'AG Grid Enterprise (licence payante), pas Community, contrairement à ce
-                              // qu'un commentaire précédent supposait — la case cochée ne faisait alors
-                              // silencieusement rien, sans erreur console. Remplacé par une ligne d'en-tête de
-                              // groupe "faite main" (pleine largeur, via isFullWidthRow/fullWidthCellRenderer,
-                              // une fonctionnalité réellement Community) insérée avant chaque rayon dans des
-                              // données triées par rayon puis par date — visuellement équivalent, sans
-                              // dépendre d'Enterprise.
-                              let groupByDepartmentActive = false;
-
-                              const numberFormatter = function (params) {
-                                   return (params.value === null || params.value === undefined) ? '—' : params.value.toLocaleString('fr-FR');
-                              };
-                              const currencyFormatter = function (params) {
-                                   return (params.value === null || params.value === undefined) ? '—' : params.value.toLocaleString('fr-FR') + ' CFA';
-                              };
-
-                              const baseColumnDefs = [
-                                   { field: 'dateLabel', headerName: 'Date', filter: 'agTextColumnFilter', sortable: true, sort: 'desc', minWidth: 170 },
-                                   { field: 'ean', headerName: 'EAN', filter: 'agTextColumnFilter', sortable: true, minWidth: 140 },
-                                   { field: 'label', headerName: 'Article', filter: 'agTextColumnFilter', sortable: true, flex: 1, minWidth: 220,
-                                        valueFormatter: function (params) { return params.value || '—'; } },
-                                   { field: 'quantity', headerName: 'Quantité', filter: 'agNumberColumnFilter', sortable: true, minWidth: 130, type: 'rightAligned', valueFormatter: numberFormatter },
-                                   { field: 'revenueExclTax', headerName: 'CA (HT)', filter: 'agNumberColumnFilter', sortable: true, minWidth: 140, type: 'rightAligned', valueFormatter: currencyFormatter },
-                                   { field: 'revenueInclTax', headerName: 'CA (TTC)', filter: 'agNumberColumnFilter', sortable: true, minWidth: 140, type: 'rightAligned', valueFormatter: currencyFormatter },
-                              ];
-
-                              const departmentColumnDef = {
-                                   field: 'department', headerName: 'Rayon', filter: 'agTextColumnFilter', sortable: true, minWidth: 160,
-                              };
-
-                              // Construit une ligne d'en-tête de groupe pleine largeur "RAYON X (N article(s))",
-                              // insérée avant chaque changement de rayon dans des lignes déjà triées par rayon.
-                              function groupHeaderRow(department, count) {
-                                   return { __groupHeader: true, department: department || 'Rayon inconnu', count: count };
-                              }
-
-                              // Trie les lignes par rayon (alphabétique) puis par date décroissante à l'intérieur
-                              // de chaque rayon, et intercale une ligne d'en-tête de groupe avant chaque rayon.
-                              function withDepartmentGroupHeaders(rows) {
-                                   const sorted = rows.slice().sort(function (a, b) {
-                                        const da = a.department || 'Rayon inconnu';
-                                        const db = b.department || 'Rayon inconnu';
-                                        if (da !== db) return da.localeCompare(db);
-                                        return new Date(b.date) - new Date(a.date);
-                                   });
-                                   const out = [];
-                                   let currentDept = null;
-                                   let deptStartIdx = 0;
-                                   sorted.forEach(function (row, idx) {
-                                        const dept = row.department || 'Rayon inconnu';
-                                        if (dept !== currentDept) {
-                                             currentDept = dept;
-                                             deptStartIdx = out.length;
-                                             out.push(groupHeaderRow(dept, 0)); // count posé après coup (voir plus bas)
-                                        }
-                                        out.push(row);
-                                   });
-                                   // Deuxième passe : remplit le compte d'articles de chaque en-tête, non connu tant
-                                   // que le groupe suivant n'a pas commencé lors de la première passe.
-                                   let i = 0;
-                                   while (i < out.length) {
-                                        if (out[i].__groupHeader) {
-                                             let count = 0;
-                                             let j = i + 1;
-                                             while (j < out.length && !out[j].__groupHeader) { count++; j++; }
-                                             out[i].count = count;
-                                             i = j;
-                                        } else {
-                                             i++;
-                                        }
-                                   }
-                                   return out;
-                              }
-
-                              let gridApi = null;
-
-                              function buildGridOptions(withDepartment) {
-                                   // En mode groupé, le tri par défaut "Date desc" de baseColumnDefs (colonne
-                                   // dateLabel) écraserait sinon visuellement l'ordre par rayon imposé dans
-                                   // withDepartmentGroupHeaders : AG Grid retrie côté client selon l'état de tri de
-                                   // la colonne, indépendamment de l'ordre des données injectées via setGridOption.
-                                   // Retiré explicitement (sort: null) uniquement dans ce mode — l'utilisateur peut
-                                   // toujours cliquer sur l'en-tête Date pour trier manuellement s'il le souhaite,
-                                   // ce qui casse alors le regroupement visuel par rayon (attendu, comme n'importe
-                                   // quel tri manuel dans un tableau groupé).
-                                   const dateColDef = withDepartment
-                                        ? Object.assign({}, baseColumnDefs[0], { sort: null })
-                                        : baseColumnDefs[0];
-                                   const columnDefs = withDepartment
-                                        ? [departmentColumnDef, dateColDef].concat(baseColumnDefs.slice(1))
-                                        : baseColumnDefs.slice();
-                                   return {
-                                        columnDefs: columnDefs,
-                                        localeText: window.AG_GRID_LOCALE_FR,
-                                        domLayout: 'autoHeight',
-                                        pagination: false,
-                                        rowData: [],
-                                        defaultColDef: { resizable: true, sortable: true },
-                                        // Ligne pleine largeur (Community, contrairement au rowGrouping natif) pour les
-                                        // en-têtes de groupe par rayon — cf. commentaire sur groupByDepartmentActive.
-                                        isFullWidthRow: withDepartment ? function (params) { return !!params.rowNode.data.__groupHeader; } : undefined,
-                                        fullWidthCellRenderer: withDepartment ? function (params) {
-                                             const div = document.createElement('div');
-                                             div.className = 'sh-group-header-row';
-                                             div.textContent = params.data.department + ' (' + params.data.count + ' article(s))';
-                                             return div;
-                                        } : undefined,
-                                        getRowHeight: withDepartment ? function (params) {
-                                             return params.data && params.data.__groupHeader ? 38 : undefined;
-                                        } : undefined,
-                                   };
-                              }
-
-                              function destroyGrid() {
-                                   if (gridApi) {
-                                        gridApi.destroy();
-                                        gridApi = null;
-                                   }
-                              }
-
-                              function createGrid(withDepartment) {
-                                   destroyGrid();
-                                   gridDiv.innerHTML = '';
-                                   const options = buildGridOptions(withDepartment);
-                                   gridApi = agGrid.createGrid(gridDiv, options);
-                              }
-
-                              createGrid(false);
-
-                              document.getElementById('sh-export-csv').addEventListener('click', function () {
-                                   if (!gridApi) return;
-                                   gridApi.exportDataAsCsv({ fileName: 'ventes-synchronisees.csv' });
-                              });
 
                               async function loadShopList() {
                                    try {
@@ -391,16 +204,15 @@
                                    }
                               }
 
-                              function toRowData(l) {
-                                   return {
-                                        dateLabel: new Date(l.date).toLocaleString('fr-FR'),
-                                        date: l.date,
-                                        ean: l.ean,
-                                        label: l.label,
-                                        quantity: l.quantity,
-                                        revenueExclTax: l.revenueExclTax,
-                                        revenueInclTax: (l.revenueInclTax !== null && l.revenueInclTax !== undefined) ? l.revenueInclTax : null,
-                                   };
+                              function renderSaleRow(l) {
+                                   return '<tr>' +
+                                        '<td>' + new Date(l.date).toLocaleString('fr-FR') + '</td>' +
+                                        '<td>' + l.ean + '</td>' +
+                                        '<td>' + (l.label || '—') + '</td>' +
+                                        '<td class="text-end">' + l.quantity.toLocaleString('fr-FR') + '</td>' +
+                                        '<td class="text-end">' + l.revenueExclTax.toLocaleString('fr-FR') + ' CFA</td>' +
+                                        '<td class="text-end">' + (l.revenueInclTax !== null && l.revenueInclTax !== undefined ? l.revenueInclTax.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
+                                        '</tr>';
                               }
 
                               // Le rayon n'existe pas sur SalesLine (une ligne de vente individuelle, pas un article
@@ -414,7 +226,7 @@
                                    const posId = shopSelect.selectedOptions[0] ? shopSelect.selectedOptions[0].dataset.posId : null;
                                    const eans = [...new Set(lines.map(function (l) { return l.ean; }))];
 
-                                   setEmptyMessage('Résolution des rayons (' + eans.length + ' article(s) distinct(s))...');
+                                   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Résolution des rayons (' + eans.length + ' article(s) distinct(s))...</td></tr>';
                                    let departmentByEan = {};
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-lines/departments?shopId=' + encodeURIComponent(shopId) + '&posId=' + encodeURIComponent(posId) + '&eans=' + encodeURIComponent(eans.join(',')));
@@ -422,33 +234,33 @@
                                         if (!json.success) throw new Error(json.message);
                                         departmentByEan = json.data;
                                    } catch (err) {
-                                        setEmptyMessage('Erreur lors de la résolution des rayons: ' + err.message);
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur lors de la résolution des rayons: ' + err.message + '</td></tr>';
                                         return;
                                    }
 
-                                   const rows = lines.map(function (l) {
-                                        const row = toRowData(l);
-                                        row.department = (departmentByEan[l.ean] && departmentByEan[l.ean].department) || 'Rayon inconnu';
-                                        return row;
+                                   const byDepartment = new Map();
+                                   lines.forEach(function (l) {
+                                        const dept = (departmentByEan[l.ean] && departmentByEan[l.ean].department) || 'Rayon inconnu';
+                                        if (!byDepartment.has(dept)) byDepartment.set(dept, []);
+                                        byDepartment.get(dept).push(l);
                                    });
+                                   const departments = Array.from(byDepartment.keys()).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
 
-                                   createGrid(true);
-                                   gridApi.setGridOption('rowData', withDepartmentGroupHeaders(rows));
-                                   showGrid();
+                                   tbody.innerHTML = departments.map(function (dept) {
+                                        const rows = byDepartment.get(dept);
+                                        const header = '<tr class="table-secondary"><td colspan="6"><strong>' + dept + '</strong> <span class="text-muted small">(' + rows.length + ' ligne(s))</span></td></tr>';
+                                        return header + rows.map(renderSaleRow).join('');
+                                   }).join('');
                               }
 
                               let lastLoadedLines = [];
                               async function renderCurrentLines() {
                                    if (!lastLoadedLines.length) {
-                                        setEmptyMessage('Aucune vente trouvée pour ces filtres.');
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Aucune vente trouvée pour ces filtres.</td></tr>';
                                    } else if (document.getElementById('sh-group-by-department').checked) {
-                                        groupByDepartmentActive = true;
                                         await renderGroupedByDepartment(lastLoadedLines);
                                    } else {
-                                        groupByDepartmentActive = false;
-                                        createGrid(false);
-                                        gridApi.setGridOption('rowData', lastLoadedLines.map(toRowData));
-                                        showGrid();
+                                        tbody.innerHTML = lastLoadedLines.map(renderSaleRow).join('');
                                    }
                               }
                               document.getElementById('sh-group-by-department').addEventListener('change', renderCurrentLines);
@@ -462,7 +274,7 @@
                               async function search(page) {
                                    const shopId = shopSelect.value;
                                    if (!shopId) {
-                                        setEmptyMessage('Sélectionnez un magasin pour afficher ses ventes.');
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses ventes.</td></tr>';
                                         return;
                                    }
                                    const token = ++searchToken;
@@ -476,7 +288,7 @@
                                    if (dateEnd) params.set('dateEnd', dateEnd + 'T23:59:59');
                                    if (ean) params.set('ean', ean);
 
-                                   setEmptyMessage('Chargement...');
+                                   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Chargement...</td></tr>';
                                    try {
                                         const res = await window.reassortFetch('/reassort/sales-lines?' + params.toString());
                                         const json = await res.json();
@@ -502,7 +314,7 @@
                                         document.getElementById('sh-next-page').disabled = currentPage >= totalPages;
                                    } catch (err) {
                                         if (token !== searchToken) return;
-                                        setEmptyMessage('Erreur: ' + err.message);
+                                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
                                    }
                               }
 

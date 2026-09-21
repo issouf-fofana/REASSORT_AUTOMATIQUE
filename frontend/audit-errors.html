@@ -13,6 +13,16 @@
 
      <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
+     <!-- AG Grid Community (migration du tableau du journal d'audit, demande du 21/09/2026, même
+          pattern que purchase-order-v2.html) : tri/filtre par colonne + export CSV en JS vanilla.
+          L'export .xlsx stylé est réservé à AG Grid Enterprise (licence payante, absente de ce
+          projet) — le CSV, gratuit avec Community, s'ouvre directement dans Excel. -->
+     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
+     <script src="assets/js/ag-grid-setup.js"></script>
+     <script src="assets/js/ag-grid-locale-fr.js"></script>
+
      <script src="assets/js/config.js"></script>
      <script src="assets/js/backend-config.js"></script>
      <script src="assets/js/reassort-auth.js"></script>
@@ -20,10 +30,34 @@
 
      <style>
           .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
-          /* Cellules longues (message d'erreur, page/API) : retour à la ligne au lieu de forcer
-             le tableau à s'étirer hors du viewport (bug observé : la scrollbar de la page entière
-             débordait jusque sur la sidebar au lieu de rester contenue dans .table-responsive). */
-          #err-tbody td { word-break: break-word; overflow-wrap: break-word; white-space: normal; }
+
+          /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun
+             coin arrondi, police Inter) — même règle que purchase-order-v2.html. */
+          .ag-theme-quartz {
+               --ag-font-family: "Inter", sans-serif;
+               --ag-font-size: 13.5px;
+               --ag-active-color: #1F2937;
+               --ag-selected-row-background-color: #f3f4f6;
+               --ag-row-hover-color: #f8f9fa;
+               --ag-header-background-color: #f8f9fa;
+               --ag-header-foreground-color: #1a1a1a;
+               --ag-header-column-resize-handle-color: #dee2e6;
+               --ag-border-color: #dee2e6;
+               --ag-row-border-color: #eef0f2;
+               --ag-cell-horizontal-border: #eef0f2;
+               --ag-input-focus-border-color: #1F2937;
+               --ag-checkbox-checked-color: #1F2937;
+               --ag-range-selection-border-color: #1F2937;
+               --ag-wrapper-border-radius: 0;
+               --ag-border-radius: 0;
+               --ag-card-radius: 0;
+          }
+          .ag-theme-quartz, .ag-theme-quartz * {
+               border-radius: 0 !important;
+          }
+          #err-grid.ag-theme-quartz {
+               width: 100%;
+          }
      </style>
 </head>
 
@@ -64,35 +98,14 @@
                                         <option value="backend">Backend</option>
                                    </select>
                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="err-refresh">Actualiser</button>
+                                   <button type="button" class="btn btn-sm btn-outline-dark" id="err-export-csv" title="Export CSV, ouvrable directement dans Excel">
+                                        <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
+                                   </button>
                               </div>
                          </div>
                          <div class="card-body">
                               <div class="small text-muted mb-2" id="err-summary"></div>
-                              <div class="table-responsive">
-                                   <table class="table table-sm align-middle mb-0" style="table-layout: fixed; width: 100%;">
-                                        <colgroup>
-                                             <col style="width: 130px;">
-                                             <col style="width: 90px;">
-                                             <col style="width: 220px;">
-                                             <col>
-                                             <col style="width: 160px;">
-                                             <col style="width: 110px;">
-                                        </colgroup>
-                                        <thead class="bg-light-subtle">
-                                             <tr>
-                                                  <th>Date</th>
-                                                  <th>Source</th>
-                                                  <th>Page / API</th>
-                                                  <th>Message exact</th>
-                                                  <th>Utilisateur</th>
-                                                  <th>IP</th>
-                                             </tr>
-                                        </thead>
-                                        <tbody id="err-tbody">
-                                             <tr><td colspan="6" class="text-center text-muted py-3">Chargement...</td></tr>
-                                        </tbody>
-                                   </table>
-                              </div>
+                              <div id="err-grid" class="ag-theme-quartz"></div>
                          </div>
                     </div>
 
@@ -103,7 +116,107 @@
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
-     <script src="assets/js/audit-errors.js"></script>
+     <script>
+          // Migration AG Grid du tableau (remplace assets/js/audit-errors.js pour cette page v2,
+          // demande du 21/09/2026) : même logique de chargement/filtre par source, tri/filtre par
+          // colonne en plus, export CSV. La page originale audit-errors.html + son script partagé
+          // assets/js/audit-errors.js restent inchangés (non touchés par cette migration).
+          (function () {
+               function fmtDate(iso) {
+                    if (!iso) return '—';
+                    return new Date(iso).toLocaleString('fr-FR');
+               }
+
+               function pageCellRenderer(params) {
+                    const r = params.data;
+                    const code = document.createElement('code');
+                    code.className = 'small';
+                    code.textContent = r.page || ((r.method ? r.method + ' ' : '') + (r.url || ''));
+                    return code;
+               }
+
+               function sourceCellRenderer(params) {
+                    const r = params.data;
+                    const span = document.createElement('span');
+                    span.className = 'badge ' + (r.source === 'frontend' ? 'bg-info' : 'bg-warning text-dark');
+                    span.textContent = r.source;
+                    return span;
+               }
+
+               function ipCellRenderer(params) {
+                    const code = document.createElement('code');
+                    code.textContent = params.data.ip || '—';
+                    return code;
+               }
+
+               const gridColumnDefs = [
+                    { headerName: 'Date', field: 'createdAt', width: 170, filter: 'agDateColumnFilter',
+                         valueFormatter: function (p) { return fmtDate(p.value); } },
+                    { headerName: 'Source', field: 'source', width: 110, filter: 'agTextColumnFilter', cellRenderer: sourceCellRenderer },
+                    { headerName: 'Page / API', width: 240, filter: 'agTextColumnFilter', cellRenderer: pageCellRenderer,
+                         valueGetter: function (p) { return p.data.page || ((p.data.method ? p.data.method + ' ' : '') + (p.data.url || '')); } },
+                    { headerName: 'Message exact', field: 'message', flex: 2, minWidth: 300, filter: 'agTextColumnFilter', autoHeight: true, wrapText: true,
+                         valueFormatter: function (p) { return p.value == null ? '' : String(p.value).slice(0, 200); } },
+                    { headerName: 'Utilisateur', field: 'userEmail', width: 200, filter: 'agTextColumnFilter',
+                         valueFormatter: function (p) { return p.value || '—'; } },
+                    { headerName: 'IP', field: 'ip', width: 140, filter: 'agTextColumnFilter', cellRenderer: ipCellRenderer,
+                         valueFormatter: function (p) { return p.value || '—'; } },
+               ];
+
+               let gridApi = null;
+               function ensureGrid() {
+                    if (gridApi) return gridApi;
+                    gridApi = agGrid.createGrid(document.getElementById('err-grid'), {
+                         columnDefs: gridColumnDefs,
+                         rowData: [],
+                         localeText: window.AG_GRID_LOCALE_FR,
+                         domLayout: 'autoHeight',
+                         pagination: true,
+                         paginationPageSize: 50,
+                         paginationPageSizeSelector: [25, 50, 100, 200],
+                         animateRows: false,
+                    });
+                    return gridApi;
+               }
+
+               async function loadErrors() {
+                    ensureGrid();
+                    const source = document.getElementById('err-source').value;
+                    gridApi.setGridOption('rowData', []);
+                    try {
+                         const res = await window.reassortFetch('/reassort/error-reports/recent');
+                         const json = await res.json();
+                         if (!json.success) throw new Error(json.message);
+                         let rows = json.data.rows;
+                         if (source) rows = rows.filter(function (r) { return r.source === source; });
+                         document.getElementById('err-summary').textContent =
+                              json.data.total + ' erreur(s) journalisée(s) (30 derniers jours max, 100 affichées)' +
+                              (source ? ' — filtrées : ' + rows.length : '');
+                         gridApi.setGridOption('rowData', rows);
+                    } catch (err) {
+                         document.getElementById('err-summary').textContent = 'Erreur: ' + err.message;
+                    }
+               }
+
+               document.getElementById('err-export-csv').addEventListener('click', function () {
+                    if (!gridApi) return;
+                    gridApi.exportDataAsCsv({
+                         fileName: 'journal-audit-' + new Date().toISOString().slice(0, 10) + '.csv',
+                    });
+               });
+
+               document.getElementById('err-source').addEventListener('change', loadErrors);
+               document.getElementById('err-refresh').addEventListener('click', loadErrors);
+               // Ce script inline est placé après le contenu de la page (donc après le DOM du
+               // tableau), mais avant la fin du document : on ne sait pas si DOMContentLoaded a déjà
+               // été émis, d'où ce garde-fou plutôt qu'un double appel à loadErrors().
+               if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', loadErrors);
+               } else {
+                    loadErrors();
+               }
+          })();
+     </script>
      <script src="assets/js/ai-assistant-widget.js"></script>
 
 </body>
