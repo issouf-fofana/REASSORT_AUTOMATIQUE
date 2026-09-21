@@ -324,6 +324,14 @@
                               document.getElementById('sh-next-page').addEventListener('click', function () { search(currentPage + 1); });
                               shopSelect.addEventListener('change', function () { loadCoverage(); search(1); });
 
+                              // reassortMakeShopPickerSearchable (appelé dans loadShopList) synchronise shopSelect.value
+                              // avec le magasin actif global de la topbar (demande du 21/09/2026 : "il affiche les
+                              // ventes... ou tout est mélangé" — un compte ADMIN/SUPERVISOR voyait par défaut le PREMIER
+                              // magasin de la liste, ex: "313", jamais forcément son magasin de travail actuel). Cette
+                              // synchronisation est TOUJOURS terminée de façon synchrone au moment où .then() s'exécute
+                              // ci-dessous (que le magasin global ait changé la valeur ou non) : on peut donc toujours se
+                              // fier à shopSelect.value ici, sans dépendre d'un événement "change" qui ne se déclenche
+                              // pas si le premier magasin de la liste coïncidait déjà avec le magasin global.
                               loadShopList().then(function () {
                                    if (shopSelect.options.length && shopSelect.value) { loadCoverage(); search(1); }
                               });

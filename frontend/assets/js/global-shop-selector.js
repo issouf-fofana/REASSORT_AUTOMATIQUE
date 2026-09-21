@@ -46,6 +46,37 @@
   window.reassortSetActiveShop = setActiveShop;
   window.reassortOnActiveShopChange = function (cb) { changeListeners.push(cb); };
 
+  // Présélection initiale par défaut (demande du 21/09/2026 : "on le classe par défaut par le
+  // magasin le plus haut niveau") : tant qu'un compte ADMIN/SUPERVISOR n'a JAMAIS explicitement
+  // choisi de magasin sur ce navigateur, getActiveShop() renvoie null et chaque page retombait sur
+  // le premier magasin par ordre alphabétique de code (ex: "313"), donnant l'impression de données
+  // arbitraires/mélangées. Une seule requête /reassort/shops/default (magasin au CA le plus élevé
+  // parmi les accessibles) suffit à amorcer localStorage — les visites suivantes n'appellent plus
+  // jamais cette route, getActiveShop() trouve déjà une valeur.
+  let defaultShopInitInFlight = false;
+  async function initDefaultShopIfNeeded() {
+    if (getActiveShop() || defaultShopInitInFlight) return; // déjà un choix (explicite ou déjà amorcé) : rien à faire
+    const user = window.reassortGetUser && window.reassortGetUser();
+    if (!user || (window.reassortIsSingleShopRole && window.reassortIsSingleShopRole(user.role))) return;
+    if (!window.reassortFetch) return;
+    defaultShopInitInFlight = true;
+    try {
+      const [defaultRes, shopsRes] = await Promise.all([
+        window.reassortFetch('/reassort/shops/default'),
+        window.reassortFetch('/reassort/shops'),
+      ]);
+      const defaultJson = await defaultRes.json();
+      const shopsJson = await shopsRes.json();
+      if (!defaultJson.success || !defaultJson.data || !shopsJson.success) return;
+      const matched = (shopsJson.data || []).find(function (s) { return s.id === defaultJson.data.id; });
+      if (matched) setActiveShop(matched);
+    } catch (err) {
+      // Échec réseau : reste sans magasin actif, comme avant cet ajout — jamais bloquant pour la page.
+    } finally {
+      defaultShopInitInFlight = false;
+    }
+  }
+
   // Exposée pour que layout.js puisse la rappeler explicitement une fois la topbar injectée dans
   // le DOM : ce script est chargé en <head> (avant <body>), donc son tout premier appel à
   // renderButton() ci-dessous échoue silencieusement (#global-shop-selector-btn n'existe pas
@@ -73,6 +104,11 @@
     const shop = getActiveShop();
     btn.textContent = shop ? shop.posLabel + ' : ' + shop.name + ' (' + shop.reference + ') ▾' : 'Choisir un magasin ▾';
     btn.style.display = '';
+
+    // Amorce le magasin par défaut si nécessaire (voir initDefaultShopIfNeeded ci-dessus) — non
+    // bloquant : renderButton() a déjà affiché "Choisir un magasin" pendant que la requête tourne,
+    // setActiveShop() (dans initDefaultShopIfNeeded) rappellera renderButton() une fois résolue.
+    if (!shop) initDefaultShopIfNeeded();
   }
 
   // Construit un <select> masqué compatible avec window.reassortMakeShopPickerSearchable

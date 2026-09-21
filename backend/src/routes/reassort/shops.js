@@ -8,6 +8,7 @@ const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const rposServers = require('../../services/rposServersService');
 const { DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
+const { getRevenueAllShops } = require('../../services/chatbotToolsService');
 
 // Un Rayonniste/Chef de département ne voit que les commandes de SON rayon — les commandes RPOS
 // sont créées une par rayon (readme §11, ProposalOrder.department) donc chaque commande a un
@@ -117,6 +118,38 @@ router.put('/servers/:posId', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('Update server error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/shops/default - magasin à présélectionner par défaut pour un compte
+// ADMIN/SUPERVISOR qui n'a encore jamais explicitement choisi de magasin sur ce navigateur (demande
+// du 21/09/2026 : "on le classe par défaut par le magasin le plus haut niveau" — jusqu'ici, sans
+// aucun choix mémorisé en localStorage, chaque page retombait sur le PREMIER magasin par ordre
+// alphabétique de code, ex: "313", donnant l'impression que les données affichées étaient
+// arbitraires/mélangées). Retourne le magasin au CA le plus élevé sur les 7 derniers jours parmi
+// ceux accessibles à l'utilisateur — jamais appelé pour un rôle mono-magasin (son seul magasin est
+// déjà connu directement depuis le JWT, pas besoin de ce calcul).
+router.get('/shops/default', async (req, res) => {
+  try {
+    if (SINGLE_SHOP_ROLES.has(req.user.role)) {
+      return res.json({ success: true, data: req.user.rposShopId ? { id: req.user.rposShopId } : null });
+    }
+    if (req.user.role !== 'ADMIN' && req.user.role !== 'SUPERVISOR') {
+      return res.status(403).json({ success: false, message: 'Réservé aux administrateurs et superviseurs' });
+    }
+
+    const allowedShopIds = req.user.role === 'ADMIN'
+      ? (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId)
+      : (await prisma.supervisedShop.findMany({ where: { userId: req.user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
+
+    if (!allowedShopIds.length) return res.json({ success: true, data: null });
+
+    const result = await getRevenueAllShops(allowedShopIds, { days: 7 });
+    const topShop = result.found && result.shops.length ? result.shops[0] : null;
+    res.json({ success: true, data: topShop ? { id: topShop.rposShopId } : { id: allowedShopIds[0] } });
+  } catch (error) {
+    console.error('Default shop error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
