@@ -192,6 +192,61 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
 }
 
 /**
+ * getRevenueAllShops(allowedShopIds, { date, days }) — classement du CA de TOUS les magasins
+ * accessibles à l'utilisateur (demande du 19/09/2026 : "il peut poser une question quelle est le CA
+ * des magasins, le système doit lui donner les infos sur le CA de chaque magasin... classé par
+ * défaut par le plus haut niveau"). Réservé ADMIN/SUPERVISOR (résolu et vérifié en amont, jamais
+ * dans ce tool — allowedShopIds est la liste déjà autorisée, cf. chatbotService.js) : un DIRECTOR/
+ * DEPARTMENT_HEAD/SHELF_STOCKER reste cloisonné à son unique magasin comme partout ailleurs, cette
+ * fonction n'est même pas exposée dans son catalogue de tools.
+ * Classé par CA décroissant par défaut (le magasin au CA le plus élevé en tête) — cohérent avec le
+ * principe déjà appliqué dans getParetoArticles/getTopGisements (toujours trié par ordre d'intérêt
+ * décroissant, jamais un ordre arbitraire comme l'ordre d'insertion en base).
+ */
+async function getRevenueAllShops(allowedShopIds, { date, days = 1 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  let dateStart;
+  let dateEnd;
+  if (date) {
+    dateStart = new Date(date + 'T00:00:00.000Z');
+    dateEnd = new Date(date + 'T23:59:59.999Z');
+    if (Number.isNaN(dateStart.getTime())) return { found: false, message: `La date "${date}" n'est pas une date valide.` };
+  } else {
+    dateEnd = new Date();
+    dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  }
+
+  const grouped = await prisma.salesLine.groupBy({
+    by: ['rposShopId'],
+    where: { rposShopId: { in: allowedShopIds }, date: { gte: dateStart, lte: dateEnd } },
+    _sum: { revenueExclTax: true, revenueInclTax: true },
+  });
+  const revenueByShop = new Map(grouped.map((g) => [g.rposShopId, g._sum]));
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+
+  const results = shops.map((shop) => ({
+    rposShopId: shop.rposShopId,
+    shopReference: shop.reference,
+    shopName: shop.name,
+    revenueExclTaxCfa: Math.round(revenueByShop.get(shop.rposShopId)?.revenueExclTax || 0),
+    revenueInclTaxCfa: Math.round(revenueByShop.get(shop.rposShopId)?.revenueInclTax || 0),
+  })).sort((a, b) => b.revenueExclTaxCfa - a.revenueExclTaxCfa);
+
+  if (!results.length) return { found: false, message: 'Aucun magasin trouvé pour ce compte.' };
+
+  return {
+    found: true,
+    date: date || null,
+    days: date ? null : days,
+    shopCount: results.length,
+    totalRevenueExclTaxCfa: results.reduce((s, r) => s + r.revenueExclTaxCfa, 0),
+    shops: results,
+  };
+}
+
+/**
  * getSales() / getSalesHistory(ean, days, department) — historique de ventes réel depuis SalesLine.
  *
  * SalesLine ne connaît pas le rayon d'un article (seulement son EAN) : un filtre par département
@@ -729,6 +784,7 @@ module.exports = {
   getTopGisements,
   getPriceChangeHistory,
   getRevenue,
+  getRevenueAllShops,
   getSalesHistory,
   getCurrentProposal,
   getStockoutRisks,

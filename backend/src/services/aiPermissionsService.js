@@ -38,6 +38,7 @@ const ROLE_DEFAULTS = {
 /** Table de correspondance outil -> capacité requise, utilisée par chatbotService.js. */
 const TOOL_CAPABILITY = {
   getRevenue: null, // résolu dynamiquement (revenueShop vs revenueArticle) selon la présence d'un filtre ean/department, cf. resolveRevenueCapability
+  getRevenueAllShops: 'revenueShop', // même capacité que le CA d'un seul magasin — la restriction ADMIN/SUPERVISOR est appliquée dans chatbotService.js, pas ici
   getArticleDetails: 'articleDetails',
   getArticlesByGisement: 'articleDetails',
   getTopGisements: 'articleDetails',

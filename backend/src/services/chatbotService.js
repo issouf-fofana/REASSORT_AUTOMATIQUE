@@ -20,7 +20,7 @@ const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./
 // c'est un repli interne de getArticleStock sans EAN, pas une intention détectable par mot-clé).
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
-  'getRevenue', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
+  'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock',
 ]);
 
@@ -107,9 +107,17 @@ const PARETO_PATTERN_REGEX = /articles?.*\d{1,3}\s*%.*(ca\b|chiffre)|.*\d{1,3}\s
 const GISEMENT_MENTION_REGEX = /\b(?:gisement|adressage)s?\b/i;
 const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|le\s+)?([^?.!]+)/i;
 
+// "tous/chaque/l'ensemble de mes magasins" en même temps qu'une question de CA (demande du
+// 19/09/2026, réservé ADMIN/SUPERVISOR — cf. runToolForQuestion) doit gagner sur la règle générique
+// getRevenue (mot-clé "ca") — sans cette priorité, "quel est le CA de tous les magasins" retombait
+// sur getRevenue (mono-magasin, celui de la conversation en cours), donnant une fausse impression
+// de réponse correcte pour une seule agence au lieu du classement demandé.
+const ALL_SHOPS_REVENUE_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\b(ca\b|chiffre)|\b(ca\b|chiffre).*\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
+
 async function detectIntent(question) {
   const normalized = normalize(question);
   if (PARETO_PATTERN_REGEX.test(normalized)) return 'getParetoArticles';
+  if (ALL_SHOPS_REVENUE_REGEX.test(question)) return 'getRevenueAllShops';
   if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
   const rules = await getIntentRules();
   for (const rule of rules) {
@@ -171,7 +179,10 @@ function extractPercentage(question) {
  * Bornée [1, 365] : au-delà, le volume RPOS/local devient peu réaliste pour ce calcul.
  */
 function extractDays(question) {
-  const match = (question || '').match(/\b(\d{1,3})\s*jours?\b/i);
+  // Un ou deux mots de liaison optionnels entre le nombre et "jour(s)" (ex: "30 DERNIERS jours",
+  // "7 jours GLISSANTS") — la forme stricte "X jours" collée ratait ces formulations pourtant
+  // courantes (bug trouvé le 19/09/2026 : "sur les 30 derniers jours" ignoré, days retombait à 1).
+  const match = (question || '').match(/\b(\d{1,3})\s+(?:\w+\s+){0,2}?jours?\b/i);
   if (!match) return null;
   const value = parseInt(match[1], 10);
   return value >= 1 && value <= 365 ? value : null;
@@ -258,6 +269,7 @@ function isVisualRequest(question) {
 // callToolByName ci-dessous, jamais exposée au LLM qui ne doit connaître qu'une forme simple.
 const TOOL_CATALOG = [
   { name: 'getRevenue', description: 'Chiffre d\'affaires (CA) du magasin, d\'un rayon ou d\'un article, sur une date ou période.', params: { date: 'date ISO aaaa-mm-jj, optionnel', department: 'rayon, optionnel', ean: 'code EAN article, optionnel' } },
+  { name: 'getRevenueAllShops', description: 'Classement du CA de TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le CA de tous les magasins", "chiffre d\'affaires de chaque magasin", jamais pour une question sur UN seul magasin précis.', params: { date: 'date ISO aaaa-mm-jj, optionnel' } },
   { name: 'getSalesHistory', description: 'Historique/évolution des ventes (quantités, tendance) sur les derniers jours, du magasin ou d\'un article.', params: { ean: 'code EAN article, optionnel', days: 'nombre de jours, optionnel (défaut 30)', department: 'rayon, optionnel' } },
   { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getArticlesByGisement', description: 'Liste tous les articles rangés dans un gisement précis (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS", "ACCESSOIRES DE CUISINE") — à ne pas confondre avec le rayon/département (classification produit). Utile pour "quels articles sont dans tel gisement", "tops ventes par gisement/emplacement".', params: { gisement: 'nom ou code approximatif du gisement recherché, OBLIGATOIRE' } },
@@ -451,6 +463,19 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
       case 'getRevenue':
         return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
+      case 'getRevenueAllShops': {
+        // Réservé ADMIN/SUPERVISOR (demande du 19/09/2026) : un DIRECTOR/DEPARTMENT_HEAD/
+        // SHELF_STOCKER (compte à un seul magasin fixe) retombe silencieusement sur SON magasin
+        // seul plutôt que sur une erreur — cohérent avec le principe qu'une question mal formulée
+        // ne doit jamais planter, et un classement à un seul élément reste une réponse valide.
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
+        }
+        const allowedShopIds = user.role === 'ADMIN'
+          ? (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId)
+          : (await prisma.supervisedShop.findMany({ where: { userId: user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
+        return { toolName, toolResult: await tools.getRevenueAllShops(allowedShopIds, { date, days: daysQuery || 1 }) };
+      }
       case 'getStockoutRisks':
         return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
       case 'getOverstockArticles':
