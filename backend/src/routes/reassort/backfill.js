@@ -5,6 +5,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAdmin } = require('../../middleware/auth');
 const salesBackfillService = require('../../services/salesBackfillService');
+const salesDailyCoverageService = require('../../services/salesDailyCoverageService');
 
 router.post('/sales-backfill', requireAdmin, async (req, res) => {
   try {
@@ -162,6 +163,18 @@ router.post('/sales-backfill/batch/:batchId/retry', requireAdmin, async (req, re
     res.json({ success: true, message: 'Relance démarrée', data: { runId } });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/sales-daily-coverage/:shopId/gaps - jours en écart (PARTIAL/MISSING) pour un
+// magasin, enregistrés par le récap automatique de fin de backfill (demande du 21/09/2026) — pour
+// affichage côté UI, ou vérification manuelle sans devoir attendre le prochain récap automatique.
+router.get('/sales-daily-coverage/:shopId/gaps', requireAdmin, async (req, res) => {
+  try {
+    const gaps = await salesDailyCoverageService.listGaps(req.params.shopId);
+    res.json({ success: true, data: gaps });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

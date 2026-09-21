@@ -359,6 +359,19 @@ async function processRun(runId) {
 
   await prisma.salesBackfillRun.update({ where: { id: runId }, data: { status: 'DONE', completedAt: new Date() } });
   console.log(`[salesBackfillService] FIN run ${runId} — toutes les tranches terminées avec succès.`);
+
+  // Récap automatique de couverture jour par jour (demande du 21/09/2026 : "il doit faire un récap
+  // de la journée... si y'a des écarts il doit chercher à récupérer les données restantes") —
+  // require() en local (pas en tête de fichier) pour éviter une dépendance circulaire, ce service
+  // relançant lui-même startBackfill en cas d'écart détecté. N'interrompt jamais le run déjà marqué
+  // DONE ci-dessus si le récap échoue : un problème de récap est un signal à corriger séparément,
+  // jamais une raison de remettre en cause un backfill qui vient de réussir.
+  try {
+    const coverageService = require('./salesDailyCoverageService');
+    await coverageService.runDailyRecap(run.rposPosId, run.rposShopId, run.periodStart.toISOString(), run.periodEnd.toISOString(), { startBackfillFn: startBackfill });
+  } catch (err) {
+    console.error(`[salesBackfillService] Échec du récap de couverture post-run ${runId} : ${err.message}`);
+  }
 }
 
 /**

@@ -962,6 +962,36 @@ model SalesSyncState {
   @@map("sales_sync_state")
 }
 
+// Enregistrement EXPLICITE des périodes disponibles/manquantes, jour par jour (demande du
+// 21/09/2026 : "il faut également enregistrer dans la base les périodes pour lesquelles les
+// données sont disponibles ou manquantes... si les ventes du 10/09/2026 sont récupérées seulement
+// à 50%, le système doit être capable de détecter que certaines données sont absentes"). Distinct
+// de SalesBackfillChunk (qui trace une TRANCHE, souvent plusieurs jours, sans jamais dire si CHAQUE
+// jour à l'intérieur est complet) : une ligne par (magasin, jour) donne la granularité exacte
+// demandée, alimentée par le récap automatique en fin de backfill/synchro (cf.
+// salesDailyCoverageService.js).
+model SalesDailyCoverage {
+  id String @id @default(cuid())
+
+  rposPosId  String   @map("rpos_pos_id")
+  rposShopId String   @map("rpos_shop_id")
+  day        DateTime @map("day") // toujours à minuit UTC (une date, pas un horodatage précis)
+
+  expectedLines Int @map("expected_lines") // count() RPOS réel pour CETTE journée précise
+  actualLines   Int @map("actual_lines")   // count() réel en base (SalesLine) pour cette même journée
+
+  // COMPLETE (actual >= expected) | PARTIAL (0 < actual < expected) | MISSING (actual = 0, expected > 0)
+  // | NO_SALES (expected = 0, jour sans aucune vente RPOS — jamais confondu avec une vraie lacune).
+  status String @map("status")
+
+  checkedAt DateTime @default(now()) @map("checked_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([rposShopId, day])
+  @@index([rposShopId, status])
+  @@map("sales_daily_coverage")
+}
+
 // =============================================
 // RÉCUPÉRATION PAR TRANCHES AVEC REPRISE (backfill volumineux)
 // =============================================
