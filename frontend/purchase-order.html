@@ -1176,8 +1176,15 @@
                                                        // langage naturel si elle suffit ou non, plutôt qu'une simple soustraction silencieuse.
                                                        // Affiché même quand l'article reste dans la liste (quantité complémentaire proposée),
                                                        // pas seulement quand il est totalement exclu (cf. alreadyOrderedBadge ci-dessus).
+                                                       // TOUJOURS affiché, y compris quand excludedAsAlreadyOrderedRpos est vrai (correctif du
+                                                       // 21/09/2026) : masquer ce raisonnement précisément dans CE cas était le vrai bug —
+                                                       // "au lieu de dire directement qu'il est dans une commande donc pas de quantité à
+                                                       // proposer, il doit d'abord dire si la quantité commandée est suffisante ou pas, et
+                                                       // c'est après ça qu'il propose une quantité". alreadyOrderedBadge annonce QUAND/COMBIEN
+                                                       // a été commandé ; orderSufficiencyReasoning dit SI c'est suffisant — deux informations
+                                                       // complémentaires, jamais redondantes, qui doivent apparaître ensemble.
                                                        const orderSufficiencyBadge = l.orderSufficiencyReasoning
-                                                            ? '<br><div class="small ' + (l.excludedAsAlreadyOrderedRpos ? 'd-none' : 'text-muted') + ' mt-1" style="max-width: 320px;">🧮 ' + l.orderSufficiencyReasoning + '</div>'
+                                                            ? '<br><div class="small text-muted mt-1" style="max-width: 320px;">🧮 ' + l.orderSufficiencyReasoning + '</div>'
                                                             : '';
                                                        return '<tr' + (l.excludedAsAlreadyOrderedRpos ? ' data-rpos-blocked="1"' : '') + '>' +
                                                             '<td><input type="checkbox" class="form-check-input reassort-line-check" data-line-id="' + l.id + '"' + (l.quantitySuggested > 0 ? ' checked' : '') + '></td>' +
