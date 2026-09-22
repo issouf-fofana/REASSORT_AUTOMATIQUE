@@ -1000,6 +1000,40 @@
                          </div>
                     </div>
 
+                    <!-- DLV actives (ajouté le 22/09/2026) : end_of_life_product côté RPOS n'est PAS une
+                         date de péremption automatique, mais un geste manuel du personnel qui bascule
+                         une partie du stock d'un article sur un EAN "DLV" distinct, vendu à prix réduit.
+                         Ce stock DLV est retiré du stock "normal" pris en compte pour calculer la
+                         quantité à recommander de l'article d'origine, pour ne jamais sous-estimer un
+                         vrai besoin de réassort à cause d'un stock qui traîne à prix soldé. -->
+                    <div class="row mt-3">
+                         <div class="col-12">
+                              <div class="card">
+                                   <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h4 class="card-title d-flex align-items-center gap-1 mb-0">
+                                             <iconify-icon icon="solar:tag-price-bold-duotone" class="text-primary fs-20"></iconify-icon>
+                                             DLV actives
+                                        </h4>
+                                        <div class="form-check form-switch mb-0">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="system-product-eol-sync-enabled">
+                                             <label class="form-check-label small" for="system-product-eol-sync-enabled">Actif</label>
+                                        </div>
+                                   </div>
+                                   <div class="card-body">
+                                        <div class="alert alert-light border mb-3 small">
+                                             <strong>À quoi ça sert :</strong> quand le personnel bascule une partie du stock d'un article
+                                             sur un EAN "DLV" (vente à prix réduit), ce stock est synchronisé ici (toutes les heures par
+                                             défaut) et <strong>retiré du stock normal</strong> pris en compte pour calculer la quantité à
+                                             recommander de l'article d'origine — sinon ce stock qui traîne à prix soldé pourrait masquer
+                                             un vrai besoin de réassort sur l'article vendu au prix plein.
+                                        </div>
+                                        <button type="button" id="system-run-product-eol-sync-now" class="btn btn-outline-secondary mb-2">Lancer la synchro maintenant</button>
+                                        <div id="system-run-product-eol-sync-result" class="small mt-2"></div>
+                                   </div>
+                              </div>
+                         </div>
+                    </div>
+
                     <div class="row">
                          <div class="col-12">
                               <div class="card">
@@ -1742,6 +1776,7 @@
                                         document.getElementById('system-daily-review-enabled').checked = d.DAILY_REVIEW_ENABLED !== 'false';
                                         document.getElementById('system-sales-sync-enabled').checked = d.SALES_SYNC_ENABLED !== 'false';
                                         document.getElementById('system-sales-daily-recap-enabled').checked = d.SALES_DAILY_RECAP_ENABLED !== 'false';
+                                        document.getElementById('system-product-eol-sync-enabled').checked = d.PRODUCT_EOL_SYNC_ENABLED !== 'false';
                                         document.getElementById('system-prediction-outcome-enabled').checked = d.PREDICTION_OUTCOME_ENABLED !== 'false';
                                         salesSyncShopIdsFromConfig = (d.SALES_SYNC_SHOP_IDS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
                                         applySalesSyncShopIdsSelection();
@@ -1839,6 +1874,7 @@
                               wireJobEnabledSwitch('system-daily-review-enabled', 'DAILY_REVIEW_ENABLED');
                               wireJobEnabledSwitch('system-sales-sync-enabled', 'SALES_SYNC_ENABLED');
                               wireJobEnabledSwitch('system-sales-daily-recap-enabled', 'SALES_DAILY_RECAP_ENABLED');
+                              wireJobEnabledSwitch('system-product-eol-sync-enabled', 'PRODUCT_EOL_SYNC_ENABLED');
                               wireJobEnabledSwitch('system-prediction-outcome-enabled', 'PREDICTION_OUTCOME_ENABLED');
                               wireJobEnabledSwitch('ai-quantity-adjustment-enabled', 'AI_QUANTITY_ADJUSTMENT_ENABLED');
                               wireJobEnabledSwitch('chatbot-llm-fallback-enabled', 'CHATBOT_LLM_FALLBACK_ENABLED');
@@ -2352,6 +2388,20 @@
                                    resultBox.textContent = 'Exécution en cours (peut prendre plusieurs minutes selon le nombre de magasins et d\'écarts à corriger)...';
                                    try {
                                         const res = await window.reassortFetch('/reassort/run-sales-daily-recap', { method: 'POST' });
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        resultBox.textContent = 'Terminé : ' + json.message;
+                                   } catch (err) {
+                                        resultBox.textContent = 'Erreur: ' + err.message;
+                                   }
+                              });
+
+                              // --- DLV actives ---
+                              document.getElementById('system-run-product-eol-sync-now').addEventListener('click', async function () {
+                                   const resultBox = document.getElementById('system-run-product-eol-sync-result');
+                                   resultBox.textContent = 'Exécution en cours...';
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/run-product-eol-sync', { method: 'POST' });
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
                                         resultBox.textContent = 'Terminé : ' + json.message;

@@ -156,6 +156,35 @@ model ProductCache {
   @@map("product_cache")
 }
 
+// DLV actives (Date Limite de Vente courte, endpoint RPOS end_of_life_product — investigué le
+// 22/09/2026 : PAS une date de péremption automatique, mais un geste manuel du personnel qui
+// scinde le stock d'un article en deux compteurs : une partie reste au stock normal (prix plein),
+// une partie bascule sur un EAN "DLV" distinct (product_ean pointe vers l'article d'origine), vendu
+// à prix réduit (sellingPrice < originSellingPrice) jusqu'à écoulement. Synchronisée localement
+// (comme SalesLine) plutôt que lue en direct à chaque génération de proposition, pour ne jamais
+// ralentir/bloquer un calcul de réassort sur un appel RPOS supplémentaire. Sert à retirer ce stock
+// DLV du stock "normal" pris en compte pour calculer la quantité à recommander de l'article
+// d'origine (proposalService.js) : un stock qui traîne en DLV ne doit jamais masquer un vrai besoin
+// de réassort de l'article normal.
+model ProductEndOfLife {
+  id String @id @default(cuid())
+
+  rposId     String @unique @map("rpos_id") // id RPOS de la fiche DLV elle-même (dédup à la resynchro)
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+
+  dlvEan      String @map("dlv_ean") // EAN propre à cette fiche DLV (distinct de l'article d'origine)
+  originEan   String @map("origin_ean") // EAN de l'article normal concerné (product_ean côté RPOS)
+  label       String?
+  dlvStock    Float  @map("dlv_stock") // quantité basculée en DLV, à retirer du stock normal
+  sellingPrice Float? @map("selling_price") // prix réduit de vente en DLV, pour affichage seulement
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@index([rposShopId, originEan])
+  @@map("product_end_of_life")
+}
+
 // Cache du résultat de getRecentUndeliveredOrderedQuantity (commandes RPOS récentes ≤7j non
 // livrées par article, hors plateforme) : second appel RPOS par article, aussi coûteux que
 // ProductCache et jusqu'ici non caché, restait le vrai goulot après l'ajout de ProductCache
@@ -762,6 +791,11 @@ model ProposalLine {
   // stock à 0 pour le calcul) : conservé pour affichage réel de l'anomalie, même si stockAtGeneration
   // vaut 0 dans ce cas.
   actualStock Float? @map("actual_stock")
+
+  // Stock DLV retiré de stockAtGeneration au moment du calcul (demande du 22/09/2026, cf.
+  // schema.prisma#ProductEndOfLife) : présent uniquement si une partie du stock RPOS de cet article
+  // était basculée sur un EAN DLV distinct — null si aucune DLV active pour cet article.
+  dlvStock Float? @map("dlv_stock")
 
   // Rayon (2e niveau de la hiérarchie department RPOS, ex: "LIQUIDES", "SAC A LA VENTE"), utilisé
   // pour créer une commande fournisseur distincte par rayon à la validation (readme §11).

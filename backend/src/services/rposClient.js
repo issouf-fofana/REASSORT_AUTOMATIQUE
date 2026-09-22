@@ -989,6 +989,45 @@ async function fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, pa
   return { results: data.results || [], count: data.count || 0, nextPage: data.next_page || null };
 }
 
+// Toutes les DLV actives connues d'un serveur RPOS (endpoint end_of_life_product — investigué le
+// 22/09/2026 via l'écran admin RPOS "D.L.V. courte") : PAS une date de péremption, un geste manuel
+// du personnel qui bascule une partie du stock d'un article sur un EAN "DLV" distinct (product_ean
+// pointe vers l'article d'origine), vendu à prix réduit jusqu'à écoulement.
+//
+// Récupère TOUT le lot en une fois (pas un appel par magasin) : confirmé par test direct que cette
+// table est globale au groupe (2 serveurs différents, pos1 et rmaster1, renvoient le même count
+// total) et que RPOS n'expose pas de filtre `shop` direct sur cet endpoint (contrairement à
+// /api/product_line/) — filtrer côté client une fois pour toutes évite de retélécharger les mêmes
+// ~6000+ lignes une fois par magasin actif. deleted_at=0.0 dans la réponse RPOS signifie "non
+// supprimée" (jamais null), utilisé pour exclure les DLV déjà clôturées/annulées.
+async function getAllEndOfLifeProducts(posId) {
+  const pageSize = 250;
+  let page = 1;
+  const results = [];
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await rposGet(posId, '/api/end_of_life_product/', { page, page_size: pageSize });
+    for (const r of data.results || []) {
+      if (r.deleted_at) continue;
+      if (!r.shop || !r.shop.id || !r.ean || !r.product_ean) continue;
+      results.push({
+        rposId: r.id,
+        shopId: r.shop.id,
+        dlvEan: String(r.ean).trim(),
+        originEan: String(r.product_ean).trim(),
+        label: r.product_label || null,
+        dlvStock: r.stock !== null && r.stock !== undefined ? parseFloat(String(r.stock).replace(',', '.')) || 0 : 0,
+        sellingPrice: r.selling_price !== null && r.selling_price !== undefined ? parseFloat(String(r.selling_price).replace(',', '.')) || 0 : null,
+      });
+    }
+    if (!data.next_page) break;
+    page = data.next_page;
+  }
+
+  return results;
+}
+
 async function getProductLinesForPeriod(posId, shopId, dateStart, dateEnd, onProgress) {
   const pageSize = 250;
   let page = 1;
@@ -1153,5 +1192,6 @@ module.exports = {
   listGisements,
   getArticlesByGisement,
   getProductGisement,
+  getAllEndOfLifeProducts,
   invalidateRposConfigCache,
 };

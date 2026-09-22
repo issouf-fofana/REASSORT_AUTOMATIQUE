@@ -8,6 +8,7 @@ const { runNightlyProposalGeneration } = require('../../jobs/nightlyProposalJob'
 const { runReceptionSync } = require('../../jobs/receptionSyncJob');
 const { runSalesSync } = require('../../jobs/salesSyncJob');
 const { runSalesDailyRecap } = require('../../jobs/salesDailyRecapJob');
+const { runProductEndOfLifeSync } = require('../../jobs/productEndOfLifeSyncJob');
 
 router.post('/run-nightly-job', requireAdmin, async (req, res) => {
   try {
@@ -54,6 +55,18 @@ router.post('/run-sales-daily-recap', requireAdmin, async (req, res) => {
     res.json({ success: true, message: 'Récap quotidien de couverture des ventes exécuté' });
   } catch (error) {
     console.error('Manual sales daily recap error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/run-product-eol-sync - déclenche manuellement la synchronisation des DLV
+// actives (ADMIN, pour les tests — s'exécute normalement toutes les heures automatiquement).
+router.post('/run-product-eol-sync', requireAdmin, async (req, res) => {
+  try {
+    await runProductEndOfLifeSync();
+    res.json({ success: true, message: 'Synchronisation des DLV exécutée' });
+  } catch (error) {
+    console.error('Manual product EOL sync error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

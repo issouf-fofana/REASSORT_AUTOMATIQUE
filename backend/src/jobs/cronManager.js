@@ -4,6 +4,7 @@ const { runNightlyProposalGeneration } = require('./nightlyProposalJob');
 const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
 const { runSalesDailyRecap } = require('./salesDailyRecapJob');
+const { runProductEndOfLifeSync } = require('./productEndOfLifeSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -15,6 +16,7 @@ let currentTask = null;
 let currentReceptionSyncTask = null;
 let currentSalesSyncTask = null;
 let currentSalesDailyRecapTask = null;
+let currentProductEolSyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -27,6 +29,7 @@ const nightlyLock = createJobLock('Génération nocturne des propositions');
 const receptionSyncLock = createJobLock('Synchronisation des réceptions');
 const salesSyncLock = createJobLock('Synchronisation des ventes');
 const salesDailyRecapLock = createJobLock('Récap quotidien de couverture des ventes');
+const productEolSyncLock = createJobLock('Synchronisation des DLV actives');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -155,6 +158,36 @@ async function startOrRestartSalesDailyRecapJob() {
   console.log(`⏰ Récap quotidien de couverture des ventes planifié: ${cronSchedule}`);
 }
 
+/** (Re)programme la synchronisation locale des DLV actives (end_of_life_product), demande du
+ * 22/09/2026 — cf. productEndOfLifeSyncJob.js pour le détail. */
+async function startOrRestartProductEolSyncJob() {
+  if (currentProductEolSyncTask) {
+    currentProductEolSyncTask.stop();
+    currentProductEolSyncTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.PRODUCT_EOL_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation des DLV désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.PRODUCT_EOL_SYNC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), synchronisation des DLV non planifiée`);
+    return;
+  }
+
+  currentProductEolSyncTask = cron.schedule(cronSchedule, () => {
+    productEolSyncLock(async () => {
+      console.log('[cron] Démarrage de la synchronisation des DLV...');
+      await trackJobRun('productEolSync', runProductEndOfLifeSync);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Synchronisation des DLV planifiée: ${cronSchedule}`);
+}
+
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
 async function startOrRestartShopsSyncJob() {
   if (currentShopsSyncTask) {
@@ -276,6 +309,7 @@ module.exports = {
   startOrRestartReceptionSyncJob,
   startOrRestartSalesSyncJob,
   startOrRestartSalesDailyRecapJob,
+  startOrRestartProductEolSyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

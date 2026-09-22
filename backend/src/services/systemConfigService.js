@@ -18,6 +18,10 @@ const KEYS = {
   RECEPTION_SYNC_CRON: 'RECEPTION_SYNC_CRON',
   SALES_SYNC_CRON: 'SALES_SYNC_CRON',
   SHOPS_SYNC_CRON: 'SHOPS_SYNC_CRON',
+  // Synchronisation locale des DLV actives (end_of_life_product, demande du 22/09/2026) : un
+  // stock qui a basculé sur un EAN DLV distinct doit être retiré du stock "normal" pris en compte
+  // pour calculer la quantité à recommander de l'article d'origine (proposalService.js).
+  PRODUCT_EOL_SYNC_CRON: 'PRODUCT_EOL_SYNC_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -52,6 +56,7 @@ const KEYS = {
   // = comportement historique, tous les magasins actifs.
   SALES_SYNC_SHOP_IDS: 'SALES_SYNC_SHOP_IDS',
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
+  PRODUCT_EOL_SYNC_ENABLED: 'PRODUCT_EOL_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -128,6 +133,9 @@ const ENV_FALLBACK = {
   [KEYS.SALES_SYNC_CRON]: () => process.env.SALES_SYNC_CRON || '*/15 * * * *',
   // Toutes les heures : la liste des magasins change très rarement (ajout/fermeture manuelle).
   [KEYS.SHOPS_SYNC_CRON]: () => process.env.SHOPS_SYNC_CRON || '0 * * * *',
+  // Toutes les heures par défaut : une DLV créée manuellement par le personnel n'a pas besoin
+  // d'être reflétée à la minute près dans le calcul de réassort (généré au plus une fois par jour).
+  [KEYS.PRODUCT_EOL_SYNC_CRON]: () => process.env.PRODUCT_EOL_SYNC_CRON || '15 * * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -211,6 +219,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.SALES_SYNC_SHOP_IDS]: () => '',
   [KEYS.SALES_DAILY_RECAP_ENABLED]: () => 'true',
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
+  [KEYS.PRODUCT_EOL_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.IMPROVEMENTS_ENABLED]: () => 'true',

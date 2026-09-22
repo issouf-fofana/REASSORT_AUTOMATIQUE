@@ -1173,6 +1173,13 @@
                                                   if (unreliableStock) {
                                                        html += '<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>';
                                                   }
+                                                  // DLV active (demande du 22/09/2026) : une partie du stock RPOS de cet article a été
+                                                  // basculée sur un EAN DLV distinct (vente à prix réduit) et retirée du stock ci-dessus
+                                                  // pour le calcul — badge informatif, pour que le magasin comprenne pourquoi le stock
+                                                  // affiché est plus bas que le stock RPOS total réel de l'article.
+                                                  if (l.dlvStock) {
+                                                       html += '<br><span class="badge bg-info-subtle text-info mt-1" title="Stock retiré du calcul car basculé en DLV (vente à prix réduit sur un EAN séparé)"><iconify-icon icon="solar:tag-price-bold-duotone"></iconify-icon> ' + l.dlvStock.toFixed(1) + ' en DLV</span>';
+                                                  }
                                                   wrap.innerHTML = html;
                                                   return wrap;
                                              }

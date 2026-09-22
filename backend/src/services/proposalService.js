@@ -561,6 +561,20 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     ? { quantityByEan: new Map(), orderInfoByEan: new Map() }
     : await rpos.getPendingPlatformOrderedEans(posId, shopId);
 
+  // DLV actives de ce magasin (demande du 22/09/2026, cf. schema.prisma#ProductEndOfLife) : lu en
+  // base locale (synchronisée par productEndOfLifeSyncJob.js, jamais un appel RPOS ici) — un article
+  // peut avoir plusieurs fiches DLV distinctes ouvertes en même temps (lots différents bascule en
+  // DLV à des moments différents), donc on cumule leur stock par article d'origine plutôt que de ne
+  // garder qu'une seule fiche.
+  const dlvStockByEan = new Map();
+  const dlvRows = await prisma.productEndOfLife.findMany({
+    where: { rposShopId: shopId },
+    select: { originEan: true, dlvStock: true },
+  });
+  for (const row of dlvRows) {
+    dlvStockByEan.set(row.originEan, (dlvStockByEan.get(row.originEan) || 0) + row.dlvStock);
+  }
+
   const proposals = [];
   const skipped = { notFound: [], notOrderable: [], negativeStock: [], alreadyOrdered: [], genericArticle: [] };
   const revenueSharePctFor = (ean) => paretoRevenueTotal > 0 ? ((revenueByEan.get(ean) || 0) / paretoRevenueTotal) * 100 : null;
@@ -652,6 +666,16 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       // dans le calcul du besoin (le déficit de stock s'ajoute alors à la quantité à commander)
       // et dans l'affichage, pour ne pas masquer une anomalie de stock au responsable magasin.
     }
+
+    // DLV actives (demande du 22/09/2026) : le stock RPOS de l'article d'origine (product.stock,
+    // lu plus haut) inclut déjà, ou pas, la portion basculée en DLV selon la config RPOS du
+    // magasin — jamais garanti dans un sens ou dans l'autre. Par prudence, on retire systématiquement
+    // le stock DLV connu du stock pris en compte pour le calcul : un stock DLV qui traîne à prix
+    // réduit sur un EAN séparé ne doit jamais faire croire que l'article d'origine a plus de stock
+    // "normal" disponible qu'il n'en a réellement, sous peine de sous-estimer le besoin réel et de
+    // rater une rupture sur l'article vendu au prix plein.
+    const dlvStock = dlvStockByEan.get(ean) || 0;
+    if (dlvStock > 0) stock = Math.max(0, stock - dlvStock);
 
     // La quantité déjà commandée déduite du besoin cumule notre propre suivi des commandes en
     // transit de cette plateforme et les commandes RPOS récentes non livrées (hors plateforme),
@@ -747,6 +771,10 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         revenueSharePct,
         hadNegativeStock,
         actualStock,
+        // Stock DLV retiré du stock pris en compte ci-dessus (dlvStock > 0 signifie qu'une partie
+        // du stock RPOS brut de cet article a été exclue du calcul) — badge informatif côté UI,
+        // cf. commentaire sur dlvStockByEan plus haut.
+        dlvStock: dlvStock > 0 ? dlvStock : null,
         department,
         sector,
         seasonalityAdjusted: !!art.seasonality_adjusted,
@@ -1053,6 +1081,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           revenueSharePct: p.revenueSharePct,
           hadNegativeStock: p.hadNegativeStock,
           actualStock: p.actualStock,
+          dlvStock: p.dlvStock,
           department: p.department,
           sector: p.sector,
           forecastMethod: p.forecastMethod,
