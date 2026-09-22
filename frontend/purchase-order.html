@@ -1198,6 +1198,9 @@
                                                   if (l.forecastMethod === 'smoothed') {
                                                        html += '<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu\'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>';
                                                   }
+                                                  if (l.weekdayAdjusted) {
+                                                       html += '<br><span class="badge bg-primary-subtle text-primary mt-1" title="La quantité tient compte du profil de vente par jour de semaine de cet article (ex: samedi plus fort), pas d\'une répartition uniforme sur la semaine"><iconify-icon icon="solar:calendar-mark-bold-duotone"></iconify-icon> Jour de semaine</span>';
+                                                  }
                                                   wrap.innerHTML = html;
                                                   return wrap;
                                              }

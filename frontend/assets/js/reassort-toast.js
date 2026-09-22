@@ -94,13 +94,36 @@
   /**
    * Confirmation stylée (remplace confirm()/window.confirm() natifs). Retourne une Promise<boolean>.
    * Usage : const ok = await window.reassortConfirm(message, { danger: true, okLabel: 'Supprimer' });
+   *
+   * Durci le 22/09/2026 (bug signalé : "la popup apparaît mais cliquer dedans ne fait rien", jamais
+   * reproduit ni de vraie erreur console récupérée) : plusieurs garde-fous ajoutés en prévention,
+   * sans certitude que l'un d'eux soit LA cause exacte — l'objectif est qu'un futur cas similaire
+   * remonte une vraie erreur visible plutôt que de rester silencieux.
+   * - id fixe remplacé par un id unique par appel : un id dupliqué (ex: reassortConfirm rappelé
+   *   avant que le précédent overlay soit retiré du DOM — actuellement improbable mais jamais gardé
+   *   explicitement) aurait pu faire que overlay.querySelector cible le MAUVAIS bouton si un
+   *   navigateur/extension réordonne le DOM de façon inattendue.
+   * - close() protégé contre un double-appel (clic simultané sur deux boutons, ou clic + Échap
+   *   quasi simultanés) qui aurait pu appeler resolve() deux fois et remove() sur un nœud déjà
+   *   détaché, ce dernier ne levant normalement pas d'erreur mais restant un état incohérent.
+   * - le handler clavier (escHandler) est maintenant TOUJOURS retiré via close(), qu'on ferme par
+   *   clic ou par Échap — avant ce correctif, cliquer OK/Annuler laissait le handler accroché sur
+   *   `document` indéfiniment ; plusieurs popups confirmées à la suite (fréquent sur cette page,
+   *   utilisée pour pause+annulation) empilaient un handler par appel, jamais nettoyé.
+   * - toute exception levée par l'appelant (ex: le fetch qui suit le "await reassortConfirm") ne
+   *   peut plus être confondue avec un bug de la popup elle-même : un console.error explicite est
+   *   ajouté ici pour distinguer "la popup n'a jamais résolu" (bug dans ce fichier) de "la popup a
+   *   bien résolu, l'erreur vient d'après" (bug dans l'appelant).
    */
+  let reassortConfirmSeq = 0;
   window.reassortConfirm = function (message, options) {
     options = options || {};
     ensureContainer();
     return new Promise(function (resolve) {
+      const overlayId = 'reassort-confirm-overlay-' + (++reassortConfirmSeq);
       const overlay = document.createElement('div');
-      overlay.id = 'reassort-confirm-overlay';
+      overlay.id = overlayId;
+      overlay.className = 'reassort-confirm-overlay-instance';
       overlay.innerHTML =
         '<div class="reassort-confirm-box">' +
         '<div class="reassort-confirm-body"></div>' +
@@ -111,16 +134,25 @@
       overlay.querySelector('.reassort-confirm-body').textContent = message;
       document.body.appendChild(overlay);
 
+      let closed = false;
       function close(result) {
-        overlay.remove();
+        if (closed) return; // double-appel (clic + Échap quasi simultanés, ou double-clic) : ignoré
+        closed = true;
+        document.removeEventListener('keydown', escHandler);
+        try {
+          overlay.remove();
+        } catch (err) {
+          console.error('[reassortConfirm] Échec de la suppression de l\'overlay:', err);
+        }
         resolve(result);
+      }
+      function escHandler(e) {
+        if (e.key === 'Escape') close(false);
       }
       overlay.querySelector('.reassort-confirm-cancel').addEventListener('click', function () { close(false); });
       overlay.querySelector('.reassort-confirm-ok').addEventListener('click', function () { close(true); });
       overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); });
-      document.addEventListener('keydown', function escHandler(e) {
-        if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(false); }
-      });
+      document.addEventListener('keydown', escHandler);
     });
   };
 })();

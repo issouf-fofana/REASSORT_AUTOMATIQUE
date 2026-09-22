@@ -142,7 +142,11 @@ const ENV_FALLBACK = {
   // Une fois par jour, en dehors des heures de pointe des autres jobs : évalue les prédictions dont
   // la semaine cible s'est terminée depuis le dernier passage (pas besoin de fréquence plus élevée,
   // les cibles ne changent qu'une fois par semaine).
-  [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 7 * * *',
+  // Passé de 1x/jour (7h) à toutes les heures le 22/09/2026 (demande explicite : "on doit voir ça
+  // à tout moment, pas un cron chaque jour à 7h") — dès qu'une vente réelle a lieu, le résultat
+  // affiché sur Vue Globale (précision IA, confiance IA) se met à jour dans l'heure qui suit, sans
+  // attendre le lendemain matin.
+  [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 * * * *',
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',

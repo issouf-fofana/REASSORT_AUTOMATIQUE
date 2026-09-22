@@ -740,6 +740,13 @@ model ProposalLine {
   // conformité).
   quantitySuggested Float @map("quantity_suggested")
   quantityValidated Float? @map("quantity_validated")
+  // Copie figée de quantitySuggested telle que produite par la génération (IA ou repli classique),
+  // AVANT toute correction manuelle via PUT /proposal/:id/line-quantity — qui écrase quantitySuggested
+  // en place. Sans ce snapshot, la recommandation d'origine était perdue dès qu'un utilisateur
+  // ajustait la quantité, rendant impossible toute comparaison a posteriori "l'IA avait-elle raison ?"
+  // (Mode Simulation / Shadow AI, phase 1 — 22/09/2026). Renseigné une seule fois à la création de la
+  // ligne, jamais modifié ensuite.
+  quantityAiOriginal Float? @map("quantity_ai_original")
 
   // Résultat de computeQuantityToOrder (vente moyenne + stock de sécurité - stock actuel -
   // commandes en cours), TOUJOURS calculé et conservé même quand l'IA ajuste la recommandation
@@ -875,6 +882,13 @@ model ProposalLine {
   // défaut) ou "smoothed" (lissage exponentiel, si config.forecastEnabled=true et historique
   // suffisant — cf. forecastService.js). Affiché en badge sur la proposition.
   forecastMethod String @default("flat") @map("forecast_method")
+
+  // true si le besoin a été réparti selon le profil de vente par jour de semaine de l'article
+  // (weekdayFactors non null, computeWeekdayFactors dans forecastService.js), plutôt qu'une
+  // répartition uniforme sur la semaine — évolution "modélisation jour de semaine", 22/09/2026.
+  // Affiché en badge sur la proposition (purchase-order.html), même convention que
+  // seasonalityAdjusted/forecastMethod ci-dessus.
+  weekdayAdjusted Boolean @default(false) @map("weekday_adjusted")
 
   // Ventes agrégées par jour sur la période d'analyse (JSON: [{date, quantity}]), pour donner à
   // l'analyse IA (aiForecastService.js) la vraie évolution de l'article plutôt qu'une seule

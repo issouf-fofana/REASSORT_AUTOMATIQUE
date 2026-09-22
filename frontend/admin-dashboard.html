@@ -218,6 +218,11 @@
                                         <p class="metric-value" id="admin-stat-bias">—</p>
                                         <p class="metric-sub" id="admin-stat-wape-footer">— WAPE</p>
                                    </div>
+                                   <div class="metric-row-item">
+                                        <p class="metric-label">Confiance IA <a href="/ai-autonomy" class="text-muted" title="Voir le détail (Mode Simulation)"><iconify-icon icon="solar:square-top-down-bold-duotone"></iconify-icon></a></p>
+                                        <p class="metric-value" id="admin-stat-ai-confidence">—</p>
+                                        <p class="metric-sub" id="admin-stat-ai-confidence-footer">l'IA avait raison sur les corrections humaines</p>
+                                   </div>
                               </div>
                          </div>
                     </div>
@@ -352,6 +357,10 @@
                                              : 'aucune prévision évaluée sur la période';
                                         document.getElementById('admin-stat-bias').textContent = num(d.globalForecastBias, 1);
                                         document.getElementById('admin-stat-wape-footer').textContent = pct(d.globalForecastWAPE) + ' WAPE — biais > 0 : sur-prévision';
+                                        document.getElementById('admin-stat-ai-confidence').textContent = pct(d.aiShadowConfidenceRate);
+                                        document.getElementById('admin-stat-ai-confidence-footer').textContent = d.aiShadowCorrectedLines
+                                             ? 'l\'IA avait raison sur ' + d.aiShadowAiRightLines + '/' + d.aiShadowCorrectedLines + ' corrections humaines'
+                                             : 'aucune correction humaine mesurable sur la période';
 
                                         if (!d.perShop.length) {
                                              tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">Aucun magasin avec un compte actif pour le moment.</td></tr>';

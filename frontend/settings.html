@@ -895,10 +895,11 @@
                                         </div>
                                         <div class="mb-3">
                                              <label class="form-label fw-semibold">Expression cron</label>
-                                             <input type="text" id="system-prediction-outcome-cron" class="form-control" placeholder="0 7 * * *" style="max-width: 300px;">
+                                             <input type="text" id="system-prediction-outcome-cron" class="form-control" placeholder="0 * * * *" style="max-width: 300px;">
                                              <div class="form-text">
-                                                  Exemple : "0 7 * * *" = tous les jours à 7h. Une fois par jour suffit, les semaines cibles ne
-                                                  se terminent qu'une fois par semaine.
+                                                  Exemple : "0 * * * *" = toutes les heures (défaut depuis le 22/09/2026, pour que la précision
+                                                  IA et le score de confiance affichés sur Vue Globale se mettent à jour rapidement après chaque
+                                                  vente, plutôt qu'une seule fois par jour).
                                              </div>
                                         </div>
                                         <button type="button" id="system-prediction-outcome-save" class="btn btn-primary">Enregistrer</button>
@@ -1770,7 +1771,7 @@
                                         document.getElementById('system-cron').value = d.NIGHTLY_PROPOSAL_CRON || '0 4 * * *';
                                         document.getElementById('system-daily-review-cron').value = d.DAILY_REVIEW_CRON || '30 6 * * *';
                                         document.getElementById('system-revision-threshold').value = Math.round((parseFloat(d.REVISION_CHANGE_THRESHOLD) || 0.10) * 100);
-                                        document.getElementById('system-prediction-outcome-cron').value = d.PREDICTION_OUTCOME_CRON || '0 7 * * *';
+                                        document.getElementById('system-prediction-outcome-cron').value = d.PREDICTION_OUTCOME_CRON || '0 * * * *';
                                         // Interrupteurs marche/arrêt par job (indépendants de l'expression cron elle-même).
                                         document.getElementById('system-nightly-enabled').checked = d.NIGHTLY_PROPOSAL_ENABLED !== 'false';
                                         document.getElementById('system-daily-review-enabled').checked = d.DAILY_REVIEW_ENABLED !== 'false';
@@ -2781,9 +2782,20 @@ async function waitForRunPaused(runId, maxAttempts) {
 }
 
 document.getElementById('sales-backfill-cancel-btn').addEventListener('click', async function () {
-  const runId = this.dataset.runId;
-  if (!(await window.reassortConfirm('Annuler cette récupération ? Les ventes déjà récupérées resteront disponibles, mais la récupération ne pourra plus être reprise — il faudra en relancer une nouvelle si besoin.', { danger: true, okLabel: 'Annuler la récupération' }))) return;
   const btn = this;
+  // Garde contre un double-clic pendant que la popup de confirmation est ouverte (le bouton n'est
+  // désactivé qu'après confirmation) : un second clic ici ouvrirait une deuxième popup empilée.
+  if (btn.dataset.cancelling === '1') return;
+  const runId = btn.dataset.runId;
+  let confirmed;
+  try {
+    confirmed = await window.reassortConfirm('Annuler cette récupération ? Les ventes déjà récupérées resteront disponibles, mais la récupération ne pourra plus être reprise — il faudra en relancer une nouvelle si besoin.', { danger: true, okLabel: 'Annuler la récupération' });
+  } catch (err) {
+    console.error('[sales-backfill-cancel-btn] reassortConfirm a levé une exception:', err);
+    window.reassortToast('Erreur inattendue lors de l\'affichage de la confirmation, réessayez.', 'error');
+    return;
+  }
+  if (!confirmed) return;
   btn.disabled = true;
   btn.dataset.cancelling = '1';
   try {

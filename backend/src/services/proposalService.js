@@ -4,7 +4,7 @@ const { getConfig } = require('./configService');
 const { resolvePeriod } = require('./periodService');
 const { readSalesLinesForPeriod } = require('./salesFileService');
 const systemConfig = require('./systemConfigService');
-const { forecastAvgWeeklySales } = require('./forecastService');
+const { forecastAvgWeeklySales, computeWeekdayFactors, projectWeekdayWeightedDemand } = require('./forecastService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { attachProposalToWeeklyPlan } = require('./weeklyPlanService');
 const { computeConfidenceScore } = require('./confidenceService');
@@ -269,6 +269,12 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, quantity]) => ({ date, quantity: Math.round(quantity * 100) / 100 }));
 
+    // Profil par jour de semaine (évolution "modélisation jour de semaine", 22/09/2026) : calculé
+    // sur le même historique que le forecast ci-dessus, indépendamment activé/désactivé (pas de
+    // config supplémentaire nécessaire — retombe silencieusement sur une répartition uniforme si
+    // l'historique est trop court, cf. computeWeekdayFactors).
+    const weekdayProfile = computeWeekdayFactors(art.lines);
+
     priorityArticles.push({
       code: art.ean,
       label: art.label,
@@ -276,6 +282,7 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
       forecast_method: forecast.method,
       cumulative_pct: cumulativePct * 100,
       daily_history: dailyHistory,
+      weekday_factors: weekdayProfile.factors,
     });
     if (cumulativePct >= paretoThreshold) break;
   }
@@ -290,10 +297,15 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
  *   réception par magasin).
  * @param {boolean} [useReceptionLeadTime] - désactivé par défaut pour ne pas changer le
  *   comportement des magasins déjà actifs sans validation explicite au cas par cas.
+ * @param {number[]|null} [weekdayFactors] - profil par jour de semaine (computeWeekdayFactors,
+ *   forecastService.js — évolution "modélisation jour de semaine", 22/09/2026) : répartit la
+ *   demande projetée sur les jours réellement couverts (à partir d'aujourd'hui) au lieu de supposer
+ *   une vente uniforme. null = comportement inchangé (répartition uniforme), pour ne jamais changer
+ *   le calcul d'un magasin dont l'historique est trop court pour un profil fiable.
  */
-function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit, safetyStockRatio, receptionLeadTimeDays, useReceptionLeadTime) {
+function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit, safetyStockRatio, receptionLeadTimeDays, useReceptionLeadTime, weekdayFactors = null) {
   const coverageDays = useReceptionLeadTime && receptionLeadTimeDays ? receptionLeadTimeDays : 7;
-  const expectedDemand = (avgWeeklySales / 7) * coverageDays;
+  const expectedDemand = projectWeekdayWeightedDemand(avgWeeklySales, coverageDays, weekdayFactors);
   const safetyStock = avgWeeklySales * safetyStockRatio;
   const rawNeed = expectedDemand + safetyStock - stock - orderedQty;
   if (rawNeed <= 0) return 0;
@@ -699,10 +711,11 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     const orderedQty = Math.max(rposOrderedQty, quantityInTransit);
     const orderingUnit = Number(product.ordering_unit || 1);
     const avgWeeklySales = Number(art.avg_weekly_quantity);
+    const weekdayFactors = art.weekday_factors || null;
 
     const quantityProposed = computeQuantityToOrder(
       avgWeeklySales, stock, orderedQty, orderingUnit, config.safetyStockRatio,
-      config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation
+      config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors
     );
 
     // Raisonnement explicite de suffisance de commande (backend/amelioration.md, demande du
@@ -745,7 +758,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     // sert à préremplir la saisie côté magasin quand il choisit de "débloquer" l'article malgré la
     // commande en cours, au lieu de le laisser retaper le calcul à la main.
     const quantityIfUnblocked = excludedAsAlreadyOrderedRpos
-      ? computeQuantityToOrder(avgWeeklySales, stock, quantityInTransit, orderingUnit, config.safetyStockRatio, config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation)
+      ? computeQuantityToOrder(avgWeeklySales, stock, quantityInTransit, orderingUnit, config.safetyStockRatio, config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors)
       : null;
 
     const avgDailySales = avgWeeklySales / 7;
@@ -785,6 +798,11 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         seasonalityAdjusted: !!art.seasonality_adjusted,
         seasonalityDeviationPct: art.seasonality_deviation_pct ?? null,
         forecastMethod: art.forecast_method || 'flat',
+        // true si le besoin ci-dessus a été réparti selon le profil par jour de semaine de
+        // l'article (weekday_factors non null) plutôt qu'une répartition uniforme — évolution
+        // "modélisation jour de semaine", 22/09/2026. Informatif seulement : n'affecte jamais le
+        // recalcul si l'utilisateur rouvre cette ligne plus tard, seulement le contexte affiché.
+        weekdayAdjusted: !!weekdayFactors,
         dailyHistory: art.daily_history || [],
         excludedAsAlreadyOrdered,
         excludedAsAlreadyOrderedRpos,
@@ -1074,6 +1092,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           label: p.label,
           productId: p.productId,
           quantitySuggested: p.quantityProposed,
+          quantityAiOriginal: p.quantityProposed,
           classicQuantitySuggested: p.classicQuantitySuggested,
           aiAdjusted: p.aiAdjusted,
           aiReasoning: p.aiReasoning,
@@ -1093,6 +1112,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           dailyHistory: p.dailyHistory && p.dailyHistory.length ? JSON.stringify(p.dailyHistory) : null,
           seasonalityAdjusted: p.seasonalityAdjusted,
           seasonalityDeviationPct: p.seasonalityDeviationPct,
+          weekdayAdjusted: p.weekdayAdjusted,
           currentOrderedQuantity: p.currentOrderedQuantity,
           orderingUnit: p.orderingUnit,
           cumulativePct: p.cumulativePct,
@@ -1649,6 +1669,8 @@ async function getAdminDashboard() {
         quantityValidated: true,
         daysUntilStockout: true,
         avgWeeklySales: true,
+        quantityAiOriginal: true,
+        actualSalesQuantity: true,
       },
     }),
     // Constats du Conseiller d'amélioration (§44-46, AI Center) : les plus prioritaires d'abord,
@@ -1705,6 +1727,12 @@ async function getAdminDashboard() {
   let stockoutEligible = 0;
   let overstockLines = 0;
   let overstockEligible = 0;
+  // Score de confiance IA global (phase 4 du Mode Simulation, 22/09/2026) : mêmes lignes que le
+  // reste de ce dashboard (fenêtre 90 jours, propositions validées), mais ne compte que les lignes
+  // où l'humain a réellement corrigé la quantité IA ET dont la vente réelle a déjà été mesurée —
+  // les lignes suivies sans modification n'apportent aucune information sur qui avait raison.
+  let aiShadowCorrected = 0;
+  let aiShadowAiRight = 0;
   const perShopLines = new Map();
 
   // Toutes les lignes d'une proposition validée, exclues comprises (§23 : taux d'acceptation,
@@ -1758,6 +1786,18 @@ async function getAdminDashboard() {
         overstockLines += 1;
         bucket.overstock += 1;
       }
+    }
+
+    if (
+      line.quantityAiOriginal !== null && line.quantityAiOriginal !== undefined &&
+      line.quantityValidated !== null && line.quantityValidated !== undefined &&
+      line.actualSalesQuantity !== null && line.actualSalesQuantity !== undefined &&
+      line.quantityAiOriginal !== line.quantityValidated
+    ) {
+      aiShadowCorrected += 1;
+      const aiError = Math.abs(line.quantityAiOriginal - line.actualSalesQuantity);
+      const humanError = Math.abs(line.quantityValidated - line.actualSalesQuantity);
+      if (aiError < humanError) aiShadowAiRight += 1;
     }
   }
 
@@ -1839,6 +1879,13 @@ async function getAdminDashboard() {
     globalForecastBias: globalForecastCount > 0 ? sumSignedError / globalForecastCount : null,
     globalForecastWAPE: sumActual > 0 ? sumAbsError / sumActual : null,
     globalForecastEvaluatedCount: globalForecastCount,
+    // Score de confiance IA (Mode Simulation, phase 4) : parmi les corrections humaines mesurées
+    // (voir aiShadowCorrected ci-dessus), quelle proportion donnait finalement raison à l'IA plutôt
+    // qu'à la correction humaine — indicateur objectif pour juger si une automatisation sans
+    // validation humaine serait aujourd'hui risquée ou non (readme évolution "Mode Auto").
+    aiShadowConfidenceRate: aiShadowCorrected > 0 ? aiShadowAiRight / aiShadowCorrected : null,
+    aiShadowCorrectedLines: aiShadowCorrected,
+    aiShadowAiRightLines: aiShadowAiRight,
     stockoutAlertThreshold,
     perShop,
     // Constats ouverts du Conseiller d'amélioration (§44-46, AI Center) : donne une vue "santé du
@@ -1912,6 +1959,139 @@ async function getForecastAccuracy(shopId) {
   };
 }
 
+// =============================================
+// MODE SIMULATION / SHADOW AI (phase 2 — 22/09/2026)
+// =============================================
+// Objectif : donner un chiffre objectif, basé sur l'historique réel du magasin, pour juger si l'IA
+// est fiable au point de pouvoir un jour se passer de validation humaine (CAHIER_DES_CHARGES.md,
+// évolution "automatisation complète"). Ne mesure PAS la précision de l'IA dans l'absolu (déjà fait
+// par getForecastAccuracy ci-dessus, qui compare prévision vs vente réelle) mais spécifiquement les
+// cas où l'HUMAIN A CORRIGÉ l'IA (quantityValidated != quantityAiOriginal) : dans ces cas-là, qui
+// avait raison au vu des ventes réellement constatées ensuite ?
+//
+// Un article est jugé "l'IA avait raison" si sa quantité d'origine était plus proche de la vente
+// réelle que la quantité finalement commandée par l'humain (distance absolue), et inversement.
+// Les lignes non corrigées (quantityValidated == quantityAiOriginal, ou pas encore de recul sur les
+// ventes réelles) sont exclues du taux — elles n'apportent aucune information sur qui avait raison.
+async function getShadowAiReport(shopId, { limit = 200 } = {}) {
+  const lines = await prisma.proposalLine.findMany({
+    where: {
+      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      wasExcluded: false,
+      quantityAiOriginal: { not: null },
+      quantityValidated: { not: null },
+      actualSalesQuantity: { not: null },
+    },
+    include: { proposal: { select: { id: true, validatedAt: true } } },
+    orderBy: { proposal: { validatedAt: 'desc' } },
+    take: limit,
+  });
+
+  let corrected = 0;
+  let aiWasRight = 0;
+  let humanWasRight = 0;
+  let tied = 0;
+  const details = [];
+
+  for (const line of lines) {
+    const aiQty = line.quantityAiOriginal;
+    const humanQty = line.quantityValidated;
+    const actual = line.actualSalesQuantity;
+
+    // Pas de correction humaine sur cette ligne : aucune information exploitable pour ce rapport.
+    if (aiQty === humanQty) continue;
+    corrected += 1;
+
+    const aiError = Math.abs(aiQty - actual);
+    const humanError = Math.abs(humanQty - actual);
+
+    let verdict;
+    if (aiError < humanError) {
+      verdict = 'AI_RIGHT';
+      aiWasRight += 1;
+    } else if (humanError < aiError) {
+      verdict = 'HUMAN_RIGHT';
+      humanWasRight += 1;
+    } else {
+      verdict = 'TIED';
+      tied += 1;
+    }
+
+    details.push({
+      proposalId: line.proposal.id,
+      validatedAt: line.proposal.validatedAt,
+      ean: line.ean,
+      label: line.label,
+      quantityAiOriginal: aiQty,
+      quantityValidated: humanQty,
+      actualSalesQuantity: actual,
+      aiError,
+      humanError,
+      verdict,
+    });
+  }
+
+  return {
+    correctedLines: corrected,
+    aiWasRight,
+    humanWasRight,
+    tied,
+    // Taux de confiance IA : uniquement sur les cas où l'humain a effectivement corrigé — ne dit
+    // rien des lignes où l'humain a simplement suivi l'IA sans y toucher.
+    aiConfidenceRate: corrected > 0 ? aiWasRight / corrected : null,
+    details,
+  };
+}
+
+// =============================================
+// JOURNAL DE TRAÇABILITÉ DES DÉCISIONS IA (22/09/2026)
+// =============================================
+// aiReasoning/aiAction existent déjà par ligne (panneau "Pourquoi ?" affiché sur chaque commande),
+// mais uniquement consultables commande par commande — aucune vue consolidée ne permettait de
+// revenir sur "qu'est-ce que l'IA a décidé la semaine dernière sur cet article, et pourquoi ?" sans
+// rouvrir chaque proposition une par une. Ne recalcule rien : lit l'historique déjà persisté.
+async function getAiDecisionLog(shopId, { ean, action, from, to, limit = 200 } = {}) {
+  const where = {
+    proposal: { rposShopId: shopId },
+    aiAdjusted: true, // une ligne sans aiAdjusted=true n'a jamais eu de décision IA réelle à tracer
+  };
+  if (ean) where.ean = ean;
+  if (action) where.aiAction = action;
+  if (from || to) {
+    where.proposal.generatedAt = {};
+    if (from) where.proposal.generatedAt.gte = new Date(from);
+    if (to) where.proposal.generatedAt.lte = new Date(to);
+  }
+
+  const lines = await prisma.proposalLine.findMany({
+    where,
+    include: { proposal: { select: { id: true, status: true, generatedAt: true, validatedAt: true } } },
+    orderBy: { proposal: { generatedAt: 'desc' } },
+    take: limit,
+  });
+
+  return lines.map((l) => ({
+    proposalId: l.proposal.id,
+    proposalStatus: l.proposal.status,
+    generatedAt: l.proposal.generatedAt,
+    validatedAt: l.proposal.validatedAt,
+    ean: l.ean,
+    label: l.label,
+    aiAction: l.aiAction,
+    aiReasoning: l.aiReasoning,
+    classicQuantitySuggested: l.classicQuantitySuggested,
+    quantityAiOriginal: l.quantityAiOriginal,
+    quantitySuggested: l.quantitySuggested,
+    quantityValidated: l.quantityValidated,
+    // Une correction humaine notable est ce qui rend cette ligne la plus intéressante à relire dans
+    // un journal (les décisions suivies sans y toucher sont déjà visibles ailleurs, cf. conformité).
+    wasCorrectedByHuman: l.quantityAiOriginal !== null && l.quantityValidated !== null && l.quantityAiOriginal !== l.quantityValidated,
+    stockAtGeneration: l.stockAtGeneration,
+    avgWeeklySales: l.avgWeeklySales,
+    daysUntilStockout: l.daysUntilStockout,
+  }));
+}
+
 module.exports = {
   generateProposal,
   computeQuantityToOrder,
@@ -1926,6 +2106,8 @@ module.exports = {
   getOverstockRate,
   getAdminDashboard,
   getForecastAccuracy,
+  getShadowAiReport,
+  getAiDecisionLog,
   getProductByEanCached,
   attachOrderAnomaliesToLines,
 };

@@ -11,6 +11,8 @@ const {
   getStockoutRate,
   getOverstockRate,
   getForecastAccuracy,
+  getShadowAiReport,
+  getAiDecisionLog,
   getAdminDashboard,
 } = require('../../services/proposalService');
 const { getConfig } = require('../../services/configService');
@@ -261,6 +263,42 @@ router.get('/forecast-accuracy', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Forecast accuracy error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/shadow-ai-report - Mode Simulation : sur les lignes où l'humain a corrigé la
+// quantité proposée par l'IA, qui avait raison au vu des ventes réellement constatées ensuite ?
+// Sert à juger objectivement, sur l'historique réel du magasin, si l'IA est assez fiable pour
+// envisager une automatisation sans validation humaine (évolution "Mode Auto", pas encore construite).
+router.get('/shadow-ai-report', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const result = await getShadowAiReport(shopId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Shadow AI report error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/ai-decision-log - journal consultable des décisions IA (raisonnement + action
+// par article, historique dans le temps), filtrable par article/action/période. Lit uniquement des
+// données déjà persistées à la génération (ProposalLine.aiReasoning/aiAction), ne recalcule rien.
+router.get('/ai-decision-log', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const { ean, action, from, to } = req.query;
+    const result = await getAiDecisionLog(shopId, { ean, action, from, to });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('AI decision log error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

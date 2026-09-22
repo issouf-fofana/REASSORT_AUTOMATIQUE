@@ -124,6 +124,12 @@
                                    Préparation à l'autonomie
                               </a>
                          </li>
+                         <li class="nav-item">
+                              <a class="nav-link" data-bs-toggle="tab" href="#tab-decision-log" role="tab">
+                                   <iconify-icon icon="solar:document-text-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
+                                   Journal des décisions
+                              </a>
+                         </li>
                     </ul>
 
                     <div class="tab-content">
@@ -312,6 +318,66 @@
                     </div>
                     <!-- ============ Fin onglet Préparation à l'autonomie ============ -->
 
+                    <!-- ============ Onglet : Journal des décisions IA (22/09/2026) ============ -->
+                    <div class="tab-pane" id="tab-decision-log" role="tabpanel">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> historique consultable de chaque décision prise par
+                                   l'IA sur une commande (quantité proposée, raisonnement, action). Le panneau
+                                   "Pourquoi ?" affiché sur chaque commande montre déjà ce raisonnement, mais uniquement
+                                   au moment où on ouvre cette commande précise — ce journal permet de retrouver et
+                                   filtrer les décisions passées sans rouvrir chaque commande une par une.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="row g-2 align-items-end mb-3">
+                                   <div class="col-auto">
+                                        <label class="form-label small mb-1">Article (EAN)</label>
+                                        <input type="text" id="adl-ean" class="form-control form-control-sm" style="width:160px;" placeholder="EAN exact">
+                                   </div>
+                                   <div class="col-auto">
+                                        <label class="form-label small mb-1">Action IA</label>
+                                        <select id="adl-action" class="form-select form-select-sm" style="width:200px;">
+                                             <option value="">Toutes</option>
+                                             <option value="ORDER_NOW">Commander maintenant</option>
+                                             <option value="ORDER_MORE">Commander plus</option>
+                                             <option value="ORDER_LESS">Commander moins</option>
+                                             <option value="WAIT">Attendre</option>
+                                             <option value="STOCK_RISK">Risque de rupture</option>
+                                             <option value="OVERSTOCK">Surstock</option>
+                                             <option value="DEMAND_INCREASE">Hausse de demande</option>
+                                             <option value="DEMAND_DECREASE">Baisse de demande</option>
+                                             <option value="ANOMALY">Anomalie</option>
+                                             <option value="VERIFY_STOCK">Vérifier le stock</option>
+                                             <option value="NO_ACTION">Aucune action</option>
+                                        </select>
+                                   </div>
+                                   <div class="col-auto">
+                                        <label class="form-label small mb-1">Du</label>
+                                        <input type="date" id="adl-from" class="form-control form-control-sm">
+                                   </div>
+                                   <div class="col-auto">
+                                        <label class="form-label small mb-1">Au</label>
+                                        <input type="date" id="adl-to" class="form-control form-control-sm">
+                                   </div>
+                                   <div class="col-auto">
+                                        <button type="button" id="adl-filter" class="btn btn-primary btn-sm">Filtrer</button>
+                                        <button type="button" id="adl-export-csv" class="btn btn-outline-secondary btn-sm">Export CSV</button>
+                                   </div>
+                              </div>
+                              <div id="adl-summary" class="small text-muted mb-2"></div>
+                              <div id="adl-grid" class="ag-theme-quartz" style="width:100%;"></div>
+                         </div>
+                    </div>
+
+                    </div>
+                    <!-- ============ Fin onglet Journal des décisions IA ============ -->
+
                     </div>
                     <!-- Fin .tab-content -->
 
@@ -327,6 +393,8 @@
      <script src="assets/js/ai-improvements.js"></script>
      <!-- Onglet Journal des corrections -->
      <script src="assets/js/ai-corrections.js"></script>
+     <!-- Onglet Journal des décisions IA -->
+     <script src="assets/js/ai-decision-log.js"></script>
      <!-- Onglet Journal des erreurs : logique reprise telle quelle depuis error-log.html
           (elle vivait en script inline dans ce fichier, pas de .js séparé). -->
      <script>
