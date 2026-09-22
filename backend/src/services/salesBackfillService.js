@@ -395,12 +395,40 @@ async function startBackfill(posId, shopId, periodStart, periodEnd) {
   return run.id;
 }
 
+// Un run IN_PROGRESS sans la moindre écriture depuis ce délai est considéré mort (le process qui le
+// traitait a crashé ou a été redémarré — ex: redéploiement backend en plein milieu — sans jamais
+// marquer le run en erreur, cf. bug trouvé le 22/09/2026 : "il fait ca depuis plus de 2h... quand je
+// clique il reste grisé"). Chaque page RPOS traitée met à jour le chunk (updatedAt du run suit via
+// la relation) : un run vivant ne peut donc jamais rester silencieux aussi longtemps, même sur une
+// page RPOS lente (timeout HTTP à 15s, cf. rposClient.RPOS_REQUEST_TIMEOUT_MS). Généreux (2 minutes,
+// pas 15s) pour ne jamais marquer à tort un run juste temporairement ralenti par un pic RPOS.
+const STALE_RUN_THRESHOLD_MS = 2 * 60 * 1000;
+
 async function getRunStatus(runId) {
-  const run = await prisma.salesBackfillRun.findUnique({
+  let run = await prisma.salesBackfillRun.findUnique({
     where: { id: runId },
     include: { chunks: { orderBy: { chunkIndex: 'asc' } } },
   });
   if (!run) return null;
+
+  // SalesBackfillRun.updatedAt ne bouge QU'au démarrage/à la fin du run (jamais pendant le
+  // traitement des pages) — c'est SalesBackfillChunk.updatedAt qui est rafraîchi à chaque page RPOS
+  // traitée (cf. la mise à jour fetchedLines/lastPageCompleted plus haut dans ce fichier). La bonne
+  // horloge d'activité est donc la plus récente des deux, jamais le run seul (qui donnerait
+  // systématiquement un faux positif "mort" dès que STALE_RUN_THRESHOLD_MS s'écoule après le
+  // démarrage, même sur un run parfaitement sain en train d'avancer).
+  const lastActivity = run.chunks.reduce(
+    (latest, c) => (c.updatedAt > latest ? c.updatedAt : latest),
+    run.updatedAt,
+  );
+  if (run.status === 'IN_PROGRESS' && Date.now() - lastActivity.getTime() > STALE_RUN_THRESHOLD_MS) {
+    console.warn(`[salesBackfillService] Run ${runId} détecté mort (aucune activité depuis ${Math.round((Date.now() - lastActivity.getTime()) / 1000)}s) — marqué ERROR pour permettre son annulation/reprise.`);
+    run = await prisma.salesBackfillRun.update({
+      where: { id: runId },
+      data: { status: 'ERROR' },
+      include: { chunks: { orderBy: { chunkIndex: 'asc' } } },
+    });
+  }
 
   const totalFetched = run.chunks.reduce((sum, c) => sum + c.fetchedLines, 0);
   const totalExpected = run.chunks.reduce((sum, c) => sum + (c.expectedLines || 0), 0) || run.estimatedTotalLines;
