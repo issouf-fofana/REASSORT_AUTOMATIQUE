@@ -1262,6 +1262,12 @@
                                                             recentOrderReference: l.rposOrderReference,
                                                             recentOrderDate: l.rposOrderDate,
                                                             recentOrderCount: l.rposOrderCount,
+                                                            // Stock DLV (demande du 22/09/2026 : "dans les analyse pour les commande... il
+                                                            // doit voir si la quantité qui reste il y a aussi en DLV ou pas") : déjà retiré
+                                                            // du stock ci-dessus (stockAtPrediction) au moment du calcul côté backend, mais
+                                                            // l'IA doit aussi VOIR cette info explicitement pour l'expliquer dans son
+                                                            // raisonnement, pas juste subir un stock déjà amputé sans le savoir.
+                                                            dlvStock: l.dlvStock || null,
                                                             onApply: function (quantity) {
                                                                  setLineQuantity(l, quantity);
                                                                  gridApi.refreshCells({ rowNodes: [params.node], force: true });

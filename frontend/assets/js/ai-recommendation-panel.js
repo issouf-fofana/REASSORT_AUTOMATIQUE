@@ -437,6 +437,7 @@
         '<div class="aip-detail-section">' +
           '<h6>Dernière commande &amp; impact</h6>' +
           buildRecentOrderBlock(currentItem || {}) +
+          buildDlvBlock(currentItem || {}) +
           '<div id="aip-impact-container"></div>' +
         '</div>' +
         '<div class="aip-detail-section">' +
@@ -815,6 +816,21 @@
       '<p class="small mb-0">Référence <strong>' + (item.recentOrderReference || '—') + '</strong>, passée le ' +
         (item.recentOrderDate ? new Date(item.recentOrderDate).toLocaleDateString('fr-FR') : '—') +
         (item.recentOrderCount && item.recentOrderCount > 1 ? ' (+ ' + (item.recentOrderCount - 1) + ' autre(s))' : '') + '.</p>' +
+      '</div>';
+  }
+
+  // Bloc "Stock en DLV" (demande du 22/09/2026 : "dans les analyse pour les commande... il doit
+  // voir si la quantité qui reste il y a aussi en DLV ou pas") — même principe que
+  // buildRecentOrderBlock ci-dessus : dlvStock est déjà retiré de item.stockAtPrediction au moment
+  // du calcul côté backend (proposalService.js), ce bloc rend cette soustraction visible plutôt que
+  // de laisser l'utilisateur croire que le stock affiché est le stock RPOS total de l'article.
+  function buildDlvBlock(item) {
+    if (!item.dlvStock) return '';
+    return '<div class="aip-classic-card mb-3">' +
+      '<div class="aip-classic-eyebrow">Stock en DLV (vente à prix réduit)</div>' +
+      '<p class="small mb-0"><strong>' + Math.round(item.dlvStock) + ' unité(s)</strong> de cet article sont actuellement basculées ' +
+        'sur un code DLV distinct (prix réduit, écoulement en cours) — déjà retirées du stock ci-dessous, ' +
+        'pour ne pas faire croire que ce stock est disponible à la vente au prix normal.</p>' +
       '</div>';
   }
 

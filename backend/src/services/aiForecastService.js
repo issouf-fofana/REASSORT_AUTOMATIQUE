@@ -102,6 +102,12 @@ function buildArticleSummary(line, shopConfig, shopActivity) {
     // besoin "brut", sans déduire cette commande) : donne à l'IA un ordre de grandeur du besoin
     // total, à comparer elle-même à ce que la commande récente couvre déjà.
     quantityIfIgnoringRecentOrder: hasRecentOrder ? (line.quantityIfUnblocked ?? null) : null,
+    // Stock DLV (demande du 22/09/2026 : "dans les analyse pour les commande... il doit voir si la
+    // quantité qui reste il y a aussi en DLV ou pas") : déjà retiré de currentStock ci-dessus au
+    // moment du calcul classique (proposalService.js) — transmis explicitement pour que l'IA sache
+    // POURQUOI le stock est plus bas que le stock RPOS total réel de l'article, plutôt que de subir
+    // une soustraction invisible sans pouvoir l'expliquer dans son raisonnement.
+    dlvStock: line.dlvStock || null,
     revenueSharePct: line.revenueSharePct !== null && line.revenueSharePct !== undefined
       ? Number(line.revenueSharePct.toFixed(2))
       : null,
@@ -177,7 +183,7 @@ async function buildStreamingPrompt(shopReference, shopName, article) {
     + `Article à analyser (JSON) :\n${JSON.stringify(article, null, 2)}\n\n` +
     'Réponds au format texte EXACT suivant, sans rien ajouter avant ni après :\n' +
     'QUANTITE: <entier positif ou nul, multiple de orderingUnit>\n' +
-    '<explication en français COURANT, destinée à du personnel de magasin (rayonnistes, chefs de rayon) sans connaissance technique — MAXIMUM 3 phrases COURTES ou 3 puces (jamais les deux à la fois, jamais plus) — en Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés, puces ("- ") uniquement si tu listes plusieurs raisons ou facteurs distincts (sinon un paragraphe simple suffit, ne force jamais une liste sur une explication à une seule idée). BANNIS tout jargon technique/métier même courant à tes yeux : jamais "jours d\'autonomie", "couverture", "stock de sécurité", "confiance", "tendance VOLATILE/STABLE" ou un nom de champ technique — reformule toujours en langage concret et oral (ex: "5,5 jours d\'autonomie" devient "il reste du stock pour environ 5-6 jours au rythme actuel"). Va droit à la décision et sa justification la plus importante (tendance ou statut du magasin si pertinent, comparaison à systemSuggestedQuantity si l\'écart est notable, commande récente si hasRecentOrder=true) — pas d\'introduction, pas de récapitulatif final, pas de détail secondaire>';
+    '<explication en français COURANT, destinée à du personnel de magasin (rayonnistes, chefs de rayon) sans connaissance technique — MAXIMUM 3 phrases COURTES ou 3 puces (jamais les deux à la fois, jamais plus) — en Markdown LÉGER : gras (**mot**) pour les chiffres ou termes clés, puces ("- ") uniquement si tu listes plusieurs raisons ou facteurs distincts (sinon un paragraphe simple suffit, ne force jamais une liste sur une explication à une seule idée). BANNIS tout jargon technique/métier même courant à tes yeux : jamais "jours d\'autonomie", "couverture", "stock de sécurité", "confiance", "tendance VOLATILE/STABLE" ou un nom de champ technique — reformule toujours en langage concret et oral (ex: "5,5 jours d\'autonomie" devient "il reste du stock pour environ 5-6 jours au rythme actuel"). Va droit à la décision et sa justification la plus importante (tendance ou statut du magasin si pertinent, comparaison à systemSuggestedQuantity si l\'écart est notable, commande récente si hasRecentOrder=true, stock DLV si dlvStock non nul — dans ce dernier cas explique que ce stock est déjà vendu à prix réduit sur un code séparé et ne compte donc pas comme du stock normal disponible) — pas d\'introduction, pas de récapitulatif final, pas de détail secondaire>';
 }
 
 function parseJsonArrayFromText(text) {

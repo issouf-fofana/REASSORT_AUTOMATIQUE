@@ -568,7 +568,12 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   // garder qu'une seule fiche.
   const dlvStockByEan = new Map();
   const dlvRows = await prisma.productEndOfLife.findMany({
-    where: { rposShopId: shopId },
+    // dlvStock > 0 : filet de sécurité en plus du filtre déjà appliqué à la source
+    // (rposClient.getAllEndOfLifeProducts) — RPOS ne clôture/supprime jamais une fiche DLV une fois
+    // son stock écoulé, un article vendu quotidiennement peut en accumuler des dizaines à stock 0
+    // ou négatif (constaté : 107 fiches trouvées pour un seul article), qui ne doivent jamais
+    // compter comme du stock réellement bloqué aujourd'hui.
+    where: { rposShopId: shopId, dlvStock: { gt: 0 } },
     select: { originEan: true, dlvStock: true },
   });
   for (const row of dlvRows) {

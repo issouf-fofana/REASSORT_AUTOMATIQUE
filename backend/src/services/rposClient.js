@@ -1000,6 +1000,14 @@ async function fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, pa
 // /api/product_line/) — filtrer côté client une fois pour toutes évite de retélécharger les mêmes
 // ~6000+ lignes une fois par magasin actif. deleted_at=0.0 dans la réponse RPOS signifie "non
 // supprimée" (jamais null), utilisé pour exclure les DLV déjà clôturées/annulées.
+//
+// Filtre stock > 0 ajouté le 22/09/2026 (bug trouvé par l'utilisateur : "est-ce que tu filtres sur
+// la DLV la plus récente... ou pas sur les dates ?") — RPOS ne clôture/supprime JAMAIS une fiche
+// DLV une fois son stock écoulé (deleted_at reste à 0), il en recrée une nouvelle à chaque nouveau
+// lot du même article : un article vendu quotidiennement (ex: pain) peut accumuler des dizaines de
+// fiches DLV historiques à stock 0 ou négatif (ajustement d'inventaire), toutes encore "actives"
+// au sens deleted_at=0. Sans ce filtre, proposalService.js sommait TOUT cet historique (jusqu'à 107
+// fiches trouvées pour un seul article) au lieu du stock réellement bloqué en DLV aujourd'hui.
 async function getAllEndOfLifeProducts(posId) {
   const pageSize = 250;
   let page = 1;
@@ -1011,13 +1019,15 @@ async function getAllEndOfLifeProducts(posId) {
     for (const r of data.results || []) {
       if (r.deleted_at) continue;
       if (!r.shop || !r.shop.id || !r.ean || !r.product_ean) continue;
+      const dlvStock = r.stock !== null && r.stock !== undefined ? parseFloat(String(r.stock).replace(',', '.')) || 0 : 0;
+      if (dlvStock <= 0) continue; // lot déjà écoulé/ajusté : ne compte plus comme stock bloqué
       results.push({
         rposId: r.id,
         shopId: r.shop.id,
         dlvEan: String(r.ean).trim(),
         originEan: String(r.product_ean).trim(),
         label: r.product_label || null,
-        dlvStock: r.stock !== null && r.stock !== undefined ? parseFloat(String(r.stock).replace(',', '.')) || 0 : 0,
+        dlvStock,
         sellingPrice: r.selling_price !== null && r.selling_price !== undefined ? parseFloat(String(r.selling_price).replace(',', '.')) || 0 : null,
       });
     }
