@@ -21,7 +21,7 @@ const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock',
+  'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getDlvArticles', 'getArticleDlvStatus',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -51,6 +51,9 @@ const FALLBACK_INTENT_RULES = [
   { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
   { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
   { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
+  // DLV (demande du 22/09/2026) : PAS une date de péremption, un stock basculé manuellement par le
+  // personnel sur un EAN distinct pour écoulement à prix réduit — cf. chatbotToolsService.js.
+  { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
 ];
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
@@ -292,6 +295,7 @@ const TOOL_CATALOG = [
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin.', params: {} },
+  { name: 'getDlvArticles', description: 'Articles ayant actuellement du stock en DLV (Date Limite de Vente courte — un stock basculé manuellement par le personnel sur un EAN distinct pour écoulement à prix réduit, PAS une date de péremption automatique), du magasin entier ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel' } },
 ];
 
 const TOOL_CALL_SYSTEM_PROMPT_HEADER = `Tu es un routeur d'intention pour un assistant de réassort en magasin. Voici la liste des outils de données disponibles, au format JSON :
@@ -501,6 +505,10 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return ean
           ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
           : { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
+      case 'getDlvArticles':
+        return ean
+          ? { toolName: 'getArticleDlvStatus', toolResult: await tools.getArticleDlvStatus(rposShopId, ean) }
+          : { toolName, toolResult: await tools.getDlvArticles(rposShopId, {}) };
       default:
         return { toolName: null, toolResult: null };
     }

@@ -776,6 +776,54 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
   return { found: true, days, ...summary };
 }
 
+/**
+ * getDlvArticles() — articles ayant actuellement du stock en DLV (Date Limite de Vente courte,
+ * demande du 22/09/2026). PAS une date de péremption automatique : un geste manuel du personnel
+ * qui bascule une partie du stock d'un article sur un EAN "DLV" distinct, vendu à prix réduit
+ * jusqu'à écoulement (cf. schema.prisma#ProductEndOfLife, synchronisé depuis RPOS toutes les
+ * heures). Un article avec beaucoup de stock en DLV signale un problème de rotation. Trié par
+ * stock DLV décroissant (les plus gros volumes à écouler en premier).
+ */
+async function getDlvArticles(rposShopId, { limit = 50 } = {}) {
+  const rows = await prisma.productEndOfLife.findMany({
+    where: { rposShopId, dlvStock: { gt: 0 } },
+    orderBy: { dlvStock: 'desc' },
+    take: limit,
+  });
+  if (!rows.length) return { found: false, message: 'Aucun article en DLV pour ce magasin actuellement.' };
+
+  return {
+    found: true,
+    count: rows.length,
+    articles: rows.map((r) => ({
+      originEan: r.originEan,
+      label: r.label,
+      dlvStock: r.dlvStock,
+      sellingPrice: r.sellingPrice,
+      syncedAt: r.syncedAt,
+    })),
+  };
+}
+
+/** getArticleDlvStatus() — un article précis a-t-il du stock en DLV actuellement ? */
+async function getArticleDlvStatus(rposShopId, ean) {
+  const rows = await prisma.productEndOfLife.findMany({
+    where: { rposShopId, originEan: ean, dlvStock: { gt: 0 } },
+  });
+  if (!rows.length) {
+    return { found: true, hasDlv: false, message: `Aucune DLV active pour l'article ${ean} dans ce magasin.` };
+  }
+  const totalDlvStock = rows.reduce((sum, r) => sum + r.dlvStock, 0);
+  return {
+    found: true,
+    hasDlv: true,
+    ean,
+    label: rows[0].label,
+    totalDlvStock,
+    entries: rows.map((r) => ({ dlvEan: r.dlvEan, dlvStock: r.dlvStock, sellingPrice: r.sellingPrice })),
+  };
+}
+
 module.exports = {
   getStoreStock,
   getArticleStock,
@@ -793,4 +841,6 @@ module.exports = {
   getPredictionAccuracy,
   getOrders,
   getStockMoveHistory,
+  getDlvArticles,
+  getArticleDlvStatus,
 };

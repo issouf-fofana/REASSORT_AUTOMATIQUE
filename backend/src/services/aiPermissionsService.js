@@ -9,7 +9,7 @@
  *                     dans getArticleDetails/getParetoArticles)
  *   articleDetails  : fiche article, emplacement, prix, promo (getArticleDetails, getPriceChangeHistory)
  *   stock           : stock, ruptures, surstock (getArticleStock, getStoreStock, getStockoutRisks,
- *                     getOverstockArticles)
+ *                     getOverstockArticles, getDlvArticles, getArticleDlvStatus)
  *   sales           : ventes et tendances (getSalesHistory, getParetoArticles)
  *   orders          : commandes et propositions (getOrders, getCurrentProposal)
  *   accuracy        : fiabilité de l'IA (getPredictionAccuracy)
@@ -48,6 +48,8 @@ const TOOL_CAPABILITY = {
   getStockoutRisks: 'stock',
   getOverstockArticles: 'stock',
   getStockMoveHistory: 'stock',
+  getDlvArticles: 'stock',
+  getArticleDlvStatus: 'stock',
   getSalesHistory: 'sales',
   getParetoArticles: 'sales',
   getOrders: 'orders',
