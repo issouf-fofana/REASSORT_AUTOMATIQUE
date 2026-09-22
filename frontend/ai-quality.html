@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+     <meta charset="utf-8" />
+     <title>Qualité &amp; IA | Réassort Automatique</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+     <link rel="icon" type="image/png" href="assets/images/logo-reassort.png">
+
+     <link type="text/css" href="assets/volt/css/volt.css" rel="stylesheet">
+     <link type="text/css" href="assets/css/theme-override.css" rel="stylesheet">
+
+     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+     <!-- AG Grid Community (utilisé par l'onglet "Journal des erreurs", repris tel quel
+          d'error-log.html) : tri/filtre par colonne + export CSV en JS vanilla. -->
+     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
+     <script src="assets/js/ag-grid-setup.js"></script>
+     <script src="assets/js/ag-grid-locale-fr.js"></script>
+
+     <script src="assets/js/config.js"></script>
+     <script src="assets/js/backend-config.js"></script>
+     <script src="assets/js/reassort-auth.js"></script>
+     <script src="assets/js/shop-picker.js"></script>
+
+     <style>
+          /* Page "Qualité & IA" (fusion du 22/09/2026 des 4 pages Améliorations IA / Journal des
+             corrections / Journal des erreurs / Préparation à l'autonomie en une seule page à onglets,
+             même mécanisme que settings.html : #tab-xxx piloté par la sidebar + hashchange). Les
+             fichiers d'origine restent sur le disque, non liés depuis le menu. */
+          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+
+          /* --- Onglet Améliorations IA (ai-improvements.html) --- */
+          .sev-CRITICAL { background-color: #dc3545; }
+          .sev-WARNING { background-color: #fd7e14; }
+          .sev-INFO { background-color: #0d6efd; }
+          .imp-detail { white-space: pre-line; }
+
+          /* --- Onglet Journal des corrections (ai-corrections.html) --- */
+          .src-AI_AUTO { background-color: #0d6efd; }
+          .src-DEV_FIX { background-color: #6f42c1; }
+          .corr-pre { white-space: pre-line; }
+
+          /* --- Onglet Journal des erreurs (error-log.html) --- */
+          .ag-theme-quartz {
+               --ag-font-family: "Inter", sans-serif;
+               --ag-font-size: 14px;
+               --ag-active-color: #1F2937;
+               --ag-selected-row-background-color: rgba(17, 24, 39, 0.1);
+               --ag-row-hover-color: rgba(17, 24, 39, 0.075);
+               --ag-header-background-color: #f8f9fa;
+               --ag-header-foreground-color: #1a1a1a;
+               --ag-border-color: #E5E7EB;
+               --ag-row-border-color: #E5E7EB;
+               --ag-wrapper-border-radius: 0;
+               --ag-border-radius: 0;
+               --ag-card-radius: 0;
+               --ag-foreground-color: #374151;
+               --ag-row-height: 48px;
+               --ag-header-height: 40px;
+          }
+          .ag-theme-quartz, .ag-theme-quartz * { border-radius: 0 !important; }
+          .ag-theme-quartz .ag-header-cell-text { text-transform: uppercase; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; }
+          .ag-theme-quartz .ag-cell { font-size: 0.875rem; color: #374151; }
+          #err-grid.ag-theme-quartz { width: 100%; }
+
+          /* --- Onglet Préparation à l'autonomie (ai-autonomy.html) --- */
+          .autonomy-ladder { display: flex; gap: 8px; flex-wrap: wrap; }
+          .autonomy-step { flex: 1; min-width: 180px; border: 2px solid #dee2e6; border-radius: 8px; padding: 12px; text-align: center; }
+          .autonomy-step.active { border-color: #198754; background: #d1e7dd; }
+          .autonomy-step.pending { border-color: #fd7e14; background: #fff3cd; }
+          .criteria-bar { height: 8px; border-radius: 5px; background: #e9ecef; overflow: hidden; }
+          .criteria-bar-fill { height: 100%; background: #0d6efd; }
+     </style>
+</head>
+
+<body data-page-title="Qualité &amp; IA">
+
+     <script src="assets/js/loading-overlay.js"></script>
+
+     <div id="layout-sidebar-slot"></div>
+
+     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+     <main class="content">
+          <div id="layout-topbar-slot"></div>
+          <script src="assets/js/layout.js"></script>
+          <script src="assets/js/global-shop-selector.js"></script>
+
+          <div class="py-4">
+               <div class="container-xxl">
+
+                    <!-- Barre d'onglets visible (corrigé le 22/09/2026 : masquée à tort d'après le
+                         pattern settings.html, où la navigation entre onglets vit dans des sous-liens
+                         sidebar séparés — mais l'utilisateur a explicitement demandé ici la barre
+                         d'onglets classique visible EN PAGE, "pas plusieurs pages"/liens sidebar).
+                         data-bs-toggle="tab" natif Bootstrap suffit ; #tab-xxx dans l'URL reste géré
+                         par openTabFromHash plus bas pour un lien direct /ai-quality#tab-errors. -->
+                    <ul class="nav nav-tabs nav-bordered mb-4" role="tablist">
+                         <li class="nav-item">
+                              <a class="nav-link active" data-bs-toggle="tab" href="#tab-improvements" role="tab">
+                                   <iconify-icon icon="solar:bolt-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
+                                   Améliorations IA
+                              </a>
+                         </li>
+                         <li class="nav-item">
+                              <a class="nav-link" data-bs-toggle="tab" href="#tab-corrections" role="tab">
+                                   <iconify-icon icon="solar:clipboard-check-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
+                                   Journal des corrections
+                              </a>
+                         </li>
+                         <li class="nav-item">
+                              <a class="nav-link" data-bs-toggle="tab" href="#tab-errors" role="tab">
+                                   <iconify-icon icon="solar:danger-triangle-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
+                                   Journal des erreurs
+                              </a>
+                         </li>
+                         <li class="nav-item">
+                              <a class="nav-link" data-bs-toggle="tab" href="#tab-autonomy" role="tab">
+                                   <iconify-icon icon="solar:medal-star-bold-duotone" class="fs-18 align-middle me-1"></iconify-icon>
+                                   Préparation à l'autonomie
+                              </a>
+                         </li>
+                    </ul>
+
+                    <div class="tab-content">
+
+                    <!-- ============ Onglet : Améliorations IA (ai-improvements.html) ============ -->
+                    <div class="tab-pane show active" id="tab-improvements" role="tabpanel">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> le chien de garde surveille en continu les
+                                   anomalies <em>silencieuses</em> (prédictions jamais évaluables, jobs en échec,
+                                   biais de précision par magasin, synchro en retard, questions chatbot sans
+                                   réponse...), propose un correctif (réglage + reco dev, enrichi par l'IA pour
+                                   les priorités), puis <strong>vérifie après coup</strong> si le correctif appliqué
+                                   a vraiment amélioré la métrique (IMPROVED) ou non (NO_EFFECT). Vous restez
+                                   décisionnaire : rien n'est appliqué automatiquement.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                              <button type="button" id="imp-generate" class="btn btn-primary">Analyser maintenant</button>
+                              <select id="imp-filter" class="form-select" style="max-width: 200px;">
+                                   <option value="">Tous statuts</option>
+                                   <option value="PROPOSED">Proposées</option>
+                                   <option value="IN_PROGRESS">En cours</option>
+                                   <option value="TO_VERIFY">À vérifier</option>
+                                   <option value="APPLIED">Appliquées</option>
+                                   <option value="IMPROVED">Améliorées</option>
+                                   <option value="NO_EFFECT">Sans effet</option>
+                                   <option value="DISMISSED">Ignorées</option>
+                              </select>
+                              <select id="imp-priority" class="form-select" style="max-width: 180px;">
+                                   <option value="">Toutes priorités</option>
+                                   <option value="CRITICAL">Critique</option>
+                                   <option value="HIGH">Élevée</option>
+                                   <option value="MEDIUM">Moyenne</option>
+                                   <option value="LOW">Faible</option>
+                              </select>
+                              <select id="imp-sort" class="form-select" style="max-width: 180px;">
+                                   <option value="priority">Tri : priorité</option>
+                                   <option value="recent">Tri : récent</option>
+                              </select>
+                              <span id="imp-summary" class="small text-muted ms-auto"></span>
+                         </div>
+                    </div>
+
+                    <div id="imp-list"></div>
+
+                    </div>
+                    <!-- ============ Fin onglet Améliorations IA ============ -->
+
+                    <!-- ============ Onglet : Journal des corrections (ai-corrections.html) ============ -->
+                    <div class="tab-pane" id="tab-corrections" role="tabpanel">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> chaque correction — qu'elle vienne d'une
+                                   auto-correction confirmée du chien de garde IA (<span class="badge src-AI_AUTO">auto IA</span>)
+                                   ou d'une correction de code faite en développement (<span class="badge src-DEV_FIX">dev</span>) —
+                                   est journalisée ici avec le détail complet : erreur exacte constatée, contexte,
+                                   cause identifiée, correction apportée, fichiers/fonctions concernés, tests avant
+                                   et après, et liens vers les corrections similaires déjà résolues sur le même
+                                   domaine. Sert de mémoire consultable pour éviter de refaire la même erreur.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                              <select id="corr-domain" class="form-select" style="max-width: 220px;">
+                                   <option value="">Tous domaines</option>
+                                   <option value="revenueShop">CA magasin</option>
+                                   <option value="revenueArticle">CA article/rayon</option>
+                                   <option value="articleDetails">Fiche article</option>
+                                   <option value="stock">Stock</option>
+                                   <option value="sales">Ventes</option>
+                                   <option value="orders">Commandes</option>
+                                   <option value="accuracy">Précision IA</option>
+                                   <option value="code">Code / technique</option>
+                              </select>
+                              <select id="corr-source" class="form-select" style="max-width: 200px;">
+                                   <option value="">Toutes sources</option>
+                                   <option value="AI_AUTO">Auto-correction IA</option>
+                                   <option value="DEV_FIX">Correction de code</option>
+                              </select>
+                              <span id="corr-summary" class="small text-muted ms-auto"></span>
+                         </div>
+                    </div>
+
+                    <div id="corr-list"></div>
+
+                    </div>
+                    <!-- ============ Fin onglet Journal des corrections ============ -->
+
+                    <!-- ============ Onglet : Journal des erreurs (error-log.html) ============ -->
+                    <div class="tab-pane" id="tab-errors" role="tabpanel">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> chaque erreur serveur (code 5xx) survenue
+                                   sur l'API est enregistrée automatiquement ici, avec l'URL appelée, le message
+                                   exact, la personne connectée au moment de l'erreur et l'horodatage — ces
+                                   mêmes erreurs sont aussi écrites dans les logs du conteneur (visibles dans
+                                   Dokploy). L'onglet Améliorations IA regroupe ces lignes en recommandations.
+                                   Rétention 30 jours, plafond 5000 lignes.
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card">
+                         <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                              <h4 class="card-title mb-0">Erreurs journalisées</h4>
+                              <div class="d-flex flex-wrap gap-2 align-items-center">
+                                   <input type="text" id="el-search" class="form-control form-control-sm" placeholder="Rechercher dans l'URL ou le message..." style="max-width: 260px;">
+                                   <select id="el-status" class="form-select form-select-sm" style="max-width: 150px;">
+                                        <option value="">Tous les codes</option>
+                                        <option value="500">500</option>
+                                        <option value="502">502</option>
+                                        <option value="503">503</option>
+                                        <option value="504">504</option>
+                                   </select>
+                                   <button type="button" id="el-refresh" class="btn btn-sm btn-outline-secondary">Actualiser</button>
+                                   <button type="button" id="el-export-csv" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
+                                        <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
+                                   </button>
+                              </div>
+                         </div>
+                         <div class="card-body">
+                              <div class="small text-muted mb-2" id="el-summary"></div>
+                              <div id="err-grid" class="ag-theme-quartz"></div>
+                         </div>
+                    </div>
+
+                    </div>
+                    <!-- ============ Fin onglet Journal des erreurs ============ -->
+
+                    <!-- ============ Onglet : Préparation à l'autonomie (ai-autonomy.html) ============ -->
+                    <div class="tab-pane" id="tab-autonomy" role="tabpanel">
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="alert alert-light border small mb-0">
+                                   <strong>À quoi ça sert :</strong> indicateur <strong>purement consultatif</strong> —
+                                   il ne déclenche jamais lui-même un changement de comportement du système. Il mesure,
+                                   à partir de critères réels (taux d'erreur, exactitude, stabilité, détection
+                                   d'anomalies, résultats après correction), si l'IA progresse vers moins de
+                                   supervision humaine. Un palier n'est affiché comme <strong>atteint</strong> que
+                                   s'il se maintient sur plusieurs évaluations consécutives — jamais sur un seul bon
+                                   résultat ponctuel — et redescend immédiatement si la performance se dégrade.
+                                   À vous de décider, en vous appuyant sur cet indicateur, d'activer ou non
+                                   davantage d'automatisation (ex: Paramètres &gt; IA &gt; Ajustement IA à la génération).
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <div class="d-flex justify-content-between align-items-center mb-3">
+                                   <h5 class="mb-0">Échelle de supervision</h5>
+                                   <button type="button" id="autonomy-recompute" class="btn btn-primary btn-sm">Recalculer maintenant</button>
+                              </div>
+                              <div class="autonomy-ladder" id="autonomy-ladder"></div>
+                              <div id="autonomy-streak-note" class="small text-muted mt-2"></div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <h5 class="mb-3">Critères mesurables</h5>
+                              <div id="autonomy-criteria"></div>
+                         </div>
+                    </div>
+
+                    <div class="card mb-3">
+                         <div class="card-body">
+                              <h5 class="mb-3">Historique des évaluations</h5>
+                              <div id="autonomy-history" class="table-responsive"></div>
+                         </div>
+                    </div>
+
+                    </div>
+                    <!-- ============ Fin onglet Préparation à l'autonomie ============ -->
+
+                    </div>
+                    <!-- Fin .tab-content -->
+
+               </div>
+          </div>
+     </main>
+
+     <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+     <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+     <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+
+     <!-- Onglet Améliorations IA -->
+     <script src="assets/js/ai-improvements.js"></script>
+     <!-- Onglet Journal des corrections -->
+     <script src="assets/js/ai-corrections.js"></script>
+     <!-- Onglet Journal des erreurs : logique reprise telle quelle depuis error-log.html
+          (elle vivait en script inline dans ce fichier, pas de .js séparé). -->
+     <script>
+          (function () {
+               function fmtDate(iso) {
+                    return iso ? new Date(iso).toLocaleString('fr-FR') : '—';
+               }
+
+               function statusCellRenderer(params) {
+                    const code = params.value;
+                    const span = document.createElement('span');
+                    // 500 = vrai bug applicatif ; 502/503/504 souvent transitoires (RPOS injoignable),
+                    // distingués visuellement pour ne pas leur donner la même urgence qu'un vrai 500.
+                    span.className = 'badge ' + (code >= 500 && code < 502 ? 'bg-danger-subtle text-danger' : 'bg-warning-subtle text-warning');
+                    span.textContent = code;
+                    return span;
+               }
+
+               function urlCellRenderer(params) {
+                    const r = params.data;
+                    const code = document.createElement('code');
+                    code.className = 'small';
+                    code.textContent = (r.method ? r.method + ' ' : '') + (r.url || '');
+                    return code;
+               }
+
+               const gridColumnDefs = [
+                    { headerName: 'Date', field: 'createdAt', width: 170, filter: 'agDateColumnFilter',
+                         valueFormatter: function (p) { return fmtDate(p.value); } },
+                    { headerName: 'Code', field: 'statusCode', width: 90, filter: 'agNumberColumnFilter', cellRenderer: statusCellRenderer },
+                    { headerName: 'URL', width: 260, filter: 'agTextColumnFilter', cellRenderer: urlCellRenderer,
+                         valueGetter: function (p) { return (p.data.method ? p.data.method + ' ' : '') + (p.data.url || ''); } },
+                    { headerName: 'Message', field: 'message', flex: 2, minWidth: 300, filter: 'agTextColumnFilter', autoHeight: true, wrapText: true },
+                    { headerName: 'Utilisateur', field: 'userEmail', width: 200, filter: 'agTextColumnFilter',
+                         valueFormatter: function (p) { return p.value || '—'; } },
+                    { headerName: 'IP', field: 'ip', width: 140, filter: 'agTextColumnFilter',
+                         valueFormatter: function (p) { return p.value || '—'; } },
+               ];
+
+               let gridApi = null;
+               function ensureGrid() {
+                    if (gridApi) return gridApi;
+                    gridApi = agGrid.createGrid(document.getElementById('err-grid'), {
+                         columnDefs: gridColumnDefs,
+                         rowData: [],
+                         localeText: window.AG_GRID_LOCALE_FR,
+                         domLayout: 'autoHeight',
+                         pagination: true,
+                         paginationPageSize: 50,
+                         paginationPageSizeSelector: [25, 50, 100, 200],
+                         animateRows: false,
+                    });
+                    return gridApi;
+               }
+
+               let searchTimer = null;
+               async function loadErrors() {
+                    ensureGrid();
+                    try {
+                         const params = new URLSearchParams();
+                         const search = document.getElementById('el-search').value.trim();
+                         const status = document.getElementById('el-status').value;
+                         if (search) params.set('search', search);
+                         if (status) params.set('statusCode', status);
+                         const res = await window.reassortFetch('/reassort/error-reports?' + params.toString());
+                         const json = await res.json();
+                         if (!json.success) throw new Error(json.message);
+                         const rows = json.data || [];
+                         document.getElementById('el-summary').textContent = rows.length + ' erreur(s) (100 max affichées, 30 derniers jours)';
+                         gridApi.setGridOption('rowData', rows);
+                    } catch (err) {
+                         document.getElementById('el-summary').textContent = 'Erreur: ' + err.message;
+                    }
+               }
+
+               document.getElementById('el-export-csv').addEventListener('click', function () {
+                    if (!gridApi) return;
+                    gridApi.exportDataAsCsv({ fileName: 'journal-erreurs-' + new Date().toISOString().slice(0, 10) + '.csv' });
+               });
+
+               document.getElementById('el-refresh').addEventListener('click', loadErrors);
+               document.getElementById('el-status').addEventListener('change', loadErrors);
+               document.getElementById('el-search').addEventListener('input', function () {
+                    clearTimeout(searchTimer);
+                    searchTimer = setTimeout(loadErrors, 400);
+               });
+
+               if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', loadErrors);
+               } else {
+                    loadErrors();
+               }
+          })();
+     </script>
+     <!-- Onglet Préparation à l'autonomie -->
+     <script src="assets/js/ai-autonomy.js"></script>
+
+     <script src="assets/js/notifications-bell.js"></script>
+     <script src="assets/js/ai-assistant-widget.js"></script>
+
+     <!-- Routage par hash entre les 4 onglets (#tab-improvements / #tab-corrections / #tab-errors /
+          #tab-autonomy), même mécanisme que settings.html (openTabFromHash + écoute hashchange). -->
+     <script>
+          (function () {
+               function openTabFromHash() {
+                    const hash = window.location.hash;
+                    if (!hash || !hash.startsWith('#tab-')) return;
+                    const tabLink = document.querySelector('.nav-tabs a.nav-link[href="' + hash + '"]');
+                    const tabPane = document.querySelector('.tab-content ' + hash);
+                    if (!tabLink || !tabPane) return;
+                    const tabItem = tabLink.closest('li');
+                    if (tabItem && tabItem.style.display === 'none') return;
+                    document.querySelectorAll('.nav-tabs .nav-link').forEach(function (l) { l.classList.remove('active'); });
+                    document.querySelectorAll('.tab-content .tab-pane').forEach(function (p) { p.classList.remove('show', 'active'); });
+                    tabLink.classList.add('active');
+                    tabPane.classList.add('show', 'active');
+               }
+               window.addEventListener('hashchange', openTabFromHash);
+               openTabFromHash();
+          })();
+     </script>
+
+     <!-- Modale : note d'action (correction effectuée / motif d'ignorance / note libre) — onglet Améliorations IA -->
+     <div class="modal fade" id="imp-note-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title" id="imp-note-title">Changer de statut</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body">
+                         <label class="form-label fw-semibold" id="imp-note-label">Note</label>
+                         <textarea id="imp-note-text" class="form-control" rows="3"></textarea>
+                         <div id="imp-note-error" class="alert alert-danger mt-2" style="display:none;"></div>
+                    </div>
+                    <div class="modal-footer">
+                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                         <button type="button" class="btn btn-primary" id="imp-note-confirm">Confirmer</button>
+                    </div>
+               </div>
+          </div>
+     </div>
+
+     <!-- Modale : détail complet + timeline de l'incident — onglet Améliorations IA -->
+     <div class="modal fade" id="imp-detail-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Détail de la recommandation</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body" id="imp-detail-body"></div>
+               </div>
+          </div>
+     </div>
+
+     <!-- Modale : modifier la proposition IA — onglet Améliorations IA -->
+     <div class="modal fade" id="imp-edit-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Modifier la proposition IA</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body">
+                         <input type="hidden" id="imp-edit-id">
+                         <label class="form-label fw-semibold">Recommandation</label>
+                         <textarea id="imp-edit-detail" class="form-control mb-3" rows="4"></textarea>
+                         <label class="form-label fw-semibold">Recommandation dev</label>
+                         <textarea id="imp-edit-dev" class="form-control mb-3" rows="3" placeholder="Vide = aucune"></textarea>
+                         <label class="form-label fw-semibold">Priorité</label>
+                         <select id="imp-edit-priority" class="form-select" style="max-width: 220px;">
+                              <option value="CRITICAL">Critique</option>
+                              <option value="HIGH">Élevée</option>
+                              <option value="MEDIUM">Moyenne</option>
+                              <option value="LOW">Faible</option>
+                         </select>
+                         <div id="imp-edit-error" class="alert alert-danger mt-3" style="display:none;"></div>
+                    </div>
+                    <div class="modal-footer">
+                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                         <button type="button" class="btn btn-primary" id="imp-edit-confirm">Enregistrer</button>
+                    </div>
+               </div>
+          </div>
+     </div>
+
+     <!-- Modale : détail complet d'une correction + corrections similaires — onglet Journal des corrections -->
+     <div class="modal fade" id="corr-detail-modal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+               <div class="modal-content">
+                    <div class="modal-header">
+                         <h5 class="modal-title">Détail de la correction</h5>
+                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body" id="corr-detail-body"></div>
+               </div>
+          </div>
+     </div>
+
+</body>
+
+</html>

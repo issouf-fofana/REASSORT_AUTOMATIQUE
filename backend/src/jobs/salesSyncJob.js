@@ -37,21 +37,25 @@ async function fetchAndSaveWindow(posId, shopId, start, now) {
   const dateStart = start.toISOString().slice(0, 19);
   const dateEnd = now.toISOString().slice(0, 19);
   let page = 1;
-  let total = 0;
+  let allRawLines = [];
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const pageResult = await rpos.fetchProductLinesPage(posId, shopId, dateStart, dateEnd, page, SYNC_PAGE_SIZE);
-    const rows = toSalesLineRows(pageResult.results, posId, shopId);
-    if (rows.length > 0) {
-      await prisma.salesLine.createMany({ data: rows, skipDuplicates: true });
-      total += rows.length;
-    }
+    allRawLines = allRawLines.concat(pageResult.results);
     if (!pageResult.nextPage) break;
     page = pageResult.nextPage;
   }
 
-  return total;
+  // Toutes les lignes de la fenêtre collectées AVANT de calculer dedupKey (pas page par page) :
+  // deux ventes en collision (même EAN/date/qté/montant à la même seconde, cf. toSalesLineRows)
+  // pourraient sinon tomber sur deux pages différentes et échapper à l'indexation qui les distingue.
+  const rows = toSalesLineRows(allRawLines, posId, shopId);
+  if (rows.length > 0) {
+    await prisma.salesLine.createMany({ data: rows, skipDuplicates: true });
+  }
+
+  return rows.length;
 }
 
 // Fenêtre de réconciliation : RPOS peut parfois répondre incomplet sur une page sans lever
@@ -161,6 +165,25 @@ function toSalesLineRows(lines, posId, shopId) {
   // ventes sont réelles et doivent être stockées pour que le CA total du magasin reste exact (même
   // correctif que salesBackfillService.js, cf. son commentaire). Le filtre EAN numérique reste
   // appliqué au moment du calcul Pareto/réassort (proposalService.js).
+  //
+  // Bug corrigé le 22/09/2026 (écarts constatés en prod : "17619 ventes réelles, 17617
+  // synchronisées", CA différent en conséquence) : deux ventes RÉELLES et DISTINCTES (même EAN,
+  // même quantité, même montant, à LA MÊME SECONDE — un magasin avec plusieurs caisses actives en
+  // même temps) produisaient l'ancienne dedupKey identique (`shop|ean|date|qté|montant`), donc la
+  // seconde était silencieusement perdue par le skipDuplicates de createMany (contrainte unique en
+  // base, dedupKey). Pire : une resynchronisation ne corrigeait jamais ce cas précis, puisqu'elle
+  // retombait exactement sur la même collision à chaque nouvelle tentative.
+  //
+  // receipt.id (ticket de caisse, ajouté le 16/09/2026) aurait été le désambiguïsant naturel, mais
+  // n'est pas fourni par tous les serveurs RPOS (constaté : 0% des lignes en ont un sur ce serveur,
+  // même après son ajout) — donc jamais fiable seul. À la place : un index de collision calculé ICI
+  // sur l'ensemble du lot reçu de RPOS (avant toute pagination), qui numérote chaque occurrence
+  // supplémentaire d'un même (ean, date, quantité, montant) dans CE lot. La toute première
+  // occurrence garde EXACTEMENT l'ancienne dedupKey (compatibilité totale avec les lignes déjà
+  // synchronisées avant ce correctif — cf. commentaire historique retiré ci-dessus, qui redoutait à
+  // raison de casser la déduplication existante) ; seules les occurrences suivantes (2e, 3e...)
+  // reçoivent un suffixe `#n` qui les distingue, sans jamais changer la clé des lignes déjà en base.
+  const collisionCount = new Map();
   return lines
     .filter((l) => l.ean)
     .map((l) => {
@@ -173,6 +196,9 @@ function toSalesLineRows(lines, posId, shopId) {
       const revenueInclTax = l.total_incl_tax !== undefined && l.total_incl_tax !== null
         ? parseFloat(String(l.total_incl_tax).replace(',', '.')) || 0
         : null;
+      const baseKey = `${shopId}|${ean}|${date}|${quantity}|${revenueExclTax}`;
+      const occurrence = collisionCount.get(baseKey) || 0;
+      collisionCount.set(baseKey, occurrence + 1);
       return {
         rposPosId: posId,
         rposShopId: shopId,
@@ -186,11 +212,7 @@ function toSalesLineRows(lines, posId, shopId) {
         // ventes (tickets distincts), pas juste le nombre de lignes d'articles — null si RPOS ne le
         // renvoie pas (config/version de serveur différente), jamais une valeur inventée.
         receiptId: l.receipt && l.receipt.id ? String(l.receipt.id) : null,
-        // dedupKey inchangée (basée sur le HT uniquement, receipt.id volontairement exclu) : ajouter
-        // un champ à cette clé la changerait pour toutes les lignes déjà synchronisées, cassant la
-        // déduplication au prochain passage (skipDuplicates ne reconnaîtrait plus les lignes
-        // existantes comme des doublons).
-        dedupKey: `${shopId}|${ean}|${date}|${quantity}|${revenueExclTax}`,
+        dedupKey: occurrence === 0 ? baseKey : `${baseKey}|#${occurrence}`,
       };
     });
 }

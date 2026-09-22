@@ -33,12 +33,18 @@ const KEYS = {
   // Chien de garde du Conseiller d'amélioration IA (première brique AI Center, §44) : détection
   // quotidienne des anomalies silencieuses + évaluation d'effet des recos appliquées.
   IMPROVEMENTS_CRON: 'IMPROVEMENTS_CRON',
+  // Récap quotidien de couverture des ventes (demande du 22/09/2026 : "au moins à 23h59:59 on est
+  // sûr que il a tout pris") — compare RPOS vs local jour par jour pour la journée qui vient de se
+  // terminer, sur CHAQUE magasin, et relance une récupération ciblée en cas d'écart. Distinct de la
+  // synchro incrémentale (SALES_SYNC_CRON, toutes les 15 min, fenêtre glissante de 48h seulement).
+  SALES_DAILY_RECAP_CRON: 'SALES_DAILY_RECAP_CRON',
   // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
   // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
   // expression cron qui ne se déclenche jamais pour le "désactiver").
   NIGHTLY_PROPOSAL_ENABLED: 'NIGHTLY_PROPOSAL_ENABLED',
   RECEPTION_SYNC_ENABLED: 'RECEPTION_SYNC_ENABLED',
   SALES_SYNC_ENABLED: 'SALES_SYNC_ENABLED',
+  SALES_DAILY_RECAP_ENABLED: 'SALES_DAILY_RECAP_ENABLED',
   // Restreint la synchro des ventes (job planifié + bouton "Lancer maintenant") à une liste de
   // magasins précise (rposShopId séparés par virgule) au lieu de tous les magasins actifs — utile
   // pour se concentrer sur un ou quelques magasins pendant les tests, sans désactiver la synchro
@@ -136,6 +142,11 @@ const ENV_FALLBACK = {
   // mesures les plus fraîches. Actif par défaut : une exécution sans nouveau constat ne coûte
   // rien (ni LLM, ni écriture grâce à la déduplication).
   [KEYS.IMPROVEMENTS_CRON]: () => process.env.IMPROVEMENTS_CRON || '30 7 * * *',
+  // 23:59 par défaut : la journée qui vient tout juste de se terminer est vérifiée dans la même
+  // minute calendaire, avant que la synchro incrémentale de minuit ne commence à couvrir le
+  // lendemain — pas de raison technique de repousser plus tard, RPOS a déjà toutes les ventes de la
+  // journée à cette heure (un magasin ferme toujours avant 23:59).
+  [KEYS.SALES_DAILY_RECAP_CRON]: () => process.env.SALES_DAILY_RECAP_CRON || '59 23 * * *',
   // 1 unité/jour par défaut : en dessous de ce rythme habituel, un silence récent des ventes
   // n'est pas signalé comme rupture invisible (cf. ANOMALY_MIN_DAILY_SALES ci-dessus).
   [KEYS.ANOMALY_MIN_DAILY_SALES]: () => '1',
@@ -198,6 +209,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.RECEPTION_SYNC_ENABLED]: () => 'true',
   [KEYS.SALES_SYNC_ENABLED]: () => 'true',
   [KEYS.SALES_SYNC_SHOP_IDS]: () => '',
+  [KEYS.SALES_DAILY_RECAP_ENABLED]: () => 'true',
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',

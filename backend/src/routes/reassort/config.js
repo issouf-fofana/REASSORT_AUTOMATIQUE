@@ -318,6 +318,10 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       const { startOrRestartSalesSyncJob } = require('../../jobs/cronManager');
       await startOrRestartSalesSyncJob();
     }
+    if ([systemConfig.KEYS.SALES_DAILY_RECAP_CRON, systemConfig.KEYS.SALES_DAILY_RECAP_ENABLED].includes(key)) {
+      const { startOrRestartSalesDailyRecapJob } = require('../../jobs/cronManager');
+      await startOrRestartSalesDailyRecapJob();
+    }
     if ([systemConfig.KEYS.SHOPS_SYNC_CRON, systemConfig.KEYS.SHOPS_SYNC_ENABLED].includes(key)) {
       const { startOrRestartShopsSyncJob } = require('../../jobs/cronManager');
       await startOrRestartShopsSyncJob();

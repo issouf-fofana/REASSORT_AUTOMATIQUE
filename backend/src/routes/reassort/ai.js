@@ -585,6 +585,18 @@ router.get('/improvements/health', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/improvements/stale - constats ouverts depuis plus longtemps que leur seuil de
+// relance (demande du 22/09/2026 : "quand il y a un souci non résolu il doit me faire des
+// relances"), consommé par le badge de notification (topbar) sur toutes les pages ADMIN/SUPERVISOR
+// et par la Vue globale. Réservé ADMIN comme le reste des routes /improvements.
+router.get('/improvements/stale', requireAdmin, async (req, res) => {
+  try {
+    res.json({ success: true, data: await improvementService.getStaleImprovements() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/improvements/:id - détail complet + timeline des événements
 // (Détection → Analyse IA → Recommandation → Validation → Correction → Vérification → Résultat).
 router.get('/improvements/:id', requireAdmin, async (req, res) => {

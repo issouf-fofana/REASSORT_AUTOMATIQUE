@@ -411,6 +411,31 @@ async function detectAppErrors() {
   return findings;
 }
 
+// Seuils de relance (demande du 22/09/2026 : "quand il y a un souci non résolu il doit me faire
+// des relances pour que je règle au plus vite") — un CRITICAL/HIGH traîne moins longtemps avant
+// d'être signalé qu'un MEDIUM/LOW, cohérent avec l'urgence déjà portée par la priorité elle-même.
+const STALE_THRESHOLDS_DAYS = { CRITICAL: 1, HIGH: 3, MEDIUM: 7, LOW: 14 };
+
+// Constats encore ouverts (OPEN_STATUSES) et plus vieux que leur seuil de relance — sert le badge
+// de notification (topbar) et la Vue globale : jamais calculé au moment de la détection elle-même
+// (collectFindings), seulement en le relisant, pour ne pas coupler "ce qui est détecté" et "ce qui
+// doit relancer l'utilisateur", deux questions distinctes.
+async function getStaleImprovements() {
+  const now = Date.now();
+  const rows = await prisma.aIImprovement.findMany({
+    where: { status: { in: OPEN_STATUSES } },
+    orderBy: { createdAt: 'asc' },
+  });
+  return rows
+    .map((r) => {
+      const thresholdDays = STALE_THRESHOLDS_DAYS[r.priority] ?? STALE_THRESHOLDS_DAYS.LOW;
+      const ageDays = (now - new Date(r.createdAt).getTime()) / DAY_MS;
+      return { row: r, ageDays, thresholdDays, isStale: ageDays >= thresholdDays };
+    })
+    .filter((x) => x.isStale)
+    .map((x) => ({ ...x.row, ageDays: Math.floor(x.ageDays) }));
+}
+
 async function collectFindings() {
   const grouped = await Promise.all([
     detectDegradedJobs(),
@@ -714,4 +739,4 @@ async function evaluateAppliedImprovements() {
   return { evaluated: improved + noEffect, improved, noEffect };
 }
 
-module.exports = { collectFindings, generateImprovements, setImprovementStatus, updateImprovement, evaluateAppliedImprovements, recomputeMetric, PRIORITY_RANK, OPEN_STATUSES };
+module.exports = { collectFindings, generateImprovements, setImprovementStatus, updateImprovement, evaluateAppliedImprovements, recomputeMetric, getStaleImprovements, PRIORITY_RANK, OPEN_STATUSES };

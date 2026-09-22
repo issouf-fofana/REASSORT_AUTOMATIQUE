@@ -94,20 +94,17 @@
                          <span class="sidebar-text">IA &amp; Prédictions</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="ai-improvements.html" data-collapse-group="reassort" id="menu-item-ai-improvements" style="display:none;">
-                    <a class="nav-link d-flex align-items-center" href="/ai-improvements">
+               <!-- "Qualité & IA" (fusion du 22/09/2026) remplace 4 entrées de menu distinctes qui
+                    pointaient chacune vers une page dédiée devenue un onglet de ai-quality.html :
+                    Améliorations IA, Journal des corrections, Journal des erreurs, Préparation à
+                    l'autonomie. Les 4 fichiers d'origine restent sur disque (non liés, non supprimés).
+                    Gating identique au plus restrictif des 4 (ADMIN uniquement, cf. reassort-auth.js). -->
+               <li class="nav-item" data-nav-item="ai-quality.html" data-collapse-group="reassort" id="menu-item-ai-quality" style="display:none;">
+                    <a class="nav-link d-flex align-items-center" href="/ai-quality">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"></path></svg>
                          </span>
-                         <span class="sidebar-text">Améliorations IA</span>
-                    </a>
-               </li>
-               <li class="nav-item" data-nav-item="ai-corrections.html" data-collapse-group="reassort" id="menu-item-ai-corrections" style="display:none;">
-                    <a class="nav-link d-flex align-items-center" href="/ai-corrections">
-                         <span class="sidebar-icon">
-                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path></svg>
-                         </span>
-                         <span class="sidebar-text">Journal des corrections</span>
+                         <span class="sidebar-text">Qualité &amp; IA</span>
                     </a>
                </li>
                <li class="nav-item" data-nav-item="ai-mastery.html" data-collapse-group="reassort" id="menu-item-ai-mastery" style="display:none;">
@@ -118,36 +115,12 @@
                          <span class="sidebar-text">Mémoire du modèle</span>
                     </a>
                </li>
-               <li class="nav-item" data-nav-item="ai-autonomy.html" data-collapse-group="reassort" id="menu-item-ai-autonomy" style="display:none;">
-                    <a class="nav-link d-flex align-items-center" href="/ai-autonomy">
-                         <span class="sidebar-icon">
-                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path></svg>
-                         </span>
-                         <span class="sidebar-text">Préparation à l'autonomie</span>
-                    </a>
-               </li>
                <li class="nav-item" data-nav-item="order-anomalies.html" data-collapse-group="reassort" id="menu-item-order-anomalies" style="display:none;">
                     <a class="nav-link d-flex align-items-center" href="/order-anomalies">
                          <span class="sidebar-icon">
                               <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
                          </span>
                          <span class="sidebar-text">Anomalies de commande</span>
-                    </a>
-               </li>
-               <li class="nav-item" data-nav-item="audit-errors.html" data-collapse-group="reassort" id="menu-item-audit-errors" style="display:none;">
-                    <a class="nav-link d-flex align-items-center" href="/audit-errors">
-                         <span class="sidebar-icon">
-                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0v3a1 1 0 102 0v-3zm2-3a1 1 0 011 1v5a1 1 0 11-2 0v-5a1 1 0 011-1zm4-1a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd"></path></svg>
-                         </span>
-                         <span class="sidebar-text">Journal d'audit</span>
-                    </a>
-               </li>
-               <li class="nav-item" data-nav-item="error-log.html" data-collapse-group="reassort" id="menu-item-error-log" style="display:none;">
-                    <a class="nav-link d-flex align-items-center" href="/error-log">
-                         <span class="sidebar-icon">
-                              <svg class="icon icon-xs me-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
-                         </span>
-                         <span class="sidebar-text">Journal des erreurs</span>
                     </a>
                </li>
                <li class="sidebar-heading sidebar-heading-collapsible" data-collapse-heading="admin">

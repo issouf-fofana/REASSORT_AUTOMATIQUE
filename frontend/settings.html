@@ -964,6 +964,42 @@
                          </div>
                     </div>
 
+                    <!-- Récap quotidien de couverture des ventes (ajouté le 22/09/2026 : écarts
+                         constatés en prod entre RPOS et la base locale, ex. "17619 ventes réelles,
+                         17617 synchronisées" — la synchro incrémentale ci-dessus ne compare RPOS et
+                         local que sur une fenêtre glissante de 48h, jamais sur une journée complète
+                         une fois passée cette fenêtre). Tourne une fois par jour, vérifie chaque
+                         magasin jour par jour, relance une récupération ciblée en cas d'écart. -->
+                    <div class="row mt-3">
+                         <div class="col-12">
+                              <div class="card">
+                                   <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h4 class="card-title d-flex align-items-center gap-1 mb-0">
+                                             <iconify-icon icon="solar:calendar-mark-bold-duotone" class="text-primary fs-20"></iconify-icon>
+                                             Récap quotidien de couverture
+                                        </h4>
+                                        <div class="form-check form-switch mb-0">
+                                             <input class="form-check-input" type="checkbox" role="switch" id="system-sales-daily-recap-enabled">
+                                             <label class="form-check-label small" for="system-sales-daily-recap-enabled">Actif</label>
+                                        </div>
+                                   </div>
+                                   <div class="card-body">
+                                        <div class="alert alert-light border mb-3 small">
+                                             <strong>À quoi ça sert :</strong> la synchro incrémentale ci-dessus ne compare RPOS et la base
+                                             locale que sur les dernières 48h — un écart plus ancien (ex: deux ventes identiques à la même
+                                             seconde silencieusement fusionnées en une seule) n'était jusqu'ici jamais rattrapé
+                                             automatiquement. Ce récap tourne <strong>une fois par jour</strong> (23:59 par défaut) et
+                                             vérifie, pour <strong>chaque magasin</strong>, que le nombre de ventes de la journée qui vient
+                                             de se terminer correspond exactement entre RPOS et le local — en cas d'écart, une
+                                             récupération ciblée sur cette journée précise est relancée automatiquement.
+                                        </div>
+                                        <button type="button" id="system-run-sales-daily-recap-now" class="btn btn-outline-secondary mb-2">Lancer le récap maintenant</button>
+                                        <div id="system-run-sales-daily-recap-result" class="small mt-2"></div>
+                                   </div>
+                              </div>
+                         </div>
+                    </div>
+
                     <div class="row">
                          <div class="col-12">
                               <div class="card">
@@ -1705,6 +1741,7 @@
                                         document.getElementById('system-nightly-enabled').checked = d.NIGHTLY_PROPOSAL_ENABLED !== 'false';
                                         document.getElementById('system-daily-review-enabled').checked = d.DAILY_REVIEW_ENABLED !== 'false';
                                         document.getElementById('system-sales-sync-enabled').checked = d.SALES_SYNC_ENABLED !== 'false';
+                                        document.getElementById('system-sales-daily-recap-enabled').checked = d.SALES_DAILY_RECAP_ENABLED !== 'false';
                                         document.getElementById('system-prediction-outcome-enabled').checked = d.PREDICTION_OUTCOME_ENABLED !== 'false';
                                         salesSyncShopIdsFromConfig = (d.SALES_SYNC_SHOP_IDS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
                                         applySalesSyncShopIdsSelection();
@@ -1801,6 +1838,7 @@
                               wireJobEnabledSwitch('system-nightly-enabled', 'NIGHTLY_PROPOSAL_ENABLED');
                               wireJobEnabledSwitch('system-daily-review-enabled', 'DAILY_REVIEW_ENABLED');
                               wireJobEnabledSwitch('system-sales-sync-enabled', 'SALES_SYNC_ENABLED');
+                              wireJobEnabledSwitch('system-sales-daily-recap-enabled', 'SALES_DAILY_RECAP_ENABLED');
                               wireJobEnabledSwitch('system-prediction-outcome-enabled', 'PREDICTION_OUTCOME_ENABLED');
                               wireJobEnabledSwitch('ai-quantity-adjustment-enabled', 'AI_QUANTITY_ADJUSTMENT_ENABLED');
                               wireJobEnabledSwitch('chatbot-llm-fallback-enabled', 'CHATBOT_LLM_FALLBACK_ENABLED');
@@ -2300,6 +2338,20 @@
                                    resultBox.textContent = 'Exécution en cours...';
                                    try {
                                         const res = await window.reassortFetch('/reassort/run-sales-sync', { method: 'POST' });
+                                        const json = await res.json();
+                                        if (!json.success) throw new Error(json.message);
+                                        resultBox.textContent = 'Terminé : ' + json.message;
+                                   } catch (err) {
+                                        resultBox.textContent = 'Erreur: ' + err.message;
+                                   }
+                              });
+
+                              // --- Récap quotidien de couverture des ventes ---
+                              document.getElementById('system-run-sales-daily-recap-now').addEventListener('click', async function () {
+                                   const resultBox = document.getElementById('system-run-sales-daily-recap-result');
+                                   resultBox.textContent = 'Exécution en cours (peut prendre plusieurs minutes selon le nombre de magasins et d\'écarts à corriger)...';
+                                   try {
+                                        const res = await window.reassortFetch('/reassort/run-sales-daily-recap', { method: 'POST' });
                                         const json = await res.json();
                                         if (!json.success) throw new Error(json.message);
                                         resultBox.textContent = 'Terminé : ' + json.message;
@@ -2836,12 +2888,19 @@ document.getElementById('sales-backfill-cancel-batch-btn').addEventListener('cli
                                    const isRange = document.getElementById('sales-backfill-mode').value === 'range';
                                    let periodStart, periodEnd;
                                    if (isRange) {
-                                        periodStart = document.getElementById('sales-backfill-start').value;
-                                        periodEnd = document.getElementById('sales-backfill-end').value;
-                                        if (!periodStart || !periodEnd) {
+                                        const startVal = document.getElementById('sales-backfill-start').value;
+                                        const endVal = document.getElementById('sales-backfill-end').value;
+                                        if (!startVal || !endVal) {
                                              resultBox.textContent = 'Sélectionnez une date de début et de fin.';
                                              return;
                                         }
+                                        // <input type="date"> ne porte pas d'heure : "21/09" -> "21/09" (même jour des
+                                        // deux côtés, pour récupérer UNE journée précise) donnait périodStart===periodEnd
+                                        // à minuit pile des deux côtés, rejeté par le backend ("date de début doit être
+                                        // antérieure à la date de fin") — alors que l'intention est de couvrir toute la
+                                        // journée. Fin de journée forcée à 23:59:59 pour que ce cas single-day marche.
+                                        periodStart = startVal + 'T00:00:00';
+                                        periodEnd = endVal + 'T23:59:59';
                                    } else {
                                         const days = parseInt(document.getElementById('sales-backfill-days').value, 10) || 90;
                                         const now = new Date();
@@ -3781,6 +3840,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/notifications-bell.js"></script>
      <script src="assets/js/ai-assistant-widget.js"></script>
 
 </body>

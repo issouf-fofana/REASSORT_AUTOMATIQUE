@@ -53,27 +53,39 @@ function buildDedupKey(shopId, ean, date, quantity, revenue) {
   return `${shopId}|${ean}|${date}|${quantity}|${revenue}`;
 }
 
-function toSalesLineRow(line, posId, shopId) {
-  const ean = String(line.ean || '').trim();
-  const date = new Date(line.date).toISOString();
-  const quantity = parseFloat(String(line.quantity || 0).replace(',', '.')) || 0;
-  const revenueExclTax = parseFloat(String(line.total_excl_tax || 0).replace(',', '.')) || 0;
-  const revenueInclTax = line.total_incl_tax !== undefined && line.total_incl_tax !== null
-    ? parseFloat(String(line.total_incl_tax).replace(',', '.')) || 0
-    : null;
-  return {
-    rposPosId: posId,
-    rposShopId: shopId,
-    ean,
-    label: line.label_1 || null,
-    date: new Date(date),
-    quantity,
-    revenueExclTax,
-    revenueInclTax,
-    // dedupKey inchangée (basée sur le HT uniquement, cf. salesSyncJob.js) : ne pas y inclure le
-    // TTC pour ne pas casser la déduplication des lignes déjà synchronisées avant cet ajout.
-    dedupKey: buildDedupKey(shopId, ean, date, quantity, revenueExclTax),
-  };
+// Corrigé le 22/09/2026 (même bug et même correctif que salesSyncJob.js#toSalesLineRows : deux
+// ventes réelles distinctes, même EAN/quantité/montant à la même seconde, produisaient la même
+// dedupKey et la seconde était silencieusement perdue par skipDuplicates — écarts constatés en
+// prod, ex. "17619 ventes réelles, 17617 synchronisées"). toSalesLineRow (singulier) devient
+// toSalesLineRows (pluriel) pour indexer les collisions sur tout un LOT de lignes (une page RPOS
+// ici, plutôt que la fenêtre entière comme dans salesSyncJob.js — ce fichier traite déjà page par
+// page en streaming) avant de calculer chaque dedupKey ; la 1ère occurrence garde l'ancienne clé
+// (compatible avec les lignes déjà en base), les suivantes reçoivent un suffixe `#n` distinct.
+function toSalesLineRows(lines, posId, shopId) {
+  const collisionCount = new Map();
+  return lines.map((line) => {
+    const ean = String(line.ean || '').trim();
+    const date = new Date(line.date).toISOString();
+    const quantity = parseFloat(String(line.quantity || 0).replace(',', '.')) || 0;
+    const revenueExclTax = parseFloat(String(line.total_excl_tax || 0).replace(',', '.')) || 0;
+    const revenueInclTax = line.total_incl_tax !== undefined && line.total_incl_tax !== null
+      ? parseFloat(String(line.total_incl_tax).replace(',', '.')) || 0
+      : null;
+    const baseKey = buildDedupKey(shopId, ean, date, quantity, revenueExclTax);
+    const occurrence = collisionCount.get(baseKey) || 0;
+    collisionCount.set(baseKey, occurrence + 1);
+    return {
+      rposPosId: posId,
+      rposShopId: shopId,
+      ean,
+      label: line.label_1 || null,
+      date: new Date(date),
+      quantity,
+      revenueExclTax,
+      revenueInclTax,
+      dedupKey: occurrence === 0 ? baseKey : `${baseKey}|#${occurrence}`,
+    };
+  });
 }
 
 /** Compte le volume de lignes RPOS sur une période, sans en télécharger le contenu (page_size=1). */
@@ -204,9 +216,7 @@ async function attemptChunk(posId, shopId, chunk) {
       // numérique reste appliqué plus loin, au moment du calcul Pareto/réassort (proposalService.js)
       // — un article générique n'est jamais commandable individuellement, mais sa vente compte bien
       // dans le CA magasin.
-      const rows = pageResult.results
-        .filter((l) => l.ean)
-        .map((l) => toSalesLineRow(l, posId, shopId));
+      const rows = toSalesLineRows(pageResult.results.filter((l) => l.ean), posId, shopId);
 
       if (rows.length > 0) {
         // fetchedLines compte les lignes RPOS effectivement VUES (traitées), pas seulement celles

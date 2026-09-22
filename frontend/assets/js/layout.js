@@ -103,14 +103,18 @@
   document.querySelectorAll('[data-nav-item]').forEach(function (li) {
     if (stripHtmlExt(li.dataset.navItem) === currentPage) li.classList.add('active');
   });
-  // Sous-liens Paramètres (sidebar plate, sans groupe repliable) : actif suivi via le hash
-  // (#tab-xxx), en live lors des clics sidebar sans rechargement. Sans hash sur /settings,
-  // l'onglet affiché par défaut est tab-reassort (cf. openTabFromHash dans settings.html).
+  // Sous-liens à onglets (sidebar plate, sans groupe repliable) : actif suivi via le hash
+  // (#tab-xxx), en live lors des clics sidebar sans rechargement. Généralisé le 22/09/2026
+  // (initialement codé en dur pour /settings seul) à toute page à onglets via ce hash — chaque
+  // page définit son propre onglet par défaut dans DEFAULT_TAB_BY_PAGE ci-dessous, cohérent avec
+  // le premier onglet ouvert par son propre openTabFromHash (ex: tab-reassort pour settings.html,
+  // tab-improvements pour ai-quality.html).
+  const DEFAULT_TAB_BY_PAGE = { settings: 'tab-reassort', 'ai-quality': 'tab-improvements' };
   function refreshHashActive() {
-    const onSettings = currentPage === 'settings';
+    const defaultTab = DEFAULT_TAB_BY_PAGE[currentPage];
     const hash = window.location.hash.replace('#', '');
     document.querySelectorAll('[data-nav-href]').forEach(function (li) {
-      const match = onSettings && (hash ? li.dataset.navHref === hash : li.dataset.navHref === 'tab-reassort');
+      const match = defaultTab && (hash ? li.dataset.navHref === hash : li.dataset.navHref === defaultTab);
       li.classList.toggle('active', !!match);
     });
   }

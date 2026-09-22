@@ -3,6 +3,7 @@ const systemConfig = require('../services/systemConfigService');
 const { runNightlyProposalGeneration } = require('./nightlyProposalJob');
 const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
+const { runSalesDailyRecap } = require('./salesDailyRecapJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -13,6 +14,7 @@ const { trackJobRun } = require('../services/jobHealthService');
 let currentTask = null;
 let currentReceptionSyncTask = null;
 let currentSalesSyncTask = null;
+let currentSalesDailyRecapTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -24,6 +26,7 @@ let currentImprovementWatchdogTask = null;
 const nightlyLock = createJobLock('Génération nocturne des propositions');
 const receptionSyncLock = createJobLock('Synchronisation des réceptions');
 const salesSyncLock = createJobLock('Synchronisation des ventes');
+const salesDailyRecapLock = createJobLock('Récap quotidien de couverture des ventes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -120,6 +123,36 @@ async function startOrRestartSalesSyncJob() {
   });
 
   console.log(`⏰ Synchronisation des ventes planifiée: ${cronSchedule}`);
+}
+
+/** (Re)programme le récap quotidien de couverture des ventes (vérification jour-par-jour RPOS vs
+ * local pour la journée qui vient de se terminer, sur chaque magasin — cf. salesDailyRecapJob.js). */
+async function startOrRestartSalesDailyRecapJob() {
+  if (currentSalesDailyRecapTask) {
+    currentSalesDailyRecapTask.stop();
+    currentSalesDailyRecapTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.SALES_DAILY_RECAP_ENABLED))) {
+    console.log('⏸️  Récap quotidien de couverture des ventes désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.SALES_DAILY_RECAP_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), récap quotidien de couverture des ventes non planifié`);
+    return;
+  }
+
+  currentSalesDailyRecapTask = cron.schedule(cronSchedule, () => {
+    salesDailyRecapLock(async () => {
+      console.log('[cron] Démarrage du récap quotidien de couverture des ventes...');
+      await trackJobRun('salesDailyRecap', runSalesDailyRecap);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Récap quotidien de couverture des ventes planifié: ${cronSchedule}`);
 }
 
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
@@ -242,6 +275,7 @@ module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
   startOrRestartSalesSyncJob,
+  startOrRestartSalesDailyRecapJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

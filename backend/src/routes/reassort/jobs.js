@@ -7,6 +7,7 @@ const { requireAdmin } = require('../../middleware/auth');
 const { runNightlyProposalGeneration } = require('../../jobs/nightlyProposalJob');
 const { runReceptionSync } = require('../../jobs/receptionSyncJob');
 const { runSalesSync } = require('../../jobs/salesSyncJob');
+const { runSalesDailyRecap } = require('../../jobs/salesDailyRecapJob');
 
 router.post('/run-nightly-job', requireAdmin, async (req, res) => {
   try {
@@ -39,6 +40,20 @@ router.post('/run-sales-sync', requireAdmin, async (req, res) => {
     res.json({ success: true, message: 'Synchronisation des ventes exécutée' });
   } catch (error) {
     console.error('Manual sales sync error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/run-sales-daily-recap - déclenche manuellement le récap quotidien de
+// couverture des ventes (ADMIN, pour les tests — s'exécute normalement chaque jour à 23:59
+// automatiquement). Vérifie RPOS vs local jour par jour pour la journée qui vient de se terminer,
+// sur chaque magasin actif, et relance une récupération ciblée en cas d'écart.
+router.post('/run-sales-daily-recap', requireAdmin, async (req, res) => {
+  try {
+    await runSalesDailyRecap();
+    res.json({ success: true, message: 'Récap quotidien de couverture des ventes exécuté' });
+  } catch (error) {
+    console.error('Manual sales daily recap error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
