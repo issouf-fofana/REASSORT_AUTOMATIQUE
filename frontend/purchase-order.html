@@ -36,6 +36,7 @@
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
+     <script src="assets/js/ag-grid-toolbar.js"></script>
 
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
@@ -599,6 +600,7 @@
                                                   <button type="button" id="reassort-export-excel" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
                                                        <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
                                                   </button>
+                                                  <div id="reassort-grid-toolbar" class="d-flex gap-2"></div>
                                              </div>
                                         </div>
                                         <div id="reassort-grid" class="m-3"></div>
@@ -1361,6 +1363,7 @@
                                                             }
                                                        },
                                                   });
+                                                  window.reassortAgGridToolbar(gridApi, document.getElementById('reassort-grid-toolbar'));
                                                   return gridApi;
                                              }
 

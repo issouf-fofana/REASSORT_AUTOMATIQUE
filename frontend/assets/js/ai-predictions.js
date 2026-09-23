@@ -313,6 +313,7 @@
         updatePageLabel();
       },
     });
+    window.reassortAgGridToolbar(gridApi, document.getElementById('aip-grid-toolbar'));
     return gridApi;
   }
 

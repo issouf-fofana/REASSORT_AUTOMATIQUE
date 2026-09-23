@@ -25,6 +25,7 @@
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
+     <script src="assets/js/ag-grid-toolbar.js"></script>
 
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
@@ -179,6 +180,7 @@
                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="sh-prev-page" disabled>&laquo; Précédent</button>
                                    <span class="small text-muted" id="sh-page-label">—</span>
                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="sh-next-page" disabled>Suivant &raquo;</button>
+                                   <div id="sh-grid-toolbar" class="d-flex gap-2"></div>
                               </div>
                          </div>
                          <div class="card-body p-0">
@@ -337,6 +339,9 @@
                                    gridDiv.innerHTML = '';
                                    const options = buildGridOptions(withDepartment);
                                    gridApi = agGrid.createGrid(gridDiv, options);
+                                   const toolbarEl = document.getElementById('sh-grid-toolbar');
+                                   toolbarEl.innerHTML = '';
+                                   window.reassortAgGridToolbar(gridApi, toolbarEl);
                               }
 
                               createGrid(false);

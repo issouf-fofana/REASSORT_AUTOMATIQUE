@@ -26,6 +26,7 @@
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
+     <script src="assets/js/ag-grid-toolbar.js"></script>
 
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
@@ -119,6 +120,7 @@
                                                   <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
                                              </button>
                                              <button id="orders-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
+                                             <div id="orders-grid-toolbar" class="d-flex gap-2"></div>
                                         </div>
                                    </div>
                                    <div class="po-metric-row" id="orders-metric-row" style="display:none;">
@@ -310,6 +312,7 @@
                                                             showOrderDetail(e.data.id, e.data.reference, e.data.status_display);
                                                        },
                                                   });
+                                                  window.reassortAgGridToolbar(gridApi, document.getElementById('orders-grid-toolbar'));
                                                   return gridApi;
                                              }
 

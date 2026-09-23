@@ -18,6 +18,7 @@
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
+     <script src="assets/js/ag-grid-toolbar.js"></script>
 
      <script src="assets/js/config.js"></script>
      <script src="assets/js/backend-config.js"></script>
@@ -242,6 +243,7 @@
                                    <button type="button" id="el-export-csv" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
                                         <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
                                    </button>
+                                   <div id="err-grid-toolbar" class="d-flex gap-2"></div>
                               </div>
                          </div>
                          <div class="card-body">
@@ -350,6 +352,7 @@
                                    <div class="col-auto">
                                         <button type="button" id="adl-filter" class="btn btn-primary btn-sm">Filtrer</button>
                                         <button type="button" id="adl-export-csv" class="btn btn-outline-secondary btn-sm">Export CSV</button>
+                                        <div id="adl-grid-toolbar" class="d-inline-flex gap-2"></div>
                                    </div>
                               </div>
                               <div id="adl-summary" class="small text-muted mb-2"></div>
@@ -430,6 +433,7 @@
                          paginationPageSizeSelector: [25, 50, 100, 200],
                          animateRows: false,
                     });
+                    window.reassortAgGridToolbar(gridApi, document.getElementById('err-grid-toolbar'));
                     return gridApi;
                }
 
