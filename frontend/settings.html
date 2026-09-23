@@ -359,29 +359,65 @@
                                                   </div>
                                              </div>
 
-                                             <div class="mb-4">
-                                                  <label class="form-label fw-semibold">Mode Auto (commande automatique sans validation humaine)</label>
-                                                  <select id="config-auto-order-enabled" class="form-select" style="max-width: 300px;">
-                                                       <option value="false">Désactivé (par défaut)</option>
-                                                       <option value="true">Activé</option>
-                                                  </select>
-                                                  <select id="config-auto-order-validate-after-create" class="form-select mt-2" style="max-width: 300px;">
-                                                       <option value="false">Crée la commande sans la valider sur RPOS</option>
-                                                       <option value="true">Crée et valide la commande sur RPOS</option>
-                                                  </select>
-                                                  <div class="alert alert-warning mt-2 mb-0 small">
-                                                       <strong>Attention :</strong> si activé, la proposition générée chaque nuit pour ce magasin est
-                                                       automatiquement transformée en commande, SANS validation humaine — la quantité proposée par
-                                                       l'IA est acceptée telle quelle sur tous les articles.<br>
-                                                       <strong>"Sans la valider" :</strong> la commande est créée sur RPOS mais reste "en préparation",
-                                                       pas encore prise en compte par l'entrepôt — recommandé pour tester avant de faire confiance
-                                                       totalement à l'automatisation.<br>
-                                                       <strong>"Crée et valide" :</strong> la commande part réellement à l'entrepôt sans aucune
-                                                       relecture humaine.<br>
-                                                       En cas d'échec (total ou partiel), une alerte apparaît dans la cloche de notification et sur
-                                                       la page Qualité &amp; IA.
+                                             <div class="mode-auto-panel mb-4" id="mode-auto-panel">
+                                                  <div class="d-flex justify-content-between align-items-start mb-3">
+                                                       <div>
+                                                            <div class="d-flex align-items-center gap-2 mb-1">
+                                                                 <iconify-icon icon="solar:bolt-bold-duotone" class="fs-18" style="color:#1F2937;"></iconify-icon>
+                                                                 <span class="fw-semibold">Mode Auto</span>
+                                                                 <span class="badge" id="mode-auto-status-badge">Désactivé</span>
+                                                            </div>
+                                                            <div class="small text-muted">Commande automatique, sans validation humaine.</div>
+                                                       </div>
+                                                  </div>
+                                                  <div class="row g-2">
+                                                       <div class="col-md-6">
+                                                            <label class="form-label small mb-1">Activation</label>
+                                                            <select id="config-auto-order-enabled" class="form-select form-select-sm">
+                                                                 <option value="false">Désactivé (par défaut)</option>
+                                                                 <option value="true">Activé</option>
+                                                            </select>
+                                                       </div>
+                                                       <div class="col-md-6">
+                                                            <label class="form-label small mb-1">Envoi à l'entrepôt</label>
+                                                            <select id="config-auto-order-validate-after-create" class="form-select form-select-sm">
+                                                                 <option value="false">Crée sans valider sur RPOS</option>
+                                                                 <option value="true">Crée et valide sur RPOS</option>
+                                                            </select>
+                                                       </div>
+                                                  </div>
+                                                  <div class="small text-muted mt-3 mb-0">
+                                                       Chaque nuit, la proposition générée pour ce magasin est transformée en commande en acceptant
+                                                       la quantité proposée par l'IA telle quelle sur tous les articles — <strong>sans la valider</strong>
+                                                       laisse la commande "en préparation" sur RPOS (recommandé pour tester) ; <strong>crée et valide</strong>
+                                                       l'envoie réellement à l'entrepôt sans relecture humaine. Un échec (total ou partiel) déclenche
+                                                       une alerte dans la cloche de notification et sur la page Qualité &amp; IA.
                                                   </div>
                                              </div>
+
+                                             <style>
+                                                  .mode-auto-panel {
+                                                       border: 1px solid #e5e5e5;
+                                                       background-color: #fafafa;
+                                                       padding: 1.1rem 1.25rem;
+                                                  }
+                                                  .mode-auto-panel.is-active {
+                                                       border-color: #F5C2C2;
+                                                       background-color: #FEF2F2;
+                                                  }
+                                                  #mode-auto-status-badge {
+                                                       background-color: #e5e5e5;
+                                                       color: #4b5563;
+                                                       font-weight: 600;
+                                                       font-size: .7rem;
+                                                       letter-spacing: .02em;
+                                                       text-transform: uppercase;
+                                                  }
+                                                  .mode-auto-panel.is-active #mode-auto-status-badge {
+                                                       background-color: #B91C1C;
+                                                       color: #ffffff;
+                                                  }
+                                             </style>
 
                                              <div class="mb-4">
                                                   <label class="form-label fw-semibold">Précision des prévisions — fenêtre de mesure</label>
@@ -1654,6 +1690,17 @@
                                    customWrapper.style.display = periodModeSelect.value === 'CUSTOM' ? '' : 'none';
                               });
 
+                              // Panneau Mode Auto : bascule visuellement en rouge pâle + badge "ACTIF" dès que
+                              // l'activation est mise sur "Activé", pour que l'état le plus engageant (commande
+                              // automatique sans validation humaine) soit immédiatement visible sans avoir à lire
+                              // la valeur du menu déroulant.
+                              function updateModeAutoPanel() {
+                                   const enabled = document.getElementById('config-auto-order-enabled').value === 'true';
+                                   document.getElementById('mode-auto-panel').classList.toggle('is-active', enabled);
+                                   document.getElementById('mode-auto-status-badge').textContent = enabled ? 'Actif' : 'Désactivé';
+                              }
+                              document.getElementById('config-auto-order-enabled').addEventListener('change', updateModeAutoPanel);
+
                               async function loadReassortConfig() {
                                    const shopIds = selectedShopIds();
                                    // En mode multi-sélection, on n'affiche pas de valeurs existantes (elles peuvent
@@ -1681,6 +1728,7 @@
                                         document.getElementById('config-split-by-department').value = c.splitOrdersByDepartment === false ? 'false' : 'true';
                                         document.getElementById('config-auto-order-enabled').value = c.autoOrderEnabled ? 'true' : 'false';
                                         document.getElementById('config-auto-order-validate-after-create').value = c.autoOrderValidateAfterCreate ? 'true' : 'false';
+                                        updateModeAutoPanel();
                                         document.getElementById('config-forecast-window').value = c.forecastAccuracyWindowDays ?? 7;
                                         document.getElementById('config-forecast-threshold').value = c.forecastAccuracyThresholdPct ?? 20;
                                         document.getElementById('config-seasonality-enabled').value = c.seasonalityComparisonEnabled ? 'true' : 'false';

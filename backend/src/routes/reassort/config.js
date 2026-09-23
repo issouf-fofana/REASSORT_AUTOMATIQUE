@@ -112,9 +112,9 @@ router.put('/config', requireAdmin, async (req, res) => {
     if (forecastEnabled !== undefined) data.forecastEnabled = forecastEnabled;
     if (forecastAlpha !== undefined) data.forecastAlpha = forecastAlpha;
     if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
-    // Mode Auto (23/09/2026) : volontairement absent de PUT /config/bulk (jamais propagé à
-    // plusieurs magasins d'un coup) — activation magasin par magasin uniquement, demande explicite
-    // de l'utilisateur et principe de prudence pour un réglage qui engage de l'argent réel.
+    // Mode Auto (23/09/2026) : réglage disponible ici par magasin, et aussi sur PUT /config/bulk
+    // pour l'appliquer à plusieurs magasins sélectionnés en même temps (réautorisé le 23/09/2026
+    // après validation de l'approche sur le magasin pilote 050).
     if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
     if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
 
@@ -131,12 +131,16 @@ router.put('/config', requireAdmin, async (req, res) => {
 // superadmin", y compris SUPERVISOR qui pouvait auparavant configurer les magasins de son
 // périmètre). requireAdmin remplace l'ancien contrôle manuel par rôle, désormais inutile ici.
 // body: { shopIds: [uuid, ...], paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-//         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice }
+//         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, autoOrderEnabled, autoOrderValidateAfterCreate }
+// Mode Auto RÉAUTORISÉ en masse depuis le 23/09/2026 (demande explicite de l'utilisateur, après
+// validation de l'approche sur le magasin pilote 050) — reste néanmoins un réglage à part entière,
+// jamais activé silencieusement par un autre champ de ce endpoint.
 router.put('/config/bulk', requireAdmin, async (req, res) => {
   try {
     const {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
+      autoOrderEnabled, autoOrderValidateAfterCreate,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
       return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
@@ -164,6 +168,8 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     if (forecastEnabled !== undefined) data.forecastEnabled = forecastEnabled;
     if (forecastAlpha !== undefined) data.forecastAlpha = forecastAlpha;
     if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
+    if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
+    if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
 
     const results = [];
     for (const shopId of shopIds) {
