@@ -37,6 +37,15 @@ RUN npm ci
 COPY react-app-ai-predictions/ .
 RUN npm run build
 
+# Stage de build de la page Assistant IA migrée vers React (cinquième page migrée, projet Vite
+# séparé même raison que ci-dessus).
+FROM node:20-alpine AS ai-assistant-builder
+WORKDIR /app
+COPY react-app-ai-assistant/package*.json ./
+RUN npm ci
+COPY react-app-ai-assistant/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -64,6 +73,10 @@ COPY --from=sales-history-builder /app/dist /usr/share/nginx/html/sales-history-
 # Résultat du build React (IA & Prédictions), servi sous /ai-predictions-app/ par une règle nginx
 # dédiée (voir nginx.conf).
 COPY --from=ai-predictions-builder /app/dist /usr/share/nginx/html/ai-predictions-app
+
+# Résultat du build React (Assistant IA), servi sous /ai-assistant-app/ par une règle nginx dédiée
+# (voir nginx.conf).
+COPY --from=ai-assistant-builder /app/dist /usr/share/nginx/html/ai-assistant-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
