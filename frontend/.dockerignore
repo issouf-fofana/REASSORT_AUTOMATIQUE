@@ -37,3 +37,7 @@ react-app-ai-quality/node_modules
 # Même raisonnement pour Utilisateurs (react-app-users/).
 react-app-users/dist
 react-app-users/node_modules
+
+# Même raisonnement pour Guide du projet (react-app-project-guide/).
+react-app-project-guide/dist
+react-app-project-guide/node_modules

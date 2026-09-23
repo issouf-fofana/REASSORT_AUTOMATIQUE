@@ -73,6 +73,15 @@ RUN npm ci
 COPY react-app-users/ .
 RUN npm run build
 
+# Stage de build de la page Guide du projet migrée vers React (neuvième page migrée, projet Vite
+# séparé même raison que ci-dessus).
+FROM node:20-alpine AS project-guide-builder
+WORKDIR /app
+COPY react-app-project-guide/package*.json ./
+RUN npm ci
+COPY react-app-project-guide/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -116,6 +125,10 @@ COPY --from=ai-quality-builder /app/dist /usr/share/nginx/html/ai-quality-app
 # Résultat du build React (Utilisateurs), servi sous /users-app/ par une règle nginx dédiée
 # (voir nginx.conf).
 COPY --from=users-builder /app/dist /usr/share/nginx/html/users-app
+
+# Résultat du build React (Guide du projet), servi sous /project-guide-app/ par une règle nginx
+# dédiée (voir nginx.conf).
+COPY --from=project-guide-builder /app/dist /usr/share/nginx/html/project-guide-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
