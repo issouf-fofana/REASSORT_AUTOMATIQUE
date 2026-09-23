@@ -41,3 +41,7 @@ react-app-users/node_modules
 # Même raisonnement pour Guide du projet (react-app-project-guide/).
 react-app-project-guide/dist
 react-app-project-guide/node_modules
+
+# Même raisonnement pour Historique des commandes (react-app-purchase-list/).
+react-app-purchase-list/dist
+react-app-purchase-list/node_modules

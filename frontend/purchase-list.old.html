@@ -19,6 +19,15 @@
           via vendor.js, absent du build Volt. Chargée séparément pour ne pas réécrire ~30 icônes. -->
      <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
+     <!-- AG Grid Community (migration du tableau de cette page, même pattern que purchase-order-v2.html
+          validé le 21/09/2026) : tri/filtre par colonne + export CSV, en JS vanilla. L'export .xlsx
+          stylé fait partie d'AG Grid Enterprise (licence payante, pas configurée ici) — le CSV,
+          gratuit avec la version Community, s'ouvre directement dans Excel avec les mêmes données. -->
+     <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
+     <script src="assets/js/ag-grid-setup.js"></script>
+     <script src="assets/js/ag-grid-locale-fr.js"></script>
+     <script src="assets/js/ag-grid-toolbar.js"></script>
+
      <!-- Theme Config js (Require in all Page) -->
      <script src="assets/js/config.js"></script>
     <script src="assets/js/backend-config.js"></script>
@@ -37,6 +46,46 @@
             ("Proposition de commande"...) donc on autorise le retour à la ligne pour éviter
             le débordement horizontal du panneau latéral. */
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
+
+         /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun coin
+            arrondi, police Inter). Migration vers la Theming API v33 (23/09/2026) :
+            window.REASSORT_AG_GRID_THEME_SOFT (ag-grid-setup.js) fournit les mêmes couleurs en JS. */
+         #orders-grid, #order-detail-grid {
+              width: 100%;
+         }
+
+         /* Style "impeccable" (23/09/2026, même pattern que admin-dashboard.html/purchase-order.html) :
+            rangée de métriques en filets fins au lieu du bandeau "X commande(s) au total" en petit
+            texte gris — donne un vrai relevé synthétique en un coup d'œil avant de plonger dans le
+            détail du tableau. Alerte rouge pâle réservée aux vrais seuils dépassés (taux d'annulation
+            élevé), jamais de couleur décorative gratuite. */
+         .po-metric-row {
+              display: flex;
+              flex-wrap: wrap;
+              border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .po-metric-row-item {
+              flex: 1 1 160px;
+              padding: 1rem 1.5rem 1rem 1.5rem;
+              border-right: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .po-metric-row-item:last-child { border-right: none; }
+         .po-metric-label {
+              font-size: .8125rem;
+              color: var(--bs-secondary-color, #6c757d);
+              margin: 0 0 .35rem;
+         }
+         .po-metric-value {
+              font-size: 1.5rem;
+              font-weight: 600;
+              line-height: 1.15;
+              font-variant-numeric: tabular-nums;
+              margin: 0;
+         }
+         .po-metric-value.is-alert { color: #B91C1C; }
+         @media (max-width: 767px) {
+              .po-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
+         }
     </style>
 </head>
 
@@ -67,31 +116,33 @@
                                         <div class="d-flex gap-2 align-items-center">
                                              <select id="orders-shop-select" class="form-select form-select-sm" style="display:none; width: auto;"></select>
                                              <span id="orders-status" class="text-muted small"></span>
+                                             <button id="orders-export-csv" class="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel">
+                                                  <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
+                                             </button>
                                              <button id="orders-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
+                                             <div id="orders-grid-toolbar" class="d-flex gap-2"></div>
+                                        </div>
+                                   </div>
+                                   <div class="po-metric-row" id="orders-metric-row" style="display:none;">
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Commandes affichées</p>
+                                             <p class="po-metric-value" id="orders-metric-total">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Complètes</p>
+                                             <p class="po-metric-value" id="orders-metric-complete">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">En attente de livraison</p>
+                                             <p class="po-metric-value" id="orders-metric-pending">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Annulées</p>
+                                             <p class="po-metric-value" id="orders-metric-cancelled">—</p>
                                         </div>
                                    </div>
                                    <div class="card-body p-0">
-                                        <div class="table-responsive">
-                                             <table class="table align-middle mb-0 table-hover table-centered">
-                                                  <thead class="bg-light-subtle">
-                                                       <tr>
-                                                            <th>Référence</th>
-                                                            <th>Libellé</th>
-                                                            <th>Fournisseur</th>
-                                                            <th>Date commande</th>
-                                                            <th>Date livraison</th>
-                                                            <th>Statut</th>
-                                                            <th>Créée par</th>
-                                                       </tr>
-                                                  </thead>
-                                                  <tbody id="orders-tbody">
-                                                       <tr>
-                                                            <td colspan="7" class="text-center text-muted py-4">Chargement...</td>
-                                                       </tr>
-                                                  </tbody>
-                                             </table>
-                                        </div>
-                                        <!-- end table-responsive -->
+                                        <div id="orders-grid" class="m-3"></div>
                                    </div>
 
                                    <div class="modal fade" id="order-detail-modal" tabindex="-1" aria-hidden="true">
@@ -115,7 +166,6 @@
                                    <script>
                                         (function () {
                                              const currentUser = window.reassortGetUser();
-                                             const tbody = document.getElementById('orders-tbody');
                                              const status = document.getElementById('orders-status');
                                              const refreshBtn = document.getElementById('orders-refresh');
                                              const shopSelect = document.getElementById('orders-shop-select');
@@ -197,56 +247,114 @@
                                                   return idx === -1 ? externalReference : externalReference.slice(idx + marker.length);
                                              }
 
-                                             function renderOrderRow(o) {
-                                                  const badgeClass = STATUS_BADGE[o.status_display] || 'bg-secondary-subtle text-secondary';
-                                                  return '<tr class="cursor-pointer order-row" data-order-id="' + o.id + '" data-order-reference="' + o.reference + '" data-order-status="' + o.status_display + '" style="cursor:pointer;">' +
-                                                       '<td><strong>' + o.reference + '</strong></td>' +
-                                                       '<td>' + (o.external_reference || '—') + '</td>' +
-                                                       '<td>' + (o.supplier ? o.supplier.code + ' / ' + o.supplier.name : '—') + '</td>' +
-                                                       '<td>' + formatDate(o.date) + '</td>' +
-                                                       '<td>' + formatDate(o.delivery_date) + '</td>' +
-                                                       '<td><span class="badge ' + badgeClass + ' py-1 px-2">' + o.status_display + '</span></td>' +
-                                                       '<td>' + (o.created_by || '—') + '</td>' +
-                                                       '</tr>';
+                                             // --- Grille AG Grid (remplace le tableau HTML + l'accordéon manuel par rayon, même pattern
+                                             // que purchase-order-v2.html). Le "rayon" est regroupé nativement via rowGroup sur la
+                                             // colonne dérivée _department (groupDefaultExpanded: 0 = replié par défaut, comme
+                                             // l'ancien accordéon qui démarrait replié). ---
+                                             function statusCellRenderer(params) {
+                                                  const badgeClass = STATUS_BADGE[params.value] || 'bg-secondary-subtle text-secondary';
+                                                  const span = document.createElement('span');
+                                                  span.className = 'badge ' + badgeClass + ' py-1 px-2';
+                                                  span.textContent = params.value;
+                                                  return span;
                                              }
 
-                                             // Rayons dépliés (accordéon) : mémorisé par nom de rayon plutôt que par index, pour survivre
-                                             // à un rechargement de la liste (Actualiser) tant que le même rayon existe toujours.
-                                             const expandedDepartments = new Set();
+                                             function referenceCellRenderer(params) {
+                                                  const btn = document.createElement('button');
+                                                  btn.type = 'button';
+                                                  btn.className = 'btn btn-sm btn-link p-0 fw-semibold order-open-btn';
+                                                  btn.textContent = params.value;
+                                                  btn.addEventListener('click', function () {
+                                                       showOrderDetail(params.data.id, params.data.reference, params.data.status_display);
+                                                  });
+                                                  return btn;
+                                             }
+
+                                             const gridColumnDefs = [
+                                                  { headerName: 'Rayon', field: '_department', rowGroup: true, hide: true, filter: 'agTextColumnFilter' },
+                                                  { headerName: 'Référence', field: 'reference', filter: 'agTextColumnFilter', width: 150, cellRenderer: referenceCellRenderer },
+                                                  { headerName: 'Libellé', field: 'external_reference', flex: 1.5, minWidth: 220, filter: 'agTextColumnFilter',
+                                                       valueFormatter: function (p) { return p.value || '—'; } },
+                                                  { headerName: 'Fournisseur', field: '_supplierLabel', flex: 1, minWidth: 180, filter: 'agTextColumnFilter' },
+                                                  { headerName: 'Date commande', field: 'date', filter: 'agDateColumnFilter', width: 160,
+                                                       valueFormatter: function (p) { return formatDate(p.value); } },
+                                                  { headerName: 'Date livraison', field: 'delivery_date', filter: 'agDateColumnFilter', width: 160,
+                                                       valueFormatter: function (p) { return formatDate(p.value); } },
+                                                  { headerName: 'Statut', field: 'status_display', filter: 'agTextColumnFilter', width: 170, cellRenderer: statusCellRenderer },
+                                                  { headerName: 'Créée par', field: 'created_by', filter: 'agTextColumnFilter', width: 150,
+                                                       valueFormatter: function (p) { return p.value || '—'; } },
+                                             ];
+
+                                             let gridApi = null;
                                              let lastLoadedOrders = [];
 
-                                             function renderRows(orders) {
-                                                  if (!orders.length) {
-                                                       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucune commande trouvée.</td></tr>';
-                                                       return;
-                                                  }
-
-                                                  const byDepartment = new Map();
-                                                  orders.forEach(function (o) {
-                                                       const dept = extractDepartment(o.external_reference);
-                                                       if (!byDepartment.has(dept)) byDepartment.set(dept, []);
-                                                       byDepartment.get(dept).push(o);
+                                             function ensureGrid() {
+                                                  if (gridApi) return gridApi;
+                                                  gridApi = agGrid.createGrid(document.getElementById('orders-grid'), {
+                                                       theme: window.REASSORT_AG_GRID_THEME_SOFT,
+                                                       columnDefs: gridColumnDefs,
+                                                       rowData: [],
+                                                       localeText: window.AG_GRID_LOCALE_FR,
+                                                       domLayout: 'autoHeight',
+                                                       animateRows: false,
+                                                       suppressCellFocus: true,
+                                                       groupDisplayType: 'groupRows',
+                                                       groupDefaultExpanded: 0,
+                                                       groupRowRendererParams: {
+                                                            innerRenderer: function (params) {
+                                                                 const count = params.node.allChildrenCount;
+                                                                 return '<strong>' + params.value + '</strong> <span class="text-muted small">(' + count + ' commande(s))</span>';
+                                                            },
+                                                       },
+                                                       getRowId: function (params) { return params.data.id; },
+                                                       onRowDoubleClicked: function (e) {
+                                                            if (!e.data) return;
+                                                            showOrderDetail(e.data.id, e.data.reference, e.data.status_display);
+                                                       },
                                                   });
-                                                  const departments = Array.from(byDepartment.keys()).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
-
-                                                  tbody.innerHTML = departments.map(function (dept) {
-                                                       const rows = byDepartment.get(dept);
-                                                       const isExpanded = expandedDepartments.has(dept);
-                                                       const header = '<tr class="table-secondary department-row" style="cursor:pointer;" data-department="' + dept.replace(/"/g, '&quot;') + '">' +
-                                                            '<td colspan="7">' +
-                                                            '<iconify-icon icon="' + (isExpanded ? 'solar:alt-arrow-down-bold' : 'solar:alt-arrow-right-bold') + '" class="me-1"></iconify-icon>' +
-                                                            '<strong>' + dept + '</strong> <span class="text-muted small">(' + rows.length + ' commande(s))</span></td></tr>';
-                                                       return header + (isExpanded ? rows.map(renderOrderRow).join('') : '');
-                                                  }).join('');
+                                                  window.reassortAgGridToolbar(gridApi, document.getElementById('orders-grid-toolbar'));
+                                                  return gridApi;
                                              }
 
-                                             tbody.addEventListener('click', function (e) {
-                                                  const deptRow = e.target.closest('.department-row');
-                                                  if (!deptRow) return;
-                                                  const dept = deptRow.dataset.department;
-                                                  if (expandedDepartments.has(dept)) expandedDepartments.delete(dept);
-                                                  else expandedDepartments.add(dept);
-                                                  renderRows(lastLoadedOrders);
+                                             function renderRows(orders) {
+                                                  ensureGrid();
+                                                  const rows = orders.map(function (o) {
+                                                       return Object.assign({}, o, {
+                                                            _department: extractDepartment(o.external_reference),
+                                                            _supplierLabel: o.supplier ? o.supplier.code + ' / ' + o.supplier.name : '—',
+                                                       });
+                                                  });
+                                                  gridApi.setGridOption('rowData', rows);
+                                             }
+
+                                             // Relevé synthèse au-dessus du tableau (style "impeccable", 23/09/2026) : calculé côté client
+                                             // à partir des commandes déjà chargées, sans appel réseau supplémentaire. status_display vient
+                                             // directement de RPOS (mêmes clés que STATUS_BADGE ci-dessus) ; "complète" regroupe ici
+                                             // 'complète' et 'finalisée et partielle' (statuts jugés équivalents pour ce relevé synthétique).
+                                             function renderMetricRow(orders) {
+                                                  const row = document.getElementById('orders-metric-row');
+                                                  if (!orders.length) { row.style.display = 'none'; return; }
+                                                  row.style.display = '';
+                                                  const total = orders.length;
+                                                  const complete = orders.filter(function (o) { return o.status_display === 'complète' || o.status_display === 'finalisée et partielle'; }).length;
+                                                  const pending = orders.filter(function (o) { return o.status_display === 'en attente de livraison' || o.status_display === 'livrée partiellement'; }).length;
+                                                  const cancelled = orders.filter(function (o) { return o.status_display === 'annulée'; }).length;
+                                                  document.getElementById('orders-metric-total').textContent = total;
+                                                  document.getElementById('orders-metric-complete').textContent = complete;
+                                                  document.getElementById('orders-metric-pending').textContent = pending;
+                                                  const cancelledEl = document.getElementById('orders-metric-cancelled');
+                                                  cancelledEl.textContent = cancelled;
+                                                  // Alerte visuelle uniquement si l'annulation dépasse 15% des commandes affichées (jugé, comme
+                                                  // le seuil de surstock 10% sur Vue Globale) — jamais de rouge pour un simple "annulée" isolée.
+                                                  cancelledEl.classList.toggle('is-alert', total > 0 && cancelled / total > 0.15);
+                                             }
+
+                                             document.getElementById('orders-export-csv').addEventListener('click', function () {
+                                                  if (!gridApi) return;
+                                                  const shopRef = (currentUser && currentUser.rposShopReference) || 'magasin';
+                                                  gridApi.exportDataAsCsv({
+                                                       fileName: 'commandes-fournisseur-' + shopRef + '-' + new Date().toISOString().slice(0, 10) + '.csv',
+                                                  });
                                              });
 
                                              const orderDetailModalEl = document.getElementById('order-detail-modal');
@@ -306,32 +414,44 @@
                                                        const total = lines.reduce(function (sum, l) {
                                                             return sum + (l.sellingPrice || 0) * (l.quantityValidated !== null && l.quantityValidated !== undefined ? l.quantityValidated : l.quantitySuggested);
                                                        }, 0);
-                                                       body.innerHTML = '<div class="table-responsive"><table class="table table-sm table-centered mb-2">' +
-                                                            '<thead><tr><th>EAN</th><th>Article</th><th class="text-end">Qté proposée</th><th class="text-end">Qté envoyée</th><th class="text-end">Prix vente</th><th class="text-end">Valeur</th></tr></thead><tbody>' +
-                                                            lines.map(function (l) {
-                                                                 const qtySent = l.quantityValidated !== null && l.quantityValidated !== undefined ? l.quantityValidated : l.quantitySuggested;
-                                                                 const value = (l.sellingPrice || 0) * qtySent;
-                                                                 return '<tr>' +
-                                                                      '<td>' + l.ean + '</td>' +
-                                                                      '<td>' + l.label + '</td>' +
-                                                                      '<td class="text-end">' + l.quantitySuggested + '</td>' +
-                                                                      '<td class="text-end fw-semibold">' + qtySent + '</td>' +
-                                                                      '<td class="text-end">' + (l.sellingPrice ? l.sellingPrice.toLocaleString('fr-FR') + ' CFA' : '—') + '</td>' +
-                                                                      '<td class="text-end">' + value.toLocaleString('fr-FR') + ' CFA' + '</td>' +
-                                                                      '</tr>';
-                                                            }).join('') +
-                                                            '</tbody></table></div>' +
-                                                            '<p class="text-end fw-semibold mb-0">Total envoyé : ' + total.toLocaleString('fr-FR') + ' CFA</p>';
+                                                       body.innerHTML = '<div id="order-detail-grid" class="mb-2"></div>' +
+                                                            '<p class="text-end fw-semibold mb-0 mt-2">Total envoyé : ' + total.toLocaleString('fr-FR') + ' CFA</p>';
+                                                       const detailRows = lines.map(function (l) {
+                                                            const qtySent = l.quantityValidated !== null && l.quantityValidated !== undefined ? l.quantityValidated : l.quantitySuggested;
+                                                            return {
+                                                                 ean: l.ean,
+                                                                 label: l.label,
+                                                                 quantitySuggested: l.quantitySuggested,
+                                                                 qtySent: qtySent,
+                                                                 sellingPrice: l.sellingPrice || 0,
+                                                                 value: (l.sellingPrice || 0) * qtySent,
+                                                            };
+                                                       });
+                                                       // Grille du détail recréée à chaque ouverture (le conteneur est réinjecté via
+                                                       // body.innerHTML ci-dessus) plutôt que réutilisée comme la grille principale.
+                                                       agGrid.createGrid(document.getElementById('order-detail-grid'), {
+                                                            theme: window.REASSORT_AG_GRID_THEME_SOFT,
+                                                            columnDefs: [
+                                                                 { headerName: 'EAN', field: 'ean', filter: 'agTextColumnFilter', width: 130 },
+                                                                 { headerName: 'Article', field: 'label', flex: 1, minWidth: 200, filter: 'agTextColumnFilter' },
+                                                                 { headerName: 'Qté proposée', field: 'quantitySuggested', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130 },
+                                                                 { headerName: 'Qté envoyée', field: 'qtySent', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130,
+                                                                      cellClass: 'fw-semibold' },
+                                                                 { headerName: 'Prix vente', field: 'sellingPrice', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130,
+                                                                      valueFormatter: function (p) { return p.value ? p.value.toLocaleString('fr-FR') + ' CFA' : '—'; } },
+                                                                 { headerName: 'Valeur', field: 'value', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130,
+                                                                      valueFormatter: function (p) { return p.value.toLocaleString('fr-FR') + ' CFA'; } },
+                                                            ],
+                                                            rowData: detailRows,
+                                                            localeText: window.AG_GRID_LOCALE_FR,
+                                                            domLayout: 'autoHeight',
+                                                            animateRows: false,
+                                                            suppressCellFocus: true,
+                                                       });
                                                   } catch (err) {
                                                        body.innerHTML = '<div class="alert alert-warning mb-0">' + err.message + '</div>';
                                                   }
                                              }
-
-                                             tbody.addEventListener('click', function (e) {
-                                                  const row = e.target.closest('.order-row');
-                                                  if (!row) return;
-                                                  showOrderDetail(row.dataset.orderId, row.dataset.orderReference, row.dataset.orderStatus);
-                                             });
 
                                              // Jeton de requête : un changement rapide de magasin peut faire revenir les réponses dans
                                              // le désordre — sans ce garde-fou, la réponse d'un magasin déjà quitté pouvait écraser
@@ -341,7 +461,10 @@
                                                   updateTitle();
                                                   const shopId = selectedShopId();
                                                   if (!shopId) {
-                                                       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sélectionnez un magasin.</td></tr>';
+                                                       ensureGrid();
+                                                       gridApi.setGridOption('rowData', []);
+                                                       document.getElementById('orders-metric-row').style.display = 'none';
+                                                       status.textContent = 'Sélectionnez un magasin.';
                                                        return;
                                                   }
                                                   const token = ++ordersLoadToken;
@@ -355,11 +478,14 @@
                                                        if (!json.success) throw new Error(json.message);
                                                        lastLoadedOrders = json.data.orders;
                                                        renderRows(lastLoadedOrders);
+                                                       renderMetricRow(lastLoadedOrders);
                                                        status.textContent = json.data.count + ' commande(s) au total';
                                                   } catch (err) {
                                                        if (token !== ordersLoadToken) return;
-                                                       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erreur: ' + err.message + '</td></tr>';
-                                                       status.textContent = '';
+                                                       ensureGrid();
+                                                       gridApi.setGridOption('rowData', []);
+                                                       document.getElementById('orders-metric-row').style.display = 'none';
+                                                       status.textContent = 'Erreur: ' + err.message;
                                                   } finally {
                                                        if (token === ordersLoadToken) refreshBtn.disabled = false;
                                                   }
@@ -399,6 +525,7 @@
      <script src="assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
      <script src="assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
      <script src="assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+     <script src="assets/js/notifications-bell.js"></script>
      <script src="assets/js/ai-assistant-widget.js"></script>
 
 </body>
