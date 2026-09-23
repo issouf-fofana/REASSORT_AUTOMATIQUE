@@ -55,11 +55,46 @@
           /* Barre compacte : UNE seule ligne scrollable horizontalement (pas un pavé de boutons
              empilés), pastilles resserrées. min-width:0 + shrink:0 : la barre défile en interne
              au lieu de déborder la page (responsive, y compris mobile). */
-          .sec-chips .card-body { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; min-width: 0; -webkit-overflow-scrolling: touch; }
+          .sec-chips .card-body {
+               flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; min-width: 0;
+               -webkit-overflow-scrolling: touch;
+               /* Piste relative pour positionner la pilule glissante en absolu par-dessus les liens. */
+               position: relative;
+          }
           .sec-chips .card-body::-webkit-scrollbar { display: none; }
-          .sec-chips .btn { white-space: nowrap; padding: 0.15rem 0.5rem; font-size: 0.78rem; flex-shrink: 0; }
           .sec-chips .fw-bold { white-space: nowrap; font-size: 0.85rem; flex-shrink: 0; }
           [id^="sec-"] { scroll-margin-top: 76px; }
+
+          /* Style "pro" façon barre de navigation flottante (23/09/2026, demande explicite avec
+             référence visuelle) : une pilule sombre glisse en fondu derrière le lien actif au lieu
+             d'un simple changement de couleur statique. Reproduit l'esprit du composant de référence
+             (React/Tailwind, incompatible avec ce site en HTML classique — cf. échange) en JS/CSS
+             vanilla : adapté à la palette noir/blanc stricte du site et SANS coin arrondi (contrainte
+             déjà imposée partout ailleurs, theme-override.css). */
+          .sec-chips-track { position: relative; display: flex; align-items: center; gap: .35rem; }
+          .sec-chip-pill {
+               position: absolute;
+               top: 0; left: 0; height: 100%;
+               background-color: #111111;
+               transition: transform .28s cubic-bezier(.4,0,.2,1), width .28s cubic-bezier(.4,0,.2,1);
+               z-index: 0;
+               opacity: 0;
+          }
+          .sec-chip-pill.is-ready { opacity: 1; }
+          .sec-chips .btn.sec-chip-link {
+               position: relative;
+               z-index: 1;
+               white-space: nowrap;
+               padding: 0.3rem 0.7rem;
+               font-size: 0.78rem;
+               flex-shrink: 0;
+               border: 1px solid #d1d5db;
+               background-color: transparent;
+               color: #374151;
+               transition: color .2s ease, border-color .2s ease;
+          }
+          .sec-chips .btn.sec-chip-link:hover { color: #111111; border-color: #9ca3af; }
+          .sec-chips .btn.sec-chip-link.active { color: #ffffff; border-color: transparent; }
     </style>
 </head>
 
@@ -3909,6 +3944,25 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                    if (SHORT_LABELS[nf]) return SHORT_LABELS[nf];
                                    return nf.length > 26 ? nf.slice(0, 25) + '…' : nf;
                               }
+                              // Fait glisser la pilule sombre derrière le lien ciblé (position + largeur recalculées
+                              // à chaque appel, jamais mémorisées : la largeur des libellés peut changer d'un onglet
+                              // à l'autre). `is-ready` n'est ajouté qu'après le premier positionnement pour ne jamais
+                              // voir la pilule "voler" depuis (0,0) au tout premier rendu de la barre.
+                              function movePill(track, link) {
+                                   const pill = track.querySelector('.sec-chip-pill');
+                                   if (!pill || !link) return;
+                                   pill.style.transform = 'translateX(' + link.offsetLeft + 'px)';
+                                   pill.style.width = link.offsetWidth + 'px';
+                                   requestAnimationFrame(function () { pill.classList.add('is-ready'); });
+                              }
+
+                              function setActiveChip(track, activeLink) {
+                                   track.querySelectorAll('.sec-chip-link').forEach(function (l) {
+                                        l.classList.toggle('active', l === activeLink);
+                                   });
+                                   if (activeLink) movePill(track, activeLink);
+                              }
+
                               function buildSectionChips() {
                                    Object.keys(PANE_MODE).forEach(function (paneId) {
                                         const pane = document.getElementById(paneId);
@@ -3931,6 +3985,14 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                         title.className = 'fw-bold me-1';
                                         title.textContent = (TAB_TITLES[paneId] || '') + ' :';
                                         body.appendChild(title);
+
+                                        const track = document.createElement('div');
+                                        track.className = 'sec-chips-track';
+                                        const pill = document.createElement('div');
+                                        pill.className = 'sec-chip-pill';
+                                        track.appendChild(pill);
+
+                                        const anchorEls = [];
                                         targets.forEach(function (t, i) {
                                              const anchor = t.closest('.mb-3') || t;
                                              if (!anchor.id) anchor.id = 'sec-' + paneId + '-' + i;
@@ -3938,13 +4000,43 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
                                                   ? ((t.querySelector('.card-title') || {}).textContent || t.textContent)
                                                   : t.textContent;
                                              const a = document.createElement('a');
-                                             a.className = 'btn btn-sm btn-outline-primary';
+                                             a.className = 'btn btn-sm sec-chip-link';
                                              a.href = '#' + anchor.id;
                                              a.textContent = shortLabel(full);
-                                             body.appendChild(a);
+                                             a.addEventListener('click', function () {
+                                                  // Réponse immédiate au clic (la pilule glisse tout de suite) plutôt que
+                                                  // d'attendre que l'IntersectionObserver détecte la section après le saut
+                                                  // d'ancre, qui peut prendre un instant sur un scroll long.
+                                                  setActiveChip(track, a);
+                                             });
+                                             track.appendChild(a);
+                                             anchorEls.push(anchor);
                                         });
+                                        body.appendChild(track);
                                         bar.appendChild(body);
                                         pane.insertBefore(bar, pane.firstChild);
+
+                                        // Suit la section réellement visible au scroll (pas seulement au clic) : la
+                                        // pilule reste synchronisée même si l'utilisateur scrolle manuellement sans
+                                        // cliquer un chip. rootMargin resserré en haut pour matcher scroll-margin-top
+                                        // (76px, cf. règle CSS [id^="sec-"]) utilisé par le saut d'ancre lui-même.
+                                        const links = Array.from(track.querySelectorAll('.sec-chip-link'));
+                                        const observer = new IntersectionObserver(function (entries) {
+                                             entries.forEach(function (entry) {
+                                                  if (!entry.isIntersecting) return;
+                                                  const idx = anchorEls.indexOf(entry.target);
+                                                  if (idx !== -1) setActiveChip(track, links[idx]);
+                                             });
+                                        }, { rootMargin: '-84px 0px -70% 0px', threshold: 0 });
+                                        anchorEls.forEach(function (el) { observer.observe(el); });
+
+                                        // Positionnement initial sur le premier chip, et à nouveau au redimensionnement
+                                        // (la largeur des libellés peut changer de ligne sur mobile).
+                                        setActiveChip(track, links[0]);
+                                        window.addEventListener('resize', function () {
+                                             const current = track.querySelector('.sec-chip-link.active') || links[0];
+                                             movePill(track, current);
+                                        });
                                    });
                               }
                               buildSectionChips();
