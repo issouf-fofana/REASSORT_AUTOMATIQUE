@@ -11,6 +11,7 @@ declare global {
     reassortGetToken: () => string | null;
     reassortGetUser: () => ReassortUser | null;
     reassortLogout: () => void;
+    reassortIsSingleShopRole: (role: string) => boolean;
   }
 }
 
