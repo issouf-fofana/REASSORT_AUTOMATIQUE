@@ -69,6 +69,7 @@
   function ensureGrid() {
     if (gridApi) return gridApi;
     gridApi = agGrid.createGrid(document.getElementById('adl-grid'), {
+      theme: window.REASSORT_AG_GRID_THEME,
       columnDefs: gridColumnDefs,
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,

@@ -16,8 +16,6 @@
      <!-- AG Grid Community (utilisé par l'onglet "Journal des erreurs", repris tel quel
           d'error-log.html) : tri/filtre par colonne + export CSV en JS vanilla. -->
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
 
@@ -45,27 +43,11 @@
           .corr-pre { white-space: pre-line; }
 
           /* --- Onglet Journal des erreurs (error-log.html) --- */
-          .ag-theme-quartz {
-               --ag-font-family: "Inter", sans-serif;
-               --ag-font-size: 14px;
-               --ag-active-color: #1F2937;
-               --ag-selected-row-background-color: rgba(17, 24, 39, 0.1);
-               --ag-row-hover-color: rgba(17, 24, 39, 0.075);
-               --ag-header-background-color: #f8f9fa;
-               --ag-header-foreground-color: #1a1a1a;
-               --ag-border-color: #E5E7EB;
-               --ag-row-border-color: #E5E7EB;
-               --ag-wrapper-border-radius: 0;
-               --ag-border-radius: 0;
-               --ag-card-radius: 0;
-               --ag-foreground-color: #374151;
-               --ag-row-height: 48px;
-               --ag-header-height: 40px;
-          }
-          .ag-theme-quartz, .ag-theme-quartz * { border-radius: 0 !important; }
-          .ag-theme-quartz .ag-header-cell-text { text-transform: uppercase; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; }
-          .ag-theme-quartz .ag-cell { font-size: 0.875rem; color: #374151; }
-          #err-grid.ag-theme-quartz { width: 100%; }
+          /* Migration vers la Theming API v33 (23/09/2026) : couleurs/bordures/hauteurs centralisées
+             dans window.REASSORT_AG_GRID_THEME (ag-grid-setup.js), fourni via theme: dans
+             createGrid(). Seul ce qui n'a pas d'équivalent Theming API reste en CSS générique. */
+          .ag-header-cell-text { text-transform: uppercase; letter-spacing: 0.02em; }
+          #err-grid { width: 100%; }
 
           /* --- Onglet Préparation à l'autonomie (ai-autonomy.html) --- */
           .autonomy-ladder { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -264,7 +246,7 @@
                          </div>
                          <div class="card-body">
                               <div class="small text-muted mb-2" id="el-summary"></div>
-                              <div id="err-grid" class="ag-theme-quartz"></div>
+                              <div id="err-grid"></div>
                          </div>
                     </div>
 
@@ -371,7 +353,7 @@
                                    </div>
                               </div>
                               <div id="adl-summary" class="small text-muted mb-2"></div>
-                              <div id="adl-grid" class="ag-theme-quartz" style="width:100%;"></div>
+                              <div id="adl-grid" style="width:100%;"></div>
                          </div>
                     </div>
 
@@ -438,6 +420,7 @@
                function ensureGrid() {
                     if (gridApi) return gridApi;
                     gridApi = agGrid.createGrid(document.getElementById('err-grid'), {
+                         theme: window.REASSORT_AG_GRID_THEME,
                          columnDefs: gridColumnDefs,
                          rowData: [],
                          localeText: window.AG_GRID_LOCALE_FR,

@@ -17,8 +17,6 @@
           purchase-order-v2.html) : CSV export gratuit avec la version Community, pas d'Excel/.xlsx
           (réservé à AG Grid Enterprise, licence payante non configurée sur ce projet). -->
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
 
@@ -33,30 +31,11 @@
          .confidence-bar-fill { height: 100%; background-color: #000000; }
 
          /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun
-            coin arrondi, police Inter) — identique à purchase-order-v2.html. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 13.5px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: #f3f4f6;
-              --ag-row-hover-color: #f8f9fa;
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #dee2e6;
-              --ag-border-color: #dee2e6;
-              --ag-row-border-color: #eef0f2;
-              --ag-cell-horizontal-border: #eef0f2;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-         }
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         #aip-grid.ag-theme-quartz {
+            coin arrondi, police Inter). Migration vers la Theming API v33 (23/09/2026) : couleurs/
+            bordures/rayon centralisés dans window.REASSORT_AG_GRID_THEME_SOFT (ag-grid-setup.js, variante
+            plus douce que REASSORT_AG_GRID_THEME pour cette page — mêmes couleurs qu'avant, juste
+            fournies en JS plutôt qu'en variables CSS). */
+         #aip-grid {
               width: 100%;
          }
     </style>
@@ -124,7 +103,7 @@
                          </div>
                          <div class="card-body p-0">
                               <div id="aip-empty" class="text-center text-muted py-4">Sélectionnez un magasin pour afficher ses prédictions.</div>
-                              <div id="aip-grid" class="ag-theme-quartz m-3" style="display:none;"></div>
+                              <div id="aip-grid" class="m-3" style="display:none;"></div>
                          </div>
                     </div>
 

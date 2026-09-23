@@ -30,9 +30,10 @@
           styles conditionnels montré dans ce lien fait partie d'AG Grid Enterprise (licence payante,
           pas configurée sur ce projet) — le CSV, gratuit avec la version Community, reste ouvrable
           directement dans Excel avec toutes les mêmes données. -->
+     <!-- Migration vers la Theming API v33 (demande du 23/09/2026) : plus de <link> ag-grid.css ni
+          ag-theme-quartz.css — le thème (couleurs, bordures, hauteurs...) est un objet JS fourni par
+          grille (window.REASSORT_AG_GRID_THEME, ag-grid-setup.js), pas du CSS chargé globalement. -->
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
 
@@ -121,75 +122,28 @@
          /* Habillage AG Grid pour se fondre dans le tableau HTML/Bootstrap d'origine du site (pas
             juste "noir/blanc/carré" comme un premier essai, jugé trop éloigné visuellement de
             l'ancien tableau — demande du 21/09/2026 : "je veux le filtre... avec l'ancien style").
-            Reproduit précisément .table thead th de volt.css (uppercase, 0.75rem, weight 600) et
-            .table td/th (0.875rem) plutôt que la taille/graisse par défaut du thème Quartz d'AG Grid,
-            pour qu'on ne remarque pas la bascule d'un tableau HTML vers AG Grid au premier coup d'œil. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 14px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: rgba(17, 24, 39, 0.1);
-              /* Couleur de survol EXACTE de .table-hover dans volt.css (--bs-table-hover-bg) —
-                 pas une approximation, pour qu'un survol de ligne AG Grid soit indiscernable de
-                 l'ancien tableau HTML. */
-              --ag-row-hover-color: rgba(17, 24, 39, 0.075);
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #E5E7EB;
-              --ag-border-color: #E5E7EB;
-              --ag-row-border-color: #E5E7EB;
-              --ag-cell-horizontal-border: transparent;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-              --ag-foreground-color: #374151;
-              --ag-data-color: #374151;
-              /* Hauteur généreuse pour laisser respirer les badges empilés (stock non fiable,
-                 commande suffisante...) sur plusieurs lignes dans une même cellule — l'ancien
-                 tableau HTML grandissait librement (hauteur automatique), AG Grid a besoin d'une
-                 valeur explicite ; posée assez haute pour ne jamais couper un badge. */
-              --ag-row-height: 68px;
-              --ag-header-height: 40px;
-         }
-         /* La variable de thème --ag-border-radius (ci-dessus) ne couvre pas tous les coins internes
-            générés par AG Grid (menus de filtre, popups) : filet de sécurité générique, même
-            logique que le sélecteur global de theme-override.css pour le reste du site. */
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         /* En-tête : réplique exacte de .table thead th (volt.css) — uppercase, petit, gras — au lieu
-            du texte pleine taille/casse normale par défaut d'AG Grid. */
-         .ag-theme-quartz .ag-header-cell-text {
+            Depuis la migration vers la Theming API v33 (23/09/2026), la quasi-totalité de cet
+            habillage (couleurs, bordures, hauteurs, rayon 0) est centralisée dans
+            window.REASSORT_AG_GRID_THEME (assets/js/ag-grid-setup.js) et fournie par grille via
+            `theme:` dans createGrid() — seul ce qui n'a PAS d'équivalent dans la Theming API reste en
+            CSS ici : text-transform/letter-spacing de l'en-tête (reproduit .table thead th de
+            volt.css) et le padding horizontal des cellules (reproduit .table > * > *). Ciblé sur des
+            classes AG Grid génériques (.ag-header-cell-text, .ag-cell), plus sur .ag-theme-quartz qui
+            n'existe plus sur le DOM avec la Theming API (le conteneur ne porte plus cette classe). */
+         .ag-header-cell-text {
               text-transform: uppercase;
-              font-size: 0.75rem;
-              font-weight: 600;
               letter-spacing: 0.02em;
          }
-         .ag-theme-quartz .ag-header {
-              border-bottom: 2px solid #E5E7EB;
-         }
-         /* Cellules : taille de police et couleur de texte identiques à .table td/th (0.875rem,
-            #374151) — AG Grid utilise --ag-font-size (14px) par défaut pour tout, y compris
-            l'en-tête ; distingué ici. Padding vertical/horizontal calqué sur .table > * > *
-            (0.75rem 0.5rem dans volt.css) plutôt que le padding par défaut d'AG Grid, plus large. */
-         .ag-theme-quartz .ag-cell {
-              font-size: 0.875rem;
-              color: #374151;
+         .ag-cell {
               padding-left: 0.5rem;
               padding-right: 0.5rem;
               display: flex;
               align-items: center;
          }
-         .ag-theme-quartz .ag-cell-wrapper {
+         .ag-cell-wrapper {
               width: 100%;
          }
-         /* La grille n'a plus besoin d'une hauteur fixe avec du vide en dessous (720px quel que soit
-            le nombre de lignes) : domLayout: 'autoHeight' (posé côté JS) fait grandir/rétrécir la
-            grille avec son contenu réel, comme le reste des tableaux du site. */
-         #reassort-grid.ag-theme-quartz {
+         #reassort-grid {
               width: 100%;
          }
     </style>
@@ -641,7 +595,7 @@
                                                   </button>
                                              </div>
                                         </div>
-                                        <div id="reassort-grid" class="ag-theme-quartz m-3"></div>
+                                        <div id="reassort-grid" class="m-3"></div>
                                    </div>
                                    <script>
                                         (function () {
@@ -1363,6 +1317,7 @@
                                              function ensureGrid() {
                                                   if (gridApi) return gridApi;
                                                   gridApi = agGrid.createGrid(document.getElementById('reassort-grid'), {
+                                                       theme: window.REASSORT_AG_GRID_THEME,
                                                        columnDefs: gridColumnDefs,
                                                        rowData: [],
                                                        localeText: window.AG_GRID_LOCALE_FR,

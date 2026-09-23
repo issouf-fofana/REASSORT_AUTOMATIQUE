@@ -278,6 +278,7 @@
   function ensureGrid() {
     if (gridApi) return gridApi;
     gridApi = agGrid.createGrid(gridEl, {
+      theme: window.REASSORT_AG_GRID_THEME_SOFT,
       columnDefs: gridColumnDefs,
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,

@@ -24,8 +24,6 @@
           stylé fait partie d'AG Grid Enterprise (licence payante, pas configurée ici) — le CSV,
           gratuit avec la version Community, s'ouvre directement dans Excel avec les mêmes données. -->
      <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-grid.css">
-     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@33/styles/ag-theme-quartz.css">
      <script src="assets/js/ag-grid-setup.js"></script>
      <script src="assets/js/ag-grid-locale-fr.js"></script>
 
@@ -49,30 +47,9 @@
          .sidebar .nav, .sidebar .multi-level .nav { white-space: normal; }
 
          /* Habillage AG Grid pour coller au thème du site (palette noir/blanc/gris stricte, aucun coin
-            arrondi, police Inter), identique à purchase-order-v2.html. */
-         .ag-theme-quartz {
-              --ag-font-family: "Inter", sans-serif;
-              --ag-font-size: 13.5px;
-              --ag-active-color: #1F2937;
-              --ag-selected-row-background-color: #f3f4f6;
-              --ag-row-hover-color: #f8f9fa;
-              --ag-header-background-color: #f8f9fa;
-              --ag-header-foreground-color: #1a1a1a;
-              --ag-header-column-resize-handle-color: #dee2e6;
-              --ag-border-color: #dee2e6;
-              --ag-row-border-color: #eef0f2;
-              --ag-cell-horizontal-border: #eef0f2;
-              --ag-input-focus-border-color: #1F2937;
-              --ag-checkbox-checked-color: #1F2937;
-              --ag-range-selection-border-color: #1F2937;
-              --ag-wrapper-border-radius: 0;
-              --ag-border-radius: 0;
-              --ag-card-radius: 0;
-         }
-         .ag-theme-quartz, .ag-theme-quartz * {
-              border-radius: 0 !important;
-         }
-         #orders-grid.ag-theme-quartz {
+            arrondi, police Inter). Migration vers la Theming API v33 (23/09/2026) :
+            window.REASSORT_AG_GRID_THEME_SOFT (ag-grid-setup.js) fournit les mêmes couleurs en JS. */
+         #orders-grid, #order-detail-grid {
               width: 100%;
          }
     </style>
@@ -112,7 +89,7 @@
                                         </div>
                                    </div>
                                    <div class="card-body p-0">
-                                        <div id="orders-grid" class="ag-theme-quartz m-3"></div>
+                                        <div id="orders-grid" class="m-3"></div>
                                    </div>
 
                                    <div class="modal fade" id="order-detail-modal" tabindex="-1" aria-hidden="true">
@@ -261,6 +238,7 @@
                                              function ensureGrid() {
                                                   if (gridApi) return gridApi;
                                                   gridApi = agGrid.createGrid(document.getElementById('orders-grid'), {
+                                                       theme: window.REASSORT_AG_GRID_THEME_SOFT,
                                                        columnDefs: gridColumnDefs,
                                                        rowData: [],
                                                        localeText: window.AG_GRID_LOCALE_FR,
@@ -360,7 +338,7 @@
                                                        const total = lines.reduce(function (sum, l) {
                                                             return sum + (l.sellingPrice || 0) * (l.quantityValidated !== null && l.quantityValidated !== undefined ? l.quantityValidated : l.quantitySuggested);
                                                        }, 0);
-                                                       body.innerHTML = '<div id="order-detail-grid" class="ag-theme-quartz mb-2"></div>' +
+                                                       body.innerHTML = '<div id="order-detail-grid" class="mb-2"></div>' +
                                                             '<p class="text-end fw-semibold mb-0 mt-2">Total envoyé : ' + total.toLocaleString('fr-FR') + ' CFA</p>';
                                                        const detailRows = lines.map(function (l) {
                                                             const qtySent = l.quantityValidated !== null && l.quantityValidated !== undefined ? l.quantityValidated : l.quantitySuggested;
@@ -376,6 +354,7 @@
                                                        // Grille du détail recréée à chaque ouverture (le conteneur est réinjecté via
                                                        // body.innerHTML ci-dessus) plutôt que réutilisée comme la grille principale.
                                                        agGrid.createGrid(document.getElementById('order-detail-grid'), {
+                                                            theme: window.REASSORT_AG_GRID_THEME_SOFT,
                                                             columnDefs: [
                                                                  { headerName: 'EAN', field: 'ean', filter: 'agTextColumnFilter', width: 130 },
                                                                  { headerName: 'Article', field: 'label', flex: 1, minWidth: 200, filter: 'agTextColumnFilter' },
