@@ -17,3 +17,7 @@ react-app-dashboard/node_modules
 # Même raisonnement pour Ventes synchronisées (react-app-sales-history/).
 react-app-sales-history/dist
 react-app-sales-history/node_modules
+
+# Même raisonnement pour IA & Prédictions (react-app-ai-predictions/).
+react-app-ai-predictions/dist
+react-app-ai-predictions/node_modules
