@@ -29,6 +29,9 @@ const DEFAULTS = {
   // cache) reste exclu, faute de prix/colisage connus. Off par défaut : le stock réel reste le
   // comportement normal et le plus fiable, à activer explicitement en connaissance de cause.
   ignoreRposStockInCalculation: false,
+  // Mode Auto (23/09/2026) : off par défaut, n'affecte aucun magasin sans activation explicite.
+  autoOrderEnabled: false,
+  autoOrderValidateAfterCreate: false,
 };
 
 /** Récupère la config d'un magasin, ou les valeurs par défaut si aucune n'a été personnalisée. */

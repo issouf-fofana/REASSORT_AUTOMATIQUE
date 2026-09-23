@@ -1510,6 +1510,60 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
   });
 }
 
+// =============================================
+// MODE AUTO (23/09/2026, magasin pilote 050)
+// =============================================
+// Un magasin en mode auto (ReassortConfig.autoOrderEnabled) voit sa proposition nocturne validée
+// automatiquement juste après sa génération, sans validation humaine : toutes les lignes proposées
+// par l'IA sont acceptées telles quelles (quantitySuggested), aucune exception de seuil de
+// confiance (choix explicite du 23/09/2026 — un seuil de confiance différencié pourra être ajouté
+// plus tard si l'expérience du magasin pilote le justifie). N'exclut QUE les lignes déjà exclues à
+// la génération (wasExcluded, ex: hors périmètre) — jamais de nouvelle exclusion inventée ici.
+const AUTO_ORDER_POLL_INTERVAL_MS = 2000;
+const AUTO_ORDER_POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 min : une proposition de plusieurs centaines
+// de lignes peut prendre plusieurs minutes à envoyer à RPOS une par une (cf. createOrderForLines,
+// LINE_CONCURRENCY=5) — un timeout trop court ferait abandonner le suivi avant la fin réelle.
+
+async function runAutoOrder({ proposalId, posId, shopId, validateAfterCreate }) {
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
+  if (!proposal) throw new Error('Proposition introuvable pour le mode auto');
+  if (proposal.status !== 'GENERATED') throw new Error(`Proposition ${proposalId} déjà traitée (statut ${proposal.status}), mode auto ignoré`);
+
+  // Accepte la quantité IA telle quelle sur toute ligne non déjà exclue à la génération — jamais de
+  // correction, jamais de nouveau seuil appliqué ici (cf. commentaire de tête).
+  const decisions = proposal.lines.map((line) => ({
+    lineId: line.id,
+    quantity: line.quantitySuggested,
+    excluded: line.wasExcluded || false,
+  }));
+
+  // orderHeader quasi vide : createOrderForLines résout déjà lui-même le fournisseur central par son
+  // code (000000) et retombe sur des dates/libellés par défaut sensés (date du jour, livraison
+  // demain) si non fournis — aucune saisie humaine à reproduire ici.
+  await startProposalValidation({
+    proposalId,
+    posId,
+    shopId,
+    userEmail: 'auto-order@reassort.local',
+    decisions,
+    orderHeader: { comment: 'Commande créée automatiquement par le Mode Auto' },
+    validateAfterCreate: !!validateAfterCreate,
+  });
+
+  // startProposalValidation est fire-and-forget (répond dès que le statut passe à VALIDATING, traite
+  // en tâche de fond) : le job nocturne qui appelle runAutoOrder a besoin de savoir si la commande a
+  // RÉELLEMENT abouti avant de logger un résultat définitif — poll jusqu'à un statut terminal.
+  const deadline = Date.now() + AUTO_ORDER_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, AUTO_ORDER_POLL_INTERVAL_MS));
+    const status = await getProposalStatus(proposalId);
+    if (status.status === 'VALIDATED' || status.status === 'VALIDATION_FAILED') {
+      return status;
+    }
+  }
+  throw new Error(`Mode auto : délai dépassé (${AUTO_ORDER_POLL_TIMEOUT_MS / 1000}s) en attendant la fin de la validation de la proposition ${proposalId}`);
+}
+
 /** État courant d'une proposition en cours ou terminée de validation (pour le suivi de progression). */
 async function getProposalStatus(proposalId) {
   return prisma.proposal.findUnique({
@@ -2100,6 +2154,7 @@ module.exports = {
   generateAndSaveProposal,
   getPendingProposal,
   startProposalValidation,
+  runAutoOrder,
   getProposalStatus,
   getConformityRate,
   getStockoutRate,

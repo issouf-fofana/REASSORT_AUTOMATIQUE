@@ -77,7 +77,7 @@ router.get('/config', requireAdmin, async (req, res) => {
 
 // PUT /api/reassort/config - met à jour la configuration réassort du magasin
 // body: { paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-//         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice }
+//         treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, autoOrderEnabled, autoOrderValidateAfterCreate }
 router.put('/config', requireAdmin, async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -88,6 +88,7 @@ router.put('/config', requireAdmin, async (req, res) => {
     const {
       paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
+      autoOrderEnabled, autoOrderValidateAfterCreate,
     } = req.body;
     const data = {};
     if (paretoThreshold !== undefined) data.paretoThreshold = paretoThreshold;
@@ -111,6 +112,11 @@ router.put('/config', requireAdmin, async (req, res) => {
     if (forecastEnabled !== undefined) data.forecastEnabled = forecastEnabled;
     if (forecastAlpha !== undefined) data.forecastAlpha = forecastAlpha;
     if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
+    // Mode Auto (23/09/2026) : volontairement absent de PUT /config/bulk (jamais propagé à
+    // plusieurs magasins d'un coup) — activation magasin par magasin uniquement, demande explicite
+    // de l'utilisateur et principe de prudence pour un réglage qui engage de l'argent réel.
+    if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
+    if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
 
     const config = await upsertConfig(shopId, data, req.user.email);
     res.json({ success: true, data: config });

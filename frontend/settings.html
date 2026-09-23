@@ -360,6 +360,30 @@
                                              </div>
 
                                              <div class="mb-4">
+                                                  <label class="form-label fw-semibold">Mode Auto (commande automatique sans validation humaine)</label>
+                                                  <select id="config-auto-order-enabled" class="form-select" style="max-width: 300px;">
+                                                       <option value="false">Désactivé (par défaut)</option>
+                                                       <option value="true">Activé</option>
+                                                  </select>
+                                                  <select id="config-auto-order-validate-after-create" class="form-select mt-2" style="max-width: 300px;">
+                                                       <option value="false">Crée la commande sans la valider sur RPOS</option>
+                                                       <option value="true">Crée et valide la commande sur RPOS</option>
+                                                  </select>
+                                                  <div class="alert alert-warning mt-2 mb-0 small">
+                                                       <strong>Attention :</strong> si activé, la proposition générée chaque nuit pour ce magasin est
+                                                       automatiquement transformée en commande, SANS validation humaine — la quantité proposée par
+                                                       l'IA est acceptée telle quelle sur tous les articles.<br>
+                                                       <strong>"Sans la valider" :</strong> la commande est créée sur RPOS mais reste "en préparation",
+                                                       pas encore prise en compte par l'entrepôt — recommandé pour tester avant de faire confiance
+                                                       totalement à l'automatisation.<br>
+                                                       <strong>"Crée et valide" :</strong> la commande part réellement à l'entrepôt sans aucune
+                                                       relecture humaine.<br>
+                                                       En cas d'échec (total ou partiel), une alerte apparaît dans la cloche de notification et sur
+                                                       la page Qualité &amp; IA.
+                                                  </div>
+                                             </div>
+
+                                             <div class="mb-4">
                                                   <label class="form-label fw-semibold">Précision des prévisions — fenêtre de mesure</label>
                                                   <div class="input-group" style="max-width: 300px;">
                                                        <input type="number" id="config-forecast-window" class="form-control" min="0" max="90" step="1">
@@ -1655,6 +1679,8 @@
                                         document.getElementById('config-revenue-share-days').value = c.revenueSharePeriodDays || 1;
                                         document.getElementById('config-overstock-threshold').value = c.overstockThresholdMultiplier || 1.5;
                                         document.getElementById('config-split-by-department').value = c.splitOrdersByDepartment === false ? 'false' : 'true';
+                                        document.getElementById('config-auto-order-enabled').value = c.autoOrderEnabled ? 'true' : 'false';
+                                        document.getElementById('config-auto-order-validate-after-create').value = c.autoOrderValidateAfterCreate ? 'true' : 'false';
                                         document.getElementById('config-forecast-window').value = c.forecastAccuracyWindowDays ?? 7;
                                         document.getElementById('config-forecast-threshold').value = c.forecastAccuracyThresholdPct ?? 20;
                                         document.getElementById('config-seasonality-enabled').value = c.seasonalityComparisonEnabled ? 'true' : 'false';
@@ -1701,6 +1727,8 @@
                                         revenueSharePeriodDays: parseInt(document.getElementById('config-revenue-share-days').value, 10) || 1,
                                         overstockThresholdMultiplier: parseFloat(document.getElementById('config-overstock-threshold').value) || 1.5,
                                         splitOrdersByDepartment: document.getElementById('config-split-by-department').value === 'true',
+                                        autoOrderEnabled: document.getElementById('config-auto-order-enabled').value === 'true',
+                                        autoOrderValidateAfterCreate: document.getElementById('config-auto-order-validate-after-create').value === 'true',
                                         forecastAccuracyWindowDays: parseInt(document.getElementById('config-forecast-window').value, 10),
                                         forecastAccuracyThresholdPct: parseFloat(document.getElementById('config-forecast-threshold').value),
                                         seasonalityComparisonEnabled: document.getElementById('config-seasonality-enabled').value === 'true',

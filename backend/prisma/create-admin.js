@@ -28,6 +28,15 @@ async function main() {
   const existingAdmin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
   if (existingAdmin && !argEmail) {
     console.log(`ℹ️  Un compte administrateur existe déjà (${existingAdmin.email}) — aucune action.`);
+    // Rappel des accès à CHAQUE démarrage (23/09/2026, demande explicite : "on doit voir les accès
+    // dans la console pour se connecter", pas seulement à la toute première création) — uniquement
+    // si ADMIN_PASSWORD est fourni en variable d'environnement (valeur connue de l'exploitant),
+    // jamais un mot de passe déjà en base (haché, donc de toute façon irrécupérable en clair) ni une
+    // valeur générée aléatoirement lors d'un démarrage précédent (perdue, pas re-générable ici).
+    if (process.env.ADMIN_PASSWORD) {
+      console.log(`ℹ️  Rappel des accès configurés (ADMIN_EMAIL/ADMIN_PASSWORD) : ${process.env.ADMIN_EMAIL || 'admin@reassort.local'} / ${process.env.ADMIN_PASSWORD}`);
+      console.log('   (ne correspond au compte ci-dessus que si ces valeurs n\'ont jamais changé depuis sa création.)');
+    }
     return;
   }
 
@@ -48,13 +57,15 @@ async function main() {
   console.log('═══════════════════════════════════════════════════════');
   console.log('  ✅ COMPTE ADMINISTRATEUR PRÊT');
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  Email    : ${user.email}`);
+  console.log(`  Email        : ${user.email}`);
+  // Affiché en clair systématiquement (23/09/2026, demande explicite : "on doit voir les accès dans
+  // la console pour se connecter") — que le mot de passe vienne d'ADMIN_PASSWORD (valeur choisie à
+  // l'avance) ou d'une génération aléatoire, jamais masqué : c'est justement ce build/déploiement
+  // qui doit permettre de se connecter immédiatement sans devoir aller chercher la valeur ailleurs.
+  console.log(`  Mot de passe : ${password}`);
   if (passwordWasGenerated) {
-    console.log(`  Mot de passe : ${password}`);
-    console.log('  ⚠️  Ce mot de passe ne sera plus jamais affiché — notez-le');
-    console.log('     maintenant et changez-le dès la première connexion.');
-  } else {
-    console.log('  Mot de passe : (fourni explicitement, non ré-affiché)');
+    console.log('  ⚠️  Généré aléatoirement — notez-le, il ne sera plus régénéré tant que ce');
+    console.log('     compte existe (ADMIN_PASSWORD non fourni à ce démarrage).');
   }
   console.log('═══════════════════════════════════════════════════════');
   console.log('');

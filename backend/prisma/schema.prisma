@@ -334,6 +334,21 @@ model ReassortConfig {
   // plate si l'historique dispo est trop court (cf. forecastService.MIN_DAYS_FOR_SMOOTHING).
   forecastAlpha Float @default(0.3) @map("forecast_alpha")
 
+  // Mode Auto (23/09/2026, magasin pilote 050) : si vrai, la proposition générée chaque nuit pour ce
+  // magasin est automatiquement validée (commande créée sur RPOS) juste après sa génération, sans
+  // attendre une action humaine — la quantité IA proposée (ProposalLine.quantitySuggested) est
+  // acceptée telle quelle sur TOUTES les lignes, aucune exception de seuil de confiance. Faux par
+  // défaut : n'affecte aucun magasin existant sans activation explicite au cas par cas.
+  autoOrderEnabled Boolean @default(false) @map("auto_order_enabled")
+
+  // Si vrai, la commande auto-créée est en plus validée sur RPOS (transmise à l'entrepôt, comme le
+  // choix "Valider et envoyer à RPOS" du flux manuel) ; si faux, elle reste "en préparation" sur
+  // RPOS (créée mais pas encore prise en compte par l'entrepôt) — même distinction que
+  // validateAfterCreate sur le flux manuel (startProposalValidation), appliquée sans confirmation
+  // humaine ici. Faux par défaut : la première automatisation d'un magasin crée sans valider, pour
+  // laisser un humain vérifier la commande sur RPOS avant qu'elle parte réellement à l'entrepôt.
+  autoOrderValidateAfterCreate Boolean @default(false) @map("auto_order_validate_after_create")
+
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by")
 

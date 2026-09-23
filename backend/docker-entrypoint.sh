@@ -20,8 +20,15 @@ echo "  API backend : ${PUBLIC_URL:-http://<votre-domaine-backend>}"
 if [ -n "$FRONTEND_URL" ]; then
   echo "  Interface   : ${FRONTEND_URL}"
 fi
-echo "  (identifiants du compte administrateur affichés ci-dessus"
-echo "   uniquement lors de sa toute première création)"
+echo "  (identifiants du compte administrateur affichés ci-dessus)"
+# Mot de passe de la base de données (23/09/2026, demande explicite : "on doit voir... le password
+# de la base de donner... au build") — extrait directement de DATABASE_URL plutôt que dupliqué dans
+# une variable séparée, pour ne jamais afficher une valeur qui pourrait diverger de celle réellement
+# utilisée par la connexion Prisma. sed capture ce qui suit ":" (après l'utilisateur) et précède "@".
+DB_PASSWORD_DISPLAY=$(echo "$DATABASE_URL" | sed -n 's#.*://[^:]*:\([^@]*\)@.*#\1#p')
+if [ -n "$DB_PASSWORD_DISPLAY" ]; then
+  echo "  Mot de passe base de données (PostgreSQL) : ${DB_PASSWORD_DISPLAY}"
+fi
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
