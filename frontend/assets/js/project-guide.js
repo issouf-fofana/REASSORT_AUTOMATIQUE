@@ -80,6 +80,56 @@
     onScroll();
   }
 
+  // `position: sticky` ne fonctionne pas ici (Volt pose overflow:hidden sur <main class="content">,
+  // ce qui casse le contexte de défilement nécessaire à sticky — le sommaire disparaissait
+  // entièrement au scroll, signalé le 23/09/2026). `position: fixed` s'accroche directement au
+  // viewport, mais perd alors l'alignement horizontal automatique de sa colonne Bootstrap : on le
+  // recalcule ici à partir de la position réelle de la colonne, et on le tient à jour au
+  // redimensionnement (une bascule de largeur de sidebar déplace la colonne).
+  function positionToc() {
+    const toc = document.getElementById('pg-toc');
+    const col = document.getElementById('pg-toc-col');
+    if (!toc || !col || window.innerWidth < 992) return;
+    const rect = col.getBoundingClientRect();
+    toc.style.left = rect.left + 'px';
+    toc.style.width = rect.width + 'px';
+  }
+
+  // Apparition progressive des sections au défilement (demande explicite du 23/09/2026 : rendre la
+  // page "plus visible et réactive") : chaque section glisse légèrement vers le haut en apparaissant
+  // la première fois qu'elle entre dans le viewport, jamais rejouée ensuite (unobserve après le
+  // premier passage) pour ne pas distraire lors d'un simple aller-retour de scroll.
+  function setupRevealAnimation() {
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('.pg-section').forEach(function (el) { el.classList.add('pg-visible'); });
+      return;
+    }
+    const observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('pg-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.pg-section').forEach(function (el) { observer.observe(el); });
+  }
+
+  // Barre de progression de lecture (filet fin en haut de page) : retour visuel réactif au scroll,
+  // proportionnel à la position dans le contenu total de la page.
+  function setupProgressBar() {
+    const bar = document.getElementById('pg-progress-bar');
+    if (!bar) return;
+    function onScroll() {
+      const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+      bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    onScroll();
+  }
+
   function init() {
     const groups = window.PROJECT_GUIDE_CONTENT;
     if (!groups) {
@@ -94,6 +144,15 @@
     document.getElementById('pg-content').innerHTML = allSections.map(renderSection).join('');
 
     setupScrollSpy(allSections.map(function (s) { return s.id; }));
+    setupRevealAnimation();
+    setupProgressBar();
+
+    positionToc();
+    window.addEventListener('resize', positionToc);
+    // La sidebar Volt peut se réduire/déplier après le chargement initial (bouton toggle) sans
+    // déclencher de resize navigateur — un court re-calcul différé couvre ce cas sans devoir
+    // observer chaque interaction possible de la sidebar.
+    setTimeout(positionToc, 300);
   }
 
   document.addEventListener('DOMContentLoaded', init);

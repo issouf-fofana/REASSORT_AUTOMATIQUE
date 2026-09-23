@@ -24,9 +24,19 @@
           /* Page "Guide du projet" (23/09/2026) : documentation métier de référence, écrite en
              langage simple pour un lecteur non technique. Pattern visuel volontairement sobre
              (cartes blanches, filets fins), cohérent avec le reste du site déjà migré vers ce style. */
+
+          /* Le sommaire doit rester visible pendant le défilement, mais `position: sticky` ne
+             fonctionne pas ici : Volt pose `overflow: hidden` sur <main class="content">, ce qui
+             casse le contexte de défilement nécessaire à sticky (constaté le 23/09/2026 — le
+             sommaire disparaissait entièrement dès qu'on scrollait). `position: fixed`, avec sa
+             position horizontale calculée en JS (project-guide.js, alignée sur sa colonne réelle),
+             contourne ce problème en s'accrochant directement au viewport plutôt qu'à un ancêtre. */
           .pg-toc {
-               position: sticky;
-               top: 1rem;
+               position: fixed;
+               top: 1.25rem;
+               width: 260px;
+               max-height: calc(100vh - 2.5rem);
+               overflow-y: auto;
           }
           .pg-toc-group-title {
                font-size: .7rem;
@@ -39,16 +49,40 @@
           .pg-toc-group-title:first-child { margin-top: 0; }
           .pg-toc a {
                display: block;
-               padding: .3rem .6rem;
+               padding: .35rem .7rem;
                font-size: .85rem;
                color: #374151;
                text-decoration: none;
                border-left: 2px solid transparent;
+               border-radius: 0 4px 4px 0;
+               transition: background-color .15s ease, color .15s ease, border-color .15s ease, padding-left .15s ease;
           }
-          .pg-toc a:hover { background-color: #f5f5f5; color: #111111; }
-          .pg-toc a.active { border-left-color: #111111; color: #111111; font-weight: 600; background-color: #f5f5f5; }
+          .pg-toc a:hover { background-color: #f5f5f5; color: #111111; padding-left: .9rem; }
+          .pg-toc a.active {
+               border-left-color: #111111;
+               color: #111111;
+               font-weight: 600;
+               background-color: #f5f5f5;
+          }
 
-          .pg-section { scroll-margin-top: 1rem; padding-top: .5rem; margin-bottom: 2.5rem; }
+          /* Petite animation d'apparition au défilement (23/09/2026, demande explicite : "plus
+             visible et réactif") : chaque section apparaît en glissant légèrement vers le haut la
+             première fois qu'elle entre dans le viewport (IntersectionObserver, project-guide.js),
+             jamais rejouée ensuite pour ne pas distraire lors d'un simple aller-retour au scroll.
+             Respecte prefers-reduced-motion (aucune animation si l'utilisateur l'a désactivée). */
+          .pg-section {
+               scroll-margin-top: 1rem;
+               padding-top: .5rem;
+               margin-bottom: 2.5rem;
+               opacity: 0;
+               transform: translateY(14px);
+               transition: opacity .5s ease, transform .5s ease;
+          }
+          .pg-section.pg-visible { opacity: 1; transform: translateY(0); }
+          @media (prefers-reduced-motion: reduce) {
+               .pg-section { opacity: 1; transform: none; transition: none; }
+          }
+
           .pg-section-header {
                display: flex;
                align-items: center;
@@ -76,6 +110,11 @@
                box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.08);
                padding: 1.25rem 1.5rem;
                margin-bottom: 1rem;
+               transition: box-shadow .2s ease, border-color .2s ease;
+          }
+          .pg-card:hover {
+               border-color: #d1d5db;
+               box-shadow: 0 2px 8px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.08);
           }
           .pg-card-label {
                font-size: .75rem;
@@ -104,11 +143,26 @@
                margin: .15rem .35rem .15rem 0;
                text-decoration: none;
                color: #111111;
+               transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
           }
-          .pg-page-links a:hover { background-color: #f5f5f5; }
+          .pg-page-links a:hover { background-color: #111111; color: #ffffff; border-color: #111111; transform: translateY(-1px); }
+
+          /* Barre de progression de lecture (23/09/2026) : filet fin en haut de page, indique
+             visuellement combien reste à lire — retour visuel réactif au scroll demandé. */
+          #pg-progress-bar {
+               position: fixed;
+               top: 0;
+               left: 0;
+               height: 3px;
+               width: 0%;
+               background-color: #111111;
+               z-index: 1050;
+               transition: width .1s linear;
+          }
 
           @media (max-width: 991px) {
-               .pg-toc { position: static; margin-bottom: 2rem; }
+               .pg-toc { position: static; width: auto; max-height: none; margin-bottom: 2rem; }
+               #pg-progress-bar { display: none; }
           }
      </style>
 </head>
@@ -118,6 +172,7 @@
      <script src="assets/js/loading-overlay.js"></script>
 
      <div id="layout-sidebar-slot"></div>
+     <div id="pg-progress-bar"></div>
 
      <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
 
@@ -138,7 +193,7 @@
                     </div>
 
                     <div class="row">
-                         <div class="col-lg-3 d-none d-lg-block">
+                         <div class="col-lg-3 d-none d-lg-block" id="pg-toc-col">
                               <nav class="pg-toc" id="pg-toc"></nav>
                          </div>
                          <div class="col-lg-9" id="pg-content">
