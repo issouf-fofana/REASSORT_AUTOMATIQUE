@@ -9,3 +9,7 @@ node_modules
 # stage nginx puisqu'il n'existe qu'après le build (généré, pas commité).
 react-app/dist
 react-app/node_modules
+
+# Même raisonnement pour le Dashboard admin (react-app-dashboard/).
+react-app-dashboard/dist
+react-app-dashboard/node_modules

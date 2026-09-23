@@ -9,6 +9,16 @@ RUN npm ci
 COPY react-app/ .
 RUN npm run build
 
+# Stage de build du Dashboard admin migré vers React (page pilote suivante après Paramètres) —
+# projet Vite séparé (frontend/react-app-dashboard/) plutôt que multi-page dans react-app/, pour ne
+# jamais risquer de casser le build de Paramètres en modifiant une config partagée.
+FROM node:20-alpine AS dashboard-builder
+WORKDIR /app
+COPY react-app-dashboard/package*.json ./
+RUN npm ci
+COPY react-app-dashboard/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -24,6 +34,10 @@ RUN rm -f /usr/share/nginx/html/nginx.conf
 # Résultat du build React (page Paramètres), servi sous /settings-app/ par une règle nginx dédiée
 # (voir nginx.conf) — jamais mélangé avec les pages HTML classiques du COPY . ci-dessus.
 COPY --from=react-builder /app/dist /usr/share/nginx/html/settings-app
+
+# Résultat du build React (Dashboard admin), servi sous /dashboard-app/ par une règle nginx dédiée
+# (voir nginx.conf).
+COPY --from=dashboard-builder /app/dist /usr/share/nginx/html/dashboard-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
