@@ -230,7 +230,24 @@
                               };
 
                               const baseColumnDefs = [
-                                   { field: 'dateLabel', headerName: 'Date', filter: 'agTextColumnFilter', sortable: true, sort: 'desc', minWidth: 170 },
+                                   // Filtre par plage de dates (23/09/2026, demande explicite : "le filtre sur les dates doit
+                                   // être conforme... ça ne doit pas être pareil que les autres") : field pointe sur la date
+                                   // brute (chaîne ISO) plutôt que sur dateLabel (déjà formatée en texte français) — un filtre
+                                   // texte sur "21/09/2026 20:58:16" ne peut pas comparer "avant/après/entre deux dates" comme
+                                   // agDateColumnFilter le permet. valueFormatter garde l'affichage français inchangé à l'écran.
+                                   { field: 'date', headerName: 'Date', filter: 'agDateColumnFilter', sortable: true, sort: 'desc', minWidth: 170,
+                                        valueFormatter: function (params) { return params.value ? new Date(params.value).toLocaleString('fr-FR') : '—'; },
+                                        filterParams: {
+                                             comparator: function (filterLocalDateAtMidnight, cellValue) {
+                                                  if (!cellValue) return -1;
+                                                  const cellDate = new Date(cellValue);
+                                                  const cellDateAtMidnight = new Date(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+                                                  if (cellDateAtMidnight < filterLocalDateAtMidnight) return -1;
+                                                  if (cellDateAtMidnight > filterLocalDateAtMidnight) return 1;
+                                                  return 0;
+                                             },
+                                        },
+                                   },
                                    { field: 'ean', headerName: 'EAN', filter: 'agTextColumnFilter', sortable: true, minWidth: 140 },
                                    { field: 'label', headerName: 'Article', filter: 'agTextColumnFilter', sortable: true, flex: 1, minWidth: 220,
                                         valueFormatter: function (params) { return params.value || '—'; } },
@@ -393,7 +410,6 @@
 
                               function toRowData(l) {
                                    return {
-                                        dateLabel: new Date(l.date).toLocaleString('fr-FR'),
                                         date: l.date,
                                         ean: l.ean,
                                         label: l.label,
