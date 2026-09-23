@@ -318,9 +318,7 @@ export function SalesHistory() {
     }
   }
 
-  // Charge la liste des magasins, crée la grille initiale, puis synchronise avec le magasin actif
-  // global de la topbar (reassortMakeShopPickerSearchable) — même comportement que
-  // sales-history.old.html.
+  // Charge la liste des magasins et crée la grille initiale.
   useEffect(() => {
     createGrid(false);
     (async () => {
@@ -335,44 +333,6 @@ export function SalesHistory() {
           .sort()
           .flatMap((posId) => byPos[posId].slice().sort((a, b) => (a.reference || '').localeCompare(b.reference || '')));
         setShops(sortedShops);
-
-        // reassortMakeShopPickerSearchable a besoin du <select> déjà peuplé dans le DOM (options
-        // réelles, pas juste l'état React) — appelé après le prochain rendu via un micro-délai,
-        // le temps que React commette les <option>.
-        setTimeout(() => {
-          const select = shopSelectRef.current;
-          if (!select) return;
-
-          // Écouteur natif plutôt qu'un onChange React contrôlé : shop-picker.js synchronise ce
-          // <select> en manipulant le DOM directement (selectEl.value = ...; dispatchEvent('change'))
-          // depuis 3 sources indépendantes — le clic dans sa propre modale, reassortOnActiveShopChange
-          // (déclenché par le bouton global de la topbar OU par un autre picker sur la même page), et
-          // applyGlobalShopIfAny() au montage (le magasin par défaut peut résoudre APRÈS ce montage,
-          // de façon asynchrone). Un <select> contrôlé par React (value=state) réécrit sa valeur DOM à
-          // chaque rendu et entre en conflit avec ces écritures externes — un select non contrôlé +
-          // un vrai event listener natif reproduit exactement le comportement de la page HTML
-          // d'origine, où ce <select> n'a jamais été piloté par un framework.
-          let changeFiredByPicker = false;
-          select.addEventListener('change', () => {
-            changeFiredByPicker = true;
-            loadCoverage(select.value);
-            search(1);
-          });
-
-          if (window.reassortMakeShopPickerSearchable) {
-            window.reassortMakeShopPickerSearchable(select);
-          }
-          // reassortMakeShopPickerSearchable déclenche lui-même un dispatchEvent('change') sur ce
-          // <select>, SYNCHRONE, s'il applique un magasin global déjà connu (applyGlobalShopIfAny) —
-          // déjà capté par le listener ci-dessus (changeFiredByPicker passe à true avant qu'on arrive
-          // ici). Sans magasin global correspondant, aucun event n'est déclenché : dans ce cas
-          // seulement, on lance nous-mêmes une recherche initiale sur la première option du <select>
-          // (comportement de repli, pas de magasin actif choisi mais au moins un existe).
-          if (select.value && !changeFiredByPicker) {
-            loadCoverage(select.value);
-            search(1);
-          }
-        }, 0);
       } catch (err) {
         setShopsError(err instanceof Error ? err.message : String(err));
       }
@@ -380,6 +340,55 @@ export function SalesHistory() {
     return () => destroyGrid();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Câble le picker + synchronise avec le magasin actif global de la topbar, UNE FOIS que `shops`
+  // a été committé dans le DOM (les <option> du <select> existent réellement) — dépend de `shops`
+  // plutôt qu'un setTimeout(0) fragile après setShops() dans l'effet ci-dessus : setTimeout(0) ne
+  // garantit PAS que React ait déjà réalisé son rendu (observé en prod le 23/09/2026 :
+  // select.options.length valait encore 1 — l'option "Chargement..." — au moment de cet appel,
+  // donc aucune correspondance jamais trouvée avec le magasin actif réel).
+  useEffect(() => {
+    const select = shopSelectRef.current;
+    if (!select || shops.length === 0) return;
+
+    // Écouteur natif plutôt qu'un onChange React contrôlé : shop-picker.js synchronise ce <select>
+    // en manipulant le DOM directement (selectEl.value = ...; dispatchEvent('change')) depuis
+    // plusieurs sources indépendantes (clic dans sa modale, reassortOnActiveShopChange). Un select
+    // contrôlé par React (value=state) réécrit sa valeur DOM à chaque rendu et entre en conflit avec
+    // ces écritures externes — un select non contrôlé + un vrai event listener natif reproduit
+    // exactement le comportement de la page HTML d'origine.
+    function handleNativeChange() {
+      loadCoverage(select!.value);
+      search(1);
+    }
+    select.addEventListener('change', handleNativeChange);
+
+    if (window.reassortMakeShopPickerSearchable) {
+      window.reassortMakeShopPickerSearchable(select);
+    }
+
+    // Filet de sécurité : reassortMakeShopPickerSearchable applique déjà le magasin global via
+    // applyGlobalShopIfAny() en interne (dispatchEvent('change'), capté ci-dessus) — mais on
+    // revérifie nous-mêmes ici, indépendamment de son mécanisme interne, au cas où son propre appel
+    // n'aurait pas trouvé de correspondance à ce moment précis.
+    const activeShop = window.reassortGetActiveShop ? window.reassortGetActiveShop() : null;
+    const matchFound = activeShop ? select.querySelector('option[value="' + activeShop.id + '"]') : null;
+    if (activeShop && matchFound) {
+      if (select.value !== activeShop.id) {
+        select.value = activeShop.id;
+      }
+      loadCoverage(select.value);
+      search(1);
+    } else if (select.value) {
+      // Aucun magasin global connu : repli sur la première option du <select> (comportement de
+      // secours, comme la page HTML d'origine sans sélection explicite).
+      loadCoverage(select.value);
+      search(1);
+    }
+
+    return () => select.removeEventListener('change', handleNativeChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shops]);
 
   function handleGroupToggle(e: React.ChangeEvent<HTMLInputElement>) {
     const next = e.target.checked;

@@ -14,5 +14,6 @@ declare global {
     AG_GRID_LOCALE_FR: Record<string, string>;
     reassortAgGridToolbar: (gridApi: any, containerEl: HTMLElement) => void;
     reassortMakeShopPickerSearchable?: (select: HTMLSelectElement) => void;
+    reassortGetActiveShop?: () => { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null;
   }
 }
