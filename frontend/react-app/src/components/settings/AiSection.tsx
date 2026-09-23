@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiFetch } from '../../api/client';
 import { saveSystemConfigKey } from '../../api/systemConfig';
+import {
+  AiAnalysisPromptCard,
+  ChatbotPromptCard,
+  ChatbotIntentRulesCard,
+  ChatbotSuggestedQuestionsCard,
+  ImprovementsPromptCard,
+} from './AiPromptCards';
 
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: 'Google Gemini',
@@ -560,6 +567,10 @@ interface AiSystemConfig {
   AI_QUANTITY_ADJUSTMENT_ENABLED?: string;
   CHATBOT_LLM_FALLBACK_ENABLED?: string;
   ANOMALY_MIN_DAILY_SALES?: string;
+  AI_ANALYSIS_PROMPT_TEMPLATE?: string;
+  CHATBOT_PROMPT_TEMPLATE?: string;
+  CHATBOT_SUGGESTED_QUESTIONS?: string;
+  IMPROVEMENTS_PROMPT_TEMPLATE?: string;
 }
 
 export function AiSection() {
@@ -606,6 +617,11 @@ export function AiSection() {
         comme si ce réglage était désactivé.
       </ToggleOnlyCard>
       <AnomalyThresholdCard initialValue={config.ANOMALY_MIN_DAILY_SALES || '1'} />
+      <AiAnalysisPromptCard initialValue={config.AI_ANALYSIS_PROMPT_TEMPLATE || ''} />
+      <ChatbotPromptCard initialValue={config.CHATBOT_PROMPT_TEMPLATE || ''} />
+      <ChatbotIntentRulesCard />
+      <ChatbotSuggestedQuestionsCard initialValue={config.CHATBOT_SUGGESTED_QUESTIONS || ''} />
+      <ImprovementsPromptCard initialValue={config.IMPROVEMENTS_PROMPT_TEMPLATE || ''} />
     </div>
   );
 }
