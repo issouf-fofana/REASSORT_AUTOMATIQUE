@@ -1,2 +1,11 @@
 node_modules
 .git
+
+# Page Paramètres migrée vers React (23/09/2026) : ce .dockerignore ne s'applique qu'au STAGE
+# nginx final (react-app/dist y est copié explicitement via COPY --from=react-builder, jamais par
+# le COPY . générique) — le stage react-builder, lui, a besoin des sources et de package*.json
+# intacts dans son propre contexte de build pour tourner. Rien à exclure de react-app/ ici : seul
+# le dist qui atterrit dans l'image finale importe, et il n'est jamais touché par le COPY . du
+# stage nginx puisqu'il n'existe qu'après le build (généré, pas commité).
+react-app/dist
+react-app/node_modules

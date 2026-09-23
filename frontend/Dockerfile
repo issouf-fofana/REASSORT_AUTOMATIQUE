@@ -1,3 +1,14 @@
+# Stage de build de la page Paramètres migrée vers React (23/09/2026, migration progressive
+# page par page — voir /home/youssef/.claude/plans/compressed-roaming-orbit.md). Séparé du stage
+# nginx final : node_modules et les sources TypeScript ne doivent jamais atterrir dans l'image
+# servie publiquement, seul le résultat du build (react-app/dist) en sort (COPY --from= plus bas).
+FROM node:20-alpine AS react-builder
+WORKDIR /app
+COPY react-app/package*.json ./
+RUN npm ci
+COPY react-app/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -9,6 +20,10 @@ COPY . /usr/share/nginx/html
 # ci-dessus avant d'avoir pu l'exclure autrement, faute de .dockerignore dans ce projet) : retiré
 # explicitement du dossier public plutôt que de laisser la config nginx elle-même téléchargeable.
 RUN rm -f /usr/share/nginx/html/nginx.conf
+
+# Résultat du build React (page Paramètres), servi sous /settings-app/ par une règle nginx dédiée
+# (voir nginx.conf) — jamais mélangé avec les pages HTML classiques du COPY . ci-dessus.
+COPY --from=react-builder /app/dist /usr/share/nginx/html/settings-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
