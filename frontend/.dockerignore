@@ -45,3 +45,7 @@ react-app-project-guide/node_modules
 # Même raisonnement pour Historique des commandes (react-app-purchase-list/).
 react-app-purchase-list/dist
 react-app-purchase-list/node_modules
+
+# Même raisonnement pour Proposition de commande, en cours de migration (react-app-purchase-order/).
+react-app-purchase-order/dist
+react-app-purchase-order/node_modules

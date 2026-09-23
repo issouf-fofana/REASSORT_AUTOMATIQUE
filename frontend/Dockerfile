@@ -91,6 +91,17 @@ RUN npm ci
 COPY react-app-purchase-list/ .
 RUN npm run build
 
+# Stage de build de Proposition de commande migrée vers React (chantier en cours, EN COURS de
+# migration — voir plan de migration : la coquille secteurs/rayons + tableau lecture seule est
+# prête, l'envoi RPOS/génération restent à faire. Servi temporairement sous /purchase-order-preview
+# le temps de la validation, PAS encore sous /purchase-order — voir nginx.conf).
+FROM node:20-alpine AS purchase-order-builder
+WORKDIR /app
+COPY react-app-purchase-order/package*.json ./
+RUN npm ci
+COPY react-app-purchase-order/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -142,6 +153,11 @@ COPY --from=project-guide-builder /app/dist /usr/share/nginx/html/project-guide-
 # Résultat du build React (Historique des commandes), servi sous /purchase-list-app/ par une règle
 # nginx dédiée (voir nginx.conf).
 COPY --from=purchase-list-builder /app/dist /usr/share/nginx/html/purchase-list-app
+
+# Résultat du build React (Proposition de commande, EN COURS), servi sous /purchase-order-app/ par
+# une règle nginx dédiée (voir nginx.conf) — temporairement à /purchase-order-preview, pas encore
+# /purchase-order.
+COPY --from=purchase-order-builder /app/dist /usr/share/nginx/html/purchase-order-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
