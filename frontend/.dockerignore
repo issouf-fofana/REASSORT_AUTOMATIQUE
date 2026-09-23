@@ -25,3 +25,7 @@ react-app-ai-predictions/node_modules
 # Même raisonnement pour Assistant IA (react-app-ai-assistant/).
 react-app-ai-assistant/dist
 react-app-ai-assistant/node_modules
+
+# Même raisonnement pour Mon accès / Guide IA (react-app-ai-guide/).
+react-app-ai-guide/dist
+react-app-ai-guide/node_modules
