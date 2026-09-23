@@ -52,6 +52,36 @@
          #users-grid {
               width: 100%;
          }
+
+         /* Style "impeccable" (23/09/2026, même pattern que admin-dashboard.html) : relevé synthèse
+            en filets fins au-dessus du tableau "Comptes existants", au lieu de découvrir ces chiffres
+            uniquement en comptant les lignes soi-même. */
+         .ul-metric-row {
+              display: flex;
+              flex-wrap: wrap;
+              border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .ul-metric-row-item {
+              flex: 1 1 140px;
+              padding: 1rem 1.5rem 1rem 1.5rem;
+              border-right: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .ul-metric-row-item:last-child { border-right: none; }
+         .ul-metric-label {
+              font-size: .8125rem;
+              color: var(--bs-secondary-color, #6c757d);
+              margin: 0 0 .35rem;
+         }
+         .ul-metric-value {
+              font-size: 1.5rem;
+              font-weight: 600;
+              line-height: 1.15;
+              font-variant-numeric: tabular-nums;
+              margin: 0;
+         }
+         @media (max-width: 767px) {
+              .ul-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
+         }
     </style>
 </head>
 
@@ -179,6 +209,24 @@
                                                        <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
                                                   </button>
                                                   <button id="users-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
+                                             </div>
+                                        </div>
+                                        <div class="ul-metric-row" id="users-metric-row" style="display:none;">
+                                             <div class="ul-metric-row-item">
+                                                  <p class="ul-metric-label">Comptes au total</p>
+                                                  <p class="ul-metric-value" id="users-metric-total">—</p>
+                                             </div>
+                                             <div class="ul-metric-row-item">
+                                                  <p class="ul-metric-label">Administrateurs</p>
+                                                  <p class="ul-metric-value" id="users-metric-admin">—</p>
+                                             </div>
+                                             <div class="ul-metric-row-item">
+                                                  <p class="ul-metric-label">Superviseurs</p>
+                                                  <p class="ul-metric-value" id="users-metric-supervisor">—</p>
+                                             </div>
+                                             <div class="ul-metric-row-item">
+                                                  <p class="ul-metric-label">Comptes magasin</p>
+                                                  <p class="ul-metric-value" id="users-metric-shop">—</p>
                                              </div>
                                         </div>
                                         <div class="card-body p-0">
@@ -726,9 +774,27 @@
                                         if (!json.success) throw new Error(json.message);
                                         usersList = json.data;
                                         usersGridApi.setGridOption('rowData', usersList);
+                                        renderUsersMetricRow(usersList);
                                    } catch (err) {
                                         console.error('[users-list] Erreur lors du chargement des comptes:', err);
                                    }
+                              }
+
+                              // Relevé synthèse (style "impeccable", 23/09/2026) : calculé côté client depuis la liste
+                              // déjà chargée, sans appel réseau supplémentaire. "Comptes magasin" regroupe les rôles
+                              // à périmètre unique (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE) — distincts
+                              // d'ADMIN (tous magasins) et SUPERVISOR (plusieurs magasins choisis).
+                              function renderUsersMetricRow(users) {
+                                   const row = document.getElementById('users-metric-row');
+                                   if (!users.length) { row.style.display = 'none'; return; }
+                                   row.style.display = '';
+                                   const admin = users.filter(function (u) { return u.role === 'ADMIN'; }).length;
+                                   const supervisor = users.filter(function (u) { return u.role === 'SUPERVISOR'; }).length;
+                                   const shop = users.filter(function (u) { return ['DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER', 'STORE'].indexOf(u.role) !== -1; }).length;
+                                   document.getElementById('users-metric-total').textContent = users.length;
+                                   document.getElementById('users-metric-admin').textContent = admin;
+                                   document.getElementById('users-metric-supervisor').textContent = supervisor;
+                                   document.getElementById('users-metric-shop').textContent = shop;
                               }
 
                               // Modal de réinitialisation de mot de passe : un admin dépanne ainsi un

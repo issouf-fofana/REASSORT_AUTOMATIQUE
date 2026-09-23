@@ -52,6 +52,39 @@
          #orders-grid, #order-detail-grid {
               width: 100%;
          }
+
+         /* Style "impeccable" (23/09/2026, même pattern que admin-dashboard.html/purchase-order.html) :
+            rangée de métriques en filets fins au lieu du bandeau "X commande(s) au total" en petit
+            texte gris — donne un vrai relevé synthétique en un coup d'œil avant de plonger dans le
+            détail du tableau. Alerte rouge pâle réservée aux vrais seuils dépassés (taux d'annulation
+            élevé), jamais de couleur décorative gratuite. */
+         .po-metric-row {
+              display: flex;
+              flex-wrap: wrap;
+              border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .po-metric-row-item {
+              flex: 1 1 160px;
+              padding: 1rem 1.5rem 1rem 1.5rem;
+              border-right: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .po-metric-row-item:last-child { border-right: none; }
+         .po-metric-label {
+              font-size: .8125rem;
+              color: var(--bs-secondary-color, #6c757d);
+              margin: 0 0 .35rem;
+         }
+         .po-metric-value {
+              font-size: 1.5rem;
+              font-weight: 600;
+              line-height: 1.15;
+              font-variant-numeric: tabular-nums;
+              margin: 0;
+         }
+         .po-metric-value.is-alert { color: #B91C1C; }
+         @media (max-width: 767px) {
+              .po-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
+         }
     </style>
 </head>
 
@@ -86,6 +119,24 @@
                                                   <iconify-icon icon="solar:file-download-bold-duotone" class="align-middle"></iconify-icon> Exporter (CSV)
                                              </button>
                                              <button id="orders-refresh" class="btn btn-sm btn-outline-primary">Actualiser</button>
+                                        </div>
+                                   </div>
+                                   <div class="po-metric-row" id="orders-metric-row" style="display:none;">
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Commandes affichées</p>
+                                             <p class="po-metric-value" id="orders-metric-total">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Complètes</p>
+                                             <p class="po-metric-value" id="orders-metric-complete">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">En attente de livraison</p>
+                                             <p class="po-metric-value" id="orders-metric-pending">—</p>
+                                        </div>
+                                        <div class="po-metric-row-item">
+                                             <p class="po-metric-label">Annulées</p>
+                                             <p class="po-metric-value" id="orders-metric-cancelled">—</p>
                                         </div>
                                    </div>
                                    <div class="card-body p-0">
@@ -273,6 +324,28 @@
                                                   gridApi.setGridOption('rowData', rows);
                                              }
 
+                                             // Relevé synthèse au-dessus du tableau (style "impeccable", 23/09/2026) : calculé côté client
+                                             // à partir des commandes déjà chargées, sans appel réseau supplémentaire. status_display vient
+                                             // directement de RPOS (mêmes clés que STATUS_BADGE ci-dessus) ; "complète" regroupe ici
+                                             // 'complète' et 'finalisée et partielle' (statuts jugés équivalents pour ce relevé synthétique).
+                                             function renderMetricRow(orders) {
+                                                  const row = document.getElementById('orders-metric-row');
+                                                  if (!orders.length) { row.style.display = 'none'; return; }
+                                                  row.style.display = '';
+                                                  const total = orders.length;
+                                                  const complete = orders.filter(function (o) { return o.status_display === 'complète' || o.status_display === 'finalisée et partielle'; }).length;
+                                                  const pending = orders.filter(function (o) { return o.status_display === 'en attente de livraison' || o.status_display === 'livrée partiellement'; }).length;
+                                                  const cancelled = orders.filter(function (o) { return o.status_display === 'annulée'; }).length;
+                                                  document.getElementById('orders-metric-total').textContent = total;
+                                                  document.getElementById('orders-metric-complete').textContent = complete;
+                                                  document.getElementById('orders-metric-pending').textContent = pending;
+                                                  const cancelledEl = document.getElementById('orders-metric-cancelled');
+                                                  cancelledEl.textContent = cancelled;
+                                                  // Alerte visuelle uniquement si l'annulation dépasse 15% des commandes affichées (jugé, comme
+                                                  // le seuil de surstock 10% sur Vue Globale) — jamais de rouge pour un simple "annulée" isolée.
+                                                  cancelledEl.classList.toggle('is-alert', total > 0 && cancelled / total > 0.15);
+                                             }
+
                                              document.getElementById('orders-export-csv').addEventListener('click', function () {
                                                   if (!gridApi) return;
                                                   const shopRef = (currentUser && currentUser.rposShopReference) || 'magasin';
@@ -387,6 +460,7 @@
                                                   if (!shopId) {
                                                        ensureGrid();
                                                        gridApi.setGridOption('rowData', []);
+                                                       document.getElementById('orders-metric-row').style.display = 'none';
                                                        status.textContent = 'Sélectionnez un magasin.';
                                                        return;
                                                   }
@@ -401,11 +475,13 @@
                                                        if (!json.success) throw new Error(json.message);
                                                        lastLoadedOrders = json.data.orders;
                                                        renderRows(lastLoadedOrders);
+                                                       renderMetricRow(lastLoadedOrders);
                                                        status.textContent = json.data.count + ' commande(s) au total';
                                                   } catch (err) {
                                                        if (token !== ordersLoadToken) return;
                                                        ensureGrid();
                                                        gridApi.setGridOption('rowData', []);
+                                                       document.getElementById('orders-metric-row').style.display = 'none';
                                                        status.textContent = 'Erreur: ' + err.message;
                                                   } finally {
                                                        if (token === ordersLoadToken) refreshBtn.disabled = false;

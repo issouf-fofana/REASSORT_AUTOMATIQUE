@@ -63,6 +63,35 @@
               color: #1a1a1a;
               border-bottom: 1px solid #dee2e6;
          }
+
+         /* Style "impeccable" (23/09/2026, même pattern que admin-dashboard.html) : remplace les 4
+            cartes identiques (une par chiffre) par un relevé en filets fins — plus dense, moins
+            "mur de cartes SaaS générique", cohérent avec le reste du site déjà migré. */
+         .sh-metric-row {
+              display: flex;
+              flex-wrap: wrap;
+         }
+         .sh-metric-row-item {
+              flex: 1 1 180px;
+              padding: 1rem 1.5rem 1rem 0;
+              border-right: 1px solid var(--bs-border-color, #dee2e6);
+         }
+         .sh-metric-row-item:last-child { border-right: none; }
+         .sh-metric-label {
+              font-size: .8125rem;
+              color: var(--bs-secondary-color, #6c757d);
+              margin: 0 0 .35rem;
+         }
+         .sh-metric-value {
+              font-size: 1.5rem;
+              font-weight: 600;
+              line-height: 1.15;
+              font-variant-numeric: tabular-nums;
+              margin: 0;
+         }
+         @media (max-width: 767px) {
+              .sh-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
+         }
     </style>
 </head>
 
@@ -117,36 +146,24 @@
                          </div>
                     </div>
 
-                    <div class="row mb-3">
-                         <div class="col-md-3">
-                              <div class="card">
-                                   <div class="card-body">
-                                        <div class="text-muted small">Lignes trouvées</div>
-                                        <div class="fs-22 fw-semibold" id="sh-stat-count">—</div>
+                    <div class="card mb-3">
+                         <div class="card-body py-2">
+                              <div class="sh-metric-row">
+                                   <div class="sh-metric-row-item">
+                                        <p class="sh-metric-label">Lignes trouvées</p>
+                                        <p class="sh-metric-value" id="sh-stat-count">—</p>
                                    </div>
-                              </div>
-                         </div>
-                         <div class="col-md-3">
-                              <div class="card">
-                                   <div class="card-body">
-                                        <div class="text-muted small">Quantité totale</div>
-                                        <div class="fs-22 fw-semibold" id="sh-stat-qty">—</div>
+                                   <div class="sh-metric-row-item">
+                                        <p class="sh-metric-label">Quantité totale</p>
+                                        <p class="sh-metric-value" id="sh-stat-qty">—</p>
                                    </div>
-                              </div>
-                         </div>
-                         <div class="col-md-3">
-                              <div class="card">
-                                   <div class="card-body">
-                                        <div class="text-muted small">Chiffre d'affaires (HT)</div>
-                                        <div class="fs-22 fw-semibold" id="sh-stat-revenue">—</div>
+                                   <div class="sh-metric-row-item">
+                                        <p class="sh-metric-label">Chiffre d'affaires (HT)</p>
+                                        <p class="sh-metric-value" id="sh-stat-revenue">—</p>
                                    </div>
-                              </div>
-                         </div>
-                         <div class="col-md-3">
-                              <div class="card">
-                                   <div class="card-body">
-                                        <div class="text-muted small">Chiffre d'affaires (TTC)</div>
-                                        <div class="fs-22 fw-semibold" id="sh-stat-revenue-ttc">—</div>
+                                   <div class="sh-metric-row-item">
+                                        <p class="sh-metric-label">Chiffre d'affaires (TTC)</p>
+                                        <p class="sh-metric-value" id="sh-stat-revenue-ttc">—</p>
                                    </div>
                               </div>
                          </div>
