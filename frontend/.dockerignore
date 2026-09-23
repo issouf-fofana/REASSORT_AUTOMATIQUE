@@ -29,3 +29,7 @@ react-app-ai-assistant/node_modules
 # Même raisonnement pour Mon accès / Guide IA (react-app-ai-guide/).
 react-app-ai-guide/dist
 react-app-ai-guide/node_modules
+
+# Même raisonnement pour Qualité & IA (react-app-ai-quality/).
+react-app-ai-quality/dist
+react-app-ai-quality/node_modules
