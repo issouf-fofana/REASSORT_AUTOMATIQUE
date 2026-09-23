@@ -4,18 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Paramètres | Réassort Automatique</title>
+    <title>Ventes synchronisées | Réassort Automatique</title>
 
-    <!-- Chemins ABSOLUS (pas relatifs à /settings-app/) : ces fichiers sont servis à la racine du
-         site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
+    <!-- Chemins ABSOLUS (pas relatifs à /sales-history-app/) : ces fichiers sont servis à la racine
+         du site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
     <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
     <link type="text/css" href="/assets/css/theme-override.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
+    <!-- AG Grid Community (même bundle/scripts que sales-history.old.html, réutilisés tels quels
+         plutôt que réécrits en ag-grid-react) : window.agGrid + window.REASSORT_AG_GRID_THEME_SOFT
+         + window.AG_GRID_LOCALE_FR + window.reassortAgGridToolbar consommés directement depuis
+         SalesHistory.tsx via un useRef, exactement comme le fait la page HTML classique. -->
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
+    <script src="/assets/js/ag-grid-setup.js"></script>
+    <script src="/assets/js/ag-grid-locale-fr.js"></script>
+    <script src="/assets/js/ag-grid-toolbar.js"></script>
+
     <!-- backend-config.js est généré au RUNTIME par docker-entrypoint.sh (pas au build Vite) à
          partir de la variable d'env BACKEND_URL — src/api/client.ts lit window.REASSORT_BACKEND_URL
-         qu'il pose, jamais une valeur figée au build (import.meta.env), pour rester cohérent avec le
-         reste du site où changer de domaine Dokploy ne nécessite jamais de reconstruire l'image. -->
+         qu'il pose, jamais une valeur figée au build (import.meta.env). -->
     <script src="/assets/js/config.js"></script>
     <script src="/assets/js/backend-config.js"></script>
     <!-- reassort-auth.js/shop-picker.js DOIVENT être chargés avant layout.js/global-shop-selector.js
@@ -27,12 +35,12 @@
     <script src="/assets/js/reassort-auth.js"></script>
     <script src="/assets/js/shop-picker.js"></script>
   </head>
-  <body data-page-title="Paramètres">
+  <body data-page-title="Ventes synchronisées">
     <script src="/assets/js/loading-overlay.js"></script>
 
     <!-- Sidebar/topbar partagées avec les pages HTML classiques (assets/partials/*.html, injectées
          par layout.js via XHR synchrone) : réutilisées à l'identique pour zéro divergence visuelle
-         avec les 19 autres pages tant qu'elles ne sont pas encore migrées. -->
+         avec les pages pas encore migrées. -->
     <div id="layout-sidebar-slot"></div>
     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
 
@@ -40,9 +48,6 @@
       <div id="layout-topbar-slot"></div>
       <script src="/assets/js/layout.js"></script>
       <script src="/assets/js/global-shop-selector.js"></script>
-      <!-- window.reassortConfirm/reassortToast (remplace confirm()/alert() natifs) — utilisé par la
-           section Sécurité (confirmation avant changement de clé JWT). -->
-      <script src="/assets/js/reassort-toast.js"></script>
 
       <div class="py-4">
         <div class="container-xxl">

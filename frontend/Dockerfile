@@ -19,6 +19,15 @@ RUN npm ci
 COPY react-app-dashboard/ .
 RUN npm run build
 
+# Stage de build de la page Ventes synchronisées migrée vers React (troisième page migrée, projet
+# Vite séparé même raison que ci-dessus).
+FROM node:20-alpine AS sales-history-builder
+WORKDIR /app
+COPY react-app-sales-history/package*.json ./
+RUN npm ci
+COPY react-app-sales-history/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -38,6 +47,10 @@ COPY --from=react-builder /app/dist /usr/share/nginx/html/settings-app
 # Résultat du build React (Dashboard admin), servi sous /dashboard-app/ par une règle nginx dédiée
 # (voir nginx.conf).
 COPY --from=dashboard-builder /app/dist /usr/share/nginx/html/dashboard-app
+
+# Résultat du build React (Ventes synchronisées), servi sous /sales-history-app/ par une règle
+# nginx dédiée (voir nginx.conf).
+COPY --from=sales-history-builder /app/dist /usr/share/nginx/html/sales-history-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

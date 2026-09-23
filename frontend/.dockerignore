@@ -13,3 +13,7 @@ react-app/node_modules
 # Même raisonnement pour le Dashboard admin (react-app-dashboard/).
 react-app-dashboard/dist
 react-app-dashboard/node_modules
+
+# Même raisonnement pour Ventes synchronisées (react-app-sales-history/).
+react-app-sales-history/dist
+react-app-sales-history/node_modules
