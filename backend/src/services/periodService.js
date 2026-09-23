@@ -1,10 +1,19 @@
 const rpos = require('./rposClient');
 const prisma = require('../utils/prisma');
 
+// Options ajoutées le 23/09/2026 (demande explicite : pouvoir analyser sur 2/3/4/6 mois, 1 an, ou
+// toutes les données disponibles, pas seulement hier/7j/30j). ALL_TIME n'a pas d'entrée ici — elle
+// n'a pas de nombre de jours fixe, elle remonte jusqu'à la toute première vente connue du magasin
+// (cf. resolvePeriod ci-dessous).
 const MODE_DAYS = {
   YESTERDAY: 1,
   LAST_7_DAYS: 7,
   LAST_30_DAYS: 30,
+  LAST_60_DAYS: 60,
+  LAST_90_DAYS: 90,
+  LAST_120_DAYS: 120,
+  LAST_180_DAYS: 180,
+  LAST_365_DAYS: 365,
 };
 
 /**
@@ -56,6 +65,25 @@ async function resolvePeriod(posId, shopId, config) {
     return {
       start: dayStart.toISOString().slice(0, 19),
       end: dayEnd.toISOString().slice(0, 19),
+      referenceDate: lastSaleDate,
+    };
+  }
+
+  // ALL_TIME (23/09/2026) : pas de nombre de jours fixe — remonte jusqu'à la toute première vente
+  // connue du magasin plutôt qu'une fenêtre glissante. En mode "sans réseau" (ignoreRposStockInCalculation),
+  // retombe sur la première vente LOCALE connue (même logique que lastSaleDate ci-dessus) : un seul
+  // appel RPOS de plus (getEarliestSaleDate) serait sinon nécessaire, hors réseau par définition.
+  if (config.periodMode === 'ALL_TIME') {
+    let earliestSaleDate;
+    if (config.ignoreRposStockInCalculation) {
+      const earliestLocal = await prisma.salesLine.findFirst({ where: { rposShopId: shopId }, orderBy: { date: 'asc' }, select: { date: true } });
+      earliestSaleDate = earliestLocal ? earliestLocal.date.toISOString() : lastSaleDate;
+    } else {
+      earliestSaleDate = await rpos.getEarliestSaleDate(posId, shopId);
+    }
+    return {
+      start: new Date(earliestSaleDate || lastSaleDate).toISOString().slice(0, 19),
+      end: new Date(lastSaleDate).toISOString().slice(0, 19),
       referenceDate: lastSaleDate,
     };
   }

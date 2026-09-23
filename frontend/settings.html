@@ -198,6 +198,12 @@
                                                        <option value="YESTERDAY">Hier</option>
                                                        <option value="LAST_7_DAYS">7 derniers jours</option>
                                                        <option value="LAST_30_DAYS">30 derniers jours</option>
+                                                       <option value="LAST_60_DAYS">2 mois</option>
+                                                       <option value="LAST_90_DAYS">3 mois</option>
+                                                       <option value="LAST_120_DAYS">4 mois</option>
+                                                       <option value="LAST_180_DAYS">6 mois</option>
+                                                       <option value="LAST_365_DAYS">1 an</option>
+                                                       <option value="ALL_TIME">Toutes les données disponibles</option>
                                                        <option value="CUSTOM">Période personnalisée</option>
                                                   </select>
                                                   <div class="alert alert-light border mt-2 mb-0 small">
@@ -207,7 +213,15 @@
                                                        pas depuis la date du jour — utile si le magasin est temporairement fermé, le calcul reste basé sur son
                                                        activité réelle plutôt que de ne rien trouver.<br>
                                                        <strong>Personnalisée :</strong> permet de fixer des dates fixes (ex: analyser uniquement décembre pour les
-                                                       fêtes), plutôt qu'une fenêtre glissante.
+                                                       fêtes), plutôt qu'une fenêtre glissante.<br>
+                                                       <strong>Toutes les données disponibles :</strong> remonte jusqu'à la toute première vente connue du
+                                                       magasin (peut prendre plus de temps à calculer si l'historique est long).
+                                                  </div>
+                                                  <div class="alert alert-warning mt-2 mb-0 small" id="config-period-long-warning" style="display:none;">
+                                                       <strong>Période longue sélectionnée :</strong> avec plusieurs mois ou années de données, une moyenne
+                                                       simple peut diluer une évolution récente (ex: un article qui vend plus depuis peu serait noyé dans un
+                                                       an d'historique). Pensez à activer la <strong>prévision par lissage exponentiel</strong> ci-dessous
+                                                       pour donner plus de poids aux ventes récentes.
                                                   </div>
                                              </div>
 
@@ -1686,9 +1700,15 @@
                               const periodModeSelect = document.getElementById('config-period-mode');
                               const customWrapper = document.getElementById('config-custom-period-wrapper');
 
-                              periodModeSelect.addEventListener('change', function () {
+                              // Périodes considérées "longues" (23/09/2026) : au-delà de ce seuil, une moyenne
+                              // simple risque de diluer une tendance récente — cf. alerte config-period-long-warning.
+                              const LONG_PERIOD_MODES = ['LAST_90_DAYS', 'LAST_120_DAYS', 'LAST_180_DAYS', 'LAST_365_DAYS', 'ALL_TIME'];
+                              function updatePeriodModeUI() {
                                    customWrapper.style.display = periodModeSelect.value === 'CUSTOM' ? '' : 'none';
-                              });
+                                   document.getElementById('config-period-long-warning').style.display =
+                                        LONG_PERIOD_MODES.includes(periodModeSelect.value) ? '' : 'none';
+                              }
+                              periodModeSelect.addEventListener('change', updatePeriodModeUI);
 
                               // Panneau Mode Auto : bascule visuellement en rouge pâle + badge "ACTIF" dès que
                               // l'activation est mise sur "Activé", pour que l'état le plus engageant (commande
@@ -1718,7 +1738,7 @@
                                         document.getElementById('config-pareto-threshold').value = Math.round(c.paretoThreshold * 100);
                                         document.getElementById('config-safety-ratio').value = Math.round(c.safetyStockRatio * 100);
                                         periodModeSelect.value = c.periodMode;
-                                        customWrapper.style.display = c.periodMode === 'CUSTOM' ? '' : 'none';
+                                        updatePeriodModeUI();
                                         if (c.customStart) document.getElementById('config-custom-start').value = c.customStart.slice(0, 10);
                                         if (c.customEnd) document.getElementById('config-custom-end').value = c.customEnd.slice(0, 10);
                                         document.getElementById('config-negative-stock').value = c.treatNegativeStockAsZero === false ? 'false' : 'true';

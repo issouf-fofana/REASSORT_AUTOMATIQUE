@@ -69,7 +69,9 @@ router.get('/config', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const config = await getConfig(shopId);
-    res.json({ success: true, data: { ...config, availablePeriodModes: Object.keys(MODE_DAYS).concat('CUSTOM') } });
+    // ALL_TIME (23/09/2026) : pas dans MODE_DAYS (pas de nombre de jours fixe, cf. periodService.js
+    // resolvePeriod), ajoutée explicitement ici pour apparaître dans le sélecteur.
+    res.json({ success: true, data: { ...config, availablePeriodModes: Object.keys(MODE_DAYS).concat(['ALL_TIME', 'CUSTOM']) } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
