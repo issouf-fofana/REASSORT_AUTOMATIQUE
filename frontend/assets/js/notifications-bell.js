@@ -36,11 +36,11 @@
       return;
     }
 
-    dropdown.innerHTML = '<a href="/ai-improvements" class="text-center text-primary fw-bold border-bottom border-light py-3 d-block">' +
+    dropdown.innerHTML = '<a href="/ai-quality#tab-corrections" class="text-center text-primary fw-bold border-bottom border-light py-3 d-block">' +
       items.length + ' constat(s) à relancer</a>' +
       '<div style="max-height: 320px; overflow-y: auto;">' +
       items.slice(0, 8).map(function (it) {
-        return '<a href="/ai-improvements" class="dropdown-item border-bottom border-light py-2 small">' +
+        return '<a href="/ai-quality#tab-corrections" class="dropdown-item border-bottom border-light py-2 small">' +
           '<div class="d-flex justify-content-between gap-2">' +
           '<span class="fw-semibold">' + esc(it.title) + '</span>' +
           '<span class="badge bg-warning-subtle text-warning flex-shrink-0">' + (PRIORITY_LABEL[it.priority] || it.priority) + '</span>' +
@@ -49,7 +49,7 @@
           '</a>';
       }).join('') +
       '</div>' +
-      (items.length > 8 ? '<a href="/ai-improvements" class="text-center small py-2 d-block border-top">Voir tout (' + items.length + ')</a>' : '');
+      (items.length > 8 ? '<a href="/ai-quality#tab-corrections" class="text-center small py-2 d-block border-top">Voir tout (' + items.length + ')</a>' : '');
   }
 
   async function loadStaleImprovements() {

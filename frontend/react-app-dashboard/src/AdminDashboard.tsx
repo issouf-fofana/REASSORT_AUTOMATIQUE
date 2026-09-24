@@ -233,7 +233,7 @@ export function AdminDashboard() {
                 <div className="metric-row-item">
                   <p className="metric-label">
                     Confiance IA{' '}
-                    <a href="/ai-autonomy" className="text-muted" title="Voir le détail (Mode Simulation)">
+                    <a href="/ai-quality#tab-autonomy" className="text-muted" title="Voir le détail (Mode Simulation)">
                       <iconify-icon icon="solar:square-top-down-bold-duotone"></iconify-icon>
                     </a>
                   </p>
@@ -253,7 +253,7 @@ export function AdminDashboard() {
               <div className="card">
                 <div className="card-header d-flex justify-content-between align-items-center">
                   <h4 className="card-title mb-0">Constats à traiter (Conseiller d'amélioration IA)</h4>
-                  <a href="/ai-improvements" className="small">
+                  <a href="/ai-quality#tab-corrections" className="small">
                     Voir tout &rarr;
                   </a>
                 </div>
