@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
 import { DepartmentListView } from './DepartmentListView';
-import { ProposalTable } from './ProposalTable';
+import { GenerationFlow } from './GenerationFlow';
+import { ProductAnalyticsModal } from './ProductAnalyticsModal';
+import { ProposalTable, type ProposalTableHandle } from './ProposalTable';
+import { ValidationFlow } from './ValidationFlow';
+import { WeeklyPlanHistoryModal } from './WeeklyPlanHistoryModal';
 import type { Proposal, ProposalHistoryItem, Shop } from './types';
 
 interface ExcludedItem {
@@ -15,7 +19,6 @@ export function PurchaseOrder() {
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
 
   const shopSelectRef = useRef<HTMLSelectElement>(null);
-  const listShopSelectRef = useRef<HTMLSelectElement>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [shopsError, setShopsError] = useState<string | null>(null);
   const [selectedShopId, setSelectedShopId] = useState('');
@@ -37,11 +40,15 @@ export function PurchaseOrder() {
 
   const [excludedModal, setExcludedModal] = useState<{ label: string; items: ExcludedItem[] | null; error: string | null } | null>(null);
   const [sufficiencyModal, setSufficiencyModal] = useState<string | null>(null);
+  const [analyticsArticle, setAnalyticsArticle] = useState<{ ean: string; productId: string; label: string } | null>(null);
+  const [weeklyPlanHistoryOpen, setWeeklyPlanHistoryOpen] = useState(false);
+  const proposalTableRef = useRef<ProposalTableHandle>(null);
+
+  const selectedShop = isSingleShop ? null : shops.find((s) => s.id === selectedShopId) || null;
 
   function selectedPosId(): string {
     if (isSingleShop) return user?.rposPosId || '';
-    const opt = shopSelectRef.current?.selectedOptions[0] as HTMLOptionElement | undefined;
-    return opt?.dataset.posId || '';
+    return selectedShop?.posId || '';
   }
 
   function shopQueryParam(): string {
@@ -60,19 +67,15 @@ export function PurchaseOrder() {
     if (shopId) params.set('shop', shopId);
     if (posId) params.set('pos', posId);
     const qs = params.toString();
-    return '/purchase-order' + (qs ? '?' + qs : '');
+    // Utilise le chemin courant (/purchase-order-preview pendant les tests, /purchase-order une
+    // fois la bascule faite) plutôt qu'un chemin figé — évite de renvoyer vers l'ancienne page HTML
+    // encore active sur /purchase-order tant que cette page React n'a pas remplacé la route finale.
+    return window.location.pathname + (qs ? '?' + qs : '');
   }
 
   function pageTitle(): string {
-    let shopName = user?.rposShopName;
-    let shopRef = user?.rposShopReference;
-    if (!isSingleShop) {
-      const opt = shopSelectRef.current?.selectedOptions[0] as HTMLOptionElement | undefined;
-      if (opt) {
-        shopName = opt.dataset.name;
-        shopRef = opt.dataset.reference;
-      }
-    }
+    const shopName = isSingleShop ? user?.rposShopName : selectedShop?.name;
+    const shopRef = isSingleShop ? user?.rposShopReference : selectedShop?.reference;
     if (!selectedSector && !selectedDepartment) {
       return 'Proposition de réassort' + (shopName ? ` — ${shopRef} (${shopName})` : '');
     }
@@ -153,40 +156,6 @@ export function PurchaseOrder() {
   }, []);
 
   useEffect(() => {
-    if (isSingleShop || shops.length === 0) return;
-    const select = shopSelectRef.current;
-    const listSelect = listShopSelectRef.current;
-    if (!select) return;
-
-    function handleChange() {
-      const val = select!.value;
-      setSelectedShopId(val);
-      if (listSelect) listSelect.value = val;
-    }
-    select.addEventListener('change', handleChange);
-    if (listSelect) {
-      listSelect.addEventListener('change', () => {
-        select!.value = listSelect.value;
-        handleChange();
-      });
-    }
-    if (urlParams.get('shop') && select.querySelector(`option[value="${urlParams.get('shop')}"]`)) {
-      select.value = urlParams.get('shop')!;
-      select.dataset.preselected = '1';
-      if (listSelect) {
-        listSelect.value = urlParams.get('shop')!;
-        listSelect.dataset.preselected = '1';
-      }
-    }
-    if (window.reassortMakeShopPickerSearchable) {
-      window.reassortMakeShopPickerSearchable(select);
-      if (listSelect) window.reassortMakeShopPickerSearchable(listSelect);
-    }
-    return () => select.removeEventListener('change', handleChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shops]);
-
-  useEffect(() => {
     if (!isSingleShop && !selectedShopId) return;
     loadPendingProposal();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,7 +186,119 @@ export function PurchaseOrder() {
   const sortedPosIds = Object.keys(byPos).sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
 
   const showListView = !selectedSector || !selectedDepartment;
-  const detailLines = proposal ? proposal.lines.filter((l) => (l.department || 'Sans rayon') === selectedDepartment) : [];
+  // useMemo (pas un simple .filter() à chaque rendu) : ProposalTable détruit et recrée
+  // ENTIÈREMENT la grille AG Grid quand sa prop `lines` change de référence (useEffect([lines])) —
+  // sans ceci, une nouvelle référence de tableau était produite à CHAQUE rendu de ce composant (y
+  // compris ceux déclenchés par la saisie d'une quantité via onTotalChange), détruisant la grille en
+  // plein milieu de la frappe et effaçant la quantité tout juste saisie, en dupliquant au passage la
+  // barre d'outils Colonnes/Filtres (reassortAgGridToolbar réinjectée dans le même conteneur sans
+  // avoir été nettoyée) — bug constaté le 24/09/2026.
+  const detailLines = useMemo(
+    () => (proposal ? proposal.lines.filter((l) => (l.department || 'Sans rayon') === selectedDepartment) : []),
+    [proposal, selectedDepartment],
+  );
+
+  // Câble le picker + synchronise avec le magasin actif global de la topbar, comme sur les autres
+  // pages migrées (cf. SalesHistory.tsx) : select NON contrôlé par React (value=state réécrirait le
+  // DOM à chaque rendu et entrerait en conflit avec shop-picker.js/global-shop-selector.js, qui
+  // manipulent ce <select> directement : selectEl.value = ...; dispatchEvent('change')). Dépend de
+  // `shops` et `showListView` (pas un setTimeout(0) fragile) pour re-câbler à chaque fois que ce
+  // <select> précis est (dé)monté (il n'existe que dans la vue Secteurs, pas dans le détail rayon).
+  useEffect(() => {
+    if (isSingleShop) return;
+    const select = shopSelectRef.current;
+    if (!select || shops.length === 0) return;
+
+    function handleNativeChange() {
+      setSelectedShopId(select!.value);
+    }
+    select.addEventListener('change', handleNativeChange);
+
+    if (window.reassortMakeShopPickerSearchable) {
+      window.reassortMakeShopPickerSearchable(select);
+    }
+
+    // Le magasin ACTIF DE LA TOPBAR gagne toujours sur le `?shop=` de l'URL : un lien profond
+    // partagé, un onglet resté ouvert ou un retour arrière du navigateur peut porter un `shop=`
+    // périmé, et le faire quand même gagner sur le sélecteur global visible à l'écran a trompé
+    // l'utilisateur le 24/09/2026 (topbar affichait 050, la page agissait sur 110 depuis une URL
+    // restée sur ce magasin) — risque réel d'agir sur le mauvais magasin. Le `?shop=` de l'URL ne
+    // sert donc plus qu'en tout dernier recours (aucun magasin actif connu du tout).
+    const urlShopId = urlParams.get('shop');
+    const activeShop = window.reassortGetActiveShop ? window.reassortGetActiveShop() : null;
+    const activeMatch = activeShop ? select.querySelector(`option[value="${activeShop.id}"]`) : null;
+    if (activeShop && activeMatch) {
+      if (select.value !== activeShop.id) select.value = activeShop.id;
+      setSelectedShopId(select.value);
+    } else if (urlShopId && select.querySelector(`option[value="${urlShopId}"]`)) {
+      if (select.value !== urlShopId) select.value = urlShopId;
+      setSelectedShopId(select.value);
+    } else if (select.value) {
+      // Aucun magasin global connu : repli sur la première option du <select> (comportement de
+      // secours, comme la page HTML d'origine sans sélection explicite).
+      setSelectedShopId(select.value);
+    }
+
+    return () => select.removeEventListener('change', handleNativeChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingleShop, shops, showListView]);
+
+  // Écoute GLOBALE du changement de magasin actif dans la topbar (reassortOnActiveShopChange),
+  // active quelle que soit la vue affichée — contrairement à l'effet ci-dessus, qui ne peut réagir
+  // que lorsque le <select> de la vue Secteurs est monté. Sans ceci, changer de magasin depuis la
+  // topbar PENDANT qu'on consulte le détail d'un rayon laissait la page sur l'ancien magasin (bug
+  // constaté le 24/09/2026 : topbar affichait 050 mais la modale de validation RPOS montrait encore
+  // les 480 articles de 110, avec l'ID de 110 dans l'URL) — risque réel d'envoyer une commande sur le
+  // mauvais magasin. Revient à la vue Secteurs du nouveau magasin plutôt que de rester sur un rayon
+  // qui n'a plus de sens pour lui.
+  const selectedShopIdRef = useRef(selectedShopId);
+  selectedShopIdRef.current = selectedShopId;
+
+  const hasSyncedInitialShopRef = useRef(false);
+
+  useEffect(() => {
+    if (isSingleShop) return;
+    function syncToActiveShop(shop: unknown) {
+      const activeShop = shop as { id: string } | null;
+      if (!activeShop) return;
+      // Lit la valeur COURANTE via la ref, jamais `selectedShopId` capturé par la closure au moment
+      // du montage de cet effet (qui ne se relance jamais, cf. deps `[isSingleShop]` ci-dessous) :
+      // sinon la comparaison reste figée sur '' pour toujours, et ce correctif se redéclenchait à
+      // chaque broadcast du sélecteur global, réinitialisant sector/dept en pleine navigation dans
+      // un rayon — bug constaté le 24/09/2026 juste après le correctif précédent (cliquer sur un
+      // secteur ne menait jamais nulle part, ramené aussitôt à la vue Secteurs).
+      if (activeShop.id === selectedShopIdRef.current) return;
+
+      // Au tout premier appel (montage), `selectedShopIdRef.current` vaut encore '' même quand le
+      // `?shop=` de l'URL correspond DÉJÀ au magasin actif (cas normal d'un lien profond valide,
+      // ex: retour depuis l'historique d'une génération) : comparer au `?shop=` de l'URL plutôt qu'à
+      // l'état React pas encore initialisé évite de réinitialiser sector/dept à tort dans ce cas —
+      // bug constaté le 24/09/2026 juste après le correctif "topbar prioritaire" (arriver sur un lien
+      // profond valide ramenait quand même à la vue Secteurs).
+      const isFirstSync = !hasSyncedInitialShopRef.current;
+      hasSyncedInitialShopRef.current = true;
+      const urlShopId = urlParams.get('shop');
+      const urlAlreadyMatches = isFirstSync && urlShopId === activeShop.id;
+
+      setSelectedShopId(activeShop.id);
+      if (!urlAlreadyMatches) {
+        setSelectedSector(null);
+        setSelectedDepartment(null);
+        window.history.pushState({}, '', window.location.pathname);
+      }
+    }
+    if (!window.reassortGetActiveShop || !window.reassortOnActiveShopChange) return;
+    // Vérifie aussi IMMÉDIATEMENT au montage (pas seulement sur un futur changement) : le
+    // désaccord entre l'URL et le magasin actif peut déjà exister à l'arrivée sur la page (lien
+    // profond périmé, retour arrière du navigateur), avant même qu'un événement de changement soit
+    // déclenché — c'est exactement le scénario qui a trompé l'utilisateur le 24/09/2026.
+    syncToActiveShop(window.reassortGetActiveShop());
+    window.reassortOnActiveShopChange(syncToActiveShop);
+    // reassortOnActiveShopChange n'a pas de désinscription (voir global-shop-selector.js) : accepté
+    // ici comme sur les autres pages migrées (ex: AiAssistant.tsx), la page vit tout le cycle de vie
+    // de l'onglet donc l'abonnement ne s'accumule pas au-delà d'un montage par session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingleShop]);
 
   function navigateTo(url: string) {
     window.history.pushState({}, '', url);
@@ -301,12 +382,12 @@ export function PurchaseOrder() {
               </div>
               {isSingleShop && user && <div className="text-muted small">{user.rposShopReference} — {user.rposShopName}</div>}
               {!isSingleShop && (
-                <select className="form-select form-select-sm mt-1" style={{ minWidth: 260 }} ref={listShopSelectRef} defaultValue="">
+                <select className="form-select form-select-sm mt-1" style={{ minWidth: 260 }} ref={shopSelectRef} defaultValue="">
                   <ShopOptions />
                 </select>
               )}
             </div>
-            <div className="d-flex gap-2 align-items-center">
+            <div className="d-flex gap-2 align-items-center flex-wrap">
               <label className="small text-muted mb-0">Génération</label>
               <select
                 className="form-select form-select-sm"
@@ -326,9 +407,22 @@ export function PurchaseOrder() {
                   ))
                 )}
               </select>
+              {proposal?.weeklyPlanId && (
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => setWeeklyPlanHistoryOpen(true)}>
+                  <iconify-icon icon="solar:history-bold-duotone" className="align-middle"></iconify-icon> Historique de la semaine
+                </button>
+              )}
               <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
                 Actualiser
               </button>
+              <GenerationFlow
+                shopId={isSingleShop ? user?.rposShopId || '' : selectedShopId}
+                shopReference={(isSingleShop ? user?.rposShopReference : selectedShop?.reference) || ''}
+                shopName={(isSingleShop ? user?.rposShopName : selectedShop?.name) || ''}
+                shopQueryParam={shopQueryParam()}
+                hasPendingProposal={!!proposal}
+                onDone={loadPendingProposal}
+              />
             </div>
           </div>
 
@@ -342,7 +436,7 @@ export function PurchaseOrder() {
             </div>
           )}
 
-          <DepartmentListView proposal={proposal} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onOpenExcluded={handleOpenExcluded} />
+          <DepartmentListView proposal={proposal} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
         </div>
       ) : (
         <div className="row">
@@ -363,30 +457,65 @@ export function PurchaseOrder() {
                 <div>
                   <h4 className="card-title">{pageTitle()}</h4>
                 </div>
-                <div className="d-flex gap-2 align-items-center">
+                <div className="d-flex gap-2 align-items-center flex-wrap">
                   <span className="text-muted small">{status}</span>
                   <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
                     Actualiser
                   </button>
-                  <button className="btn btn-sm btn-success" disabled title="Envoi à RPOS pas encore migré — utilisez /purchase-order.old.html en attendant">
-                    Valider et envoyer à RPOS
-                  </button>
+                  {!viewingPastGeneration && proposal && (
+                    <ValidationFlow
+                      proposalId={proposal.id}
+                      decisionsProvider={() => proposalTableRef.current?.getDecisions() || []}
+                      selectedDepartment={selectedDepartment}
+                      totalLines={proposal.lines.length}
+                      shopName={(isSingleShop ? user?.rposShopName : selectedShop?.name) || ''}
+                      shopQueryParam={shopQueryParam()}
+                      onValidated={() => {
+                        // Une fois validée, la proposition n'est plus "en attente" : rester sur la
+                        // vue détail d'un rayon qui n'a plus rien à afficher laissait l'utilisateur
+                        // devant un tableau vide sans explication (bug constaté le 24/09/2026).
+                        // Retour à la vue Secteurs (qui affichera "Aucune proposition en attente"
+                        // avec un message clair) plutôt que de rester sur un rayon désormais orphelin.
+                        navigateTo(buildNavUrl(selectedSector, null));
+                        loadPendingProposal();
+                      }}
+                    />
+                  )}
                 </div>
               </div>
 
               <div className="card-body">
-                <div className="alert alert-info small mb-3">
-                  Étape 1 de la migration React de cette page : consultation en lecture seule. L'envoi vers RPOS et la
-                  génération d'une nouvelle proposition restent à faire — utilisez{' '}
-                  <a href="/purchase-order.old.html">l'ancienne page</a> pour ces actions en attendant.
+                {viewingPastGeneration && (
+                  <div className="alert alert-warning small mb-3">
+                    Génération passée en lecture seule — ne peut pas être validée ni envoyée à RPOS.
+                  </div>
+                )}
+                <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                  {orderTotal > 0 && <p className="fw-semibold mb-0">Total commande : {orderTotal.toLocaleString('fr-FR')} CFA</p>}
+                  <div className="d-flex gap-2 ms-auto">
+                    <button className="btn btn-sm btn-outline-secondary" onClick={() => proposalTableRef.current?.selectAllToggle()}>
+                      Tout cocher/décocher
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline-secondary"
+                      onClick={() =>
+                        proposalTableRef.current?.exportCsv(
+                          (isSingleShop ? user?.rposShopReference : selectedShop?.reference) || 'magasin',
+                        )
+                      }
+                    >
+                      Exporter (CSV)
+                    </button>
+                  </div>
                 </div>
-                {orderTotal > 0 && <p className="fw-semibold">Total commande : {orderTotal.toLocaleString('fr-FR')} CFA</p>}
                 <ProposalTable
+                  ref={proposalTableRef}
                   proposal={proposal}
                   lines={detailLines}
                   shopId={isSingleShop ? user?.rposShopId || '' : selectedShopId}
-                  readOnly
-                  onOpenAnalytics={() => {}}
+                  shopQueryParam={shopQueryParam()}
+                  readOnly={viewingPastGeneration}
+                  onOpenAnalytics={setAnalyticsArticle}
                   onTotalChange={setOrderTotal}
                   onOpenSufficiency={setSufficiencyModal}
                 />
@@ -454,6 +583,14 @@ export function PurchaseOrder() {
           </div>
           <div className="modal-backdrop fade show"></div>
         </>
+      )}
+
+      {analyticsArticle && (
+        <ProductAnalyticsModal article={analyticsArticle} shopQueryParam={shopQueryParam()} onClose={() => setAnalyticsArticle(null)} />
+      )}
+
+      {weeklyPlanHistoryOpen && proposal?.weeklyPlanId && (
+        <WeeklyPlanHistoryModal weeklyPlanId={proposal.weeklyPlanId} onClose={() => setWeeklyPlanHistoryOpen(false)} />
       )}
     </div>
   );

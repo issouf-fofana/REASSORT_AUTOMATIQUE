@@ -1299,7 +1299,15 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
     });
 
     if (!excluded && quantity > 0) {
-      linesToOrder.push({ lineId: line.id, productId: line.productId, quantity, orderingUnit: line.orderingUnit, department: line.department || 'Sans rayon' });
+      linesToOrder.push({
+        lineId: line.id,
+        productId: line.productId,
+        quantity,
+        orderingUnit: line.orderingUnit,
+        department: line.department || 'Sans rayon',
+        ean: line.ean,
+        label: line.label,
+      });
     }
   }
 
@@ -1375,6 +1383,12 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
   // prolongeant d'autant la fenêtre où la commande RPOS reste incomplète côté fournisseur).
   let processed = 0;
   let failed = 0;
+  // Détail des lignes refusées PAR RPOS LUI-MÊME (ex: article non rattaché au fournisseur central
+  // pour ce magasin, cf. 400 constaté le 24/09/2026 sur "PAIN ARABE DIET PQT X7") : jusqu'ici
+  // seulement compté (`linesFailed`), jamais identifié — la commande se créait "avec succès" aux
+  // yeux de l'utilisateur alors qu'un article manquait silencieusement dedans. Capturé ici pour
+  // remonter jusqu'à l'UI un message explicite par article, pas juste un total.
+  const failedLines = [];
   const LINE_CONCURRENCY = 5;
   await mapWithConcurrency(lines, LINE_CONCURRENCY, async (line) => {
     try {
@@ -1386,6 +1400,8 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
       });
     } catch (err) {
       failed += 1;
+      const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+      failedLines.push({ ean: line.ean, label: line.label, reason: detail });
       console.error(`[validateProposal] Ligne échouée (produit ${line.productId}, rayon ${department}):`, err.message);
     }
     processed += 1;
@@ -1405,7 +1421,45 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
     }
   }
 
-  return { order, processed, failed, rposOrderValidated };
+  return { order, processed, failed, failedLines, rposOrderValidated };
+}
+
+/**
+ * Vérifie, AVANT l'envoi à RPOS, quelles lignes d'une proposition ne sont pas rattachées au
+ * fournisseur central côté RPOS — jusqu'ici découvert seulement APRÈS coup (RPOS refuse l'ajout de
+ * la ligne avec un 400 une fois la commande déjà créée, cf. createOrderForLines/failedLines),
+ * laissant l'utilisateur devant une commande RPOS bien réelle mais incomplète sans l'avoir su à
+ * l'avance (demande du 24/09/2026 : "il doit vérifier d'abord si l'article est lié au fournisseur
+ * central"). Réutilise getProductByEan (déjà utilisé ailleurs pour lire une fiche produit RPOS,
+ * jamais réécrit ici) : chaque fiche porte un champ `suppliers` (id, name, code) — comparé au code
+ * SUPPLIER_CENTRAL_CODE plutôt qu'à l'UUID résolu dynamiquement par magasin (getSupplierByCode),
+ * pour ne faire qu'un seul appel RPOS par article au lieu de deux.
+ */
+async function checkSupplierEligibility(posId, shopId, lines) {
+  const CONCURRENCY = 5;
+  const ineligible = [];
+  await mapWithConcurrency(lines, CONCURRENCY, async (line) => {
+    try {
+      const product = await rpos.getProductByEan(posId, shopId, line.ean);
+      const suppliers = product?.suppliers || [];
+      const isLinked = suppliers.some((s) => s.code === SUPPLIER_CENTRAL_CODE);
+      if (!isLinked) {
+        ineligible.push({
+          lineId: line.id,
+          ean: line.ean,
+          label: line.label,
+          currentSuppliers: suppliers.map((s) => s.name).join(', ') || 'aucun',
+        });
+      }
+    } catch (err) {
+      // Un aléa réseau RPOS sur cette vérification préalable ne doit jamais bloquer toute la
+      // validation (elle reste un avertissement, pas un contrôle de sécurité) : silencieux ici,
+      // l'échec réel (si l'article a vraiment un problème) sera de toute façon rattrapé au moment
+      // de l'envoi réel par createOrderForLines.
+      console.warn(`[checkSupplierEligibility] Vérification échouée pour l'EAN ${line.ean}: ${err.message}`);
+    }
+  });
+  return ineligible;
 }
 
 async function runValidationInBackground({ proposalId, posId, shopId, userEmail, linesToOrder, orderHeader, validateAfterCreate, splitByDepartment, receptionLeadTimeDays }) {
@@ -1441,13 +1495,22 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
     });
 
     try {
-      const { order, processed, failed, rposOrderValidated } = await createOrderForLines(
+      const { order, processed, failed, failedLines, rposOrderValidated } = await createOrderForLines(
         posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate
       );
 
       // Statut métier de réception initial : EN_ATTENTE_RECEPTION si transmise à l'entrepôt
       // (validée sur RPOS), sinon COMMANDEE (créée mais encore "en préparation" côté RPOS).
       const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
+
+      // Un ou plusieurs articles refusés PAR RPOS (mais pas tous : la commande existe quand même)
+      // ne doit jamais rester invisible pour l'utilisateur — la commande semblait "créée avec
+      // succès" alors qu'un article manquait dedans (constaté le 24/09/2026 avec "PAIN ARABE DIET
+      // PQT X7", non rattaché au fournisseur central sur RPOS pour ce magasin). Résumé lisible
+      // stocké sur errorMessage même quand status reste DONE (partiel, pas un échec total).
+      const failedLinesSummary = failedLines.length
+        ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
+        : null;
 
       await prisma.proposalOrder.update({
         where: { id: proposalOrder.id },
@@ -1460,6 +1523,7 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
           receptionStatus,
           lastRposStatus: rposOrderValidated ? 2 : 1,
           lastSyncedAt: new Date(),
+          errorMessage: failedLinesSummary,
         },
       });
 
@@ -2165,4 +2229,5 @@ module.exports = {
   getAiDecisionLog,
   getProductByEanCached,
   attachOrderAnomaliesToLines,
+  checkSupplierEligibility,
 };

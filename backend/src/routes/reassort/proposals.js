@@ -13,6 +13,7 @@ const {
   startProposalValidation,
   getProposalStatus,
   attachOrderAnomaliesToLines,
+  checkSupplierEligibility,
 } = require('../../services/proposalService');
 const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../../services/weeklyPlanService');
 const { getConfig } = require('../../services/configService');
@@ -370,6 +371,39 @@ router.get('/proposal/:id', async (req, res) => {
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
     proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
     res.json({ success: true, data: proposal });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/proposal/:id/supplier-check - vérifie AVANT l'envoi lesquelles des lignes
+// sélectionnées ne sont pas rattachées au fournisseur central côté RPOS (demande du 24/09/2026,
+// suite à une commande créée avec un article silencieusement absent car refusé par RPOS après
+// coup). body: { decisions: [{ lineId, excluded }] } — mêmes décisions que /validate, pour ne
+// vérifier que les lignes qui seraient réellement envoyées.
+router.post('/proposal/:id/supplier-check', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const { decisions } = req.body;
+    if (!Array.isArray(decisions)) {
+      return res.status(400).json({ success: false, message: 'decisions est requis' });
+    }
+
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { lines: true } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+
+    const decisionByLineId = new Map(decisions.map((d) => [d.lineId, d]));
+    const linesToCheck = proposal.lines.filter((line) => {
+      const decision = decisionByLineId.get(line.id);
+      return !(decision && decision.excluded);
+    });
+
+    const ineligible = await checkSupplierEligibility(posId, shopId, linesToCheck);
+    res.json({ success: true, data: { ineligible } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -26,11 +26,24 @@ function accentColorFor(pct: number): string {
   return '#c9ccd1';
 }
 
-function DeptTile({ name, d, href }: { name: string; d: GroupData; href: string }) {
+function DeptTile({ name, d, href, onNavigate }: { name: string; d: GroupData; href: string; onNavigate: (href: string) => void }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
   return (
     <div className="col-md-4 col-lg-3">
-      <a href={href} className="card text-decoration-none h-100 reassort-dept-tile" style={{ '--tile-accent': accentColorFor(d.revenuePct) } as React.CSSProperties}>
+      <a
+        href={href}
+        className="card text-decoration-none h-100 reassort-dept-tile"
+        style={{ '--tile-accent': accentColorFor(d.revenuePct) } as React.CSSProperties}
+        onClick={(e) => {
+          // Empêche un vrai rechargement de page (perdrait tout l'état React déjà chargé — proposal,
+          // shops, etc.) au profit d'une navigation SPA via history.pushState, exactement comme les
+          // flèches "retour" du composant parent — oublié ici lors de la première écriture de ce
+          // composant, ce qui faisait sembler les tuiles totalement inertes (24/09/2026).
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // laisse ouvrir dans un nouvel onglet si demandé
+          e.preventDefault();
+          onNavigate(href);
+        }}
+      >
         <div className="card-body">
           <h5 className="card-title mb-1">{name}</h5>
           <div className="text-muted small mb-2">{d.count} article(s)</div>
@@ -130,7 +143,7 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
     revenuePeriodLabel = revStart.toDateString() === revEnd.toDateString() ? ` (${fmtDate(proposal.revenueShareStart)})` : ` (du ${fmtDate(proposal.revenueShareStart)} au ${fmtDate(proposal.revenueShareEnd)})`;
   }
 
-  const showCoverageWarning = proposal.coverageGapDays && proposal.coverageGapDays > 1 && proposal.actualDataStart;
+  const showCoverageWarning = !!(proposal.coverageGapDays && proposal.coverageGapDays > 1 && proposal.actualDataStart);
 
   return (
     <div className="alert alert-light border small mb-3">
@@ -160,11 +173,13 @@ export function DepartmentListView({
   proposal,
   selectedSector,
   buildNavUrl,
+  onNavigate,
   onOpenExcluded,
 }: {
   proposal: Proposal | null;
   selectedSector: string | null;
   buildNavUrl: (sector: string | null, dept: string | null) => string;
+  onNavigate: (href: string) => void;
   onOpenExcluded: (proposalId: string, reason: string, label: string) => void;
 }) {
   const lines = proposal ? proposal.lines : [];
@@ -196,7 +211,7 @@ export function DepartmentListView({
       <DeptListContext proposal={proposal!} />
       <div className="row g-3">
         {tiles.map(([name, d, href]) => (
-          <DeptTile name={name} d={d} href={href} key={name} />
+          <DeptTile name={name} d={d} href={href} onNavigate={onNavigate} key={name} />
         ))}
         {proposal && (
           <RemainderTile proposal={proposal} rawGroups={groups} onOpenExcluded={(reason, label) => onOpenExcluded(proposal.id, reason, label)} />

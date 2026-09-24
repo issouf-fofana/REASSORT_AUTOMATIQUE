@@ -19,6 +19,9 @@ declare global {
     // Panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js) : self-contained,
     // jamais réécrit en React ici (voir react-app-ai-predictions, qui l'utilise aussi).
     openAiRecommendationPanel?: (item: Record<string, unknown>) => void;
+    // Chargé via <script> classique dans index.html (cdn.jsdelivr.net) — jamais le package
+    // npm apexcharts, pour rester cohérent avec le chargement des 19 pages HTML encore actives.
+    ApexCharts: new (el: Element, options: Record<string, unknown>) => { render: () => void; destroy: () => void };
   }
 }
 

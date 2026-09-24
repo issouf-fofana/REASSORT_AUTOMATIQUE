@@ -1,6 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { apiFetch } from './api/client';
 import type { LineState, Proposal, ProposalLine } from './types';
+
+export interface ProposalTableHandle {
+  getDecisions: () => { lineId: string; quantity: number; excluded: boolean; price: number }[];
+  selectAllToggle: () => void;
+  exportCsv: (shopReference: string) => void;
+}
 
 function lineUnit(l: ProposalLine): number {
   return Number(l.orderingUnit) || 1;
@@ -119,23 +125,25 @@ function lastSaleCellRenderer(params: any) {
   return span;
 }
 
-export function ProposalTable({
-  proposal,
-  lines,
-  shopId,
-  readOnly,
-  onOpenAnalytics,
-  onTotalChange,
-  onOpenSufficiency,
-}: {
+export const ProposalTable = forwardRef<ProposalTableHandle, {
   proposal: Proposal | null;
   lines: ProposalLine[];
   shopId: string;
+  shopQueryParam: string;
   readOnly: boolean;
   onOpenAnalytics: (article: { ean: string; productId: string; label: string }) => void;
   onTotalChange: (total: number) => void;
   onOpenSufficiency: (reasoning: string) => void;
-}) {
+}>(function ProposalTable({
+  proposal,
+  lines,
+  shopId,
+  shopQueryParam,
+  readOnly,
+  onOpenAnalytics,
+  onTotalChange,
+  onOpenSufficiency,
+}, ref) {
   const gridDivRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const gridApiRef = useRef<any>(null);
@@ -355,8 +363,30 @@ export function ProposalTable({
           onOpenSufficiency(osBadge.dataset.reasoning || '');
         }
       },
+      // Force AG Grid à re-mesurer la largeur réelle de son conteneur juste après le montage : en
+      // navigation SPA (history.pushState, sans rechargement complet de la page), le calcul initial
+      // des colonnes peut avoir lieu avant que la sidebar/topbar aient fini de se stabiliser après le
+      // changement de vue, produisant des colonnes EAN/Article visuellement chevauchées — jamais
+      // reproduit sur l'ancienne page HTML, qui recharge entièrement le DOM à chaque navigation et
+      // ne mesure donc jamais un conteneur encore en transition (bug constaté le 24/09/2026).
+      onGridReady: () => {
+        // AG Grid mesure son propre conteneur via un ResizeObserver interne, mais si la sidebar ou
+        // la topbar continuent d'animer/se stabiliser juste après ce montage (navigation SPA), sa
+        // première mesure peut être prise sur une largeur transitoire sans qu'un nouveau resize ne
+        // soit jamais détecté ensuite. Un `resize` explicite, après laisser le DOM se stabiliser,
+        // force AG Grid à re-mesurer une dernière fois sur la largeur réellement finale.
+        requestAnimationFrame(() => {
+          setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+        });
+      },
     });
     if (toolbarRef.current) {
+      // reassortAgGridToolbar AJOUTE ses boutons sans jamais vider le conteneur au préalable (voir
+      // ag-grid-toolbar.js) — filet de sécurité en plus du useMemo sur `lines` côté PurchaseOrder.tsx
+      // qui évite l'essentiel des recréations de grille : si ensureGrid() est malgré tout rappelé
+      // sur ce même conteneur, on repart d'un conteneur vide plutôt que d'empiler les boutons
+      // Colonnes/Filtres à l'infini (bug constaté le 24/09/2026).
+      toolbarRef.current.innerHTML = '';
       window.reassortAgGridToolbar(gridApiRef.current, toolbarRef.current);
     }
     return gridApiRef.current;
@@ -373,7 +403,7 @@ export function ProposalTable({
         const saleSpan = document.querySelector<HTMLSpanElement>(`.last-sale-result[data-product-id="${span.dataset.productId}"]`);
         try {
           const data = await apiFetch<{ lastPurchase: { date: string; quantity: number } | null; lastSale: { date: string; quantity: number } | null }>(
-            `/reassort/product/${span.dataset.productId}/last-purchase?shop=${encodeURIComponent(shopId)}&ean=${encodeURIComponent(span.dataset.ean || '')}`,
+            `/reassort/product/${span.dataset.productId}/last-purchase?${shopQueryParam}&ean=${encodeURIComponent(span.dataset.ean || '')}`,
           );
           span.textContent = data.lastPurchase ? `${new Date(data.lastPurchase.date).toLocaleDateString('fr-FR')} — qté ${data.lastPurchase.quantity}` : 'Aucun achat trouvé';
           if (saleSpan) {
@@ -387,6 +417,36 @@ export function ProposalTable({
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
   }
+
+  useImperativeHandle(ref, () => ({
+    getDecisions() {
+      // Toutes les lignes de LA PROPOSITION ENTIÈRE, pas seulement `lines` (filtrées par rayon
+      // sélectionné) : reproduit le comportement de l'ancienne page HTML (validateProposal), où une
+      // ligne jamais affichée dans cette session garde sa valeur par défaut (quantitySuggested,
+      // incluse ssi > 0) au lieu d'être silencieusement absente de la commande envoyée à RPOS — bug
+      // constaté le 24/09/2026 : valider depuis la vue d'un seul rayon envoyait une commande sans les
+      // articles des autres rayons de la même proposition.
+      const allLines = proposal ? proposal.lines : lines;
+      return allLines.map((l) => {
+        const st = getLineState(l);
+        return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0 };
+      });
+    },
+    selectAllToggle() {
+      const allExcluded = lines.every((l) => getLineState(l).excluded);
+      lines.forEach((l) => {
+        getLineState(l).excluded = !allExcluded;
+      });
+      gridApiRef.current?.refreshCells({ force: true });
+      updateOrderTotal();
+    },
+    exportCsv(shopReference: string) {
+      if (!gridApiRef.current) return;
+      gridApiRef.current.exportDataAsCsv({
+        fileName: `proposition-commande-${shopReference}-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    },
+  }));
 
   useEffect(() => {
     lineStateRef.current.clear();
@@ -410,4 +470,4 @@ export function ProposalTable({
       <div ref={gridDivRef} id="reassort-grid"></div>
     </div>
   );
-}
+});

@@ -46,6 +46,18 @@ react-app-project-guide/node_modules
 react-app-purchase-list/dist
 react-app-purchase-list/node_modules
 
-# Même raisonnement pour Proposition de commande, en cours de migration (react-app-purchase-order/).
+# Même raisonnement pour Proposition de commande (react-app-purchase-order/).
 react-app-purchase-order/dist
 react-app-purchase-order/node_modules
+
+# Même raisonnement pour Tableau de bord (react-app-tableau-de-bord/).
+react-app-tableau-de-bord/dist
+react-app-tableau-de-bord/node_modules
+
+# Même raisonnement pour Mémoire du modèle (react-app-ai-mastery/).
+react-app-ai-mastery/dist
+react-app-ai-mastery/node_modules
+
+# Même raisonnement pour Anomalies de commande (react-app-order-anomalies/).
+react-app-order-anomalies/dist
+react-app-order-anomalies/node_modules
