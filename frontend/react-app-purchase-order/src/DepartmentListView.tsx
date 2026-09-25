@@ -26,6 +26,27 @@ function accentColorFor(pct: number): string {
   return '#c9ccd1';
 }
 
+// Icône décorative par secteur/rayon : purement esthétique (aucune logique métier), une
+// correspondance mot-clé raisonnable suffit — un rayon non reconnu retombe sur une icône neutre.
+const SECTOR_ICON_BY_KEYWORD: [string, string][] = [
+  ['sec', 'solar:box-bold-duotone'],
+  ['frais', 'solar:leaf-bold-duotone'],
+  ['bazar', 'solar:bag-smile-bold-duotone'],
+  ['textile', 'solar:t-shirt-bold-duotone'],
+  ['liquide', 'solar:bottle-bold-duotone'],
+  ['boisson', 'solar:cup-hot-bold-duotone'],
+  ['hygiène', 'solar:health-bold-duotone'],
+  ['hygiene', 'solar:health-bold-duotone'],
+  ['entretien', 'solar:spray-can-bold-duotone'],
+  ['surgel', 'solar:snowflake-bold-duotone'],
+];
+
+function sectorIcon(name: string): string {
+  const key = name.toLowerCase();
+  const match = SECTOR_ICON_BY_KEYWORD.find(([kw]) => key.includes(kw));
+  return match ? match[1] : 'solar:widget-2-bold-duotone';
+}
+
 function DeptTile({ name, d, href, onNavigate }: { name: string; d: GroupData; href: string; onNavigate: (href: string) => void }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
   return (
@@ -45,8 +66,11 @@ function DeptTile({ name, d, href, onNavigate }: { name: string; d: GroupData; h
         }}
       >
         <div className="card-body">
+          <div className="tile-icon">
+            <iconify-icon icon={sectorIcon(name)}></iconify-icon>
+          </div>
           <h5 className="card-title mb-1">{name}</h5>
-          <div className="text-muted small mb-2">{d.count} article(s)</div>
+          <div className="tile-count">{d.count} article(s)</div>
           <div className="tile-pct">
             {d.revenuePct.toFixed(1)}
             <span className="fs-14 fw-normal text-muted"> % CA</span>
@@ -89,8 +113,11 @@ function RemainderTile({
     <div className="col-md-4 col-lg-3">
       <div className="card h-100 reassort-dept-tile" style={{ '--tile-accent': '#c9ccd1', borderStyle: 'dashed', opacity: 0.92 } as React.CSSProperties}>
         <div className="card-body">
+          <div className="tile-icon">
+            <iconify-icon icon="solar:pie-chart-2-bold-duotone"></iconify-icon>
+          </div>
           <h5 className="card-title mb-1 text-muted">Reste du CA magasin</h5>
-          <div className="text-muted small mb-2">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>
+          <div className="tile-count">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>
           <div className="tile-pct text-secondary">
             {remainderPct.toFixed(1)}
             <span className="fs-14 fw-normal text-muted"> % CA</span>

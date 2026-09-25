@@ -1,18 +1,31 @@
 import { useEffect, useState } from 'react';
+import {
+  Settings,
+  Folder,
+  Server,
+  Clock,
+  RefreshCw,
+  Sparkles,
+  Mail,
+} from 'lucide-react';
+
+import { NotchTabBar } from '@/components/ui/NotchTabBar';
 import { ReassortConfigSection } from './ReassortConfigSection';
 import { SalesFilesSection } from './SalesFilesSection';
 import { RposSecuritySection } from './RposSecuritySection';
 import { SchedulingSection } from './SchedulingSection';
 import { SyncSection } from './SyncSection';
 import { AiSection } from './AiSection';
+import { MailSection } from './MailSection';
 
 const TABS = [
-  { id: 'tab-reassort', label: 'Réassort', icon: 'solar:tuning-2-bold-duotone' },
-  { id: 'tab-files', label: 'Fichiers de ventes', icon: 'solar:folder-bold-duotone' },
-  { id: 'tab-rpos', label: 'RPOS & Sécurité', icon: 'solar:server-square-bold-duotone' },
-  { id: 'tab-cron', label: 'Planification', icon: 'solar:clock-circle-bold-duotone' },
-  { id: 'tab-sync', label: 'Synchronisation des ventes', icon: 'solar:refresh-square-bold-duotone' },
-  { id: 'tab-ai', label: 'IA', icon: 'solar:magic-stick-3-bold-duotone' },
+  { id: 'tab-reassort', label: 'Réassort', icon: Settings },
+  { id: 'tab-files', label: 'Fichiers de ventes', icon: Folder },
+  { id: 'tab-rpos', label: 'RPOS & Sécurité', icon: Server },
+  { id: 'tab-cron', label: 'Planification', icon: Clock },
+  { id: 'tab-sync', label: 'Synchronisation', icon: RefreshCw },
+  { id: 'tab-ai', label: 'IA', icon: Sparkles },
+  { id: 'tab-mail', label: 'Comptes mail', icon: Mail },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -23,11 +36,9 @@ function tabFromHash(): TabId {
 }
 
 /**
- * Reproduit la barre d'onglets Bootstrap + le routage par hash (#tab-xxx) de settings.old.html
- * (openTabFromHash/hashchange) — les liens de la sidebar pointent déjà vers /settings#tab-xxx,
- * ce routage doit rester compatible sans modifier la sidebar. Contrairement à l'ancienne page, les
- * 6 onglets sont toujours visibles ici : AdminGuard bloque déjà tout le composant aux non-ADMIN,
- * la logique de masquage par rôle par onglet (réservée à ADMIN de toute façon) n'a plus lieu d'être.
+ * Barre de navigation en style NotchTabBar (boutons pill avec indicateur actif)
+ * remplace la barre d'onglets Bootstrap nav-tabs de l'ancienne page settings.old.html.
+ * Le routage par hash (#tab-xxx) reste compatible avec les liens de la sidebar.
  */
 export function SettingsTabs() {
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash());
@@ -47,24 +58,13 @@ export function SettingsTabs() {
 
   return (
     <div>
-      <ul className="nav nav-tabs nav-bordered mb-4" role="tablist">
-        {TABS.map((tab) => (
-          <li className="nav-item" key={tab.id}>
-            <a
-              className={`nav-link ${activeTab === tab.id ? 'active' : ''}`}
-              href={`#${tab.id}`}
-              role="tab"
-              onClick={(e) => {
-                e.preventDefault();
-                selectTab(tab.id);
-              }}
-            >
-              <iconify-icon icon={tab.icon} className="fs-18 align-middle me-1"></iconify-icon>
-              {tab.label}
-            </a>
-          </li>
-        ))}
-      </ul>
+      <div className="mb-6">
+        <NotchTabBar
+          tabs={TABS}
+          activeId={activeTab}
+          onActiveChange={(id) => selectTab(id as TabId)}
+        />
+      </div>
 
       <div className="tab-content">
         {activeTab === 'tab-reassort' && (
@@ -95,6 +95,11 @@ export function SettingsTabs() {
         {activeTab === 'tab-ai' && (
           <div className="tab-pane show active">
             <AiSection />
+          </div>
+        )}
+        {activeTab === 'tab-mail' && (
+          <div className="tab-pane show active">
+            <MailSection />
           </div>
         )}
       </div>

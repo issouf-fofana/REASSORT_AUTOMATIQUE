@@ -127,8 +127,6 @@ function ImprovementCard({
       <div className="card-body">
         <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
           <span className={`badge ${p.badge}`}>Priorité {p.label}</span>
-          <span className="badge bg-light text-dark border">{imp.severity}</span>
-          <span className="badge bg-light text-dark border">{imp.type}</span>
           <span className="badge bg-secondary">{STATUS_LABEL[imp.status] || imp.status}</span>
           {imp.aiConfidence != null && <span className="badge bg-light text-dark border">Confiance IA {imp.aiConfidence}%</span>}
           <span className="small text-muted ms-auto">{fmtDate(imp.createdAt)}</span>

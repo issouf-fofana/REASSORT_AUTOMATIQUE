@@ -17,35 +17,34 @@ function fmtNum(n: number): number {
 
 function AnomalyCard({ a, onAction }: { a: OrderAnomaly; onAction: (id: string, status: 'ACKNOWLEDGED' | 'DISMISSED') => void }) {
   return (
-    <div className="card mb-2">
-      <div className="card-body">
-        <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
-          <div>
-            <span className={`badge oa-badge-${a.direction}`}>{DIRECTION_LABEL[a.direction] || a.direction}</span>{' '}
-            <span className="badge bg-secondary">{STATUS_LABEL[a.status] || a.status}</span>
+    <div className="oa-card">
+      <div className={`oa-card-icon oa-card-icon-${a.direction}`}>
+        <iconify-icon icon={a.direction === 'HIGH' ? 'solar:double-alt-arrow-up-bold-duotone' : 'solar:double-alt-arrow-down-bold-duotone'}></iconify-icon>
+      </div>
+      <div className="oa-card-body">
+        <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-1">
+          <div className="d-flex flex-wrap gap-2 align-items-center">
+            <span className={`oa-direction-badge oa-direction-${a.direction}`}>{DIRECTION_LABEL[a.direction] || a.direction}</span>
+            <span className="oa-status-badge">{STATUS_LABEL[a.status] || a.status}</span>
           </div>
-          <span className="small text-muted">{fmtDate(a.detectedAt)}</span>
+          <span className="oa-date">{fmtDate(a.detectedAt)}</span>
         </div>
-        <div className="mt-2 fw-semibold">
-          {a.label || a.ean} <span className="text-muted small">({a.ean})</span>
+        <div className="oa-article">
+          {a.label || a.ean} <span className="oa-ean">({a.ean})</span>
         </div>
-        <div className="small text-muted mt-1">
+        <div className="oa-shop">
           Magasin : {a.shopReference ? `${a.shopReference}${a.shopName ? ' — ' + a.shopName : ''}` : a.rposShopId}
         </div>
-        <div className="mt-2">
+        <div className="oa-figures">
           Quantité proposée : <strong>{fmtNum(a.newQuantity)}</strong> — habituellement entre <strong>{fmtNum(a.historicalMin)}</strong> et{' '}
           <strong>{fmtNum(a.historicalMax)}</strong> (moyenne {fmtNum(a.historicalMean)}, sur {a.sampleSize} commande(s) passée(s))
         </div>
-        {a.contextNote && (
-          <div className="small text-muted mt-2">
-            <em>Note : {a.contextNote}</em>
-          </div>
-        )}
+        {a.contextNote && <div className="oa-note">Note : {a.contextNote}</div>}
         {a.status === 'PENDING' && (
           <div className="mt-3">
-            <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => onAction(a.id, 'ACKNOWLEDGED')}>
+            <button type="button" className="btn btn-sm btn-outline-dark me-2" onClick={() => onAction(a.id, 'ACKNOWLEDGED')}>
               Accepter
-            </button>{' '}
+            </button>
             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => onAction(a.id, 'DISMISSED')}>
               Ignorer
             </button>
@@ -108,32 +107,61 @@ export function OrderAnomalies() {
   return (
     <div>
       <style>{`
-        .oa-badge-HIGH { background-color: #fd7e14; }
-        .oa-badge-LOW { background-color: #dc3545; }
+        .oa-intro {
+          background: #fafafa; border: 1px solid #ececec; border-radius: 12px;
+          padding: 1.1rem 1.35rem; margin-bottom: 1.5rem; font-size: .87rem; color: #444444; line-height: 1.6;
+        }
+        .oa-intro strong { color: #000000; }
+
+        .oa-toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+        .oa-toolbar select { max-width: 220px; }
+        .oa-toolbar-count { color: #9198a1; font-size: .82rem; margin-left: auto; }
+
+        .oa-card {
+          display: flex; gap: 1rem;
+          background: #ffffff; border: 1px solid #ececec; border-radius: 14px;
+          padding: 1.15rem 1.35rem; margin-bottom: 1rem;
+          box-shadow: 0 1px 2px rgba(20, 20, 20, .03);
+          transition: box-shadow .2s ease, border-color .2s ease;
+        }
+        .oa-card:hover { box-shadow: 0 4px 16px rgba(20, 20, 20, .06); border-color: #e2e4e7; }
+        .oa-card-icon {
+          width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+        }
+        .oa-card-icon-HIGH { background: #fdf0e3; color: #d68910; }
+        .oa-card-icon-LOW { background: #fdecea; color: #c0392b; }
+        .oa-card-body { min-width: 0; flex: 1; }
+
+        .oa-direction-badge { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: .25rem .65rem; border-radius: 999px; }
+        .oa-direction-HIGH { background: #fdf0e3; color: #b9770e; }
+        .oa-direction-LOW { background: #fdecea; color: #c0392b; }
+        .oa-status-badge { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: #6c757d; background: #f1f2f4; padding: .25rem .65rem; border-radius: 999px; }
+        .oa-date { font-size: .78rem; color: #9198a1; }
+
+        .oa-article { font-weight: 700; font-size: .95rem; color: #17181a; margin-top: .5rem; }
+        .oa-ean { color: #9198a1; font-size: .82rem; font-weight: 400; }
+        .oa-shop { font-size: .82rem; color: #6c757d; margin-top: .2rem; }
+        .oa-figures { font-size: .88rem; color: #2c2d30; margin-top: .6rem; }
+        .oa-note { font-size: .82rem; color: #6c757d; font-style: italic; margin-top: .6rem; }
       `}</style>
 
-      <div className="card mb-3">
-        <div className="card-body">
-          <div className="alert alert-light border small mb-0">
-            <strong>À quoi ça sert :</strong> chaque fois qu'une quantité proposée pour un article s'écarte significativement de l'historique des
-            quantités déjà validées pour ce même article, une anomalie apparaît ici — <strong>trop haute</strong> (risque de surstock) ou{' '}
-            <strong>trop basse</strong> (risque de rupture malgré la commande). Une anomalie ne signifie jamais "erreur" : elle signale seulement
-            un écart par rapport à l'habitude — une promotion, une reprise d'activité ou un événement particulier peut parfaitement l'expliquer.
-            Vérifiez le contexte avant de valider la commande concernée.
-          </div>
-        </div>
+      <div className="oa-intro">
+        <strong>À quoi ça sert :</strong> chaque fois qu'une quantité proposée pour un article s'écarte significativement de l'historique des
+        quantités déjà validées pour ce même article, une anomalie apparaît ici — <strong>trop haute</strong> (risque de surstock) ou{' '}
+        <strong>trop basse</strong> (risque de rupture malgré la commande). Une anomalie ne signifie jamais "erreur" : elle signale seulement
+        un écart par rapport à l'habitude — une promotion, une reprise d'activité ou un événement particulier peut parfaitement l'expliquer.
+        Vérifiez le contexte avant de valider la commande concernée.
       </div>
 
-      <div className="card mb-3">
-        <div className="card-body d-flex flex-wrap gap-2 align-items-center">
-          <select className="form-select" style={{ maxWidth: 200 }} value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">Toutes (sauf traitées)</option>
-            <option value="PENDING">À vérifier</option>
-            <option value="ACKNOWLEDGED">Acceptées</option>
-            <option value="DISMISSED">Ignorées</option>
-          </select>
-          <span className="small text-muted ms-auto">{rows ? `${rows.length} anomalie(s)` : ''}</span>
-        </div>
+      <div className="oa-toolbar">
+        <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">Toutes (sauf traitées)</option>
+          <option value="PENDING">À vérifier</option>
+          <option value="ACKNOWLEDGED">Acceptées</option>
+          <option value="DISMISSED">Ignorées</option>
+        </select>
+        <span className="oa-toolbar-count">{rows ? `${rows.length} anomalie(s)` : ''}</span>
       </div>
 
       {error ? (
@@ -141,7 +169,10 @@ export function OrderAnomalies() {
       ) : rows === null ? (
         <div className="text-center text-muted py-4">Chargement...</div>
       ) : rows.length === 0 ? (
-        <div className="text-center text-muted py-4">Aucune anomalie pour ce filtre.</div>
+        <div className="text-center text-muted py-5">
+          <iconify-icon icon="solar:check-circle-bold-duotone" style={{ fontSize: '2rem', color: '#c9ccd1' }}></iconify-icon>
+          <div className="mt-2">Aucune anomalie pour ce filtre.</div>
+        </div>
       ) : (
         rows.map((a) => <AnomalyCard a={a} onAction={openNoteModal} key={a.id} />)
       )}

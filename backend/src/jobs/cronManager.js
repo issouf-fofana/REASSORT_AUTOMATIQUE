@@ -9,6 +9,7 @@ const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
 const { runImprovementWatchdog } = require('./improvementWatchdogJob');
+const { runProposalReminder } = require('./proposalReminderJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -21,6 +22,7 @@ let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
 let currentImprovementWatchdogTask = null;
+let currentProposalReminderTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -34,6 +36,7 @@ const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
 const improvementWatchdogLock = createJobLock('Chien de garde améliorations IA');
+const proposalReminderLock = createJobLock('Relance des propositions en attente');
 
 /** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
 async function isJobEnabled(enabledKey) {
@@ -304,6 +307,36 @@ async function startOrRestartImprovementWatchdogJob() {
   console.log(`⏰ Chien de garde améliorations IA planifié: ${cronSchedule}`);
 }
 
+/** (Re)programme la relance des propositions en attente (demande du 25/09/2026, 10h par défaut —
+ * avant la limite de réception entrepôt à 13h). */
+async function startOrRestartProposalReminderJob() {
+  if (currentProposalReminderTask) {
+    currentProposalReminderTask.stop();
+    currentProposalReminderTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.PROPOSAL_REMINDER_ENABLED))) {
+    console.log('⏸️  Relance des propositions en attente désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.PROPOSAL_REMINDER_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), relance des propositions non planifiée`);
+    return;
+  }
+
+  currentProposalReminderTask = cron.schedule(cronSchedule, () => {
+    proposalReminderLock(async () => {
+      console.log('[cron] Démarrage de la relance des propositions en attente...');
+      await trackJobRun('proposalReminder', runProposalReminder);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Relance des propositions en attente planifiée: ${cronSchedule}`);
+}
+
 module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
@@ -314,4 +347,5 @@ module.exports = {
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,
   startOrRestartImprovementWatchdogJob,
+  startOrRestartProposalReminderJob,
 };

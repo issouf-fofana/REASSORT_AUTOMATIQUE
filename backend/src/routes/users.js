@@ -142,7 +142,16 @@ router.put('/:id', async (req, res) => {
     if (name !== undefined) data.name = name;
     if (role !== undefined) data.role = normalizeRole(role);
     if (isActive !== undefined) data.isActive = isActive;
-    if (password) data.password = await bcrypt.hash(password, 10);
+    if (password) {
+      // Un compte Active Directory (ldapManaged) a son mot de passe géré par l'annuaire, jamais par
+      // cette plateforme — filet de sécurité derrière le masquage de l'action côté frontend (demande
+      // du 25/09/2026), au cas où l'appel serait déclenché autrement qu'via l'UI.
+      const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { ldapManaged: true } });
+      if (target?.ldapManaged) {
+        return res.status(400).json({ success: false, message: 'Ce compte est géré par Active Directory : le mot de passe ne peut pas être modifié ici.' });
+      }
+      data.password = await bcrypt.hash(password, 10);
+    }
     // aiPermissionsJson : réglage fin optionnel, jamais recalculé automatiquement — un champ omis
     // du body (undefined) laisse la valeur existante intacte ; null l'efface explicitement pour
     // revenir au défaut du rôle (cf. aiPermissionsService.getEffectivePermissions).

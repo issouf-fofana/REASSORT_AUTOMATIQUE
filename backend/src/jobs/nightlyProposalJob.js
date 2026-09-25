@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { runAiForecast } = require('../services/aiForecastService');
 const { MIN_DAYS_FOR_SMOOTHING } = require('../services/forecastService');
 const { getConfig } = require('../services/configService');
+const { notifyShopUsersOfNewProposal } = require('../services/proposalNotificationService');
 
 
 // L'analyse IA n'est lancée automatiquement QUE sur ce job nocturne (une fois par jour par
@@ -79,6 +80,14 @@ async function runNightlyProposalGeneration() {
       console.log(`[nightlyProposalJob] ${shop.reference} (${shop.name}): ${stats.proposalsGenerated} proposition(s)`);
       if (!weeklyPlanAttached) {
         console.warn(`[nightlyProposalJob] ALERTE ${shop.reference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+      }
+
+      if (stats.proposalsGenerated > 0) {
+        try {
+          await notifyShopUsersOfNewProposal(shop, stats, proposal);
+        } catch (mailError) {
+          console.error(`[nightlyProposalJob] Alerte email échouée pour ${shop.reference}:`, mailError.message);
+        }
       }
 
       const periodDays = (new Date(stats.periodEnd) - new Date(stats.periodStart)) / (24 * 60 * 60 * 1000);

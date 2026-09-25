@@ -1671,3 +1671,39 @@ model ErrorReport {
   @@index([createdAt])
   @@map("error_reports")
 }
+
+// Compte d'envoi Outlook/Microsoft Graph pour les alertes email (demande du 25/09/2026) : dès
+// qu'une génération nocturne produit une proposition non vide pour un magasin, les comptes
+// rattachés à ce magasin reçoivent un email de notification avec un lien vers la page de
+// validation. Un seul compte actif pour toute la plateforme (V1) — même si le modèle permettrait
+// d'en stocker plusieurs, seul isActive=true est utilisé pour l'envoi.
+model MailAccount {
+  id String @id @default(cuid())
+
+  email    String // ex: ia.prosuma@prosuma.ci — compte affiché dans Paramètres > Comptes mail
+  provider String @default("OUTLOOK") // seul fournisseur supporté pour l'instant
+
+  // Identifiants de l'application Azure AD enregistrée (flow OAuth2 "refresh_token" sur
+  // login.microsoftonline.com) — clientId/tenantId ne sont pas des secrets, clientSecret et
+  // refreshToken le sont : stockés chiffrés (AES-256-GCM, cf. cryptoService.js), jamais renvoyés
+  // en clair par l'API après la sauvegarde initiale (seul un aperçu masqué est affiché).
+  clientId               String @map("client_id")
+  tenantId               String @map("tenant_id")
+  encryptedClientSecret  String @map("encrypted_client_secret")
+  // Nullable : rempli par le flux OAuth (routes/oauthOutlook.js), pas saisi à la main — un compte
+  // fraîchement créé n'a donc pas encore de refresh token tant que "Connecter Outlook" n'a pas été
+  // suivi jusqu'au bout (demande du 25/09/2026 : éviter de faire copier-coller un token).
+  encryptedRefreshToken String? @map("encrypted_refresh_token")
+
+  isActive Boolean @default(true) @map("is_active")
+
+  lastTestedAt    DateTime? @map("last_tested_at")
+  lastTestSuccess Boolean?  @map("last_test_success")
+  lastError       String?   @map("last_error")
+  lastErrorAt     DateTime? @map("last_error_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("mail_accounts")
+}

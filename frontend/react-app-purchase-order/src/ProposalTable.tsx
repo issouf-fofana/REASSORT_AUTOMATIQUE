@@ -33,23 +33,24 @@ function checkCellRenderer(getLineState: (l: ProposalLine) => LineState, onChang
 function labelCellRenderer(params: any) {
   const l = params.data as ProposalLine;
   const wrap = document.createElement('div');
-  wrap.style.lineHeight = '1.5';
-  let html = l.label;
+  wrap.style.lineHeight = '1.35';
+  wrap.style.padding = '.35rem 0';
+  let html = `<span style="font-size:.86rem;">${l.label}</span>`;
   html += ` <button type="button" class="btn btn-sm btn-link p-0 ms-1 pa-open-btn" data-ean="${l.ean}" data-product-id="${l.productId}" title="Voir l'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>`;
 
   if (l.excludedAsAlreadyOrdered) {
-    html += `<br><span class="badge bg-info-subtle text-info mt-1" title="Déjà en commande sur cette plateforme, pas encore reçue"><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Déjà commandé (qté ${l.quantityInTransit || 0})${l.platformOrderReference ? ` — cmd ${l.platformOrderReference}` : ''}${l.platformOrderDate ? ` du ${new Date(l.platformOrderDate).toLocaleDateString('fr-FR')}` : ''}</span>`;
+    html += `<br><span class="badge bg-info-subtle text-info mt-1 reassort-mini-badge" title="Déjà en commande sur cette plateforme, pas encore reçue"><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Déjà commandé (qté ${l.quantityInTransit || 0})${l.platformOrderReference ? ` — cmd ${l.platformOrderReference}` : ''}${l.platformOrderDate ? ` du ${new Date(l.platformOrderDate).toLocaleDateString('fr-FR')}` : ''}</span>`;
   } else if (l.excludedAsAlreadyOrderedRpos) {
     const statusLabel = l.rposOrderStatus === 2 ? ' — validée' : l.rposOrderStatus === 1 ? ' — en préparation (pas encore validée)' : l.rposOrderStatus === 6 ? ' — annulée' : '';
-    html += `<br><span class="badge bg-secondary-subtle text-secondary mt-1" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme."><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Commandé le ${l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?'}${l.rposOrderReference ? ` (réf. ${l.rposOrderReference})` : ''}${l.rposOrderCount && l.rposOrderCount > 1 ? ` + ${l.rposOrderCount - 1} autre(s)` : ''}${statusLabel}</span><br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="${l.id}" data-quantity="${l.quantityIfUnblocked || l.quantitySuggested || 0}"><iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même</button>`;
+    html += `<br><span class="badge bg-secondary-subtle text-secondary mt-1 reassort-mini-badge" title="Commande(s) RPOS des 7 derniers jours, hors de cette plateforme."><iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Commandé le ${l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '?'}${l.rposOrderReference ? ` (réf. ${l.rposOrderReference})` : ''}${l.rposOrderCount && l.rposOrderCount > 1 ? ` + ${l.rposOrderCount - 1} autre(s)` : ''}${statusLabel}</span><br><button type="button" class="btn btn-sm btn-warning mt-1 reassort-unblock-btn" data-line-id="${l.id}" data-quantity="${l.quantityIfUnblocked || l.quantitySuggested || 0}"><iconify-icon icon="solar:lock-keyhole-unlocked-bold-duotone"></iconify-icon> Débloquer et commander quand même</button>`;
   }
 
   if (l.orderAnomaly) {
-    html += `<br><span class="badge ${l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger'} mt-1" title="Habituellement entre ${l.orderAnomaly.historicalMin.toFixed(0)} et ${l.orderAnomaly.historicalMax.toFixed(0)} (moyenne ${l.orderAnomaly.historicalMean.toFixed(0)}, sur ${l.orderAnomaly.sampleSize} commande(s) passée(s))"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ${l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible'}</span>`;
+    html += `<br><span class="badge ${l.orderAnomaly.direction === 'HIGH' ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger'} mt-1 reassort-mini-badge" title="Habituellement entre ${l.orderAnomaly.historicalMin.toFixed(0)} et ${l.orderAnomaly.historicalMax.toFixed(0)} (moyenne ${l.orderAnomaly.historicalMean.toFixed(0)}, sur ${l.orderAnomaly.sampleSize} commande(s) passée(s))"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ${l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible'}</span>`;
   }
 
   if (l.orderSufficiencyReasoning) {
-    html += `<br><span class="badge ${l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'} mt-1 os-badge" style="cursor:pointer;" data-reasoning="${l.orderSufficiencyReasoning.replace(/"/g, '&quot;')}">${l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante'}</span>`;
+    html += `<br><span class="badge ${l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'} mt-1 os-badge reassort-mini-badge" style="cursor:pointer;" data-reasoning="${l.orderSufficiencyReasoning.replace(/"/g, '&quot;')}">${l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante'}</span>`;
   }
 
   wrap.innerHTML = html;
@@ -63,10 +64,10 @@ function stockCellRenderer(params: any) {
   const wrap = document.createElement('div');
   let html = stockValue !== null && stockValue !== undefined ? (stockValue < 0 ? `<span class="text-danger fw-semibold">${stockValue.toFixed(1)}</span>` : stockValue.toFixed(1)) : '—';
   if (unreliableStock) {
-    html += `<br><span class="badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>`;
+    html += `<br><span class="badge reassort-mini-badge bg-warning-subtle text-warning mt-1" title="Ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Stock non fiable</span>`;
   }
   if (l.dlvStock) {
-    html += `<br><span class="badge bg-info-subtle text-info mt-1" title="Stock retiré du calcul car basculé en DLV (vente à prix réduit sur un EAN séparé)"><iconify-icon icon="solar:tag-price-bold-duotone"></iconify-icon> ${l.dlvStock.toFixed(1)} en DLV</span>`;
+    html += `<br><span class="badge reassort-mini-badge bg-info-subtle text-info mt-1" title="Stock retiré du calcul car basculé en DLV (vente à prix réduit sur un EAN séparé)"><iconify-icon icon="solar:tag-price-bold-duotone"></iconify-icon> ${l.dlvStock.toFixed(1)} en DLV</span>`;
   }
   wrap.innerHTML = html;
   return wrap;
@@ -81,13 +82,13 @@ function avgSalesCellRenderer(params: any) {
   }
   let html = l.avgWeeklySales.toFixed(1);
   if (l.seasonalityAdjusted) {
-    html += `<br><span class="badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l'année dernière (écart ${l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?'})"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saisonnalité</span>`;
+    html += `<br><span class="badge reassort-mini-badge bg-info-subtle text-info mt-1" title="Ajustée par rapport à la même période l'année dernière (écart ${l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?'})"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saisonnalité</span>`;
   }
   if (l.forecastMethod === 'smoothed') {
-    html += `<br><span class="badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>`;
+    html += `<br><span class="badge reassort-mini-badge bg-success-subtle text-success mt-1" title="Prévision par lissage exponentiel : donne plus de poids aux ventes récentes qu'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Prévision lissée</span>`;
   }
   if (l.weekdayAdjusted) {
-    html += `<br><span class="badge bg-primary-subtle text-primary mt-1" title="La quantité tient compte du profil de vente par jour de semaine de cet article (ex: samedi plus fort), pas d'une répartition uniforme sur la semaine"><iconify-icon icon="solar:calendar-mark-bold-duotone"></iconify-icon> Jour de semaine</span>`;
+    html += `<br><span class="badge reassort-mini-badge bg-primary-subtle text-primary mt-1" title="La quantité tient compte du profil de vente par jour de semaine de cet article (ex: samedi plus fort), pas d'une répartition uniforme sur la semaine"><iconify-icon icon="solar:calendar-mark-bold-duotone"></iconify-icon> Jour de semaine</span>`;
   }
   wrap.innerHTML = html;
   return wrap;
@@ -102,7 +103,7 @@ function stockoutCellRenderer(params: any) {
   }
   const days = Math.round(l.daysUntilStockout);
   const badgeClass = days <= 3 ? 'bg-danger-subtle text-danger' : days <= 7 ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success';
-  wrap.innerHTML = `<span class="badge ${badgeClass} py-1 px-2">${days <= 0 ? 'en rupture' : days + ' j'}</span>`;
+  wrap.innerHTML = `<span class="badge reassort-mini-badge ${badgeClass} py-1 px-2">${days <= 0 ? 'en rupture' : days + ' j'}</span>`;
   return wrap;
 }
 
@@ -148,6 +149,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const gridApiRef = useRef<any>(null);
   const lineStateRef = useRef<Map<string, LineState>>(new Map());
+  const pendingFilterModelRef = useRef<Record<string, unknown> | null>(null);
 
   function getLineState(l: ProposalLine): LineState {
     if (!lineStateRef.current.has(l.id)) {
@@ -246,8 +248,19 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   function ensureGrid() {
     if (gridApiRef.current) return gridApiRef.current;
     if (!gridDivRef.current) return null;
+    // rowHeight/headerHeight resserrés UNIQUEMENT sur cette grille (withParams part du thème partagé
+    // window.REASSORT_AG_GRID_THEME sans le modifier) : les badges empilés dans certaines cellules
+    // (Article, Stock, Vente moy.) rendaient les lignes du thème par défaut (68px) visuellement
+    // massives sur cette page précise, demande du 24/09/2026 "trop gros, style plus pro".
+    const tableTheme = window.REASSORT_AG_GRID_THEME.withParams({
+      rowHeight: 44,
+      headerHeight: 34,
+      headerFontSize: 11,
+      dataFontSize: 13,
+      cellHorizontalPadding: 10,
+    });
     gridApiRef.current = window.agGrid.createGrid(gridDivRef.current, {
-      theme: window.REASSORT_AG_GRID_THEME,
+      theme: tableTheme,
       columnDefs: [
         {
           headerName: '',
@@ -330,13 +343,25 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,
       domLayout: 'autoHeight',
+      // Pagination client-side (AG Grid) : un filtre s'applique TOUJOURS sur l'intégralité des lignes
+      // chargées, jamais seulement sur la page affichée — la pagination ne fait que limiter combien
+      // de résultats déjà filtrés sont montrés à la fois, jamais quelles lignes sont cherchées.
       pagination: true,
-      paginationPageSize: 50,
-      paginationPageSizeSelector: [25, 50, 100, 200],
+      paginationPageSize: 10,
+      paginationPageSizeSelector: [10, 25, 50, 100, 200],
       animateRows: false,
       suppressCellFocus: true,
       getRowId: (params: any) => params.data.id,
-      onPaginationChanged: () => loadLastPurchasesAutomatically(),
+      // `resize` explicite (même remède que ai-predictions.html) : évite un espace vide sous le
+      // tableau quand un filtre réduit fortement le nombre de lignes visibles, domLayout 'autoHeight'
+      // ne re-mesurant pas toujours seul sa hauteur après un changement de modèle/page.
+      onPaginationChanged: () => {
+        loadLastPurchasesAutomatically();
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      },
+      onModelUpdated: () => {
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      },
       onCellClicked: (e: any) => {
         const target = e.event.target as HTMLElement;
         const unblockBtn = target.closest?.('.reassort-unblock-btn') as HTMLButtonElement | null;
@@ -449,14 +474,28 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   }));
 
   useEffect(() => {
+    // Le filtre de colonne actif (ex: filtrer "Article" sur "Eau" dans le rayon Liquides) vit dans
+    // l'instance AG Grid elle-même — détruite et recréée à chaque rafraîchissement (bouton
+    // "Actualiser", qui redonne une nouvelle référence à `lines` via le useMemo de PurchaseOrder.tsx)
+    // puisque `ensureGrid()` reconstruit tout de zéro. Sans le sauvegarder avant destruction (dans le
+    // cleanup de l'effet PRÉCÉDENT, seul moment où l'ancienne instance existe encore) et le
+    // réappliquer ici, actualiser pendant qu'un filtre est actif l'effaçait silencieusement, donnant
+    // l'impression à l'utilisateur de "revenir en arrière" vers la liste complète du rayon (bug
+    // constaté le 24/09/2026).
+    const filterModelToRestore = pendingFilterModelRef.current;
+    pendingFilterModelRef.current = null;
     lineStateRef.current.clear();
     const api = ensureGrid();
     if (!api) return;
     api.setGridOption('rowData', lines);
+    if (filterModelToRestore && Object.keys(filterModelToRestore).length) {
+      api.setFilterModel(filterModelToRestore);
+    }
     loadLastPurchasesAutomatically();
     updateOrderTotal();
     return () => {
       if (gridApiRef.current) {
+        pendingFilterModelRef.current = gridApiRef.current.getFilterModel();
         gridApiRef.current.destroy();
         gridApiRef.current = null;
       }

@@ -44,10 +44,17 @@
    350px) pousse alors la page en débordement horizontal permanent sur desktop, faisant apparaître
    un ascenseur horizontal en bas de toutes les pages. position: absolute ne suffit pas seul (le
    dropdown se positionne alors par rapport à un ancêtre non prévu pour, débordant quand même) —
-   overflow-x: hidden sur html/body coupe court à ce débordement, quelle que soit sa cause exacte,
-   sans risquer de casser un futur élément large similaire ailleurs dans le thème vendor. */
+   overflow-x coupe court à ce débordement, quelle que soit sa cause exacte, sans risquer de casser
+   un futur élément large similaire ailleurs dans le thème vendor.
+   `clip` plutôt que `hidden` (24/09/2026, testé empiriquement en headless Chrome) : Chrome désactive
+   position:sticky pour TOUS les descendants dès qu'un ancêtre a un overflow non-`visible` sur
+   N'IMPORTE quel axe — même `hidden` seulement sur X cassait le sticky de la topbar (.navbar-top,
+   demande "topbar fixe au défilement sur tout le site"). `clip` coupe l'affichage sans ce défaut. */
 html, body {
-     overflow-x: hidden;
+     overflow-x: clip;
+}
+main.content {
+     overflow: visible !important;
 }
 @media (min-width: 992px) {
      .navbar-nav .dropdown-menu {
@@ -275,9 +282,17 @@ a:not(.sidebar *),
      color: #1a1a1a !important;
 }
 
+/* Topbar fixe au défilement (demande du 24/09/2026, généralisée à tout le site plutôt que la seule
+   page Guide du projet) : position: sticky plutôt que fixed pour rester dans le flux de .content
+   (qui a déjà sa marge de 260px pour la sidebar sur desktop) sans avoir à dupliquer ce calcul en
+   position fixed + left. z-index sous celui de la sidebar (100) pour qu'un sous-menu de sidebar
+   ouvert en overlay puisse toujours passer par-dessus si besoin. */
 .navbar-top {
      background-color: #ffffff !important;
      border-bottom: 1px solid #e5e5e5;
+     position: sticky;
+     top: 0;
+     z-index: 90;
 }
 
 .card {

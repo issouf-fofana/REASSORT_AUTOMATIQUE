@@ -1,0 +1,23 @@
+/* Tailwind est utilisé UNIQUEMENT par AIChatInput.tsx (composant 21st.dev demandé par
+   l'utilisateur), jamais par le reste de la page (Bootstrap/Volt) : les styles de base générés par
+   `@import "tailwindcss"` (`@layer base { * {...} body {...} }`) écraseraient sinon les couleurs/
+   bordures Bootstrap du reste de la page — retirés, remplacés par un scope explicite sous
+   .reassort-ai-input-root, seule zone du DOM où Tailwind doit avoir un effet (même technique que
+   react-app-notch-nav/src/index.css). */
+@import "tailwindcss";
+
+@theme inline {
+     --radius-md: 0.75rem;
+     --radius-lg: 1rem;
+     --radius-xl: 1.5rem;
+}
+
+.reassort-ai-input-root {
+     font-family: inherit;
+}
+
+.reassort-ai-input-root *,
+.reassort-ai-input-root *::before,
+.reassort-ai-input-root *::after {
+     box-sizing: border-box;
+}

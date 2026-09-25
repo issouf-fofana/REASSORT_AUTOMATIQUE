@@ -1,0 +1,16 @@
+/* Tailwind est utilisé UNIQUEMENT par la barre d'onglets "pilule" animée (NotchTabBar, réutilisée
+   depuis Paramètres — demande du 25/09/2026), jamais par le reste de la page (Bootstrap/Volt) : les
+   styles de base générés par `@import "tailwindcss"` écraseraient sinon les couleurs/bordures
+   Bootstrap du reste de la page — retirés, remplacés par un scope explicite sous
+   .reassort-tabs-root, seule zone du DOM où Tailwind doit avoir un effet. */
+@import "tailwindcss";
+
+.reassort-tabs-root {
+     font-family: inherit;
+}
+
+.reassort-tabs-root *,
+.reassort-tabs-root *::before,
+.reassort-tabs-root *::after {
+     box-sizing: border-box;
+}

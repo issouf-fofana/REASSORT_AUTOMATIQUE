@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Connexion | Réassort Automatique</title>
+
+    <!-- Chemins ABSOLUS (pas relatifs à /auth-signin-app/) : ces fichiers sont servis à la racine
+         du site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
+    <script src="/assets/js/config.js"></script>
+    <script src="/assets/js/backend-config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

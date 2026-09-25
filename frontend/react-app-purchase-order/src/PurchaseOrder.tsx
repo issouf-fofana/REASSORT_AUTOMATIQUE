@@ -346,18 +346,56 @@ export function PurchaseOrder() {
     <div>
       <style>{`
         .reassort-unblock-btn { font-size: .72rem; padding: .15rem .5rem; line-height: 1.3; }
-        .reassort-dept-tile { border: 1px solid #eef0f2; border-top: 3px solid var(--tile-accent, #444444); border-radius: 10px; transition: box-shadow .2s ease, border-color .2s ease; }
-        .reassort-dept-tile:hover { box-shadow: 0 4px 16px rgba(20, 20, 20, .06); border-color: #e2e4e7; }
-        .reassort-dept-tile .card-title { font-size: .95rem; font-weight: 600; letter-spacing: .01em; }
-        .reassort-dept-tile .tile-pct { font-size: 1.85rem; font-weight: 600; line-height: 1.1; color: #1a1a1a; letter-spacing: -.01em; }
-        .reassort-dept-tile .tile-progress { height: 4px; border-radius: 2px; background-color: #f0f1f3; overflow: hidden; margin: .65rem 0 .9rem; }
-        .reassort-dept-tile .tile-progress-fill { height: 100%; background-color: var(--tile-accent, #444444); border-radius: 2px; opacity: .75; transition: width .3s ease; }
-        .reassort-dept-tile .tile-revenue { font-weight: 500; color: #3a3a3a; font-size: .92rem; }
-        .reassort-dept-tile .tile-proposed { color: #a8adb3; font-size: .78rem; margin-top: .1rem; }
+        .reassort-dept-tile {
+          border: 1px solid #ececec;
+          border-radius: 12px;
+          box-shadow: 0 1px 2px rgba(20, 20, 20, .04);
+          transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
+          overflow: hidden;
+          position: relative;
+        }
+        .reassort-dept-tile::before {
+          content: '';
+          position: absolute;
+          top: 0; left: 0; right: 0;
+          height: 3px;
+          background: var(--tile-accent, #444444);
+        }
+        .reassort-dept-tile:hover { box-shadow: 0 6px 18px rgba(20, 20, 20, .08); border-color: #dcdfe3; transform: translateY(-1px); }
+        .reassort-dept-tile .card-body { padding: .9rem 1.05rem; }
+        .reassort-dept-tile .tile-icon {
+          width: 28px; height: 28px; border-radius: 8px;
+          display: flex; align-items: center; justify-content: center;
+          background: color-mix(in srgb, var(--tile-accent, #444444) 12%, white);
+          color: var(--tile-accent, #444444);
+          font-size: .9rem;
+          margin-bottom: .5rem;
+        }
+        .reassort-dept-tile .card-title { font-size: .85rem; font-weight: 700; letter-spacing: .01em; color: #17181a; }
+        .reassort-dept-tile .tile-count { color: #9198a1; font-size: .72rem; margin-bottom: .4rem; }
+        .reassort-dept-tile .tile-pct { font-size: 1.4rem; font-weight: 700; line-height: 1.1; color: #17181a; letter-spacing: -.02em; }
+        .reassort-dept-tile .tile-pct .fs-14 { font-size: .7rem !important; }
+        .reassort-dept-tile .tile-progress { height: 4px; border-radius: 999px; background-color: #f1f2f4; overflow: hidden; margin: .5rem 0 .6rem; }
+        .reassort-dept-tile .tile-progress-fill { height: 100%; background-color: var(--tile-accent, #444444); border-radius: 999px; transition: width .35s ease; }
+        .reassort-dept-tile .tile-revenue { font-weight: 600; color: #2c2d30; font-size: .78rem; padding-top: .5rem; border-top: 1px solid #f2f3f4; }
+        .reassort-dept-tile .tile-proposed { color: #b1b6bc; font-size: .72rem; margin-top: .1rem; }
         .ag-header-cell-text { text-transform: uppercase; letter-spacing: 0.02em; }
         .ag-cell { padding-left: 0.5rem; padding-right: 0.5rem; display: flex; align-items: center; }
         .ag-cell-wrapper { width: 100%; }
         #reassort-grid { width: 100%; }
+        /* Badges compacts pour le tableau de proposition (demande du 24/09/2026, "trop gros, style
+           plus pro") : les badges Bootstrap standards (icône + texte, padding par défaut) empilés
+           dans une cellule autoHeight (Article/Vente moy./Stock) gonflaient chaque ligne bien au-delà
+           du rowHeight réduit posé sur cette grille — ce style les ramène à une taille de puce
+           d'information plutôt que de bouton. */
+        .reassort-mini-badge {
+          font-size: .68rem !important;
+          font-weight: 600;
+          padding: .18rem .5rem !important;
+          line-height: 1.3;
+          border-radius: 999px;
+        }
+        .reassort-mini-badge iconify-icon { font-size: .8rem; vertical-align: -1px; }
       `}</style>
 
       {showListView ? (

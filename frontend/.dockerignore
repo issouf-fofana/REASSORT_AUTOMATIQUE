@@ -61,3 +61,9 @@ react-app-ai-mastery/node_modules
 # Même raisonnement pour Anomalies de commande (react-app-order-anomalies/).
 react-app-order-anomalies/dist
 react-app-order-anomalies/node_modules
+
+# Même raisonnement pour la navigation "notch" (react-app-notch-nav/) — son dist/ est copié
+# explicitement fichier par fichier (notch-nav.js/.css) vers assets/js/ et assets/css/, jamais tel
+# quel comme les autres bundles /xxx-app/.
+react-app-notch-nav/dist
+react-app-notch-nav/node_modules

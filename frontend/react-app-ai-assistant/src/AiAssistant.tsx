@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
+import { AIChatInput } from './components/ui/ai-chat-input';
 
 interface Shop {
   id: string;
@@ -218,7 +219,6 @@ export function AiAssistant() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [shopLabel, setShopLabel] = useState<string | null>(null);
   const [shopReady, setShopReady] = useState(false);
   const [department, setDepartment] = useState('');
   const [departments, setDepartments] = useState<string[]>([]);
@@ -250,15 +250,6 @@ export function AiAssistant() {
   }, []);
 
   const refreshShopContext = useCallback(() => {
-    const user = window.reassortGetUser();
-    let label: string | null;
-    if (user && window.reassortIsSingleShopRole(user.role)) {
-      label = user.rposShopName ? `${user.rposShopReference} - ${user.rposShopName}` : null;
-    } else {
-      const shop = window.reassortGetActiveShop();
-      label = shop ? `${shop.reference} - ${shop.name}` : null;
-    }
-    setShopLabel(label);
     const shopId = currentShopId();
     setShopReady(!!shopId);
     if (shopId) loadDepartments(shopId);
@@ -516,11 +507,16 @@ export function AiAssistant() {
         .aia-table th { font-weight: 600; color: #666666; font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; border-bottom-width: 2px; }
         .aia-empty-hint { color: #999999; text-align: center; padding: 2rem 1rem; }
 
-        .aia-input-bar { padding: .85rem 1rem; border-top: 1px solid #e5e5e5; }
+        /* La bulle flottante de l'Assistant IA (widget global, cf. ai-assistant-widget.js) est fixe
+           en bas-droite (56px + 24px de marge, z-index 1050) sur TOUTES les pages du site — elle
+           chevauchait le bouton d'envoi de cette barre, elle-même étirée jusqu'au bord droit de la
+           page. On réserve donc explicitement l'espace qu'elle occupe, uniquement sur cette page. */
+        .aia-input-bar { padding: 1rem 1.25rem 1rem; border-top: 1px solid #e5e5e5; padding-right: calc(1.25rem + 80px); }
 
         @media (max-width: 768px) {
           .aia-layout { flex-direction: column; height: auto; }
           .aia-conv-list { width: 100%; max-height: 220px; }
+          .aia-input-bar { padding-right: 1.25rem; padding-bottom: calc(1rem + 88px); }
         }
       `}</style>
 
@@ -566,23 +562,44 @@ export function AiAssistant() {
 
         <div className="aia-main">
           <div className="aia-context-bar">
-            <span className="text-muted small fw-semibold">{shopLabel || 'Sélectionnez un magasin (en haut de page)'}</span>
-            <select className="form-select form-select-sm" value={department} onChange={(e) => setDepartment(e.target.value)}>
-              <option value="">Tous les rayons</option>
-              {departments.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              className="form-control form-control-sm"
-              placeholder="Sous-rayon (optionnel)"
-              value={subDepartment}
-              onChange={(e) => setSubDepartment(e.target.value)}
-            />
-            <a href="/ai-guide" className="btn btn-outline-dark btn-sm">
+            {!shopReady && (
+              <span className="text-muted small">Sélectionnez un magasin (en haut de page)</span>
+            )}
+            <div className="dropdown">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm dropdown-toggle"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+              >
+                {department ? department : 'Filtrer par rayon'}
+                {subDepartment ? ` / ${subDepartment}` : ''}
+              </button>
+              <div className="dropdown-menu p-3" style={{ minWidth: 260 }}>
+                <label className="form-label small text-muted mb-1">Rayon</label>
+                <select
+                  className="form-select form-select-sm mb-2"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                >
+                  <option value="">Tous les rayons</option>
+                  {departments.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+                <label className="form-label small text-muted mb-1">Sous-rayon (optionnel)</label>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  placeholder="Ex : biscuits sucrés"
+                  value={subDepartment}
+                  onChange={(e) => setSubDepartment(e.target.value)}
+                />
+              </div>
+            </div>
+            <a href="/ai-guide" className="small ms-auto">
               Ce que je peux vous demander
             </a>
           </div>
@@ -641,27 +658,18 @@ export function AiAssistant() {
                 </div>
               </div>
             )}
-            <div className="input-group">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Ex : quels articles risquent d'être en rupture ?"
-                disabled={!shopReady}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !abortControllerRef.current) sendQuestion();
-                }}
-              />
-              <button
-                type="button"
-                className={sending ? 'btn btn-outline-danger' : 'btn btn-dark'}
-                disabled={!shopReady}
-                onClick={() => (abortControllerRef.current ? stopGeneration() : sendQuestion())}
-              >
-                {sending ? 'Arrêter' : 'Envoyer'}
-              </button>
-            </div>
+            <AIChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={() => (abortControllerRef.current ? stopGeneration() : sendQuestion())}
+              disabled={!shopReady}
+              sending={sending}
+              placeholders={
+                suggestedQuestions.length
+                  ? suggestedQuestions
+                  : ["Ex : quels articles risquent d'être en rupture ?"]
+              }
+            />
           </div>
         </div>
       </div>

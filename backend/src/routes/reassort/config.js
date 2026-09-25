@@ -11,6 +11,9 @@ const systemConfig = require('../../services/systemConfigService');
 const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase, MANUAL_IMPORT_DIR } = require('../../services/salesFileService');
 const jobHealthService = require('../../services/jobHealthService');
 const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
+const prisma = require('../../utils/prisma');
+const cryptoService = require('../../services/cryptoService');
+const outlookMailService = require('../../services/outlookMailService');
 const multer = require('multer');
 const path = require('path');
 
@@ -352,6 +355,10 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       const { startOrRestartPredictionOutcomeJob } = require('../../jobs/cronManager');
       await startOrRestartPredictionOutcomeJob();
     }
+    if ([systemConfig.KEYS.PROPOSAL_REMINDER_CRON, systemConfig.KEYS.PROPOSAL_REMINDER_ENABLED].includes(key)) {
+      const { startOrRestartProposalReminderJob } = require('../../jobs/cronManager');
+      await startOrRestartProposalReminderJob();
+    }
 
     res.json({ success: true, data: { key, value: systemConfig.SENSITIVE_KEYS.has(key) ? '••••••••' : value } });
   } catch (error) {
@@ -461,6 +468,107 @@ router.post('/system-config/sales-files-upload', requireAdmin, salesFileUpload.s
     });
   } catch (error) {
     console.error('Sales file upload error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- Comptes mail (Outlook/Microsoft Graph) : alertes de proposition par email, demande du
+// 25/09/2026. Un seul compte actif utilisé pour l'envoi (cf. outlookMailService.js) même si
+// plusieurs lignes peuvent exister en base — la liste sert surtout à en garder l'historique/en
+// changer sans perdre la configuration précédente.
+
+// GET /api/reassort/mail-accounts - liste les comptes configurés (ADMIN uniquement), sans jamais
+// renvoyer les secrets en clair : seul un aperçu masqué est exposé (même pattern que /ai/keys).
+router.get('/mail-accounts', requireAdmin, async (req, res) => {
+  try {
+    const accounts = await prisma.mailAccount.findMany({ orderBy: { createdAt: 'asc' } });
+    const data = accounts.map((a) => ({
+      id: a.id,
+      email: a.email,
+      provider: a.provider,
+      clientId: a.clientId,
+      tenantId: a.tenantId,
+      maskedClientSecret: cryptoService.maskApiKey(cryptoService.decrypt(a.encryptedClientSecret)),
+      hasRefreshToken: !!a.encryptedRefreshToken,
+      isActive: a.isActive,
+      lastTestedAt: a.lastTestedAt,
+      lastTestSuccess: a.lastTestSuccess,
+      lastError: a.lastError,
+      lastErrorAt: a.lastErrorAt,
+    }));
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/mail-accounts - ajoute un compte (ADMIN uniquement). Créé SANS refresh token :
+// rempli ensuite par "Connecter Outlook" (flux OAuth, cf. routes/oauthOutlook.js) — jamais saisi à
+// la main, contrairement au reste des champs.
+// body: { email, clientId, clientSecret, tenantId }
+router.post('/mail-accounts', requireAdmin, async (req, res) => {
+  try {
+    const { email, clientId, clientSecret, tenantId } = req.body;
+    if (!email || !clientId || !clientSecret || !tenantId) {
+      return res.status(400).json({ success: false, message: 'email, clientId, clientSecret et tenantId sont requis' });
+    }
+    const account = await prisma.mailAccount.create({
+      data: {
+        email,
+        clientId,
+        tenantId,
+        encryptedClientSecret: cryptoService.encrypt(clientSecret),
+      },
+    });
+    res.json({ success: true, data: { id: account.id } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/mail-accounts/:id - met à jour un compte (client secret optionnel : omis =
+// inchangé ; refreshToken n'est PAS éditable ici, seulement via le flux OAuth "Connecter Outlook").
+router.put('/mail-accounts/:id', requireAdmin, async (req, res) => {
+  try {
+    const { email, clientId, clientSecret, tenantId, isActive } = req.body;
+    const data = {};
+    if (email !== undefined) data.email = email;
+    if (clientId !== undefined) data.clientId = clientId;
+    if (tenantId !== undefined) data.tenantId = tenantId;
+    if (isActive !== undefined) data.isActive = isActive;
+    if (clientSecret) data.encryptedClientSecret = cryptoService.encrypt(clientSecret);
+
+    await prisma.mailAccount.update({ where: { id: req.params.id }, data });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/reassort/mail-accounts/:id
+router.delete('/mail-accounts/:id', requireAdmin, async (req, res) => {
+  try {
+    await prisma.mailAccount.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/mail-accounts/:id/test - envoie un email de test au compte lui-même
+router.post('/mail-accounts/:id/test', requireAdmin, async (req, res) => {
+  try {
+    await outlookMailService.sendTestMail();
+    await prisma.mailAccount.update({
+      where: { id: req.params.id },
+      data: { lastTestedAt: new Date(), lastTestSuccess: true, lastError: null, lastErrorAt: null },
+    });
+    res.json({ success: true, message: 'Email de test envoyé.' });
+  } catch (error) {
+    await prisma.mailAccount.update({
+      where: { id: req.params.id },
+      data: { lastTestedAt: new Date(), lastTestSuccess: false, lastError: error.message, lastErrorAt: new Date() },
+    }).catch(() => {});
     res.status(500).json({ success: false, message: error.message });
   }
 });

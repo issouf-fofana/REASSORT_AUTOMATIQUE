@@ -4,6 +4,8 @@ import { CorrectionsTab } from './components/CorrectionsTab';
 import { ErrorLogTab } from './components/ErrorLogTab';
 import { AutonomyTab } from './components/AutonomyTab';
 import { DecisionLogTab } from './components/DecisionLogTab';
+import { NotchTabBar } from './components/ui/NotchTabBar';
+import './index.css';
 
 const TABS = [
   { id: 'tab-improvements', label: 'Améliorations IA', icon: 'solar:bolt-bold-duotone' },
@@ -46,24 +48,10 @@ export function QualityTabs() {
 
   return (
     <div>
-      <ul className="nav nav-tabs nav-bordered mb-4" role="tablist">
-        {TABS.map((tab) => (
-          <li className="nav-item" key={tab.id}>
-            <a
-              className={`nav-link ${activeTab === tab.id ? 'active' : ''}`}
-              href={`#${tab.id}`}
-              role="tab"
-              onClick={(e) => {
-                e.preventDefault();
-                selectTab(tab.id);
-              }}
-            >
-              <iconify-icon icon={tab.icon} className="fs-18 align-middle me-1"></iconify-icon>
-              {tab.label}
-            </a>
-          </li>
-        ))}
-      </ul>
+      <style>{`.aiq-tabs-wrap { margin-bottom: 1.75rem; }`}</style>
+      <div className="aiq-tabs-wrap">
+        <NotchTabBar tabs={TABS} activeId={activeTab} onActiveChange={(id) => selectTab(id as TabId)} />
+      </div>
 
       <div className="tab-content">
         {activeTab === 'tab-improvements' && (

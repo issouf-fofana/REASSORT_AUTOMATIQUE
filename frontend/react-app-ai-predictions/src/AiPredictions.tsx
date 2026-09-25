@@ -280,9 +280,13 @@ export function AiPredictions() {
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,
       domLayout: 'autoHeight',
+      // 10 par défaut (demande du 24/09/2026, cohérent avec le tableau de Proposition de commande) :
+      // un filtre AG Grid s'applique toujours sur l'intégralité des lignes chargées, jamais
+      // seulement la page affichée — réduire la taille de page par défaut ne limite donc jamais ce
+      // qu'un filtre peut trouver, seulement combien de résultats déjà filtrés sont montrés à la fois.
       pagination: true,
-      paginationPageSize: 50,
-      paginationPageSizeSelector: [25, 50, 100, 200],
+      paginationPageSize: 10,
+      paginationPageSizeSelector: [10, 25, 50, 100, 200],
       animateRows: false,
       suppressCellFocus: true,
       getRowId: (params: any) => params.data.ean,
@@ -295,8 +299,19 @@ export function AiPredictions() {
         });
       },
       onCellClicked: (e: any) => openPanelForRow(e.data),
-      onPaginationChanged: () => updatePageLabel(),
-      onModelUpdated: () => updatePageLabel(),
+      // Espace vide constaté sous le tableau (24/09/2026) quand un filtre réduit fortement le nombre
+      // de lignes visibles (ex: 6 résultats après filtre, page dimensionnée pour 50) : domLayout
+      // 'autoHeight' ne re-mesure pas toujours sa hauteur tout seul après un changement de modèle —
+      // un `resize` explicite force AG Grid à recalculer sa hauteur réelle sur le nombre de lignes
+      // effectivement affiché, plutôt que de garder la hauteur de la page précédente.
+      onPaginationChanged: () => {
+        updatePageLabel();
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      },
+      onModelUpdated: () => {
+        updatePageLabel();
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      },
     });
     if (toolbarRef.current) {
       window.reassortAgGridToolbar(gridApiRef.current, toolbarRef.current);

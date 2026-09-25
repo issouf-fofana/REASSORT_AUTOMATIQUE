@@ -360,29 +360,15 @@ function ModeAutoPanel({
 }) {
   return (
     <div
-      className="mb-4"
-      style={{
-        border: '1px solid',
-        borderColor: enabled ? '#F5C2C2' : '#e5e5e5',
-        backgroundColor: enabled ? '#FEF2F2' : '#fafafa',
-        padding: '1.1rem 1.25rem',
-      }}
+      className={`mb-4 mode-auto-panel${enabled ? ' active' : ''}`}
     >
       <div className="d-flex justify-content-between align-items-start mb-3">
         <div>
           <div className="d-flex align-items-center gap-2 mb-1">
-            <iconify-icon icon="solar:bolt-bold-duotone" className="fs-18" style={{ color: '#1F2937' }} />
+            <iconify-icon icon="solar:bolt-bold-duotone" className="fs-18 mode-auto-icon" />
             <span className="fw-semibold">Mode Auto</span>
             <span
-              className="badge"
-              style={{
-                backgroundColor: enabled ? '#B91C1C' : '#e5e5e5',
-                color: enabled ? '#ffffff' : '#4b5563',
-                fontWeight: 600,
-                fontSize: '.7rem',
-                letterSpacing: '.02em',
-                textTransform: 'uppercase',
-              }}
+              className={`badge mode-auto-badge${enabled ? ' active' : ' inactive'}`}
             >
               {enabled ? 'Actif' : 'Désactivé'}
             </span>

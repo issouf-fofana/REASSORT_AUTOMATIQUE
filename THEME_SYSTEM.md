@@ -1,764 +1,814 @@
-# Système de thème — Documentation complète
-> Réutilisable dans n'importe quel projet web (Django, React, HTML pur…).
-> Fichiers sources : `static/css/style.css` · `static/js/theme.js`
-
----
-
-## Architecture générale
-
-Le système repose sur **trois mécanismes** qui s'enchaînent :
-
-```
-Utilisateur clique
-      │
-      ▼
-window.setXxx()  ←── fonctions publiques dans theme.js
-      │
-      ├─► localStorage  (persistance entre sessions)
-      │
-      ├─► :root CSS vars  (--bg, --accent, --border, --font-ui…)
-      │       └─► tout le CSS les lit via var(--xxx)
-      │
-      └─► data-theme / data-style sur <html>
-              └─► les sélecteurs CSS [data-theme="dark"] etc. activent des blocs
-```
-
-**Règle clé :** Tout le CSS utilise uniquement des `var(--xxx)`. Jamais de couleurs ou tailles codées en dur dans les composants. Changer une var change instantanément toute l'interface.
-
----
-
-## 1. Tokens CSS (variables de design)
-
-Définis sur `:root` dans `style.css`. Ce sont les valeurs par défaut (mode clair).
-
-```css
-:root {
-    /* Polices */
-    --font-ui: system-ui, -apple-system, sans-serif;  /* Dashboard */
-    --font-mc: 'Space Mono', 'Courier New', monospace; /* Mission Control */
-
-    /* Fond de page et surfaces */
-    --bg:       #f5f5f0;   /* fond page */
-    --surface:  #ffffff;   /* fond cartes/panels */
-    --surface2: #f0f0ea;   /* fond secondaire */
-
-    /* Bordures */
-    --border:   #d8dac8;   /* bordure principale */
-    --border2:  #e8eacc;   /* bordure secondaire (plus subtile) */
-
-    /* Texte */
-    --tx-1: #131114;   /* texte principal */
-    --tx-2: #3d3d38;   /* texte secondaire */
-    --tx-3: #7a7a6e;   /* texte atténué / labels */
-
-    /* Couleur accent (personnalisable) */
-    --accent:      #8C9C7C;
-    --accent-rgb:  140,156,124;   /* pour rgba() */
-    --accent-lt:   #e8eacc;      /* version claire */
-    --accent-text: #4a5a3c;      /* texte sur accent */
-
-    /* Sémantique */
-    --c-green: #5a7a4a;   --c-green-lt: #dde8d4;
-    --c-red:   #8b3a3a;   --c-red-lt:   #f0dede;
-    --c-amber: #7a6030;   --c-amber-lt: #ede8d4;
-    --c-blue:  #3a5a7a;   --c-blue-lt:  #d4e0ed;
-
-    /* Coins et ombres */
-    --r:    4px;    /* border-radius standard */
-    --r-lg: 6px;    /* border-radius large (cartes) */
-    --sh:   0 1px 3px rgba(19,17,20,.07);
-    --sh-md:0 4px 16px rgba(19,17,20,.10);
-
-    /* Sidebar */
-    --sidebar-bg: #131114;
-    --sidebar-w:  240px;
-    --header-h:   56px;
-}
-```
-
-**Comment les utiliser dans les composants :**
-```css
-.ma-carte {
-    background: var(--surface);        /* s'adapte auto au mode sombre */
-    border: 1px solid var(--border);   /* s'adapte auto aux persos */
-    border-radius: var(--r-lg);        /* s'adapte auto aux coins choisis */
-    color: var(--tx-1);
-    font-family: var(--font-ui);
-    box-shadow: var(--sh);
-}
-```
-
----
-
-## 2. Mode sombre / clair
-
-### Comment ça marche
-
-L'attribut `data-theme="dark"` sur `<html>` active un bloc CSS qui redéfinit les tokens :
-
-```css
-/* Mode clair : rien sur <html>, les :root s'appliquent */
-
-/* Mode sombre : data-theme="dark" sur <html> */
-[data-theme="dark"] {
-    --bg:      #0e0d10;
-    --surface: #18161b;
-    --border:  #2d2b32;
-    --tx-1:    #E8EACC;
-    --tx-2:    #b0b29c;
-    --sh-md:   0 4px 20px rgba(0,0,0,.6);
-    /* Les vars couleur restent identiques — seules les surfaces changent */
-}
-```
-
-### Activation JS
-```js
-// Passer en sombre
-document.documentElement.setAttribute('data-theme', 'dark');
-
-// Passer en clair
-document.documentElement.removeAttribute('data-theme');
-```
-
-### Affichage dans l'UI
-```html
-<div class="mode-btns">
-    <button onclick="setMode('light')" id="modeLight" class="active">☀ Clair</button>
-    <button onclick="setMode('dark')"  id="modeDark">☾ Sombre</button>
-</div>
-```
-`setMode()` gère aussi l'auto-ajustement de la couleur texte.
-
----
-
-## 3. Styles visuels
-
-### Comment ça marche
-
-L'attribut `data-style="<nom>"` sur `<html>` active un style visuel.
-Les composants utilisent les classes `.panel` et `.kpi-card` — les styles les ciblent.
-
-```css
-/* Flat (défaut) — rien à faire, styles de base s'appliquent */
-
-/* Ombres */
-[data-style="shadows"] .panel,
-[data-style="shadows"] .kpi-card {
-    box-shadow: var(--sh-md);
-}
-
-/* Soft — ombres sans bordure */
-[data-style="soft"] .panel,
-[data-style="soft"] .kpi-card {
-    border: none;
-    box-shadow: 0 4px 20px rgba(0,0,0,.10);
-}
-
-/* Bordered — contours épais */
-[data-style="bordered"] .panel,
-[data-style="bordered"] .kpi-card {
-    border-width: 2px;
-    box-shadow: none;
-}
-
-/* Minimal — fond alternatif, ni bordure ni ombre */
-[data-style="minimal"] .panel,
-[data-style="minimal"] .kpi-card {
-    border: none;
-    box-shadow: none;
-    background: var(--surface2);
-}
-
-/* Glass — glassmorphism */
-[data-style="glass"] .panel,
-[data-style="glass"] .kpi-card {
-    background: rgba(255,255,255,.55);
-    backdrop-filter: blur(14px);
-    border-color: rgba(255,255,255,.35);
-}
-[data-theme="dark"][data-style="glass"] .panel {
-    background: rgba(24,22,27,.65);
-    border-color: rgba(255,255,255,.08);
-}
-
-/* Cyber — dégradés teintés par l'accent */
-[data-style="cyber"] {
-    --border:  rgba(var(--accent-rgb), .28);
-    --border2: rgba(var(--accent-rgb), .15);
-}
-[data-style="cyber"] .panel {
-    border: 1px solid rgba(var(--accent-rgb),.2);
-    background: linear-gradient(145deg,
-        color-mix(in srgb, var(--surface) 96%, var(--accent) 4%) 0%,
-        var(--surface) 100%);
-}
-[data-theme="dark"][data-style="cyber"] {
-    --bg:      #07080b;
-    --surface: #0d0f14;
-}
-```
-
-### Activation JS
-```js
-document.documentElement.setAttribute('data-style', 'cyber');
-```
-
-### Boutons dans l'UI
-```html
-<div class="style-grid" id="styleGrid">
-    <button class="style-btn active" data-vstyle="flat"     onclick="setVisualStyle('flat')">
-        <div class="style-preview style-preview-flat"></div>
-        <span>Flat</span>
-    </button>
-    <button class="style-btn" data-vstyle="shadows"  onclick="setVisualStyle('shadows')">
-        <div class="style-preview style-preview-shadows"></div>
-        <span>Ombres</span>
-    </button>
-    <button class="style-btn" data-vstyle="soft"     onclick="setVisualStyle('soft')">
-        <div class="style-preview style-preview-soft"></div>
-        <span>Soft</span>
-    </button>
-    <button class="style-btn" data-vstyle="bordered" onclick="setVisualStyle('bordered')">
-        <div class="style-preview style-preview-bordered"></div>
-        <span>Bordures</span>
-    </button>
-    <button class="style-btn" data-vstyle="minimal"  onclick="setVisualStyle('minimal')">
-        <div class="style-preview style-preview-minimal"></div>
-        <span>Minimal</span>
-    </button>
-    <button class="style-btn" data-vstyle="glass"    onclick="setVisualStyle('glass')">
-        <div class="style-preview style-preview-glass"></div>
-        <span>Glass</span>
-    </button>
-    <button class="style-btn" data-vstyle="cyber"    onclick="setVisualStyle('cyber')">
-        <div class="style-preview style-preview-cyber"></div>
-        <span>Cyber</span>
-    </button>
-</div>
-```
-
-CSS des mini-aperçus :
-```css
-.style-preview {
-    width: 28px; height: 20px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 2px; margin: 0 auto .3rem;
-}
-.style-preview-flat    { border: 1px solid var(--border); box-shadow: none; }
-.style-preview-shadows { border: 1px solid var(--border); box-shadow: 0 3px 8px rgba(0,0,0,.18); }
-.style-preview-soft    { border: none; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
-.style-preview-bordered{ border: 2px solid var(--accent); box-shadow: none; }
-.style-preview-minimal { border: none; background: var(--surface2); }
-.style-preview-glass   { border: 1px solid rgba(255,255,255,.4); background: rgba(255,255,255,.4); backdrop-filter: blur(4px); }
-.style-preview-cyber   { border: 1px solid rgba(140,156,124,.5); background: linear-gradient(135deg,#0d0f14,#07080b); box-shadow: 0 0 6px rgba(140,156,124,.25); }
-```
-
-Le bouton actif est marqué via JS : `el.classList.toggle('active', el.dataset.vstyle === currentStyle)`.
-
-### Ajouter un nouveau style visuel
-```css
-/* 1. Dans style.css */
-[data-style="mon-style"] .panel,
-[data-style="mon-style"] .kpi-card {
-    /* vos overrides */
-}
-[data-theme="dark"][data-style="mon-style"] .panel {
-    /* variante dark si besoin */
-}
-```
-```html
-<!-- 2. Bouton dans le panel -->
-<button class="style-btn" data-vstyle="mon-style" onclick="setVisualStyle('mon-style')">
-    <div class="style-preview" style="/* mini aperçu inline */"></div>
-    <span>Mon style</span>
-</button>
-```
-
----
-
-## 4. Couleur accent (color picker)
-
-### Comment ça marche
-
-L'accent définit `--accent`, `--accent-rgb`, `--accent-lt`, `--accent-text` sur `:root`.
-Tout bouton actif, highlight, nav active, badge utilise `var(--accent)`.
-
-```css
-.btn-primary    { background: var(--accent); color: var(--accent-text); }
-.nav-link.active{ background: rgba(var(--accent-rgb), .15); border-left: 2px solid var(--accent); }
-.badge-accent   { background: var(--accent-lt); color: var(--accent-text); }
-```
-
-### UI du picker
-```html
-<!-- Roue chromatique native -->
-<div class="color-picker-wrap">
-    <input type="color" id="accentColorPicker" value="#8C9C7C">
-    <div class="color-picker-thumb" id="accentPickerThumb" style="background:#8C9C7C;"></div>
-</div>
-<!-- Hex input -->
-<div class="color-hex-wrap">
-    <span>#</span>
-    <input type="text" id="accentHexInput" value="8C9C7C" maxlength="6" placeholder="8C9C7C">
-    <button class="color-hex-apply" onclick="applyAccentHex()">↵</button>
-</div>
-<!-- Swatches prédéfinies -->
-<div class="accent-swatches">
-    <div class="accent-swatch" data-color="#8C9C7C" data-rgb="140,156,124" style="background:#8C9C7C;"></div>
-    <div class="accent-swatch" data-color="#3b82f6" data-rgb="59,130,246"  style="background:#3b82f6;"></div>
-    <!-- ... autres couleurs ... -->
-</div>
-```
-
-Le JS écoute `input` sur la roue et `keydown Enter` sur le hex. La swatch active reçoit la classe `active`.
-
----
-
-## 5. Couleurs personnalisables (fond, bordures)
-
-### Comment ça marche
-
-Ces couleurs sont appliquées **directement** en `style` inline sur `:root` via JS — elles prennent priorité sur le CSS statique. Pour réinitialiser, on appelle `removeProperty()` et le mode (clair/sombre) reprend le contrôle.
-
-```js
-// Appliquer
-document.documentElement.style.setProperty('--bg', '#1a1a2e');
-document.documentElement.style.setProperty('--border', '#2d2b32');
-
-// Réinitialiser — laisse le mode (clair/sombre) reprendre
-document.documentElement.style.removeProperty('--bg');
-document.documentElement.style.removeProperty('--border');
-```
-
-### UI (même pattern pour fond et bordures)
-```html
-<div class="theme-section">
-    <div class="theme-section-label">Fond principal</div>
-    <div style="display:flex;align-items:center;gap:.5rem;">
-        <!-- Roue chromatique -->
-        <div class="color-picker-wrap">
-            <input type="color" id="pageBgPicker" value="#f5f5f0" oninput="...">
-            <div class="color-picker-thumb" id="pageBgPickerThumb"></div>
-        </div>
-        <!-- Hex -->
-        <div class="color-hex-wrap">
-            <span>#</span>
-            <input type="text" id="pageBgHexInput" maxlength="6">
-            <button onclick="applyPageBgHex()">↵</button>
-        </div>
-        <!-- Reset -->
-        <button onclick="clearPageBg()" title="Réinitialiser">×</button>
-    </div>
-    <!-- Swatches -->
-    <div class="accent-swatches">
-        <div class="page-bg-swatch" data-color=""        style="background:var(--bg);border:1px dashed var(--border);" title="Auto"></div>
-        <div class="page-bg-swatch" data-color="#0e0d10" style="background:#0e0d10;"></div>
-        <!-- ... -->
-    </div>
-</div>
-```
-
-La swatch avec `data-color=""` déclenche `clearPageBg()` (reset).
-
----
-
-## 6. Coins (border-radius)
-
-### Comment ça marche
-
-Tout le CSS utilise `var(--r)` et `var(--r-lg)`. Changer ces deux vars modifie tous les coins de l'interface.
-
-```css
-.panel       { border-radius: var(--r-lg); }
-.kpi-card    { border-radius: var(--r-lg); }
-.btn         { border-radius: var(--r); }
-.badge       { border-radius: var(--r); }
-```
-
-### UI
-```html
-<div class="radius-row">
-    <button class="radius-btn active" data-radius="0px,0px"   onclick="setRadius(this,'0px','0px')">
-        <div class="radius-preview" style="border-radius:0"></div>
-        Carré
-    </button>
-    <button class="radius-btn" data-radius="8px,10px"  onclick="setRadius(this,'8px','10px')">
-        <div class="radius-preview" style="border-radius:4px"></div>
-        Arrondi
-    </button>
-    <button class="radius-btn" data-radius="14px,18px" onclick="setRadius(this,'14px','18px')">
-        <div class="radius-preview" style="border-radius:8px"></div>
-        Large
-    </button>
-</div>
-```
-
-Le bouton actif est marqué via `data-radius` : le JS compare `r === p.radius`.
-
----
-
-## 7. Polices
-
-### Comment ça marche
-
-Deux vars CSS contrôlent les polices :
-- `--font-ui` : police du dashboard (body, tous les composants via `font-family: inherit`)
-- `--font-mc` : police du Mission Control (section `#view-mc`)
-
-```css
-body      { font-family: var(--font-ui); }
-#view-mc  { font-family: var(--font-mc); }
-button, input, select { font-family: inherit; } /* héritent automatiquement */
-```
-
-### Chargement des polices (Google Fonts)
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700
-    &family=Inter:wght@400;500;600;700
-    &family=JetBrains+Mono:wght@400;700
-    &family=Geist+Mono:wght@400;700
-    &family=Sora:wght@400;500;600;700
-    &family=DM+Sans:wght@400;500;600;700
-    &family=IBM+Plex+Sans:wght@400;500;600;700
-    &family=IBM+Plex+Mono:wght@400;700
-    &display=swap" rel="stylesheet">
-```
-
-### Application JS
-```js
-// Police dashboard
-const fontValue = font === 'system'
-    ? 'system-ui, -apple-system, sans-serif'
-    : `'${font}', sans-serif`;
-document.documentElement.style.setProperty('--font-ui', fontValue);
-
-// Police MC
-const fontMcValue = font === 'system'
-    ? 'monospace'
-    : `'${font}', monospace`;
-document.documentElement.style.setProperty('--font-mc', fontMcValue);
-```
-
-### UI (même pattern pour dashboard et MC)
-```html
-<div class="font-pick-grid" id="fontUiGrid">
-    <button class="font-pick-btn active" data-font="system"
-            onclick="setFontUi('system')"
-            style="font-family:system-ui,sans-serif;">Système</button>
-    <button class="font-pick-btn" data-font="Inter"
-            onclick="setFontUi('Inter')"
-            style="font-family:'Inter',sans-serif;">Inter</button>
-    <!-- chaque bouton est affiché dans sa propre police via style inline -->
-</div>
-```
-
-CSS de la grille :
-```css
-.font-pick-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: .3rem;
-}
-.font-pick-btn {
-    padding: .35rem .5rem; font-size: .72rem; font-weight: 500;
-    border: 1px solid var(--border); background: var(--surface2);
-    color: var(--tx-2); cursor: pointer; text-align: left;
-    border-radius: var(--r); transition: all .12s;
-}
-.font-pick-btn:hover  { border-color: var(--accent); color: var(--tx-1); }
-.font-pick-btn.active { border-color: var(--accent); background: var(--accent-lt);
-                        color: var(--accent-text); font-weight: 700; }
-```
-
-Le bouton actif est marqué via `data-font` : `el.classList.toggle('active', el.dataset.font === currentFont)`.
-
----
-
-## 8. theme.js — Moteur complet
-
-### Structure du fichier
-```
-(function() {              ← IIFE pour ne pas polluer le scope global
-    const STORAGE_KEY      ← clé localStorage
-    const DEFAULTS         ← valeurs par défaut de toutes les prefs
-    function load()        ← lit localStorage + merge avec DEFAULTS
-    function save(prefs)   ← écrit dans localStorage
-    let prefs = load()     ← état courant
-
-    function applyAll(p)   ← applique TOUTES les prefs sur le DOM
-    // helpers couleur : lightenHex, darkenHex, hexToRgb
-    // helpers UI : syncPickerUI, syncColorPickerEl, wireColorPicker
-
-    // API publique — tout sur window.xxx pour les onclick HTML
-    window.setMode()
-    window.setAccent()
-    window.setSidebarColor()
-    window.setRadius()
-    window.setFontSize()
-    window.setVisualStyle()
-    window.setFontUi()
-    window.setFontMc()
-    window.setTextColor()
-    window.setConBg()
-    window.setPageBg() / clearPageBg()
-    window.setBorderColor() / clearBorderColor()
-    window.openThemePanel() / closeThemePanel()
-    window.resetTheme()
-    window.applyAccentHex() / applyPageBgHex() / applyBorderColorHex() / applyConBgHex()
-    window._themeApplyAll  ← expose applyAll pour usage externe
-
-    function wireSwatches() ← branche tous les event listeners
-
-    DOMContentLoaded → applyAll + wireSwatches + syncPickerUI
-    applyAll(prefs)  ← exécuté immédiatement pour éviter le flash
-})();
-```
-
-### Objet prefs (localStorage)
-```js
-{
-    mode:        'light',          // 'light' | 'dark'
-    accent:      '#8C9C7C',
-    accentRgb:   '140,156,124',
-    accentLt:    '#e8eacc',
-    accentText:  '#4a5a3c',
-    sidebar:     '#131114',
-    radius:      '0px',           // --r
-    radiusLg:    '0px',           // --r-lg
-    fontSize:    '14',            // px
-    vstyle:      'flat',          // style visuel
-    fontUi:      'system',        // police dashboard
-    fontMc:      'Space Mono',    // police MC
-    textColor:   '#131114',
-    conBg:       '#06080d',       // fond constellation MC
-    pageBg:      '',              // '' = auto (suit le mode)
-    borderColor: '',              // '' = auto (suit le mode)
-}
-```
-
-### Ce que fait applyAll()
-1. `data-theme` sur `<html>` → mode clair/sombre
-2. `data-style` sur `<html>` → style visuel
-3. `--accent`, `--accent-rgb`, `--accent-lt`, `--accent-text` sur `:root`
-4. `--tx-1`, `--text-primary` sur `:root`
-5. `--sidebar-bg` + style direct sur `#appSidebar`
-6. `--con-bg` sur `:root`
-7. `--bg` sur `:root` si pageBg défini, sinon `removeProperty`
-8. `--border`, `--border2`, `--border-light` si borderColor défini
-9. `--r`, `--r-lg` sur `:root`
-10. `--font-ui`, `--font-mc` sur `:root`
-11. `font-size` sur `:root`
-12. Sync de tous les pickers (valeur + thumb)
-13. Marquage des boutons actifs (swatches, style-btn, radius-btn, font-pick-btn)
-
----
-
-## 9. Panel de personnalisation HTML
-
-### Structure du panel
-```html
-<!-- Overlay cliquable pour fermer -->
-<div class="theme-overlay" id="themeOverlay" onclick="closeThemePanel()"></div>
-
-<!-- Panel latéral -->
-<div class="theme-panel" id="themePanel">
-    <div class="theme-panel-header">
-        <span>Personnalisation</span>
-        <button onclick="closeThemePanel()">×</button>
-    </div>
-
-    <!-- Section type -->
-    <div class="theme-section">
-        <div class="theme-section-label">Nom de la section</div>
-        <!-- contrôles ici -->
-    </div>
-
-    <!-- ... autres sections ... -->
-
-    <button class="theme-reset-btn" onclick="resetTheme()">↺ Réinitialiser</button>
-</div>
-
-<!-- Bouton déclencheur flottant -->
-<button class="theme-trigger-btn" onclick="openThemePanel()">🎨</button>
-```
-
-### CSS du panel
-```css
-.theme-panel {
-    position: fixed; top: 0; right: -340px; width: 320px; height: 100vh;
-    background: var(--surface); border-left: 1px solid var(--border);
-    z-index: 9000; overflow-y: auto; transition: right .25s ease;
-    padding: 1rem;
-}
-.theme-panel.open { right: 0; }
-
-.theme-overlay {
-    display: none; position: fixed; inset: 0; z-index: 8999;
-    background: rgba(0,0,0,.2);
-}
-.theme-overlay.open { display: block; }
-
-.theme-trigger-btn {
-    position: fixed; bottom: 1.5rem; right: 1.5rem;
-    width: 44px; height: 44px; border-radius: 50%;
-    background: var(--accent); color: var(--accent-text);
-    border: none; cursor: pointer; z-index: 8998;
-    box-shadow: 0 2px 12px rgba(0,0,0,.2);
-}
-
-.theme-section { margin-bottom: 1.25rem; }
-.theme-section-label {
-    font-size: .62rem; font-weight: 700; color: var(--tx-3);
-    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .5rem;
-}
-```
-
-### Sections dans l'ordre
-| # | Section | Contrôle |
-|---|---|---|
-| 1 | Mode d'affichage | Boutons Clair / Sombre |
-| 2 | Fond principal | Color picker + hex + swatches + reset |
-| 3 | Couleur des bordures | Color picker + hex + swatches + reset |
-| 4 | Couleur accent | Color picker + hex + 12 swatches |
-| 5 | Couleur sidebar | 6 swatches |
-| 6 | Fond Constellation (MC) | Color picker + hex + 8 swatches |
-| 7 | Style visuel | 7 boutons avec aperçu |
-| 8 | Coins | 3 boutons (Carré / Arrondi / Large) |
-| 9 | Police — Dashboard | Grille 2 colonnes, 8 polices |
-| 10 | Police — Mission Control | Grille 2 colonnes, 7 polices |
-| 11 | Texte principal | 5 swatches |
-| 12 | Taille du texte | Slider 12–16px |
-| — | Réinitialiser | Bouton reset global |
-
----
-
-## 10. Priorité des surcharges CSS
-
-Du plus fort (inline JS) au plus faible (défaut `:root`) :
-
-```
-element.style.setProperty()              ← inline JS (pageBg, borderColor, fontUi, fontMc…)
-  > #view-mc[data-mc-theme="dark/light"] ← mode MC forcé
-    > #view-mc[data-mc-style="green/…"]  ← thème couleur MC
-      > [data-theme="dark"][data-style="cyber"] .panel  ← combo thème+style
-        > [data-style="cyber"] .panel    ← style visuel seul
-          > [data-theme="dark"]          ← mode sombre
-            > :root                      ← défaut clair
-```
-
----
-
-## 11. Mission Control — Système de thème propre
-
-Le MC a un jeu de vars CSS **indépendant** défini sur `#view-mc`, avec son propre mode sombre/clair.
-
-```css
-/* Vars de base MC (sombre par défaut) */
-#view-mc {
-    --mc-bg:           #0b0c0e;
-    --mc-surface:      #0e1117;
-    --mc-border-theme: #1e2a3a;
-    --mc-con-bg:       #06080d;
-    --mc-hi:           #f59e0b;   /* couleur principale */
-    --mc-tx:           #cbd5e1;
-    --mc-border: var(--mc-border-custom, var(--mc-border-theme));
-    /* --mc-border-custom (picker MC) écrase --mc-border-theme (thème) */
-}
-
-/* Mode clair MC auto (suit le thème global) */
-:root:not([data-theme="dark"]) #view-mc:not([data-mc-theme="dark"]) {
-    --mc-bg:      #f4f5f0;
-    --mc-surface: #ffffff;
-    --mc-con-bg:  #e8eadc;
-    --mc-tx:      #1e2118;
-}
-
-/* Mode sombre MC forcé (indépendant du thème global) */
-#view-mc[data-mc-theme="dark"] { /* vars sombres */ }
-
-/* Mode clair MC forcé */
-#view-mc[data-mc-theme="light"] { /* vars claires */ }
-
-/* Thèmes couleur (toujours sombres) */
-#view-mc[data-mc-style="green"]  { --mc-hi:#22c55e; --mc-con-bg:#030a05; … }
-#view-mc[data-mc-style="blue"]   { --mc-hi:#38bdf8; --mc-con-bg:#04060f; … }
-#view-mc[data-mc-style="red"]    { --mc-hi:#ef4444; --mc-con-bg:#0a0303; … }
-#view-mc[data-mc-style="amber"]  { --mc-hi:#f59e0b; --mc-con-bg:#090700; … }
-```
-
-Boutons dans la topbar MC :
-```html
-<div class="mc-style-bar">
-    <button data-mcs="dark"  onclick="setMcStyle('dark')">DARK</button>
-    <button data-mcs="light" onclick="setMcStyle('light')">LIGHT</button>
-    <button data-mcs="green" onclick="setMcStyle('green')">GREEN</button>
-    <!-- … -->
-    <!-- Mini pickers directs dans la topbar -->
-    <div class="mc-mini-picker">
-        <input type="color" id="mcConBgPicker" oninput="mcSetConBg(this.value)">
-        <div class="mc-mini-picker-thumb" id="mcConBgThumb"></div>
-    </div>
-</div>
-```
-
----
-
-## 12. Intégration dans un nouveau projet
-
-### Fichiers à copier
-```
-static/css/style.css    → tokens + styles visuels + composants
-static/js/theme.js      → moteur complet
-```
-
-### HTML minimum
-```html
-<!DOCTYPE html>
-<html lang="fr">  <!-- pas de data-theme = mode clair par défaut -->
-<head>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700
-        &family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700
-        &family=Sora:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700
-        &family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;700
-        &display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-    <!-- Ton contenu avec .panel, .kpi-card etc. -->
-    <div class="panel"> ... </div>
-
-    <!-- Panel de personnalisation (copier depuis base.html) -->
-    <div class="theme-overlay" id="themeOverlay" onclick="closeThemePanel()"></div>
-    <div class="theme-panel" id="themePanel"> ... </div>
-    <button class="theme-trigger-btn" onclick="openThemePanel()">🎨</button>
-
-    <!-- Moteur de thème — doit être chargé AVANT les scripts de page -->
-    <script src="theme.js"></script>
-</body>
-</html>
-```
-
-### Règles à respecter pour que tout fonctionne
-
-1. **Jamais de couleur codée en dur dans les composants** — toujours `var(--xxx)`
-2. **Toujours `font-family: inherit`** sur `button`, `input`, `select` pour hériter `--font-ui`
-3. **Utiliser `.panel` et `.kpi-card`** comme classes de base pour que les styles visuels s'appliquent
-4. **`theme.js` chargé en dernier** (avant `</body>`) — il s'applique immédiatement pour éviter le flash
-5. **Toutes les fonctions onclick doivent être sur `window.xxx`** (pas juste `function xxx()`) car le SPA les wrappe dans un IIFE
-
-### Ajouter un composant qui répond aux thèmes
-```css
-.mon-composant {
-    background: var(--surface);      /* auto clair/sombre */
-    border: 1px solid var(--border); /* auto + perso bordures */
-    border-radius: var(--r-lg);      /* auto coins */
-    color: var(--tx-1);              /* auto clair/sombre */
-    font-family: var(--font-ui);     /* auto police */
-    box-shadow: var(--sh);           /* auto ombres */
-}
-/* Rien d'autre à faire — les data-theme et data-style gèrent le reste */
-```
+Tu es un Senior Product Designer + Senior Frontend Engineer spécialisé dans les interfaces mobiles modernes.
+
+Je veux refondre l'interface complète de mon projet en utilisant comme référence visuelle l'image fournie.
+
+IMPORTANT :
+L'image de référence sert à définir le LANGAGE VISUEL, le DESIGN SYSTEM, les proportions, les espacements, les formes, les ombres, les boutons, les cartes, les champs et la hiérarchie visuelle.
+
+Ne copie pas littéralement les écrans de l'image.
+Ne reproduis pas son contenu ou sa structure fonctionnelle.
+Adapte uniquement son STYLE VISUEL à mon application et à ses fonctionnalités existantes.
+
+==================================================
+1. OBJECTIF GLOBAL
+==================================================
+
+Transforme l'ensemble de mon application afin d'obtenir une interface :
+
+- minimaliste
+- premium
+- moderne
+- élégante
+- très lisible
+- principalement monochrome
+- orientée mobile
+- très aérée
+- avec une hiérarchie visuelle claire
+- avec très peu de décoration inutile
+- avec des composants arrondis
+- avec des ombres extrêmement subtiles
+- avec des boutons noirs très visibles
+- avec des icônes line-art fines
+- avec des surfaces gris très clair
+- avec beaucoup d'espace négatif
+
+L'interface doit donner une impression de :
+"premium minimal mobile app"
+
+Elle doit ressembler à une application moderne conçue par une équipe produit professionnelle, et non à un template générique.
+
+==================================================
+2. DIRECTION ARTISTIQUE
+==================================================
+
+Utilise une esthétique monochrome.
+
+Palette principale :
+
+- Background principal : #F7F7F7
+- Surface / cards : #FFFFFF
+- Surface secondaire : #F1F1F1
+- Gris très clair : #EAEAEA
+- Bordure : #E2E2E2
+- Texte principal : #111111
+- Texte secondaire : #6F6F6F
+- Texte désactivé : #A5A5A5
+- Noir CTA : #111111
+- Blanc : #FFFFFF
+
+Évite les couleurs fortes par défaut.
+
+Ne pas utiliser :
+- gradients colorés
+- néons
+- ombres fortes
+- effets glassmorphism excessifs
+- bordures épaisses
+- couleurs saturées
+- éléments visuellement bruyants
+
+Si une couleur métier est absolument nécessaire, utilise-la uniquement comme accent très discret.
+
+Le noir et les gris doivent dominer l'expérience.
+
+==================================================
+3. TYPOGRAPHIE
+==================================================
+
+Utilise une police moderne et très lisible.
+
+Priorité :
+
+1. Inter
+2. SF Pro / system-ui
+3. Geist
+4. équivalent sans-serif moderne
+
+Hiérarchie :
+
+Large title :
+font-size: 28-32px
+font-weight: 600-700
+line-height: 1.15
+
+Section title :
+font-size: 20-24px
+font-weight: 600
+
+Card title :
+font-size: 16-18px
+font-weight: 600
+
+Body :
+font-size: 14-16px
+font-weight: 400
+line-height: 1.5
+
+Caption :
+font-size: 12-13px
+color: #777777
+
+Les titres doivent être courts et visuellement forts.
+
+Évite les textes trop gras partout.
+
+==================================================
+4. ESPACEMENT
+==================================================
+
+Utilise un système d'espacement cohérent basé sur 4px.
+
+Exemple :
+
+4px
+8px
+12px
+16px
+20px
+24px
+32px
+40px
+48px
+
+Utilise principalement :
+
+- padding horizontal mobile : 20px
+- padding vertical : 20-24px
+- gap entre sections : 24-32px
+- gap entre éléments liés : 8-16px
+
+L'interface doit respirer.
+
+Ne jamais remplir artificiellement l'écran.
+
+Le whitespace est une partie importante du design.
+
+==================================================
+5. BORDER RADIUS
+==================================================
+
+Utilise des coins généreusement arrondis.
+
+Petits éléments :
+8-10px
+
+Inputs :
+12-14px
+
+Cards :
+16-20px
+
+Grandes sections / bottom sheets :
+24-28px
+
+Boutons principaux :
+12-16px
+
+Les coins doivent donner une sensation douce et moderne.
+
+Évite les rectangles parfaitement carrés sauf lorsque cela est fonctionnellement nécessaire.
+
+==================================================
+6. OMBRES
+==================================================
+
+Les ombres doivent être presque imperceptibles.
+
+Exemple :
+
+box-shadow:
+0 4px 20px rgba(0,0,0,0.05);
+
+Pour les éléments flottants :
+
+box-shadow:
+0 8px 30px rgba(0,0,0,0.08);
+
+Ne jamais utiliser :
+- grosse ombre noire
+- shadow très foncée
+- effet 3D
+- néon
+
+L'élévation doit être suggérée, pas dessinée.
+
+==================================================
+7. BOUTONS
+==================================================
+
+Les boutons principaux doivent être noirs avec texte blanc.
+
+Exemple :
+
+background: #111111
+color: #FFFFFF
+border-radius: 14px
+height: 48-52px
+
+Style :
+
+[     Get started     ]
+
+Le bouton doit être suffisamment grand pour être facilement utilisé au doigt.
+
+Bouton principal :
+- pleine largeur lorsque pertinent
+- hauteur 48-52px
+- radius 14px
+- font-weight 500-600
+- aucune décoration inutile
+
+Bouton secondaire :
+- fond #F1F1F1
+- texte #111111
+
+Bouton tertiaire :
+- transparent
+- texte #555555
+
+Ajouter des états :
+
+hover
+active
+pressed
+disabled
+loading
+
+Mais garder les transitions très discrètes.
+
+==================================================
+8. INPUTS / FORMULAIRES
+==================================================
+
+Les champs doivent être extrêmement propres.
+
+Style :
+
+background: #FFFFFF
+border: 1px solid #E2E2E2
+border-radius: 12-14px
+height: 48-52px
+
+Label :
+petit
+semi-bold
+#333333
+
+Placeholder :
+#A0A0A0
+
+Focus :
+bordure #111111
+
+Évite les bordures épaisses.
+
+Les formulaires doivent paraître simples et premium.
+
+==================================================
+9. CARDS
+==================================================
+
+Les cards sont un élément central du design.
+
+Utiliser :
+
+background: #FFFFFF
+border-radius: 18px
+padding: 16-20px
+
+Optionnel :
+border: 1px solid #EEEEEE
+
+Shadow :
+très subtile.
+
+Une card peut contenir :
+
+- icône
+- image
+- titre
+- description
+- metadata
+- bouton
+- statut
+- action secondaire
+
+Les cards doivent être visuellement simples.
+
+Évite de mettre trop d'informations dans une seule card.
+
+==================================================
+10. ICÔNES
+==================================================
+
+Utiliser uniquement des icônes minimalistes de type line-art.
+
+Style recommandé :
+
+- stroke fin
+- monochrome
+- aucune icône 3D
+- aucune icône multicolore
+- aucune illustration complexe
+
+Utiliser une librairie cohérente comme Lucide Icons si disponible.
+
+Les icônes doivent généralement être :
+
+18px
+20px
+24px
+
+Ne mélange pas plusieurs styles d'icônes.
+
+==================================================
+11. NAVIGATION MOBILE
+==================================================
+
+Créer une navigation mobile très simple.
+
+Bottom navigation :
+
+- fond blanc
+- légère séparation supérieure
+- 4 ou 5 éléments maximum
+- icône + label si nécessaire
+- état actif en noir
+- état inactif en gris
+
+La navigation doit rester discrète.
+
+Ne pas utiliser de gros blocs colorés.
+
+==================================================
+12. HEADER
+==================================================
+
+Les headers doivent être minimalistes.
+
+Exemple :
+
+←                    ⋯
+
+ou
+
+←    Page title       🔍
+
+Utiliser beaucoup d'espace.
+
+Éviter les headers surchargés.
+
+Le titre doit être clairement identifiable.
+
+==================================================
+13. MODALS / BOTTOM SHEETS
+==================================================
+
+Les modals doivent suivre le style de la référence.
+
+Utiliser :
+
+- overlay gris/noir transparent
+- background blanc
+- radius supérieur 24-28px
+- padding 20-24px
+- shadow très légère
+
+Le contenu doit être hiérarchisé.
+
+Ajouter un bouton de fermeture discret.
+
+Pour les actions importantes, utiliser le bouton noir principal.
+
+==================================================
+14. EMPTY STATES
+==================================================
+
+Les empty states doivent rester très minimalistes.
+
+Exemple :
+
+       [ line icon ]
+
+       Aucun élément
+
+       Une courte description expliquant
+       quoi faire ensuite.
+
+       [ Commencer ]
+
+Utiliser des illustrations très simples ou des icônes line-art.
+
+Pas d'illustrations complexes ou colorées.
+
+==================================================
+15. LOADING STATES
+==================================================
+
+Créer des skeleton loaders gris très clair.
+
+Exemple :
+
+#EEEEEE
+
+avec des formes arrondies.
+
+Éviter les spinners agressifs.
+
+Les skeletons doivent respecter exactement les dimensions des vrais composants.
+
+==================================================
+16. MICRO-INTERACTIONS
+==================================================
+
+Ajouter des animations très subtiles.
+
+Durée :
+150-250ms
+
+Utiliser :
+
+ease-out
+
+Exemples :
+
+- bouton qui change légèrement de couleur au press
+- card qui monte de 1-2px
+- modal qui apparaît doucement
+- bottom sheet qui slide-up
+- navigation active qui transitionne
+- skeleton loading subtil
+
+Ne jamais utiliser d'animations extravagantes.
+
+L'animation doit renforcer l'impression premium.
+
+==================================================
+17. RESPONSIVE DESIGN
+==================================================
+
+L'application doit être pensée MOBILE FIRST.
+
+Priorité :
+
+375px
+390px
+412px
+430px
+
+Puis adapter pour :
+
+768px
+1024px
+1440px+
+
+Sur mobile :
+
+- contenu pleine largeur
+- padding horizontal 16-20px
+- boutons facilement accessibles
+- zones tactiles minimum 44px
+- bottom navigation fixe si nécessaire
+
+Sur desktop :
+
+Ne pas simplement étirer l'interface mobile.
+
+Créer une version desktop cohérente avec :
+- max-width
+- contenu centré
+- colonnes si nécessaire
+- sidebar lorsque pertinent
+- cards plus larges
+
+==================================================
+18. IMAGES
+==================================================
+
+Les images doivent avoir des coins arrondis.
+
+Exemples :
+
+border-radius: 16px
+
+Utiliser object-fit: cover lorsque nécessaire.
+
+Les images doivent être intégrées dans les cards sans casser le rythme visuel.
+
+Éviter les images avec des cadres lourds.
+
+==================================================
+19. GRILLE / LAYOUT
+==================================================
+
+Utiliser une structure très propre.
+
+Exemple mobile :
+
+Header
+↓
+Hero / titre
+↓
+Section
+↓
+Cards
+↓
+Section suivante
+↓
+Bottom navigation
+
+Ne jamais avoir plusieurs éléments concurrents au même niveau visuel.
+
+Chaque écran doit avoir :
+
+1. une action principale
+2. une hiérarchie claire
+3. une lecture verticale naturelle
+
+==================================================
+20. ACCESSIBILITÉ
+==================================================
+
+Le design doit rester accessible.
+
+Respecter :
+
+- contraste suffisant
+- taille de texte lisible
+- touch targets minimum 44x44px
+- labels explicites
+- états focus visibles
+- navigation clavier sur desktop
+- support prefers-reduced-motion
+
+Ne pas sacrifier l'accessibilité pour l'esthétique.
+
+==================================================
+21. COMPOSANTS À CRÉER
+==================================================
+
+Créer ou refactoriser les composants suivants :
+
+- Button
+- IconButton
+- Input
+- SearchInput
+- Textarea
+- Select
+- Checkbox
+- Radio
+- Switch
+- Card
+- Avatar
+- Badge
+- Chip
+- Modal
+- BottomSheet
+- Toast
+- Alert
+- Skeleton
+- Divider
+- Header
+- BottomNavigation
+- TabBar
+- ListItem
+- EmptyState
+- LoadingState
+- Dropdown
+- Tooltip
+- Pagination si nécessaire
+
+Tous ces composants doivent appartenir au même design system.
+
+==================================================
+22. DESIGN TOKENS
+==================================================
+
+Créer des variables globales pour éviter les valeurs arbitraires.
+
+Exemple :
+
+--color-background: #F7F7F7;
+--color-surface: #FFFFFF;
+--color-surface-secondary: #F1F1F1;
+--color-border: #E2E2E2;
+
+--color-text-primary: #111111;
+--color-text-secondary: #6F6F6F;
+--color-text-muted: #A5A5A5;
+
+--color-primary: #111111;
+--color-primary-foreground: #FFFFFF;
+
+--radius-sm: 8px;
+--radius-md: 12px;
+--radius-lg: 18px;
+--radius-xl: 24px;
+
+--spacing-1: 4px;
+--spacing-2: 8px;
+--spacing-3: 12px;
+--spacing-4: 16px;
+--spacing-5: 20px;
+--spacing-6: 24px;
+--spacing-8: 32px;
+--spacing-10: 40px;
+--spacing-12: 48px;
+
+--shadow-sm: 0 2px 10px rgba(0,0,0,.04);
+--shadow-md: 0 8px 30px rgba(0,0,0,.06);
+
+Tous les composants doivent utiliser ces tokens.
+
+Ne pas hardcoder des dizaines de valeurs différentes.
+
+==================================================
+23. ARCHITECTURE VISUELLE
+==================================================
+
+Chaque écran doit suivre cette logique :
+
+1. Background clair
+2. Header minimal
+3. Titre / contexte
+4. Contenu principal
+5. Cards ou sections
+6. Action principale
+7. Navigation
+
+Créer une hiérarchie visuelle forte uniquement avec :
+
+- taille
+- poids typographique
+- espace
+- contraste
+- position
+- radius
+- surface
+
+Ne pas utiliser des couleurs pour créer artificiellement la hiérarchie.
+
+==================================================
+24. RÈGLE IMPORTANTE SUR LE DESIGN
+==================================================
+
+Quand tu hésites entre :
+
+A. ajouter un élément
+B. supprimer l'élément
+
+Privilégie la simplicité.
+
+Quand tu hésites entre :
+
+A. plusieurs couleurs
+B. noir + gris
+
+Privilégie noir + gris.
+
+Quand tu hésites entre :
+
+A. une interface dense
+B. une interface respirante
+
+Privilégie l'interface respirante.
+
+Quand tu hésites entre :
+
+A. décoration
+B. fonctionnalité
+
+Privilégie la fonctionnalité.
+
+Le design doit paraître volontairement simple.
+
+==================================================
+25. ADAPTATION À MON PROJET
+==================================================
+
+Ne supprime aucune fonctionnalité existante.
+
+Commence par analyser :
+
+- toutes les pages
+- tous les composants
+- toutes les routes
+- tous les flows utilisateurs
+- les formulaires
+- les états loading
+- les états empty
+- les erreurs
+- les modals
+- les navigations
+- les actions principales
+
+Ensuite applique le nouveau design system à l'ensemble du projet.
+
+Ne change pas la logique métier sauf si cela est nécessaire pour corriger un problème évident d'UX.
+
+==================================================
+26. MÉTHODE DE TRAVAIL
+==================================================
+
+Étape 1 :
+Analyse l'application existante.
+
+Étape 2 :
+Identifie tous les composants réutilisables.
+
+Étape 3 :
+Crée le nouveau design system.
+
+Étape 4 :
+Crée les design tokens.
+
+Étape 5 :
+Refactorise les composants globaux.
+
+Étape 6 :
+Refais les écrans principaux.
+
+Étape 7 :
+Refais les écrans secondaires.
+
+Étape 8 :
+Ajoute les états loading / empty / error.
+
+Étape 9 :
+Vérifie le responsive.
+
+Étape 10 :
+Vérifie l'accessibilité.
+
+Étape 11 :
+Supprime les styles incohérents et les anciennes couleurs.
+
+Étape 12 :
+Effectue une dernière passe UX/UI pour assurer la cohérence entre tous les écrans.
+
+==================================================
+27. QUALITÉ VISUELLE
+==================================================
+
+À la fin, inspecte chaque écran comme le ferait un Senior Product Designer.
+
+Vérifie :
+
+- alignements
+- spacing
+- tailles
+- contrastes
+- radius
+- ombres
+- cohérence des boutons
+- cohérence des inputs
+- cohérence des icons
+- cohérence de la navigation
+- responsive
+- hiérarchie visuelle
+
+Aucun écran ne doit sembler appartenir à une autre application.
+
+Tout doit avoir le même langage visuel.
+
+==================================================
+28. RÉSULTAT ATTENDU
+==================================================
+
+Le résultat final doit évoquer :
+
+Minimal
+Premium
+Clean
+Modern
+Mobile-first
+Monochrome
+Soft
+Elegant
+Professional
+Highly usable
+
+Le résultat doit être proche de l'esprit visuel de l'image de référence :
+
+- fond gris/blanc très clair
+- cards blanches
+- gros border-radius
+- ombres très légères
+- boutons noirs
+- textes noirs/gris
+- icônes line-art
+- beaucoup de whitespace
+- interface très propre
+- composants arrondis
+- hiérarchie extrêmement claire
+
+IMPORTANT :
+Ne transforme pas simplement les couleurs de l'application actuelle.
+
+Recompose réellement l'interface afin qu'elle adopte ce langage visuel.
+
+Conserve les fonctionnalités et les données existantes, mais améliore fortement la présentation, la hiérarchie et l'expérience utilisateur.
+
+Avant de modifier du code, inspecte l'architecture existante et identifie les composants qui peuvent être réutilisés.
+
+Ensuite implémente progressivement le nouveau design system dans tout le projet.

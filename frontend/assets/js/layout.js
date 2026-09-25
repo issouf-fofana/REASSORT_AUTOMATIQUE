@@ -47,8 +47,12 @@
   // ce rôle", le pliage ne fait qu'ajouter une couche par-dessus qui masque tout le groupe.
   (function initCollapsibleSidebarSections() {
     const COLLAPSE_KEY_PREFIX = 'sidebar-collapsed-';
+    // Repliés par défaut (demande du 25/09/2026 : la sidebar avait grossi à 17 liens + 2 groupes et
+    // débordait en hauteur, forçant un scroll interne) — seul un choix explicite de l'utilisateur
+    // (setCollapsed) enregistre '0' pour rouvrir un groupe ; en son absence ('1' ou rien du tout en
+    // localStorage), le groupe démarre replié plutôt qu'ouvert comme avant.
     function isCollapsed(group) {
-      try { return localStorage.getItem(COLLAPSE_KEY_PREFIX + group) === '1'; } catch (err) { return false; }
+      try { return localStorage.getItem(COLLAPSE_KEY_PREFIX + group) !== '0'; } catch (err) { return true; }
     }
     function setCollapsed(group, collapsed) {
       try { localStorage.setItem(COLLAPSE_KEY_PREFIX + group, collapsed ? '1' : '0'); } catch (err) { /* état non persistant si le stockage est indisponible */ }

@@ -1,3 +1,16 @@
+# Stage de build de la navigation "notch" (24/09/2026, remplace la sidebar/topbar Volt classique
+# sur les 14 pages — voir react-app-notch-nav/) : SEUL projet du site avec Tailwind/shadcn/
+# framer-motion, jamais dupliqués dans les 14 autres. Produit un bundle IIFE autonome
+# (notch-nav.js/.css) chargé en <script>/<link> classique par chaque page, comme
+# assets/js/layout.js l'était auparavant — construit EN PREMIER ici pour que les COPY des autres
+# stages n'aient jamais besoin d'attendre sur lui.
+FROM node:20-alpine AS notch-nav-builder
+WORKDIR /app
+COPY react-app-notch-nav/package*.json ./
+RUN npm ci
+COPY react-app-notch-nav/ .
+RUN npm run build
+
 # Stage de build de la page Paramètres migrée vers React (23/09/2026, migration progressive
 # page par page — voir /home/youssef/.claude/plans/compressed-roaming-orbit.md). Séparé du stage
 # nginx final : node_modules et les sources TypeScript ne doivent jamais atterrir dans l'image
@@ -128,6 +141,13 @@ RUN npm ci
 COPY react-app-order-anomalies/ .
 RUN npm run build
 
+FROM node:20-alpine AS auth-signin-builder
+WORKDIR /app
+COPY react-app-auth-signin/package*.json ./
+RUN npm ci
+COPY react-app-auth-signin/ .
+RUN npm run build
+
 FROM nginx:alpine
 
 # Servi séparément de /usr/share/nginx/html (le COPY . ci-dessous) : sinon nginx.conf finirait
@@ -139,6 +159,13 @@ COPY . /usr/share/nginx/html
 # ci-dessus avant d'avoir pu l'exclure autrement, faute de .dockerignore dans ce projet) : retiré
 # explicitement du dossier public plutôt que de laisser la config nginx elle-même téléchargeable.
 RUN rm -f /usr/share/nginx/html/nginx.conf
+
+# Bundle de la navigation "notch" (React+Tailwind+shadcn+framer-motion), servi au même titre que les
+# autres fichiers statiques partagés sous assets/js/ et assets/css/ — chargé en <script>/<link>
+# classique par chaque page (voir index.html des 14 projets react-app-*), jamais comme les bundles
+# /xxx-app/ des autres pages (celui-ci n'est PAS le contenu d'une page, juste sa navigation).
+COPY --from=notch-nav-builder /app/dist/notch-nav.js /usr/share/nginx/html/assets/js/notch-nav.js
+COPY --from=notch-nav-builder /app/dist/notch-nav.css /usr/share/nginx/html/assets/css/notch-nav.css
 
 # Résultat du build React (page Paramètres), servi sous /settings-app/ par une règle nginx dédiée
 # (voir nginx.conf) — jamais mélangé avec les pages HTML classiques du COPY . ci-dessus.
@@ -195,6 +222,7 @@ COPY --from=ai-mastery-builder /app/dist /usr/share/nginx/html/ai-mastery-app
 # Résultat du build React (Anomalies de commande), servi sous /order-anomalies-app/ par une règle
 # nginx dédiée (voir nginx.conf) — dernière page du site migrée vers React.
 COPY --from=order-anomalies-builder /app/dist /usr/share/nginx/html/order-anomalies-app
+COPY --from=auth-signin-builder /app/dist /usr/share/nginx/html/auth-signin-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

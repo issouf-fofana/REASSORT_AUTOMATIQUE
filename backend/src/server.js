@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -14,6 +14,7 @@ const reassortRoutes = require('./routes/reassort');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const fallbackRoutes = require('./routes/fallback');
+const oauthOutlookRoutes = require('./routes/oauthOutlook');
 
 // Initialize Express
 const app = express();
@@ -100,6 +101,9 @@ app.use(fallbackRoutes);
 app.use('/api/reassort', reassortRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+// Hors /api/reassort volontairement : reçoit la redirection du NAVIGATEUR d'Azure AD (jamais un
+// appel fetch authentifié par notre JWT), protégé par son propre state signé — cf. oauthOutlook.js.
+app.use('/api/oauth/outlook', oauthOutlookRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -223,6 +227,8 @@ async function start() {
     await startOrRestartPredictionOutcomeJob();
     // Chien de garde quotidien du Conseiller d'amélioration IA (horaire configurable).
     await startOrRestartImprovementWatchdogJob();
+    // Relance des propositions encore en attente (horaire configurable, 10h par défaut).
+    await startOrRestartProposalReminderJob();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

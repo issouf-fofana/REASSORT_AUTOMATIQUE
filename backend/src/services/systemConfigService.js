@@ -42,6 +42,9 @@ const KEYS = {
   // terminer, sur CHAQUE magasin, et relance une récupération ciblée en cas d'écart. Distinct de la
   // synchro incrémentale (SALES_SYNC_CRON, toutes les 15 min, fenêtre glissante de 48h seulement).
   SALES_DAILY_RECAP_CRON: 'SALES_DAILY_RECAP_CRON',
+  // Relance des propositions encore en attente (demande du 25/09/2026 : l'entrepôt ne reçoit plus
+  // les commandes après 13h, une relance en matinée laisse le temps de valider avant cette limite).
+  PROPOSAL_REMINDER_CRON: 'PROPOSAL_REMINDER_CRON',
   // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
   // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
   // expression cron qui ne se déclenche jamais pour le "désactiver").
@@ -60,6 +63,7 @@ const KEYS = {
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
+  PROPOSAL_REMINDER_ENABLED: 'PROPOSAL_REMINDER_ENABLED',
   // Si "true", chaque génération de proposition (nocturne, manuelle, réajustement quotidien)
   // envoie ses articles à l'IA pour ajuster la quantité calculée classiquement avant de
   // l'enregistrer comme "Qté proposée" — au lieu de laisser cette étape à un appel manuel séparé
@@ -147,6 +151,8 @@ const ENV_FALLBACK = {
   // affiché sur Vue Globale (précision IA, confiance IA) se met à jour dans l'heure qui suit, sans
   // attendre le lendemain matin.
   [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 * * * *',
+  // 10h par défaut : fenêtre 9h-11h demandée, avant la limite de 13h de l'entrepôt.
+  [KEYS.PROPOSAL_REMINDER_CRON]: () => process.env.PROPOSAL_REMINDER_CRON || '0 10 * * *',
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
@@ -226,6 +232,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.PRODUCT_EOL_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
+  [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
   [KEYS.IMPROVEMENTS_ENABLED]: () => 'true',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
