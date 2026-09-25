@@ -128,6 +128,13 @@ RUN npm ci
 COPY react-app-order-anomalies/ .
 RUN npm run build
 
+FROM node:20-alpine AS feature-requests-builder
+WORKDIR /app
+COPY react-app-feature-requests/package*.json ./
+RUN npm ci
+COPY react-app-feature-requests/ .
+RUN npm run build
+
 FROM node:20-alpine AS auth-signin-builder
 WORKDIR /app
 COPY react-app-auth-signin/package*.json ./
@@ -203,6 +210,10 @@ COPY --from=ai-mastery-builder /app/dist /usr/share/nginx/html/ai-mastery-app
 # nginx dédiée (voir nginx.conf) — dernière page du site migrée vers React.
 COPY --from=order-anomalies-builder /app/dist /usr/share/nginx/html/order-anomalies-app
 COPY --from=auth-signin-builder /app/dist /usr/share/nginx/html/auth-signin-app
+
+# Résultat du build React (Demandes d'évolution, 25/09/2026), servi sous /feature-requests-app/ par
+# une règle nginx dédiée (voir nginx.conf).
+COPY --from=feature-requests-builder /app/dist /usr/share/nginx/html/feature-requests-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

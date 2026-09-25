@@ -16,6 +16,7 @@ const aiMasteryService = require('../../services/aiMasteryService');
 const autonomyReadinessService = require('../../services/autonomyReadinessService');
 const aiUsageService = require('../../services/aiUsageService');
 const { filterProposalLinesForUser, getCapabilityGuide, getPlatformGuide } = require('../../services/aiPermissionsService');
+const featureRequestService = require('../../services/featureRequestService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir faire analyser par l'IA (ou poser une
 // question de suivi sur) un article hors de son rayon simplement en connaissant son EAN dans cette
@@ -611,6 +612,44 @@ router.get('/improvements/:id', requireAdmin, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+// GET /api/reassort/feature-requests - demandes d'évolution produit remontées par l'Assistant IA
+// (demande du 25/09/2026, spec "Comportement général de l'IA") : liste, filtrable par statut.
+// Réservé ADMIN, même principe que /improvements.
+router.get('/feature-requests', requireAdmin, async (req, res) => {
+  try {
+    const data = await featureRequestService.listFeatureRequests({ status: req.query.status || undefined });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/feature-requests/:id - détail complet avec l'historique des notes/enrichissements.
+router.get('/feature-requests/:id', requireAdmin, async (req, res) => {
+  try {
+    const data = await featureRequestService.getFeatureRequest(req.params.id);
+    if (!data) return res.status(404).json({ success: false, message: 'Demande introuvable' });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/feature-requests/:id/status - changement de statut manuel par un développeur/admin
+// (§8 de la spec : new -> needs_information -> pending -> in_progress -> resolved/closed).
+router.put('/feature-requests/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!featureRequestService.VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Statut invalide' });
+    }
+    const data = await featureRequestService.updateFeatureRequestStatus(req.params.id, status);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/corrections - journal unifié des corrections (AI_AUTO + DEV_FIX), demande du
 // 17/09/2026 : chaque entrée trace erreur constatée, contexte, cause, correction, fichiers/fonctions
 // touchés, tests avant/après, et liens vers l'historique des corrections similaires. Filtrable par

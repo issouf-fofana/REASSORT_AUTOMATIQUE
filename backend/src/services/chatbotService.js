@@ -12,6 +12,7 @@ const tools = require('./chatbotToolsService');
 const { streamWithFallback, callWithFallback } = require('./aiForecastService');
 const systemConfig = require('./systemConfigService');
 const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./aiPermissionsService');
+const featureRequestService = require('./featureRequestService');
 
 // Noms d'outils valides pour une règle d'intention — sert à ignorer silencieusement une règle
 // invalide plutôt que de planter le chatbot si la config CHATBOT_INTENT_RULES est mal éditée
@@ -615,6 +616,77 @@ ${persona}`;
 }
 
 /**
+ * Décide si la conversation en cours doit donner lieu à l'enregistrement (ou l'enrichissement) d'une
+ * demande d'évolution produit (spec "Comportement général de l'IA", demande du 25/09/2026, règles
+ * §2-§9) — appelé UNIQUEMENT quand aucun outil de données n'a répondu à la question (sinon ce n'est
+ * pas un manque fonctionnel, juste une question normale déjà traitée). Un second appel LLM séparé de
+ * la réponse conversationnelle (celle-ci reste streamée normalement) : ce second appel raisonne sur
+ * TOUTE la conversation pour juger si (a) elle contient assez d'information pour constituer une
+ * demande exploitable, et (b) l'utilisateur ne pose pas juste une question hors périmètre sans
+ * intention d'évolution (§14 : ne pas transformer toute conversation en ticket).
+ * Ne fait JAMAIS planter la conversation ni prétendre avoir enregistré quoi que ce soit qui ne l'a
+ * pas été réellement (§9) : une erreur à n'importe quelle étape retombe silencieusement sur featureRequest: null.
+ */
+async function maybeTrackFeatureRequest({ conversationHistory, question, answer }) {
+  try {
+    const llmFeatureTrackingEnabled = (await systemConfig.getValue(systemConfig.KEYS.CHATBOT_FEATURE_TRACKING_ENABLED)) === 'true';
+    if (!llmFeatureTrackingEnabled) return null;
+
+    const historyText = (conversationHistory || [])
+      .map((turn) => `Utilisateur : ${turn.question}\nAssistant : ${turn.answer}`)
+      .join('\n\n');
+
+    const prompt = `Tu analyses une conversation entre un utilisateur et l'assistant IA d'une application de gestion de stock/réassort en magasin. L'assistant vient de répondre qu'il ne pouvait pas répondre avec certitude à la dernière question (fonctionnalité manquante, donnée non disponible, ou question hors périmètre des données réelles).
+
+Conversation précédente :
+${historyText || '(aucune)'}
+
+Dernière question de l'utilisateur : "${question}"
+Réponse de l'assistant : "${answer}"
+
+Détermine si cette conversation révèle un VRAI besoin d'évolution du produit (une fonctionnalité manquante ou une amélioration que l'utilisateur souhaite concrètement), à distinguer d'une simple question mal comprise ou totalement hors sujet.
+
+Réponds UNIQUEMENT avec un tableau JSON contenant UN SEUL objet, sans aucun texte avant ni après, au format exact :
+[{"isFeatureRequest": true/false, "readyToRecord": true/false, "title": "<titre court, ou null>", "problem": "<résumé fidèle du besoin tel qu'exprimé par l'utilisateur, sans rien inventer, ou null>", "expectedBehavior": "<comportement attendu s'il a été précisé, ou null>"}]
+
+"readyToRecord" doit être false si le besoin est réel mais encore trop vague pour être exploitable par un développeur sans poser de question de clarification supplémentaire (dans ce cas, l'assistant posera la question au tour suivant plutôt que d'enregistrer maintenant).`;
+
+    // callWithFallback (aiForecastService.js) applique TOUJOURS parseJsonArrayFromText côté chaque
+    // fournisseur : la réponse attendue est systématiquement un TABLEAU JSON, jamais un objet nu —
+    // même contrainte que detectIntentViaLlm ci-dessus.
+    const { result } = await callWithFallback(prompt, 'chatbot-feature-tracking');
+    const decision = Array.isArray(result) ? result[0] : null;
+    if (!decision || !decision.isFeatureRequest || !decision.readyToRecord || !decision.title || !decision.problem) return null;
+
+    return decision;
+  } catch (err) {
+    console.error('[chatbotService] Analyse de suivi des demandes d\'évolution indisponible:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Enregistre effectivement la demande décidée par maybeTrackFeatureRequest : cherche d'abord une
+ * demande similaire déjà ouverte (§4) pour l'enrichir (§5-§6) plutôt que d'en créer une nouvelle (§7).
+ * Retourne un résumé factuel de ce qui a RÉELLEMENT été fait, pour que le texte de réponse au client
+ * (cf. askAssistant) ne prétende jamais un enregistrement qui n'a pas eu lieu (§9).
+ */
+async function recordFeatureRequest(decision, { user }) {
+  const similar = await featureRequestService.findSimilarRequest(`${decision.title} — ${decision.problem}`);
+  if (similar) {
+    await featureRequestService.enrichFeatureRequest(similar.id, { content: decision.problem, user });
+    return { action: 'enriched', requestId: similar.id, title: similar.title };
+  }
+  const created = await featureRequestService.createFeatureRequest({
+    title: decision.title,
+    problem: decision.problem,
+    expectedBehavior: decision.expectedBehavior,
+    user,
+  });
+  return { action: 'created', requestId: created.id, title: created.title };
+}
+
+/**
  * Point d'entrée principal : détecte l'intention, appelle l'outil si pertinent, construit le prompt,
  * puis streame la réponse du LLM via onTextChunk (même mécanisme que askFollowUpQuestion).
  */
@@ -626,6 +698,17 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);
   }, 'chatbot-answer');
+
+  // Suivi des demandes d'évolution (§2-§9 de la spec) : uniquement quand aucun outil de données n'a
+  // répondu à la question (toolResult null) — une question normale déjà traitée par un outil n'est
+  // jamais un manque fonctionnel. Se produit APRÈS le streaming de la réponse conversationnelle,
+  // jamais à sa place : l'utilisateur voit toujours la réponse normale en premier, l'enregistrement
+  // éventuel est un effet de bord silencieux signalé seulement dans featureRequest ci-dessous.
+  let featureRequest = null;
+  if (!toolResult && !reusedFromHistory) {
+    const decision = await maybeTrackFeatureRequest({ conversationHistory, question, answer: fullText.trim() });
+    if (decision) featureRequest = await recordFeatureRequest(decision, { user });
+  }
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
@@ -640,7 +723,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // OU si elle réutilise un résultat déjà affiché visuellement plus tôt dans la conversation. Une
   // simple question texte ("quels articles risquent d'être en rupture ?") ne doit renvoyer QUE la
   // réponse en langage naturel, jamais un tableau brut en plus.
-  return { answer: fullText.trim(), providerUsed, toolUsed: toolName, toolResult, wantsVisual: isVisualRequest(question) || !!reusedFromHistory };
+  return { answer: fullText.trim(), providerUsed, toolUsed: toolName, toolResult, wantsVisual: isVisualRequest(question) || !!reusedFromHistory, featureRequest };
 }
 
 // Questions suggérées (§34) : éditables depuis Paramètres > IA (CHATBOT_SUGGESTED_QUESTIONS, une par

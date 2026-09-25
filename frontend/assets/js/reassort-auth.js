@@ -81,7 +81,7 @@
       // visible pour tout rôle (seul sous-lien Paramètres sans réserve), incohérent avec la
       // décision "personne ne doit voir les paramètres à part le superadmin" — désormais masqué
       // par défaut dans sidebar.html et révélé ici comme les autres sous-liens Paramètres.
-      ['settings-menu-heading', 'settings-menu-reassort', 'settings-menu-files', 'settings-menu-rpos', 'settings-menu-cron', 'settings-menu-sync', 'settings-menu-ai', 'menu-item-ai-quality', 'menu-item-ai-mastery', 'menu-item-order-anomalies'].forEach(function (id) {
+      ['settings-menu-heading', 'settings-menu-reassort', 'settings-menu-files', 'settings-menu-rpos', 'settings-menu-cron', 'settings-menu-sync', 'settings-menu-ai', 'menu-item-ai-quality', 'menu-item-ai-mastery', 'menu-item-order-anomalies', 'menu-item-feature-requests'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) el.style.display = '';
       });

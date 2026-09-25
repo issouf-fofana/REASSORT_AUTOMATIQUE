@@ -14,10 +14,10 @@ datasource db {
 // UTILISATEURS
 // =============================================
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String
+  id       String @id @default(cuid())
+  email    String @unique
+  password String
+  name     String
   // Hiérarchie de rôles (plan validé le 15/09/2026, remplace l'ancien système à 3 niveaux) :
   //   ADMIN (alias historique de SUPERADMIN, conservé pour compatibilité avec le code existant qui
   //     le teste encore à ~27 endroits — tous les magasins + configuration technique complète) ;
@@ -31,7 +31,7 @@ model User {
   // DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER partagent le même cloisonnement magasin que l'ancien
   // STORE (rposShopId ci-dessous) — seule la granularité département/rayon et les permissions IA
   // par capacité (aiPermissions ci-dessous) les distinguent entre eux.
-  role      String   @default("DIRECTOR")
+  role     String @default("DIRECTOR")
 
   // Rattachement au magasin RPOS (uuid, référence et nom mis en cache pour l'affichage), et au
   // serveur RPOS qui l'héberge (chaque magasin n'est joignable que via son propre serveur).
@@ -54,7 +54,7 @@ model User {
   // uniquement le défaut de son rôle, jamais recalculé/écrasé automatiquement une fois personnalisé.
   aiPermissionsJson String? @map("ai_permissions_json")
 
-  isActive  Boolean  @default(true) @map("is_active")
+  isActive Boolean @default(true) @map("is_active")
 
   // true si ce compte a été créé automatiquement au premier login réussi contre l'Active Directory
   // Prosuma (STEP 10) plutôt que créé à la main par un ADMIN — sert uniquement à distinguer, dans
@@ -62,7 +62,8 @@ model User {
   // quelqu'un a délibérément désactivé (les deux ont isActive=false, mais des raisons différentes).
   ldapManaged Boolean @default(false) @map("ldap_managed")
 
-  supervisedShops SupervisedShop[]
+  supervisedShops     SupervisedShop[]
+  featureRequestNotes FeatureRequestNote[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -95,10 +96,10 @@ model SupervisedShop {
 // chaque serveur a ses propres identifiants de connexion, cf. readme section 24)
 // =============================================
 model RposServer {
-  id       String @id @default(cuid())
-  posId    String @unique @map("pos_id") // identifiant technique, ex: "pos1"
-  label    String // ex: "Serveur Prosuma Prod1"
-  baseUrl  String @map("base_url") // ex: https://pos1-prod-prosuma.prosuma.pos
+  id      String @id @default(cuid())
+  posId   String @unique @map("pos_id") // identifiant technique, ex: "pos1"
+  label   String // ex: "Serveur Prosuma Prod1"
+  baseUrl String @map("base_url") // ex: https://pos1-prod-prosuma.prosuma.pos
 
   rposUser     String? @map("rpos_user")
   rposPassword String? @map("rpos_password") // jamais renvoyé en clair par l'API, cf. systemConfigService
@@ -173,11 +174,11 @@ model ProductEndOfLife {
   rposPosId  String @map("rpos_pos_id")
   rposShopId String @map("rpos_shop_id")
 
-  dlvEan      String @map("dlv_ean") // EAN propre à cette fiche DLV (distinct de l'article d'origine)
-  originEan   String @map("origin_ean") // EAN de l'article normal concerné (product_ean côté RPOS)
-  label       String?
-  dlvStock    Float  @map("dlv_stock") // quantité basculée en DLV, à retirer du stock normal
-  sellingPrice Float? @map("selling_price") // prix réduit de vente en DLV, pour affichage seulement
+  dlvEan       String  @map("dlv_ean") // EAN propre à cette fiche DLV (distinct de l'article d'origine)
+  originEan    String  @map("origin_ean") // EAN de l'article normal concerné (product_ean côté RPOS)
+  label        String?
+  dlvStock     Float   @map("dlv_stock") // quantité basculée en DLV, à retirer du stock normal
+  sellingPrice Float?  @map("selling_price") // prix réduit de vente en DLV, pour affichage seulement
 
   syncedAt DateTime @default(now()) @map("synced_at")
 
@@ -198,15 +199,15 @@ model RecentOrderCache {
   rposShopId String @map("rpos_shop_id")
   productId  String @map("rpos_product_id")
 
-  quantity           Float
-  orderCount         Int    @default(0) @map("order_count")
-  mostRecentDate     DateTime? @map("most_recent_date")
-  mostRecentReference String?  @map("most_recent_reference")
+  quantity            Float
+  orderCount          Int       @default(0) @map("order_count")
+  mostRecentDate      DateTime? @map("most_recent_date")
+  mostRecentReference String?   @map("most_recent_reference")
   // Statut RPOS de la commande la plus récente (1=en préparation, 2=validée/en attente de
   // livraison, 6=annulée) : affiché sur le badge "commandé le X" pour distinguer une commande
   // simplement créée d'une commande réellement transmise à l'entrepôt.
-  mostRecentStatus   Int?     @map("most_recent_status")
-  ordersJson         String?  @map("orders_json") // détail des commandes (JSON), pour le badge "commandé le X" — sérialisé faute de type JSON portable simple ici
+  mostRecentStatus    Int?      @map("most_recent_status")
+  ordersJson          String?   @map("orders_json") // détail des commandes (JSON), pour le badge "commandé le X" — sérialisé faute de type JSON portable simple ici
 
   syncedAt DateTime @default(now()) @map("synced_at")
 
@@ -332,7 +333,7 @@ model ReassortConfig {
   // Poids donné à la journée la plus récente (0 à 1) : plus proche de 1 = réagit plus vite aux
   // ventes récentes, plus proche de 0 = lisse davantage. Retombe automatiquement sur la moyenne
   // plate si l'historique dispo est trop court (cf. forecastService.MIN_DAYS_FOR_SMOOTHING).
-  forecastAlpha Float @default(0.3) @map("forecast_alpha")
+  forecastAlpha   Float   @default(0.3) @map("forecast_alpha")
 
   // Mode Auto (23/09/2026, magasin pilote 050) : si vrai, la proposition générée chaque nuit pour ce
   // magasin est automatiquement validée (commande créée sur RPOS) juste après sa génération, sans
@@ -371,14 +372,14 @@ model ProposalGenerationRun {
   // Étape en cours, alignée sur les 3 étapes déjà affichées côté UI : SALES (analyse des ventes,
   // avant que le nombre total d'articles à traiter soit connu) -> PARETO (classement) ->
   // QUANTITIES (calcul par article, seule étape avec un vrai compteur X/Y) -> DONE.
-  step String @default("SALES")
+  step   String @default("SALES")
 
-  articlesTotal     Int @default(0) @map("articles_total")
-  articlesProcessed Int @default(0) @map("articles_processed")
+  articlesTotal     Int     @default(0) @map("articles_total")
+  articlesProcessed Int     @default(0) @map("articles_processed")
   // Dernier article traité (EAN + libellé), pour afficher "en cours : ..." plutôt qu'un compteur
   // seul — répond à la demande de voir "les articles qu'il a fini de faire".
-  lastArticleEan   String? @map("last_article_ean")
-  lastArticleLabel String? @map("last_article_label")
+  lastArticleEan    String? @map("last_article_ean")
+  lastArticleLabel  String? @map("last_article_label")
 
   proposalId   String? @map("proposal_id") // renseigné une fois la proposition créée (statut DONE)
   errorMessage String? @map("error_message")
@@ -402,7 +403,7 @@ model ProposalGenerationRun {
 // PROPOSITIONS DE RÉASSORT (historisation, cf. readme section 16)
 // =============================================
 model Proposal {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // Magasin RPOS concerné (uuid, référence et nom mis en cache pour l'affichage), et serveur RPOS
   rposShopId        String  @map("rpos_shop_id")
@@ -413,16 +414,16 @@ model Proposal {
   // Statut du cycle de vie : GENERATED (calculée, en attente) -> VALIDATING (envoi en cours vers
   // RPOS, en tâche de fond) -> VALIDATED (terminé) ou VALIDATION_FAILED -> REJECTED (écrasée par
   // une nouvelle génération sans avoir été traitée)
-  status    String   @default("GENERATED")
+  status String @default("GENERATED")
 
-  generatedAt DateTime @default(now()) @map("generated_at")
+  generatedAt DateTime  @default(now()) @map("generated_at")
   validatedAt DateTime? @map("validated_at")
   validatedBy String?   @map("validated_by") // email de l'utilisateur ayant validé
 
   // Progression de l'envoi en tâche de fond vers RPOS (nombre de lignes traitées / total)
-  linesTotal     Int? @map("lines_total")
-  linesProcessed Int? @map("lines_processed")
-  linesFailed    Int? @map("lines_failed")
+  linesTotal      Int?    @map("lines_total")
+  linesProcessed  Int?    @map("lines_processed")
+  linesFailed     Int?    @map("lines_failed")
   validationError String? @map("validation_error")
 
   // Référence de la première commande RPOS créée lors de la validation (conservé pour compat avec
@@ -438,14 +439,14 @@ model Proposal {
   // CA total du magasin sur la période de référence utilisée pour la colonne "% CA magasin"
   // (ReassortConfig.revenueSharePeriodDays), pour donner un contexte au pourcentage affiché
   // par ligne (ex: "71% de quoi ?").
-  revenueShareStart   DateTime? @map("revenue_share_start")
-  revenueShareEnd     DateTime? @map("revenue_share_end")
-  shopTotalRevenue    Float?    @map("shop_total_revenue")
+  revenueShareStart       DateTime? @map("revenue_share_start")
+  revenueShareEnd         DateTime? @map("revenue_share_end")
+  shopTotalRevenue        Float?    @map("shop_total_revenue")
   // CA TTC équivalent, affiché à côté du HT ci-dessus (demande du 15/09/2026) : le rapport de
   // caisse RPOS raisonne en TTC, alors que shopTotalRevenue (HT) sert au calcul Pareto/% CA par
   // article — afficher les deux évite de faire croire à tort à un écart de données entre l'appli
   // et RPOS quand ce n'est qu'une différence HT/TTC.
-  shopTotalRevenueInclTax Float? @map("shop_total_revenue_incl_tax")
+  shopTotalRevenueInclTax Float?    @map("shop_total_revenue_incl_tax")
 
   // Période d'analyse des ventes utilisée pour le classement Pareto et le calcul de la vente
   // moyenne (distincte de revenueShareStart/End ci-dessus, qui sert uniquement à la colonne "% CA
@@ -467,33 +468,33 @@ model Proposal {
   // Paramètres de calcul effectivement appliqués à cette génération (peuvent différer de la
   // configuration actuelle du magasin si elle a changé depuis) : nécessaires pour reconstruire
   // l'explication du calcul d'une proposition ancienne de façon fiable.
-  paretoThresholdUsed         Float? @map("pareto_threshold_used")
-  safetyStockRatioUsed        Float? @map("safety_stock_ratio_used")
-  receptionLeadTimeDaysUsed   Int?   @map("reception_lead_time_days_used")
+  paretoThresholdUsed       Float? @map("pareto_threshold_used")
+  safetyStockRatioUsed      Float? @map("safety_stock_ratio_used")
+  receptionLeadTimeDaysUsed Int?   @map("reception_lead_time_days_used")
 
   // Détail du nombre d'articles écartés par raison (readme évolution "vue par secteur/rayon" :
   // affiche pourquoi le "Reste du CA magasin" non proposé n'est pas à 0%, sans faire varier son
   // calcul — qui reste 100% − somme des % CA affichés par carte). Persisté à la génération car ces
   // compteurs ne sont sinon disponibles qu'en mémoire le temps du calcul (result.stats).
-  totalArticlesWithSales   Int? @map("total_articles_with_sales")
-  skippedNotFound          Int? @map("skipped_not_found")
-  skippedNotOrderable      Int? @map("skipped_not_orderable")
-  skippedNegativeStock     Int? @map("skipped_negative_stock")
-  skippedAlreadyOrdered    Int? @map("skipped_already_ordered")
-  skippedGenericArticle    Int? @map("skipped_generic_article")
+  totalArticlesWithSales Int? @map("total_articles_with_sales")
+  skippedNotFound        Int? @map("skipped_not_found")
+  skippedNotOrderable    Int? @map("skipped_not_orderable")
+  skippedNegativeStock   Int? @map("skipped_negative_stock")
+  skippedAlreadyOrdered  Int? @map("skipped_already_ordered")
+  skippedGenericArticle  Int? @map("skipped_generic_article")
 
-  lines           ProposalLine[]
-  orders          ProposalOrder[]
+  lines            ProposalLine[]
+  orders           ProposalOrder[]
   excludedArticles ExcludedArticle[]
-  predictions     AIPrediction[]
-  orderAnomalies  OrderAnomaly[]
+  predictions      AIPrediction[]
+  orderAnomalies   OrderAnomaly[]
 
   // Rattache cette génération à une semaine cible (CAHIER_DES_CHARGES.md §11-13, étape 1 du plan) :
   // une Proposal reste le mécanisme de calcul/validation existant, inchangé ; weeklyPlanId l'associe
   // en plus à un WeeklyReplenishmentPlan qui, lui, survit aux régénérations successives de la même
   // semaine (chaque nouvelle génération pour cette semaine devient une révision de plan, au lieu de
   // remplacer purement et simplement l'ancienne Proposal comme c'était le cas avant cette étape).
-  weeklyPlanId String?                 @map("weekly_plan_id")
+  weeklyPlanId String?                  @map("weekly_plan_id")
   weeklyPlan   WeeklyReplenishmentPlan? @relation(fields: [weeklyPlanId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -565,7 +566,7 @@ model AIPrediction {
   proposalId String   @map("proposal_id")
   proposal   Proposal @relation(fields: [proposalId], references: [id])
 
-  rposShopId String @map("rpos_shop_id")
+  rposShopId String  @map("rpos_shop_id")
   ean        String
   label      String?
 
@@ -599,11 +600,11 @@ model AIPrediction {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  outcome AIPredictionOutcome?
+
   @@index([rposShopId, ean, predictionDate])
   @@index([proposalId])
   @@map("ai_predictions")
-
-  outcome AIPredictionOutcome?
 }
 
 // =============================================
@@ -625,15 +626,15 @@ model AIPredictionOutcome {
 
   evaluatedAt DateTime @default(now()) @map("evaluated_at")
 
-  predictedQuantity Int   @map("predicted_quantity") // copie de AIPrediction.predictedQuantity au moment de l'évaluation
-  actualSales       Float @map("actual_sales") // somme des quantités vendues (SalesLine) sur la période cible
+  predictedQuantity Int    @map("predicted_quantity") // copie de AIPrediction.predictedQuantity au moment de l'évaluation
+  actualSales       Float  @map("actual_sales") // somme des quantités vendues (SalesLine) sur la période cible
   actualStock       Float? @map("actual_stock") // stock en cache au moment de l'évaluation (cf. limite ci-dessus)
   actualOrders      Float? @map("actual_orders") // quantité effectivement commandée sur la proposition (ProposalLine.quantitySuggested si validée)
 
   // forecastError = actual - predicted (signé : positif = sous-estimation, négatif = sur-estimation)
-  forecastError Float @map("forecast_error")
+  forecastError   Float  @map("forecast_error")
   // absoluteError = abs(forecastError)
-  absoluteError Float @map("absolute_error")
+  absoluteError   Float  @map("absolute_error")
   // percentageError = abs(actual - predicted) / actual — null si actual = 0 (division impossible,
   // cf. CAHIER_DES_CHARGES.md §22 "gérer correctement les cas où actual = 0").
   percentageError Float? @map("percentage_error")
@@ -655,10 +656,10 @@ model ExcludedArticle {
   proposalId String   @map("proposal_id")
   proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
 
-  ean              String
-  label            String?
-  revenueSharePct  Float?  @map("revenue_share_pct")
-  reason           String  // notFound | notOrderable | negativeStock | alreadyOrdered | genericArticle
+  ean             String
+  label           String?
+  revenueSharePct Float?  @map("revenue_share_pct")
+  reason          String // notFound | notOrderable | negativeStock | alreadyOrdered | genericArticle
 
   @@index([proposalId, reason])
   @@map("excluded_articles")
@@ -677,14 +678,14 @@ model ProposalOrder {
 
   department String // rayon principal (ex: "PRODUITS FRAIS")
 
-  rposOrderId        String? @map("rpos_order_id")
-  rposOrderReference String? @map("rpos_order_reference")
+  rposOrderId        String?  @map("rpos_order_id")
+  rposOrderReference String?  @map("rpos_order_reference")
   rposOrderValidated Boolean? @map("rpos_order_validated")
 
-  linesTotal    Int @default(0) @map("lines_total")
-  linesFailed   Int @default(0) @map("lines_failed")
-  status        String @default("PENDING") // statut d'envoi technique : PENDING -> DONE -> FAILED -> CANCELLED
-  errorMessage  String? @map("error_message")
+  linesTotal   Int     @default(0) @map("lines_total")
+  linesFailed  Int     @default(0) @map("lines_failed")
+  status       String  @default("PENDING") // statut d'envoi technique : PENDING -> DONE -> FAILED -> CANCELLED
+  errorMessage String? @map("error_message")
 
   // Statut métier de réception (distinct du statut d'envoi ci-dessus) : COMMANDEE (créée sur RPOS,
   // pas encore transmise) -> EN_ATTENTE_RECEPTION (transmise à l'entrepôt) -> RECUE_ESTIMEE ou
@@ -707,8 +708,8 @@ model ProposalOrder {
 
   // Dernier statut RPOS numérique observé (1-6) et horodatage de la dernière synchronisation,
   // pour savoir si une commande n'a pas été revérifiée depuis longtemps.
-  lastRposStatus    Int?      @map("last_rpos_status")
-  lastSyncedAt      DateTime? @map("last_synced_at")
+  lastRposStatus Int?      @map("last_rpos_status")
+  lastSyncedAt   DateTime? @map("last_synced_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -729,8 +730,8 @@ model ReceptionEvent {
   proposalOrderId String
   proposalOrder   ProposalOrder @relation(fields: [proposalOrderId], references: [id], onDelete: Cascade)
 
-  rposStatus      Int      // statut RPOS observé (1-6), ou -1 si la transition vient du délai configuré
-  receptionStatus String   // statut métier correspondant, pour lecture directe sans re-mapper
+  rposStatus      Int // statut RPOS observé (1-6), ou -1 si la transition vient du délai configuré
+  receptionStatus String // statut métier correspondant, pour lecture directe sans re-mapper
   observedAt      DateTime @default(now()) @map("observed_at")
 
   @@map("reception_events")
@@ -753,8 +754,8 @@ model ProposalLine {
   // de génération bloquée faute de clé API/réseau IA). Puis quantité finalement validée par
   // l'humain (== quantitySuggested si l'utilisateur n'a rien modifié : sert au calcul du taux de
   // conformité).
-  quantitySuggested Float @map("quantity_suggested")
-  quantityValidated Float? @map("quantity_validated")
+  quantitySuggested  Float  @map("quantity_suggested")
+  quantityValidated  Float? @map("quantity_validated")
   // Copie figée de quantitySuggested telle que produite par la génération (IA ou repli classique),
   // AVANT toute correction manuelle via PUT /proposal/:id/line-quantity — qui écrase quantitySuggested
   // en place. Sans ce snapshot, la recommandation d'origine était perdue dès qu'un utilisateur
@@ -767,17 +768,17 @@ model ProposalLine {
   // commandes en cours), TOUJOURS calculé et conservé même quand l'IA ajuste la recommandation
   // finale : sert de base de calcul transmise à l'IA (systemSuggestedQuantity côté prompt) et de
   // repère de comparaison affiché dans le panneau détail ("Pourquoi ?", section calcul classique).
-  classicQuantitySuggested Float? @map("classic_quantity_suggested")
+  classicQuantitySuggested Float?  @map("classic_quantity_suggested")
   // true si quantitySuggested provient réellement d'un appel IA réussi à la génération (par
   // opposition à un repli silencieux sur classicQuantitySuggested faute d'IA disponible) : affiché
   // dans "Pourquoi ?" pour ne jamais faire croire à une analyse IA qui n'a pas eu lieu.
-  aiAdjusted        Boolean @default(false) @map("ai_adjusted")
-  aiReasoning       String? @map("ai_reasoning") // explication de l'IA pour cette quantité finale, si aiAdjusted=true
+  aiAdjusted               Boolean @default(false) @map("ai_adjusted")
+  aiReasoning              String? @map("ai_reasoning") // explication de l'IA pour cette quantité finale, si aiAdjusted=true
   // Type d'action structuré (CAHIER_DES_CHARGES.md §18) : ORDER_NOW | ORDER_MORE | ORDER_LESS |
   // WAIT | STOCK_RISK | OVERSTOCK | DEMAND_INCREASE | DEMAND_DECREASE | ANOMALY | VERIFY_STOCK |
   // NO_ACTION. Renseigné uniquement si aiAdjusted=true (l'IA a réellement tourné) — jamais déduit
   // ou inventé côté backend si l'IA n'a pas répondu ce champ.
-  aiAction          String? @map("ai_action")
+  aiAction                 String? @map("ai_action")
 
   // Raisonnement déterministe (pas l'IA) expliquant si une commande RPOS/POS déjà en cours pour
   // cet article suffit à couvrir le besoin ou non (backend/amelioration.md, demande du 18/09/2026 :
@@ -793,11 +794,11 @@ model ProposalLine {
 
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).
-  stockAtGeneration      Float? @map("stock_at_generation")
-  avgWeeklySales         Float? @map("avg_weekly_sales")
-  daysUntilStockout      Float? @map("days_until_stockout")
-  sellingPrice           Float? @map("selling_price")
-  buyingPrice            Float? @map("buying_price")
+  stockAtGeneration Float? @map("stock_at_generation")
+  avgWeeklySales    Float? @map("avg_weekly_sales")
+  daysUntilStockout Float? @map("days_until_stockout")
+  sellingPrice      Float? @map("selling_price")
+  buyingPrice       Float? @map("buying_price")
 
   // Part du CA de l'article dans le CA total du magasin, sur la période de référence configurée
   // (ReassortConfig.revenueSharePeriodDays), en pourcentage (ex: 3.5 = 3.5%).
@@ -859,7 +860,7 @@ model ProposalLine {
 
   // Référence et date de la commande créée par cette plateforme responsable de quantityInTransit,
   // affichées à côté du badge "Déjà commandé" pour indiquer où retrouver cette commande dans RPOS.
-  platformOrderReference String? @map("platform_order_reference")
+  platformOrderReference String?   @map("platform_order_reference")
   platformOrderDate      DateTime? @map("platform_order_date")
 
   // Comme excludedAsAlreadyOrdered, mais pour une commande déjà en cours côté RPOS indépendante
@@ -871,13 +872,13 @@ model ProposalLine {
   // Référence, date et nombre de commandes RPOS récentes (≤ 7 jours, hors plateforme) non encore
   // livrées pour cet article, affichées à côté du badge "Déjà en commande (RPOS)" quand
   // excludedAsAlreadyOrderedRpos=true, pour indiquer où et quand cette commande a été passée.
-  rposOrderReference String? @map("rpos_order_reference")
+  rposOrderReference String?   @map("rpos_order_reference")
   rposOrderDate      DateTime? @map("rpos_order_date")
-  rposOrderCount     Int? @map("rpos_order_count")
+  rposOrderCount     Int?      @map("rpos_order_count")
   // Statut RPOS de cette commande (1=en préparation, 2=validée/en attente de livraison,
   // 6=annulée) : affiché à côté de la référence pour dire si la commande bloquante a réellement
   // été transmise à l'entrepôt, pas seulement créée dans RPOS.
-  rposOrderStatus    Int? @map("rpos_order_status")
+  rposOrderStatus    Int?      @map("rpos_order_status")
 
   // Quantité qui aurait été proposée si on ignorait la commande RPOS récente ci-dessus, pour
   // préremplir la saisie côté magasin s'il choisit de débloquer l'article et de commander quand
@@ -918,9 +919,9 @@ model ProposalLine {
   // (dataQuality, cf. confidenceService.js) et l'analyse IA à la demande — jamais utilisés pour
   // bloquer automatiquement une commande à cette étape (§69 : en cas de doute, ne pas commander
   // automatiquement n'est pertinent qu'à partir de l'auto-réassort, pas encore actif ici).
-  anomalies         String? @map("anomalies") // JSON: [{type, changePct, message}]
-  trendCategory     String? @map("trend_category") // GROWING | DECLINING | STABLE | VOLATILE | UNKNOWN
-  trendChangePct    Float?  @map("trend_change_pct")
+  anomalies      String? @map("anomalies") // JSON: [{type, changePct, message}]
+  trendCategory  String? @map("trend_category") // GROWING | DECLINING | STABLE | VOLATILE | UNKNOWN
+  trendChangePct Float?  @map("trend_change_pct")
 
   @@map("proposal_lines")
 }
@@ -929,12 +930,12 @@ model ProposalLine {
 // CONFIGURATION SYSTÈME
 // =============================================
 model SystemConfig {
-  id          String @id @default(cuid())
-  key         String @unique
+  id          String  @id @default(cuid())
+  key         String  @unique
   value       String
   description String?
 
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("system_config")
 }
@@ -1046,7 +1047,7 @@ model SalesDailyCoverage {
   day        DateTime @map("day") // toujours à minuit UTC (une date, pas un horodatage précis)
 
   expectedLines Int @map("expected_lines") // count() RPOS réel pour CETTE journée précise
-  actualLines   Int @map("actual_lines")   // count() réel en base (SalesLine) pour cette même journée
+  actualLines   Int @map("actual_lines") // count() réel en base (SalesLine) pour cette même journée
 
   // COMPLETE (actual >= expected) | PARTIAL (0 < actual < expected) | MISSING (actual = 0, expected > 0)
   // | NO_SALES (expected = 0, jour sans aucune vente RPOS — jamais confondu avec une vraie lacune).
@@ -1104,7 +1105,7 @@ model SalesBackfillRun {
   // ferme l'onglet ou recharge la page (avant cet ajout, la file d'attente tournait entièrement en
   // JS navigateur : quitter la page arrêtait tous les magasins restants sans que rien ne le
   // signale, le run en cours seul continuait jusqu'au bout côté serveur).
-  batchId String?           @map("batch_id")
+  batchId String?             @map("batch_id")
   batch   SalesBackfillBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   // Un seul run actif à la fois par magasin : une reprise doit retrouver ce run existant plutôt
@@ -1156,7 +1157,7 @@ model SalesBackfillBatch {
 model SalesBackfillChunk {
   id String @id @default(cuid())
 
-  runId String @map("run_id")
+  runId String           @map("run_id")
   run   SalesBackfillRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   chunkIndex  Int      @map("chunk_index") // 1-based, ordre de traitement
@@ -1164,13 +1165,13 @@ model SalesBackfillChunk {
   periodEnd   DateTime @map("period_end")
 
   expectedLines Int @default(0) @map("expected_lines") // count() RPOS réel sur la période de CETTE tranche
-  fetchedLines  Int @default(0) @map("fetched_lines")  // cumul des lignes effectivement insérées
+  fetchedLines  Int @default(0) @map("fetched_lines") // cumul des lignes effectivement insérées
 
   // Curseur de reprise intra-tranche : dernière page RPOS insérée avec succès. Si le process est
   // interrompu à la page 15/35, la reprise redemande la page 16, pas la tranche entière.
   lastPageCompleted Int? @map("last_page_completed")
 
-  status String @default("PENDING") @map("status") // PENDING | IN_PROGRESS | DONE | ERROR
+  status       String  @default("PENDING") @map("status") // PENDING | IN_PROGRESS | DONE | ERROR
   errorMessage String? @map("error_message")
 
   // Nombre de tentatives déjà effectuées sur cette tranche (demande du 21/09/2026 : "combien de
@@ -1211,9 +1212,9 @@ model AiProviderKey {
   priority Int     @default(0) // ordre d'essai, plus petit = essayé en premier
   isActive Boolean @default(true) @map("is_active")
 
-  lastUsedAt    DateTime? @map("last_used_at")
-  lastError     String?   @map("last_error")
-  lastErrorAt   DateTime? @map("last_error_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  lastError   String?   @map("last_error")
+  lastErrorAt DateTime? @map("last_error_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1239,7 +1240,7 @@ model AiUsageLog {
   provider String // "gemini" | "openai" | "anthropic" — dupliqué depuis providerKey (jamais perdu si la clé est supprimée ensuite)
   model    String? // modèle réellement utilisé pour cet appel
 
-  promptTokens     Int @map("prompt_tokens")     // tokens d'entrée (prompt envoyé)
+  promptTokens     Int @map("prompt_tokens") // tokens d'entrée (prompt envoyé)
   completionTokens Int @map("completion_tokens") // tokens de sortie (réponse générée)
   totalTokens      Int @map("total_tokens")
 
@@ -1261,8 +1262,8 @@ model AiUsageLog {
 model AiForecastRun {
   id String @id @default(cuid())
 
-  proposalId String  @map("proposal_id")
-  rposShopId String  @map("rpos_shop_id")
+  proposalId String @map("proposal_id")
+  rposShopId String @map("rpos_shop_id")
 
   providerUsed String? @map("provider_used") // quel fournisseur a effectivement répondu (après fallback éventuel)
   status       String  @default("PENDING") @map("status") // PENDING | RUNNING | DONE | ERROR
@@ -1285,7 +1286,7 @@ model AiForecastLine {
 
   ean               String
   label             String?
-  quantitySuggested Float  @map("quantity_suggested")
+  quantitySuggested Float   @map("quantity_suggested")
   reasoning         String? // courte justification renvoyée par le LLM, affichée à titre indicatif
 
   @@map("ai_forecast_lines")
@@ -1321,9 +1322,9 @@ model ChatbotConversation {
 }
 
 model ChatbotMessage {
-  id             String               @id @default(cuid())
-  conversationId String               @map("conversation_id")
-  conversation   ChatbotConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id             String              @id @default(cuid())
+  conversationId String              @map("conversation_id")
+  conversation   ChatbotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   role    String // "user" | "assistant"
   content String
@@ -1354,32 +1355,32 @@ model AIImprovement {
 
   // SILENT_ANOMALY (anomalie silencieuse : prédiction non évaluable, job qui dérive...),
   // ACCURACY (précision/biais par magasin), JOB_HEALTH, DATA_QUALITY, CHATBOT_GAP, WORKFLOW.
-  type String
+  type              String
   // INFO | WARNING | CRITICAL
-  severity String
-  title    String
+  severity          String
+  title             String
   // Recommandation d'exploitation (texte déterministe, éventuellement enrichi par LLM).
-  detail String
+  detail            String
   // Recommandation dev (fichiers/pistes de correctif), si le constat relève du code.
-  devRecommendation String? @map("dev_recommendation")
+  devRecommendation String?   @map("dev_recommendation")
   // Preuve chiffrée (JSON) : effectifs, exemples, paramètres de recalcule de la métrique.
-  evidence String?
+  evidence          String?
   // Périmètre : "global" ou rposShopId.
-  scope String @default("global")
+  scope             String    @default("global")
   // PROPOSED -> IN_PROGRESS -> TO_VERIFY -> APPLIED, puis IMPROVED | NO_EFFECT après
   // évaluation ; DISMISSED à tout moment (avec motif). Voir AIImprovementEvent pour la timeline.
-  status    String    @default("PROPOSED") // PROPOSED | IN_PROGRESS | TO_VERIFY | APPLIED | DISMISSED | IMPROVED | NO_EFFECT
-  appliedAt DateTime? @map("applied_at")
+  status            String    @default("PROPOSED") // PROPOSED | IN_PROGRESS | TO_VERIFY | APPLIED | DISMISSED | IMPROVED | NO_EFFECT
+  appliedAt         DateTime? @map("applied_at")
 
   // Priorité de traitement : CRITICAL (bloquant) | HIGH (intervention rapide) |
   // MEDIUM (à traiter, non bloquant) | LOW (amélioration mineure). Dérivée de la sévérité
   // à la création.
-  priority String @default("MEDIUM")
+  priority     String  @default("MEDIUM")
   // Message d'erreur EXACT constaté (ex: dernière erreur du job) — jamais reformulé, pour
   // vérification précise sans interprétation de l'IA.
   errorMessage String? @map("error_message")
   // Confiance de l'analyse IA (0-100) quand enrichie par LLM, null sinon.
-  aiConfidence Int? @map("ai_confidence")
+  aiConfidence Int?    @map("ai_confidence")
 
   metricName   String? @map("metric_name")
   metricBefore Float?  @map("metric_before")
@@ -1395,10 +1396,10 @@ model AIImprovement {
 
   // Contexte de détection (traçabilité Qui/Où/Quand) : qui a lancé l'analyse (email ou
   // "system/cron"), IP source, version appli, environnement.
-  detectedBy  String? @map("detected_by")
-  detectedIp  String? @map("detected_ip")
-  appVersion  String? @map("app_version")
-  environment String? @default("production")
+  detectedBy      String? @map("detected_by")
+  detectedIp      String? @map("detected_ip")
+  appVersion      String? @map("app_version")
+  environment     String? @default("production")
   // Suivi humain : qui a appliqué, ce qui a réellement été fait, pourquoi ignoré.
   appliedBy       String? @map("applied_by")
   appliedNote     String? @map("applied_note")
@@ -1429,18 +1430,18 @@ model AIImprovement {
 model AIImprovementEvent {
   id String @id @default(cuid())
 
-  improvementId String         @map("improvement_id")
-  improvement   AIImprovement  @relation(fields: [improvementId], references: [id], onDelete: Cascade)
+  improvementId String        @map("improvement_id")
+  improvement   AIImprovement @relation(fields: [improvementId], references: [id], onDelete: Cascade)
 
-  at DateTime @default(now())
+  at         DateTime @default(now())
   // Email de l'utilisateur, ou "system" pour les actions automatiques (détection, évaluation).
-  actor String @default("system")
+  actor      String   @default("system")
   // DETECTED | ENRICHED | STATUS_CHANGED | EVALUATED
-  action String
-  fromStatus String? @map("from_status")
-  toStatus   String? @map("to_status")
+  action     String
+  fromStatus String?  @map("from_status")
+  toStatus   String?  @map("to_status")
   // Détail libre : motif d'ignorance, correction réellement effectuée, mesure avant→après...
-  note String?
+  note       String?
 
   @@index([improvementId, at])
   @@map("ai_improvement_events")
@@ -1470,11 +1471,11 @@ model CorrectionRecord {
   domain String // capacité concernée (cf. aiPermissionsService.CAPABILITIES), ou "code"
 
   errorObserved String @map("error_observed")
-  context        String
-  rootCause      String @map("root_cause")
-  fixApplied     String @map("fix_applied")
+  context       String
+  rootCause     String @map("root_cause")
+  fixApplied    String @map("fix_applied")
 
-  filesChanged     String @map("files_changed")     // JSON: string[]
+  filesChanged     String @map("files_changed") // JSON: string[]
   functionsChanged String @map("functions_changed") // JSON: string[]
 
   testsBefore String @map("tests_before")
@@ -1518,7 +1519,7 @@ model AIDomainMastery {
   domain String @unique
 
   masteryScore    Float @default(100) @map("mastery_score") // 0-100
-  confidenceScore Float @default(0)   @map("confidence_score") // 0-100 : bas si peu d'observations, même si masteryScore est haut
+  confidenceScore Float @default(0) @map("confidence_score") // 0-100 : bas si peu d'observations, même si masteryScore est haut
 
   // Méthode ayant produit masteryScore pour cette ligne — traçabilité pour ne jamais confondre un
   // score "vérité-terrain" avec un score "volume de corrections" en lisant seulement le chiffre.
@@ -1572,17 +1573,17 @@ model AutonomyReadinessSnapshot {
   postCorrectionScore         Float? @map("post_correction_score")
   testCaseScore               Float? @map("test_case_score") // toujours null aujourd'hui, cf. commentaire de tête
 
-  globalScore Float @map("global_score") // moyenne des critères non-null ci-dessus
+  globalScore           Float @map("global_score") // moyenne des critères non-null ci-dessus
   // Nombre de critères réellement entrés dans le calcul de globalScore (sur 7) — affiché dans l'UI
   // pour ne jamais laisser croire à une mesure complète alors que 2 critères manquent aujourd'hui.
-  measuredCriteriaCount Int @map("measured_criteria_count")
+  measuredCriteriaCount Int   @map("measured_criteria_count")
 
   // VALIDATION_HUMAINE | SUPERVISION_HUMAINE | AUTONOMIE_CONTROLEE | AUTONOME
-  level String
+  level              String
   // Nombre de snapshots consécutifs (ce snapshot inclus) où le score est resté au niveau suffisant
   // pour CE palier — un palier n'est affiché comme réellement "tenu" que si ce compteur dépasse le
   // seuil de continuité requis, jamais sur la base d'un seul snapshot ponctuel.
-  currentStreakCount Int @map("current_streak_count")
+  currentStreakCount Int    @map("current_streak_count")
 
   detailsJson String @map("details_json") // JSON: détail par domaine (AIDomainMastery), échantillons utilisés
 
@@ -1602,20 +1603,20 @@ model AutonomyReadinessSnapshot {
 model OrderAnomaly {
   id String @id @default(cuid())
 
-  rposShopId String @map("rpos_shop_id")
+  rposShopId String  @map("rpos_shop_id")
   ean        String
   label      String?
 
-  proposalId String? @map("proposal_id")
+  proposalId String?   @map("proposal_id")
   proposal   Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
 
   detectedAt DateTime @default(now()) @map("detected_at")
 
-  newQuantity     Float @map("new_quantity")
-  historicalMean  Float @map("historical_mean")
-  historicalMin   Float @map("historical_min")
-  historicalMax   Float @map("historical_max")
-  sampleSize      Int   @map("sample_size") // nombre de commandes passées ayant servi au calcul
+  newQuantity    Float @map("new_quantity")
+  historicalMean Float @map("historical_mean")
+  historicalMin  Float @map("historical_min")
+  historicalMax  Float @map("historical_max")
+  sampleSize     Int   @map("sample_size") // nombre de commandes passées ayant servi au calcul
 
   // HIGH (quantité nettement supérieure à l'habitude, risque de surstock) | LOW (nettement
   // inférieure, risque de rupture malgré la commande déjà passée).
@@ -1641,29 +1642,29 @@ model ErrorReport {
   id String @id @default(cuid())
 
   // "backend" (erreur API 5xx) | "frontend" (erreur JS page).
-  source String
+  source     String
   // Page frontend (ex: "/purchase-order") pour source frontend, null côté backend.
-  page String?
+  page       String?
   // URL/méthode API côté backend (ex: "POST /api/reassort/proposal/generate").
-  url    String?
-  method String?
+  url        String?
+  method     String?
   // Code HTTP côté backend (500...), null côté frontend.
-  statusCode Int? @map("status_code")
+  statusCode Int?    @map("status_code")
   // Message EXACT, jamais reformulé.
-  message String
+  message    String
   // Stack (tronquée) quand disponible.
-  stack String?
+  stack      String?
   // Contexte Qui/Où (spec §5) : email, périmètre magasin, IP, navigateur, version appli.
-  userEmail String? @map("user_email")
-  shopRef   String? @map("shop_ref")
-  ip        String?
-  userAgent String? @map("user_agent")
+  userEmail  String? @map("user_email")
+  shopRef    String? @map("shop_ref")
+  ip         String?
+  userAgent  String? @map("user_agent")
 
   // Recommandation liée (clic journal → correctif) : posée quand le chien de garde regroupe
   // cette erreur dans un constat. Null = pas (encore) de reco — occurrences insuffisantes
   // (seuil ≥3) ou erreur non reproductible : toutes les erreurs ne sont pas des bugs code.
-  improvementId String?         @map("improvement_id")
-  improvement   AIImprovement?  @relation(fields: [improvementId], references: [id], onDelete: SetNull)
+  improvementId String?        @map("improvement_id")
+  improvement   AIImprovement? @relation(fields: [improvementId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -1687,9 +1688,9 @@ model MailAccount {
   // login.microsoftonline.com) — clientId/tenantId ne sont pas des secrets, clientSecret et
   // refreshToken le sont : stockés chiffrés (AES-256-GCM, cf. cryptoService.js), jamais renvoyés
   // en clair par l'API après la sauvegarde initiale (seul un aperçu masqué est affiché).
-  clientId               String @map("client_id")
-  tenantId               String @map("tenant_id")
-  encryptedClientSecret  String @map("encrypted_client_secret")
+  clientId              String  @map("client_id")
+  tenantId              String  @map("tenant_id")
+  encryptedClientSecret String  @map("encrypted_client_secret")
   // Nullable : rempli par le flux OAuth (routes/oauthOutlook.js), pas saisi à la main — un compte
   // fraîchement créé n'a donc pas encore de refresh token tant que "Connecter Outlook" n'a pas été
   // suivi jusqu'au bout (demande du 25/09/2026 : éviter de faire copier-coller un token).
@@ -1706,4 +1707,61 @@ model MailAccount {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("mail_accounts")
+}
+
+// Demande d'évolution produit remontée par l'Assistant IA (demande du 25/09/2026, spec "Comportement
+// général de l'IA") : quand un utilisateur pose une question à laquelle l'assistant ne sait pas
+// répondre parce que la fonctionnalité n'existe pas, et que le besoin en vaut la peine, l'IA
+// clarifie le besoin puis l'enregistre ici — après avoir vérifié qu'une demande similaire n'existe
+// pas déjà (auquel cas elle l'enrichit via FeatureRequestNote au lieu de dupliquer). Jamais rempli
+// par un texte inventé : uniquement ce que l'utilisateur a effectivement dit, éventuellement
+// reformulé/structuré par l'IA mais sans ajouter d'information non fournie.
+model FeatureRequest {
+  id String @id @default(cuid())
+
+  title            String // court, ex: "Export PDF des rapports d'analyse"
+  problem          String  @db.Text // le problème/besoin tel que compris à partir de la conversation
+  expectedBehavior String? @db.Text // comportement attendu, quand précisé par l'utilisateur
+  context          String? @db.Text // contexte d'usage (magasin, rayon, situation), quand pertinent
+
+  // new = vient d'être créée ; needs_information = l'IA attend encore des précisions avant de la
+  // considérer exploitable ; pending = complète, en attente de traitement par un développeur ;
+  // in_progress / resolved / closed = suivi manuel par un ADMIN depuis la page dédiée.
+  status String @default("new")
+
+  // IDs d'autres FeatureRequest jugées liées (même besoin sous un angle différent, ou dépendance) —
+  // simple liste de strings plutôt qu'une vraie relation many-to-many : ce lien est indicatif pour un
+  // développeur qui consulte la fiche, jamais utilisé pour une jointure ou un calcul.
+  relatedRequestIdsJson String? @map("related_request_ids_json")
+
+  notes FeatureRequestNote[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@map("feature_requests")
+}
+
+// Un enrichissement d'une FeatureRequest existante : soit la contribution initiale au moment de la
+// création (première note), soit un utilisateur supplémentaire qui rapporte le même besoin avec son
+// propre cas d'usage/contexte (règle §5-§6 de la spec : plusieurs utilisateurs peuvent enrichir la
+// même demande plutôt que d'en créer une par personne).
+model FeatureRequestNote {
+  id        String         @id @default(cuid())
+  requestId String         @map("request_id")
+  request   FeatureRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  // Nullable : une note peut venir d'une conversation où l'utilisateur n'est pas identifiable avec
+  // certitude (ne devrait pas arriver en usage normal, l'assistant est toujours authentifié) — jamais
+  // bloquant pour enregistrer la note elle-même.
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  content String @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([requestId, createdAt])
+  @@map("feature_request_notes")
 }

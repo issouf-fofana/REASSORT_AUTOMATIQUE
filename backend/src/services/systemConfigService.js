@@ -116,6 +116,12 @@ const KEYS = {
   // même raison que AI_QUANTITY_ADJUSTMENT_ENABLED : coût et latence d'un appel LLM supplémentaire
   // par question ambiguë, à activer explicitement une fois vérifié en conditions réelles.
   CHATBOT_LLM_FALLBACK_ENABLED: 'CHATBOT_LLM_FALLBACK_ENABLED',
+  // Suivi des demandes d'évolution produit (chatbotService.js maybeTrackFeatureRequest, demande du
+  // 25/09/2026) : quand aucun outil de données n'a pu répondre à une question, un second appel LLM
+  // juge si la conversation révèle un vrai besoin fonctionnel et l'enregistre (ou l'enrichit s'il
+  // existe déjà). Off par défaut, même raison que CHATBOT_LLM_FALLBACK_ENABLED : coût et latence d'un
+  // appel LLM supplémentaire à chaque question hors périmètre, à activer explicitement.
+  CHATBOT_FEATURE_TRACKING_ENABLED: 'CHATBOT_FEATURE_TRACKING_ENABLED',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -247,6 +253,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',
   [KEYS.CHATBOT_LLM_FALLBACK_ENABLED]: () => 'false',
+  [KEYS.CHATBOT_FEATURE_TRACKING_ENABLED]: () => 'false',
   [KEYS.CHATBOT_PROMPT_TEMPLATE]: () => `Tu es l'Assistant IA Store d'un magasin de grande distribution. Tu réponds aux questions du responsable magasin sur le réassort, les ventes, les stocks et les prévisions.
 
 Contexte :
