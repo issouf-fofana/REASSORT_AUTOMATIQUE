@@ -21,7 +21,7 @@ const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -126,10 +126,16 @@ const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|l
 // de réponse correcte pour une seule agence au lieu du classement demandé.
 const ALL_SHOPS_REVENUE_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\b(ca\b|chiffre)|\b(ca\b|chiffre).*\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
 
+// Même principe que ALL_SHOPS_REVENUE_REGEX (demande du 25/09/2026, "dans tout les magasin ... il
+// peux chercher") : "tous/chaque/l'ensemble de mes magasins" en même temps qu'une question de stock
+// doit gagner sur la règle générique getArticleStock (mono-magasin).
+const ALL_SHOPS_STOCK_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\bstocks?\b|\bstocks?\b.*\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
+
 async function detectIntent(question) {
   const normalized = normalize(question);
   if (PARETO_PATTERN_REGEX.test(normalized)) return 'getParetoArticles';
   if (ALL_SHOPS_REVENUE_REGEX.test(question)) return 'getRevenueAllShops';
+  if (ALL_SHOPS_STOCK_REGEX.test(question)) return 'getArticleStockAllShops';
   if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
   const rules = await getIntentRules();
   for (const rule of rules) {
@@ -289,6 +295,7 @@ const TOOL_CATALOG = [
   { name: 'getPriceChangeHistory', description: 'Historique des changements de prix (dont mises en promo) d\'un article précis.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getStockMoveHistory', description: 'Mouvements de stock d\'un article précis (casse, vol, cession de rayon, retour fournisseur) expliquant une variation de stock.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getArticleStock', description: 'Stock actuel disponible, du magasin entier/un rayon, ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel', department: 'rayon, optionnel' } },
+  { name: 'getArticleStockAllShops', description: 'Stock d\'un article précis dans TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le stock de l\'article X dans tous les magasins", jamais pour une question sur UN seul magasin précis.', params: { ean: 'code EAN article, requis' } },
   { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
   { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement.', params: { department: 'rayon, optionnel' } },
   { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
@@ -505,6 +512,18 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return ean
           ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
           : { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
+      case 'getArticleStockAllShops': {
+        if (!ean) return { toolName, toolResult: { found: false, message: "Précisez le code EAN de l'article pour consulter son stock dans tous les magasins." } };
+        // Même repli que getRevenueAllShops : un compte à un seul magasin fixe retombe
+        // silencieusement sur SON magasin seul plutôt que sur une erreur.
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getArticleStock', toolResult: await tools.getArticleStock(rposShopId, ean) };
+        }
+        const allowedShopIds = user.role === 'ADMIN'
+          ? (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId)
+          : (await prisma.supervisedShop.findMany({ where: { userId: user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
+        return { toolName, toolResult: await tools.getArticleStockAllShops(allowedShopIds, ean) };
+      }
       case 'getDlvArticles':
         return ean
           ? { toolName: 'getArticleDlvStatus', toolResult: await tools.getArticleDlvStatus(rposShopId, ean) }

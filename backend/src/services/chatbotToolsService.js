@@ -106,6 +106,54 @@ async function getArticleStock(rposShopId, ean) {
 }
 
 /**
+ * getArticleStockAllShops(ean) — stock d'un article précis dans TOUS les magasins accessibles au
+ * compte (demande du 25/09/2026 : "dans tout les magasin le systeme meme si ya pas token ia il
+ * peux chercher"), même principe que getRevenueAllShops : réservé ADMIN/SUPERVISOR côté
+ * chatbotService.js, purement déterministe (aucun appel LLM), lit ProposalLine déjà en base.
+ * Chaque magasin a sa propre dernière proposition (pas de table partagée à filtrer en un seul
+ * groupBy comme pour le CA) : une requête par magasin, en parallèle borné.
+ */
+async function getArticleStockAllShops(allowedShopIds, ean) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  if (!shops.length) return { found: false, message: 'Aucun magasin trouvé pour ce compte.' };
+
+  const results = await mapWithConcurrency(shops, 5, async (shop) => {
+    const proposal = await getLatestProposal(shop.rposShopId);
+    if (!proposal) return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false };
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false };
+
+    return {
+      rposShopId: shop.rposShopId,
+      shopReference: shop.reference,
+      shopName: shop.name,
+      found: true,
+      label: line.label,
+      stock: line.stockAtGeneration,
+      avgWeeklySales: line.avgWeeklySales,
+      daysUntilStockout: line.daysUntilStockout,
+    };
+  });
+
+  const withData = results.filter((r) => r.found);
+  if (!withData.length) {
+    return { found: false, message: `Article ${ean} introuvable dans la dernière proposition d'aucun magasin accessible.` };
+  }
+
+  return {
+    found: true,
+    ean,
+    label: withData[0].label,
+    shopCount: results.length,
+    totalStockUnits: withData.reduce((s, r) => s + (r.stock || 0), 0),
+    shops: results.sort((a, b) => (b.stock || 0) - (a.stock || 0)),
+  };
+}
+
+/**
  * getRevenue() — chiffre d'affaires réel (HT) du magasin sur une période ou une date précise,
  * calculé depuis SalesLine.revenueExclTax. Distinct de getSalesHistory (quantités vendues) : une
  * question sur "le CA" porte sur un montant en CFA, jamais une quantité d'unités.
@@ -827,6 +875,7 @@ async function getArticleDlvStatus(rposShopId, ean) {
 module.exports = {
   getStoreStock,
   getArticleStock,
+  getArticleStockAllShops,
   getArticleDetails,
   getArticlesByGisement,
   getTopGisements,
