@@ -564,6 +564,29 @@ router.post('/order-anomalies/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/proposal/send-alert/recipients - liste les destinataires SANS envoyer l'email
+// (demande du 25/09/2026 : "voir les personnes qui son assigé avant de valider l'envoi") — appelée
+// par la popup de confirmation avant le vrai envoi manuel ci-dessous.
+router.get('/proposal/send-alert/recipients', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) return res.status(400).json({ success: false, message: 'Magasin introuvable pour ce compte.' });
+
+    const { getShopRecipients } = require('../../services/proposalNotificationService');
+    const recipients = await getShopRecipients(shopId);
+    // Rôle de chaque destinataire (affiché dans la popup pour distinguer un compte du magasin d'un
+    // ADMIN inclus systématiquement en copie, cf. getShopRecipients) — une seule requête groupée
+    // plutôt que de la déduire côté frontend, qui n'a pas accès à cette information.
+    const users = await prisma.user.findMany({
+      where: { email: { in: recipients } },
+      select: { email: true, name: true, role: true },
+    });
+    res.json({ success: true, data: users });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/send-alert - envoi manuel de l'alerte email pour le magasin courant
 // (demande du 25/09/2026 : "au cas où le auto n'a pas passé") — même contenu et mêmes destinataires
 // que l'alerte automatique du job nocturne/la relance de 10h, déclenchable à tout moment depuis la

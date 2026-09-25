@@ -31,6 +31,9 @@ export function PurchaseOrder() {
   const [status, setStatus] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [sendingAlert, setSendingAlert] = useState(false);
+  const [sendAlertModalOpen, setSendAlertModalOpen] = useState(false);
+  const [sendAlertRecipients, setSendAlertRecipients] = useState<{ email: string; name: string; role: string }[] | null>(null);
+  const [sendAlertError, setSendAlertError] = useState<string | null>(null);
   const loadTokenRef = useRef(0);
 
   const [history, setHistory] = useState<ProposalHistoryItem[]>([]);
@@ -124,14 +127,29 @@ export function PurchaseOrder() {
 
   // Envoi manuel de l'alerte email (demande du 25/09/2026 : "au cas où le auto n'a pas passé") —
   // même contenu/destinataires que le job automatique, déclenchable à la demande pour le magasin
-  // actuellement affiché.
-  async function handleSendAlert() {
+  // actuellement affiché. Popup de confirmation avec la liste des destinataires AVANT l'envoi réel
+  // (demande du 25/09/2026 : "voir les personnes qui son assigé avant de valider l'envoi") — la
+  // liste est chargée depuis une route dédiée qui ne fait que lire, jamais envoyer.
+  async function handleOpenSendAlertModal() {
+    setSendAlertModalOpen(true);
+    setSendAlertRecipients(null);
+    setSendAlertError(null);
+    try {
+      const data = await apiFetch<{ email: string; name: string; role: string }[]>(`/reassort/proposal/send-alert/recipients?${shopQueryParam()}`);
+      setSendAlertRecipients(data);
+    } catch (err) {
+      setSendAlertError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleConfirmSendAlert() {
     setSendingAlert(true);
     try {
       const res = await window.reassortFetch(`/reassort/proposal/send-alert?${shopQueryParam()}`, { method: 'POST' });
       const json: { success: boolean; message: string } = await res.json();
       if (!json.success) throw new Error(json.message);
       window.reassortToast(json.message, 'success');
+      setSendAlertModalOpen(false);
     } catch (err) {
       window.reassortToast('Erreur : ' + (err instanceof Error ? err.message : String(err)), 'error');
     } finally {
@@ -475,7 +493,7 @@ export function PurchaseOrder() {
                 <button
                   className="btn btn-sm btn-outline-secondary"
                   disabled={sendingAlert}
-                  onClick={handleSendAlert}
+                  onClick={handleOpenSendAlertModal}
                   title="Envoie manuellement l'alerte email aux comptes rattachés à ce magasin, au cas où l'envoi automatique n'aurait pas eu lieu"
                 >
                   <iconify-icon icon="solar:letter-bold-duotone" className="align-middle"></iconify-icon>{' '}
@@ -533,7 +551,7 @@ export function PurchaseOrder() {
                     <button
                       className="btn btn-sm btn-outline-secondary"
                       disabled={sendingAlert}
-                      onClick={handleSendAlert}
+                      onClick={handleOpenSendAlertModal}
                       title="Envoie manuellement l'alerte email aux comptes rattachés à ce magasin, au cas où l'envoi automatique n'aurait pas eu lieu"
                     >
                       <iconify-icon icon="solar:letter-bold-duotone" className="align-middle"></iconify-icon>{' '}
@@ -669,6 +687,58 @@ export function PurchaseOrder() {
 
       {weeklyPlanHistoryOpen && proposal?.weeklyPlanId && (
         <WeeklyPlanHistoryModal weeklyPlanId={proposal.weeklyPlanId} onClose={() => setWeeklyPlanHistoryOpen(false)} />
+      )}
+
+      {sendAlertModalOpen && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
+            <div className="modal-dialog" role="document">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">Envoyer l'alerte par email</h5>
+                  <button type="button" className="btn-close" onClick={() => setSendAlertModalOpen(false)}></button>
+                </div>
+                <div className="modal-body">
+                  {sendAlertError && <div className="alert alert-danger">{sendAlertError}</div>}
+                  {!sendAlertError && sendAlertRecipients === null && <p className="text-muted text-center py-3">Chargement des destinataires...</p>}
+                  {sendAlertRecipients?.length === 0 && (
+                    <p className="text-muted text-center py-3">Aucun destinataire trouvé pour ce magasin.</p>
+                  )}
+                  {!!sendAlertRecipients?.length && (
+                    <>
+                      <p className="small text-muted mb-2">Cet email sera envoyé aux {sendAlertRecipients.length} destinataire(s) suivant(s) :</p>
+                      <ul className="list-group">
+                        {sendAlertRecipients.map((r) => (
+                          <li key={r.email} className="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                              <div className="fw-semibold">{r.name}</div>
+                              <div className="small text-muted">{r.email}</div>
+                            </div>
+                            <span className="badge bg-secondary">{r.role}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setSendAlertModalOpen(false)}>
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={sendingAlert || !sendAlertRecipients?.length}
+                    onClick={handleConfirmSendAlert}
+                  >
+                    {sendingAlert ? 'Envoi...' : 'Confirmer l\'envoi'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
       )}
     </div>
   );
