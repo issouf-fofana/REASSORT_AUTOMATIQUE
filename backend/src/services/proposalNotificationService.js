@@ -10,16 +10,19 @@ const rpos = require('./rposClient');
 const { checkSupplierEligibility } = require('./proposalService');
 
 /** Comptes à alerter pour un magasin donné : rattachement direct (DIRECTOR/DEPARTMENT_HEAD/
- * SHELF_STOCKER) + SUPERVISOR qui le couvrent. */
+ * SHELF_STOCKER) + SUPERVISOR qui le couvrent + TOUJOURS les ADMIN en copie (demande du 25/09/2026)
+ * — garantit une visibilité globale et évite qu'une alerte parte dans le vide pour un magasin sans
+ * aucun compte encore rattaché (repli implicite : la liste n'est alors jamais vide). */
 async function getShopRecipients(rposShopId) {
-  const [directUsers, supervisors] = await Promise.all([
+  const [directUsers, supervisors, admins] = await Promise.all([
     prisma.user.findMany({ where: { rposShopId, isActive: true }, select: { email: true } }),
     prisma.user.findMany({
       where: { role: 'SUPERVISOR', isActive: true, supervisedShops: { some: { rposShopId } } },
       select: { email: true },
     }),
+    prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true } }),
   ]);
-  return [...new Set([...directUsers, ...supervisors].map((u) => u.email))];
+  return [...new Set([...directUsers, ...supervisors, ...admins].map((u) => u.email))];
 }
 
 function purchaseOrderLink(shop) {
