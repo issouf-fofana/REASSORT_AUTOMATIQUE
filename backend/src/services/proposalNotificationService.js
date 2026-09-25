@@ -8,6 +8,7 @@ const prisma = require('../utils/prisma');
 const outlookMailService = require('./outlookMailService');
 const rpos = require('./rposClient');
 const { checkSupplierEligibility } = require('./proposalService');
+const { renderMailTemplate } = require('./mailTemplateService');
 
 /** Comptes à alerter pour un magasin donné : rattachement direct (DIRECTOR/DEPARTMENT_HEAD/
  * SHELF_STOCKER) + SUPERVISOR qui le couvrent + TOUJOURS les ADMIN en copie (demande du 25/09/2026)
@@ -95,14 +96,17 @@ async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `Réassort Automatique — nouvelle proposition pour ${shop.reference} (${shop.name})`,
-    htmlBody: `
-      <p>Bonjour ${user.name},</p>
-      <p>Une nouvelle proposition de commande vient d'être générée pour le magasin <strong>${shop.reference} — ${shop.name}</strong>.</p>
-      <p><strong>${stats.proposalsGenerated}</strong> article(s) proposé(s).</p>
-      ${supplierWarningHtml}
-      <p>Merci de vous connecter pour vérifier et valider cette commande :</p>
-      <p><a href="${link}">${link}</a></p>
-    `,
+    htmlBody: renderMailTemplate(
+      'Nouvelle proposition de commande',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p>Une nouvelle proposition de commande vient d'être générée pour le magasin <strong>${shop.reference} — ${shop.name}</strong>.</p>
+        <p><strong>${stats.proposalsGenerated}</strong> article(s) proposé(s).</p>
+        ${supplierWarningHtml}
+        <p>Merci de vous connecter pour vérifier et valider cette commande.</p>
+      `,
+      { severity: 'info', cta: { label: 'Voir la commande', url: link } },
+    ),
   }));
 }
 
@@ -123,14 +127,17 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `⚠️ Rappel urgent — proposition non validée pour ${shop.reference} (${shop.name})`,
-    htmlBody: `
-      <p>Bonjour ${user.name},</p>
-      <p style="color:#c0392b;"><strong>La proposition de commande du magasin ${shop.reference} — ${shop.name} n'est toujours pas validée.</strong></p>
-      <p><strong>${proposal.lines.length}</strong> article(s) en attente de vérification.</p>
-      <p style="color:#c0392b;">L'entrepôt ne reçoit plus les commandes après <strong>13h</strong> — au-delà, cette commande sera traitée le lendemain.</p>
-      <p>Merci de vous connecter dès que possible pour vérifier et valider cette commande :</p>
-      <p><a href="${link}">${link}</a></p>
-    `,
+    htmlBody: renderMailTemplate(
+      '⚠️ Rappel urgent',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p style="color:#c0392b;"><strong>La proposition de commande du magasin ${shop.reference} — ${shop.name} n'est toujours pas validée.</strong></p>
+        <p><strong>${proposal.lines.length}</strong> article(s) en attente de vérification.</p>
+        <p style="color:#c0392b;">L'entrepôt ne reçoit plus les commandes après <strong>13h</strong> — au-delà, cette commande sera traitée le lendemain.</p>
+        <p>Merci de vous connecter dès que possible pour vérifier et valider cette commande.</p>
+      `,
+      { severity: 'danger', cta: { label: 'Valider maintenant', url: link } },
+    ),
   }));
 }
 
@@ -199,13 +206,16 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `${isAutoMode ? '🤖 ' : ''}Réassort Automatique — commande créée pour ${shop.reference} (${shop.name})`,
-    htmlBody: `
-      <p>Bonjour ${user.name},</p>
-      <p>${introText}</p>
-      <ul>${orderSummaryHtml(orders)}</ul>
-      <p>Le bon de commande PDF de chaque commande est joint à cet email.</p>
-      <p><a href="${purchaseOrderLink(shop)}">${purchaseOrderLink(shop)}</a></p>
-    `,
+    htmlBody: renderMailTemplate(
+      `${isAutoMode ? '🤖 ' : ''}Commande créée`,
+      `
+        <p>Bonjour ${user.name},</p>
+        <p>${introText}</p>
+        <ul>${orderSummaryHtml(orders)}</ul>
+        <p>Le bon de commande PDF de chaque commande est joint à cet email.</p>
+      `,
+      { severity: 'info', cta: { label: 'Voir la commande', url: purchaseOrderLink(shop) } },
+    ),
     attachments,
   }));
 }
