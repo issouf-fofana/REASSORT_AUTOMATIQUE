@@ -287,6 +287,140 @@ function NewAccountForm({ onCreated, onCancel }: { onCreated: () => void; onCanc
   );
 }
 
+// Pied de page signature/logo (demande du 25/09/2026) : ajouté automatiquement par le backend
+// (outlookMailService.sendMail) à CHAQUE email envoyé par la plateforme, jamais géré par page
+// individuellement — un seul réglage central ici couvre proposition/relance/commande créée.
+interface MailSignature {
+  signatureText: string;
+  hasLogo: boolean;
+}
+
+function SignatureSection() {
+  const [signature, setSignature] = useState<MailSignature | null>(null);
+  const [signatureText, setSignatureText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  async function load() {
+    try {
+      const data = await apiFetch<MailSignature>('/reassort/mail-signature');
+      setSignature(data);
+      setSignatureText(data.signatureText);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function handleSaveText() {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await apiFetch('/reassort/mail-signature', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signatureText }),
+      });
+      setSuccess('Signature enregistrée.');
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLogo(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const token = window.reassortGetToken() || '';
+      const apiBase = (window.REASSORT_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:3001`) + '/api';
+      const formData = new FormData();
+      formData.append('logo', file);
+      const res = await fetch(`${apiBase}/reassort/mail-signature/logo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const json: { success: boolean; message?: string } = await res.json();
+      if (!json.success) throw new Error(json.message);
+      setSuccess('Logo mis à jour.');
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleRemoveLogo() {
+    if (!(await window.reassortConfirm('Retirer le logo de la signature email ?'))) return;
+    try {
+      await apiFetch('/reassort/mail-signature/logo', { method: 'DELETE' });
+      load();
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err as Error).message, 'error');
+    }
+  }
+
+  if (!signature) return null;
+
+  return (
+    <div className="card mb-3">
+      <div className="card-header">
+        <h5 className="card-title mb-0">Signature des emails</h5>
+      </div>
+      <div className="card-body">
+        <div className="alert alert-light border small mb-3">
+          Ajoutée automatiquement en pied de page de chaque email envoyé par la plateforme (nouvelle proposition, relance, commande
+          créée...).
+        </div>
+        {error && <div className="alert alert-danger small">{error}</div>}
+        {success && <div className="alert alert-success small">{success}</div>}
+
+        <div className="mb-3">
+          <label className="form-label small fw-semibold text-uppercase">Logo</label>
+          <div className="d-flex align-items-center gap-2">
+            <input type="file" accept="image/*" className="form-control" style={{ maxWidth: 300 }} onChange={handleLogoChange} disabled={uploadingLogo} />
+            {signature.hasLogo && (
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={handleRemoveLogo}>
+                Retirer
+              </button>
+            )}
+          </div>
+          {signature.hasLogo && <div className="form-text text-success">✓ Un logo est actuellement configuré.</div>}
+        </div>
+
+        <div className="mb-3">
+          <label className="form-label small fw-semibold text-uppercase">Texte de signature</label>
+          <textarea
+            className="form-control"
+            rows={4}
+            placeholder={'Reassort Automatique\nSystème de réassort intelligent\ncontact@prosuma.ci'}
+            value={signatureText}
+            onChange={(e) => setSignatureText(e.target.value)}
+          />
+          <div className="form-text">Texte simple, une ligne par ligne affichée (pas de mise en forme HTML).</div>
+        </div>
+        <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSaveText}>
+          {saving ? 'Enregistrement...' : 'Enregistrer la signature'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function MailSection() {
   const [accounts, setAccounts] = useState<MailAccount[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -339,6 +473,8 @@ export function MailSection() {
         <div className="text-center text-muted py-4">Aucun compte mail configuré — les alertes de proposition ne sont pas envoyées.</div>
       )}
       {accounts && accounts.map((a) => <AccountCard account={a} key={a.id} onChanged={load} />)}
+
+      <SignatureSection />
     </div>
   );
 }

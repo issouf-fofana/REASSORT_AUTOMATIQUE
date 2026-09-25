@@ -10,9 +10,11 @@
  */
 const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
+const systemConfig = require('./systemConfigService');
 
 const TOKEN_TIMEOUT_MS = 15000;
 const SEND_TIMEOUT_MS = 20000;
+const LOGO_CONTENT_ID = 'reassort-mail-logo';
 
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
@@ -55,12 +57,56 @@ async function getAccessToken(account) {
   return json.access_token;
 }
 
-/** Envoie un email HTML via Microsoft Graph (POST /me/sendMail) avec le compte actif configuré. */
+/** Pied de page signature/logo (demande du 25/09/2026, configurable dans Paramètres > Comptes
+ * mail) — signature en texte simple (jamais de HTML brut accepté, une balise mal fermée casserait
+ * l'affichage de TOUS les emails envoyés par cette plateforme) converti en <br> pour les retours à
+ * la ligne ; logo joint en pièce jointe INLINE (Content-ID), jamais via une URL publique — évite
+ * d'exposer un nouvel endpoint de fichiers statiques juste pour cette image, et le logo reste
+ * visible même si le destinataire bloque les images distantes (cas fréquent des clients mail).
+ * Silencieux si rien n'est configuré : le mail part sans pied de page, comme avant cette fonction. */
+async function buildSignatureFooter() {
+  const [signatureText, logoBase64, logoContentType] = await Promise.all([
+    systemConfig.getValue(systemConfig.KEYS.MAIL_SIGNATURE_TEXT),
+    systemConfig.getValue(systemConfig.KEYS.MAIL_LOGO_BASE64),
+    systemConfig.getValue(systemConfig.KEYS.MAIL_LOGO_CONTENT_TYPE),
+  ]);
+
+  if (!signatureText && !logoBase64) return { footerHtml: '', logoAttachment: null };
+
+  const escapedSignature = (signatureText || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .split('\n').join('<br>');
+
+  const logoImgHtml = logoBase64 ? `<img src="cid:${LOGO_CONTENT_ID}" alt="Logo" style="max-height:60px;display:block;margin-bottom:8px;">` : '';
+
+  const footerHtml = `
+    <hr style="margin-top:24px;border:none;border-top:1px solid #e5e5e5;">
+    <table role="presentation" style="margin-top:12px;font-family:sans-serif;font-size:13px;color:#555;">
+      <tr><td>${logoImgHtml}${escapedSignature}</td></tr>
+    </table>
+  `;
+
+  const logoAttachment = logoBase64
+    ? {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'logo.png',
+        contentType: logoContentType || 'image/png',
+        contentBytes: logoBase64,
+        contentId: LOGO_CONTENT_ID,
+        isInline: true,
+      }
+    : null;
+
+  return { footerHtml, logoAttachment };
+}
+
 /**
  * Envoi avec pièce(s) jointe(s) (demande du 25/09/2026 : PDF du bon de commande en pièce jointe
  * quand une commande est créée) — Microsoft Graph attend chaque pièce jointe en base64 inline dans
  * le corps JSON de la requête (fileAttachment), pas un upload séparé : suffisant pour un PDF de
- * quelques dizaines de Ko, jamais des fichiers volumineux avec ce système.
+ * quelques dizaines de Ko, jamais des fichiers volumineux avec ce système. Le pied de page
+ * signature/logo (Paramètres > Comptes mail) est ajouté automatiquement à CHAQUE email envoyé par
+ * cette fonction, y compris le test — un appelant n'a jamais à s'en soucier.
  * @param {{name: string, contentBytes: Buffer, contentType?: string}[]} [attachments]
  */
 async function sendMail({ to, subject, htmlBody, attachments = [] }) {
@@ -72,12 +118,18 @@ async function sendMail({ to, subject, htmlBody, attachments = [] }) {
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean).map((email) => ({ emailAddress: { address: email } }));
   if (!recipients.length) throw new Error('Aucun destinataire fourni.');
 
-  const graphAttachments = attachments.map((a) => ({
-    '@odata.type': '#microsoft.graph.fileAttachment',
-    name: a.name,
-    contentType: a.contentType || 'application/octet-stream',
-    contentBytes: a.contentBytes.toString('base64'),
-  }));
+  const { footerHtml, logoAttachment } = await buildSignatureFooter();
+  const fullHtmlBody = htmlBody + footerHtml;
+
+  const graphAttachments = [
+    ...attachments.map((a) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: a.name,
+      contentType: a.contentType || 'application/octet-stream',
+      contentBytes: a.contentBytes.toString('base64'),
+    })),
+    ...(logoAttachment ? [logoAttachment] : []),
+  ];
 
   const res = await fetchWithTimeout(
     'https://graph.microsoft.com/v1.0/me/sendMail',
@@ -87,7 +139,7 @@ async function sendMail({ to, subject, htmlBody, attachments = [] }) {
       body: JSON.stringify({
         message: {
           subject,
-          body: { contentType: 'HTML', content: htmlBody },
+          body: { contentType: 'HTML', content: fullHtmlBody },
           toRecipients: recipients,
           ...(graphAttachments.length ? { attachments: graphAttachments } : {}),
         },

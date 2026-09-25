@@ -573,6 +573,72 @@ router.post('/mail-accounts/:id/test', requireAdmin, async (req, res) => {
   }
 });
 
+// --- Signature/logo email (demande du 25/09/2026, Paramètres > Comptes mail) : pied de page ajouté
+// automatiquement à chaque email envoyé (outlookMailService.sendMail), stocké en base plutôt que
+// sur disque — logo joint en pièce jointe inline (Content-ID), jamais servi par une URL publique.
+
+// GET /api/reassort/mail-signature - lit la signature/logo actuels (ADMIN uniquement).
+router.get('/mail-signature', requireAdmin, async (req, res) => {
+  try {
+    const [signatureText, hasLogo] = await Promise.all([
+      systemConfig.getValue(systemConfig.KEYS.MAIL_SIGNATURE_TEXT),
+      systemConfig.getValue(systemConfig.KEYS.MAIL_LOGO_BASE64),
+    ]);
+    res.json({ success: true, data: { signatureText: signatureText || '', hasLogo: !!hasLogo } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/mail-signature - met à jour le texte de signature (body: { signatureText }).
+router.put('/mail-signature', requireAdmin, async (req, res) => {
+  try {
+    await systemConfig.setValue(systemConfig.KEYS.MAIL_SIGNATURE_TEXT, req.body.signatureText || '');
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Petite image (logo de signature) : memoryStorage suffit, jamais de fichier volumineux ici —
+// contrairement à salesFileUpload (exports RPOS de plusieurs centaines de Mo), qui streame sur
+// disque pour cette raison précise.
+const mailLogoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2 Mo largement suffisant pour un logo de signature
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) return cb(new Error('Le fichier doit être une image.'));
+    cb(null, true);
+  },
+});
+
+// POST /api/reassort/mail-signature/logo - upload du logo (multipart, champ "logo").
+router.post('/mail-signature/logo', requireAdmin, mailLogoUpload.single('logo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'Aucun fichier reçu.' });
+    await Promise.all([
+      systemConfig.setValue(systemConfig.KEYS.MAIL_LOGO_BASE64, req.file.buffer.toString('base64')),
+      systemConfig.setValue(systemConfig.KEYS.MAIL_LOGO_CONTENT_TYPE, req.file.mimetype),
+    ]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/reassort/mail-signature/logo - retire le logo actuel.
+router.delete('/mail-signature/logo', requireAdmin, async (req, res) => {
+  try {
+    await Promise.all([
+      systemConfig.setValue(systemConfig.KEYS.MAIL_LOGO_BASE64, ''),
+      systemConfig.setValue(systemConfig.KEYS.MAIL_LOGO_CONTENT_TYPE, ''),
+    ]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // --- IA (LLM) : gestion des clés API multi-fournisseurs et prévision à la demande ---
 
 // GET /api/reassort/ai/keys - liste les clés configurées (ADMIN uniquement), sans jamais renvoyer

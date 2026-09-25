@@ -42,6 +42,15 @@ const KEYS = {
   // terminer, sur CHAQUE magasin, et relance une récupération ciblée en cas d'écart. Distinct de la
   // synchro incrémentale (SALES_SYNC_CRON, toutes les 15 min, fenêtre glissante de 48h seulement).
   SALES_DAILY_RECAP_CRON: 'SALES_DAILY_RECAP_CRON',
+  // Signature/logo ajoutés en pied de page de CHAQUE email envoyé par outlookMailService.sendMail()
+  // (demande du 25/09/2026, Paramètres > Comptes mail) — texte simple multi-lignes (jamais de HTML
+  // brut accepté, pour ne jamais risquer de casser l'affichage du mail avec une balise mal fermée).
+  MAIL_SIGNATURE_TEXT: 'MAIL_SIGNATURE_TEXT',
+  // Logo encodé en base64 (avec son content-type), stocké en base plutôt que sur disque : envoyé en
+  // pièce jointe inline (Content-ID) à chaque email, jamais servi par une URL publique — évite
+  // d'exposer un nouvel endpoint de fichiers statiques juste pour cette image.
+  MAIL_LOGO_BASE64: 'MAIL_LOGO_BASE64',
+  MAIL_LOGO_CONTENT_TYPE: 'MAIL_LOGO_CONTENT_TYPE',
   // Relance des propositions encore en attente (demande du 25/09/2026 : l'entrepôt ne reçoit plus
   // les commandes après 13h, une relance en matinée laisse le temps de valider avant cette limite).
   PROPOSAL_REMINDER_CRON: 'PROPOSAL_REMINDER_CRON',
