@@ -564,4 +564,37 @@ router.post('/order-anomalies/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/proposal/send-alert - envoi manuel de l'alerte email pour le magasin courant
+// (demande du 25/09/2026 : "au cas où le auto n'a pas passé") — même contenu et mêmes destinataires
+// que l'alerte automatique du job nocturne/la relance de 10h, déclenchable à tout moment depuis la
+// page Proposition de commande plutôt que d'attendre le prochain passage des jobs planifiés.
+router.post('/proposal/send-alert', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) return res.status(400).json({ success: false, message: 'Magasin introuvable pour ce compte.' });
+
+    const shop = await prisma.shop.findUnique({
+      where: { rposShopId: shopId },
+      select: { rposShopId: true, reference: true, name: true, rposPosId: true },
+    });
+    if (!shop) return res.status(404).json({ success: false, message: 'Magasin introuvable.' });
+
+    const proposal = await getPendingProposal(shopId);
+    if (!proposal || !proposal.lines.length) {
+      return res.status(400).json({ success: false, message: 'Aucune proposition en attente pour ce magasin.' });
+    }
+
+    const { getShopRecipients, notifyShopUsersOfPendingProposal } = require('../../services/proposalNotificationService');
+    const recipients = await getShopRecipients(shop.rposShopId);
+    if (!recipients.length) {
+      return res.status(400).json({ success: false, message: 'Aucun compte rattaché à ce magasin pour recevoir l\'alerte.' });
+    }
+
+    await notifyShopUsersOfPendingProposal(shop, proposal);
+    res.json({ success: true, message: `Alerte envoyée à ${recipients.length} destinataire(s).` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

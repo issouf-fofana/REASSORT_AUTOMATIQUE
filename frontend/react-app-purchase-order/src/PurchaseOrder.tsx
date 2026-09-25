@@ -30,6 +30,7 @@ export function PurchaseOrder() {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [status, setStatus] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [sendingAlert, setSendingAlert] = useState(false);
   const loadTokenRef = useRef(0);
 
   const [history, setHistory] = useState<ProposalHistoryItem[]>([]);
@@ -119,6 +120,23 @@ export function PurchaseOrder() {
       if (token === loadTokenRef.current) setRefreshing(false);
     }
     if (token === loadTokenRef.current) loadHistory(shopId || '');
+  }
+
+  // Envoi manuel de l'alerte email (demande du 25/09/2026 : "au cas où le auto n'a pas passé") —
+  // même contenu/destinataires que le job automatique, déclenchable à la demande pour le magasin
+  // actuellement affiché.
+  async function handleSendAlert() {
+    setSendingAlert(true);
+    try {
+      const res = await window.reassortFetch(`/reassort/proposal/send-alert?${shopQueryParam()}`, { method: 'POST' });
+      const json: { success: boolean; message: string } = await res.json();
+      if (!json.success) throw new Error(json.message);
+      window.reassortToast(json.message, 'success');
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      setSendingAlert(false);
+    }
   }
 
   async function loadProposalById(id: string) {
@@ -453,6 +471,17 @@ export function PurchaseOrder() {
               <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
                 Actualiser
               </button>
+              {!!proposal && (
+                <button
+                  className="btn btn-sm btn-outline-secondary"
+                  disabled={sendingAlert}
+                  onClick={handleSendAlert}
+                  title="Envoie manuellement l'alerte email aux comptes rattachés à ce magasin, au cas où l'envoi automatique n'aurait pas eu lieu"
+                >
+                  <iconify-icon icon="solar:letter-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                  {sendingAlert ? 'Envoi...' : 'Envoyer par email'}
+                </button>
+              )}
               <GenerationFlow
                 shopId={isSingleShop ? user?.rposShopId || '' : selectedShopId}
                 shopReference={(isSingleShop ? user?.rposShopReference : selectedShop?.reference) || ''}
@@ -500,6 +529,17 @@ export function PurchaseOrder() {
                   <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
                     Actualiser
                   </button>
+                  {!!proposal && (
+                    <button
+                      className="btn btn-sm btn-outline-secondary"
+                      disabled={sendingAlert}
+                      onClick={handleSendAlert}
+                      title="Envoie manuellement l'alerte email aux comptes rattachés à ce magasin, au cas où l'envoi automatique n'aurait pas eu lieu"
+                    >
+                      <iconify-icon icon="solar:letter-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      {sendingAlert ? 'Envoi...' : 'Envoyer par email'}
+                    </button>
+                  )}
                   {!viewingPastGeneration && proposal && (
                     <ValidationFlow
                       proposalId={proposal.id}
