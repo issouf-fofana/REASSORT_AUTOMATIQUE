@@ -52,9 +52,15 @@ async function sendMailToEachRecipient(users, buildMailForUser) {
   }
 }
 
+/** FRONTEND_URL peut contenir plusieurs origines séparées par des virgules (même format que
+ * CORS_ORIGIN, ex: "http://localhost:8080,http://10.0.80.31:8080" pour accepter les deux façons
+ * d'atteindre le site) — un lien dans un email ne peut pointer que vers UNE seule URL, jamais les
+ * coller ensemble (bug constaté le 25/09/2026 : lien illisible et non cliquable dans Outlook,
+ * "[url1]url2" concaténés). On retient toujours la première, cohérente avec l'usage principal.
+ */
 function purchaseOrderLink(shop) {
-  const siteUrl = process.env.FRONTEND_URL || 'https://reassort.local';
-  return `${siteUrl}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}`;
+  const configured = (process.env.FRONTEND_URL || 'https://reassort.local').split(',')[0].trim();
+  return `${configured}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}`;
 }
 
 /** Liste HTML des articles non rattachés au fournisseur central RPOS (peuvent manquer à l'envoi
