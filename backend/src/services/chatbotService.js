@@ -631,7 +631,16 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
   // (dailyHistory -> graphique, lines/topArticles -> tableau) — jamais un rendu que l'IA aurait pu
   // déformer ou halluciner en le redécrivant dans son texte.
-  return { answer: fullText.trim(), providerUsed, toolUsed: toolName, toolResult };
+  // `wantsVisual` (demande du 25/09/2026, bug trouvé sur capture d'écran : "Quels articles risquent
+  // d'être en rupture ?" affichait la réponse texte PUIS un gros tableau non demandé) — le frontend
+  // affichait le tableau dès que toolResult contenait des lignes, sans jamais regarder si la question
+  // demandait réellement une représentation visuelle. Calculé ici pour rester la seule source de
+  // vérité (même logique qu'isVisualRequest, déjà utilisée pour router vers reusedFromHistory) :
+  // vrai seulement si la question mentionne explicitement un mot-clé visuel ("tableau", "graphique"...)
+  // OU si elle réutilise un résultat déjà affiché visuellement plus tôt dans la conversation. Une
+  // simple question texte ("quels articles risquent d'être en rupture ?") ne doit renvoyer QUE la
+  // réponse en langage naturel, jamais un tableau brut en plus.
+  return { answer: fullText.trim(), providerUsed, toolUsed: toolName, toolResult, wantsVisual: isVisualRequest(question) || !!reusedFromHistory };
 }
 
 // Questions suggérées (§34) : éditables depuis Paramètres > IA (CHATBOT_SUGGESTED_QUESTIONS, une par
@@ -642,4 +651,4 @@ async function getSuggestedQuestions() {
   return (raw || '').split('\n').map((q) => q.trim()).filter(Boolean);
 }
 
-module.exports = { askAssistant, detectIntent, extractEan, getSuggestedQuestions, VALID_INTENT_TOOLS };
+module.exports = { askAssistant, detectIntent, extractEan, getSuggestedQuestions, VALID_INTENT_TOOLS, isVisualRequest };

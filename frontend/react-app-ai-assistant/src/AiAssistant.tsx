@@ -166,8 +166,21 @@ function buildArticlesTable(lines: ToolResultLine[], quantityLabel?: string): st
   );
 }
 
-function buildVisualFromToolResult(toolResult: ToolResult | null | undefined): string {
-  if (!toolResult || !toolResult.found) return '';
+// Mêmes mots-clés que VISUAL_REQUEST_KEYWORDS côté backend (chatbotService.js) — l'utilisateur doit
+// demander explicitement un tableau/graphique pour qu'on lui en affiche un (bug trouvé le 25/09/2026 :
+// une simple question texte comme "Quels articles risquent d'être en rupture ?" affichait la réponse
+// PUIS un gros tableau non demandé, dès que toolResult contenait des lignes). Dupliqué ici uniquement
+// pour reconstruire l'affichage de l'historique déjà enregistré (qui ne porte pas encore ce flag) —
+// pour une nouvelle question, c'est `wantsVisual` calculé côté backend qui fait foi (cf. sendQuestion).
+const VISUAL_REQUEST_KEYWORDS = ['graph', 'graphique', 'tableau', 'courbe', 'visuel', 'schema', 'diagramme'];
+
+function isVisualRequest(question: string): boolean {
+  const normalized = (question || '').toLowerCase();
+  return VISUAL_REQUEST_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
+function buildVisualFromToolResult(toolResult: ToolResult | null | undefined, wantsVisual: boolean): string {
+  if (!wantsVisual || !toolResult || !toolResult.found) return '';
   if (Array.isArray(toolResult.dailyHistory) && toolResult.dailyHistory.length > 1) {
     return (
       buildLineChart(toolResult.dailyHistory) +
@@ -292,7 +305,7 @@ export function AiAssistant() {
         let visualHtml = '';
         if (assistantMsg?.toolResult) {
           try {
-            visualHtml = buildVisualFromToolResult(JSON.parse(assistantMsg.toolResult));
+            visualHtml = buildVisualFromToolResult(JSON.parse(assistantMsg.toolResult), isVisualRequest(userMsg?.content || ''));
           } catch {
             // résultat mal formé, ignoré
           }
@@ -391,7 +404,7 @@ export function AiAssistant() {
       if (finalResult) {
         next[turnIndex] = {
           question: q,
-          answerHtml: markdownLiteToHtml(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult),
+          answerHtml: markdownLiteToHtml(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult, !!finalResult.wantsVisual),
         };
       } else if (lastErr?.name === 'AbortError') {
         next[turnIndex] = {
