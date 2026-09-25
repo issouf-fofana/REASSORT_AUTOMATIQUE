@@ -588,8 +588,9 @@ router.get('/proposal/send-alert/recipients', async (req, res) => {
 });
 
 // POST /api/reassort/proposal/send-alert - envoi manuel de l'alerte email pour le magasin courant
-// (demande du 25/09/2026 : "au cas où le auto n'a pas passé") — même contenu et mêmes destinataires
-// que l'alerte automatique du job nocturne/la relance de 10h, déclenchable à tout moment depuis la
+// (demande du 25/09/2026 : "au cas où le auto n'a pas passé") — mêmes destinataires que l'alerte
+// automatique par défaut, ou une liste choisie à la main via body.recipients (popup de confirmation
+// avant l'envoi, demande du 25/09/2026 — "les enlever ou pas"), déclenchable à tout moment depuis la
 // page Proposition de commande plutôt que d'attendre le prochain passage des jobs planifiés.
 router.post('/proposal/send-alert', async (req, res) => {
   try {
@@ -608,12 +609,17 @@ router.post('/proposal/send-alert', async (req, res) => {
     }
 
     const { getShopRecipients, notifyShopUsersOfPendingProposal } = require('../../services/proposalNotificationService');
-    const recipients = await getShopRecipients(shop.rposShopId);
+    // body.recipients (tableau d'emails) : filtré contre la vraie liste calculée, jamais fait
+    // confiance tel quel — un email arbitraire fourni côté client ne doit jamais pouvoir être ajouté
+    // à l'insu du contrôle d'accès normal (seulement RETIRER un destinataire légitime est permis).
+    const allRecipients = await getShopRecipients(shop.rposShopId);
+    const requestedRecipients = Array.isArray(req.body?.recipients) ? req.body.recipients : null;
+    const recipients = requestedRecipients ? allRecipients.filter((e) => requestedRecipients.includes(e)) : allRecipients;
     if (!recipients.length) {
-      return res.status(400).json({ success: false, message: 'Aucun compte rattaché à ce magasin pour recevoir l\'alerte.' });
+      return res.status(400).json({ success: false, message: 'Aucun destinataire sélectionné pour recevoir l\'alerte.' });
     }
 
-    await notifyShopUsersOfPendingProposal(shop, proposal);
+    await notifyShopUsersOfPendingProposal(shop, proposal, recipients);
     res.json({ success: true, message: `Alerte envoyée à ${recipients.length} destinataire(s).` });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -34,6 +34,9 @@ export function PurchaseOrder() {
   const [sendAlertModalOpen, setSendAlertModalOpen] = useState(false);
   const [sendAlertRecipients, setSendAlertRecipients] = useState<{ email: string; name: string; role: string }[] | null>(null);
   const [sendAlertError, setSendAlertError] = useState<string | null>(null);
+  // Emails décochés par l'utilisateur dans la popup (demande du 25/09/2026 : "les enlever ou pas") —
+  // tous cochés par défaut à l'ouverture, un Set plutôt qu'un tableau pour un togglage simple.
+  const [sendAlertExcluded, setSendAlertExcluded] = useState<Set<string>>(new Set());
   const loadTokenRef = useRef(0);
 
   const [history, setHistory] = useState<ProposalHistoryItem[]>([]);
@@ -134,6 +137,7 @@ export function PurchaseOrder() {
     setSendAlertModalOpen(true);
     setSendAlertRecipients(null);
     setSendAlertError(null);
+    setSendAlertExcluded(new Set());
     try {
       const data = await apiFetch<{ email: string; name: string; role: string }[]>(`/reassort/proposal/send-alert/recipients?${shopQueryParam()}`);
       setSendAlertRecipients(data);
@@ -142,10 +146,24 @@ export function PurchaseOrder() {
     }
   }
 
+  function toggleSendAlertRecipient(email: string) {
+    setSendAlertExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  }
+
   async function handleConfirmSendAlert() {
+    const recipients = (sendAlertRecipients || []).map((r) => r.email).filter((e) => !sendAlertExcluded.has(e));
     setSendingAlert(true);
     try {
-      const res = await window.reassortFetch(`/reassort/proposal/send-alert?${shopQueryParam()}`, { method: 'POST' });
+      const res = await window.reassortFetch(`/reassort/proposal/send-alert?${shopQueryParam()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipients }),
+      });
       const json: { success: boolean; message: string } = await res.json();
       if (!json.success) throw new Error(json.message);
       window.reassortToast(json.message, 'success');
@@ -706,13 +724,25 @@ export function PurchaseOrder() {
                   )}
                   {!!sendAlertRecipients?.length && (
                     <>
-                      <p className="small text-muted mb-2">Cet email sera envoyé aux {sendAlertRecipients.length} destinataire(s) suivant(s) :</p>
+                      <p className="small text-muted mb-2">
+                        Décochez un destinataire pour l'exclure de cet envoi ({sendAlertRecipients.length - sendAlertExcluded.size} sur{' '}
+                        {sendAlertRecipients.length} sélectionné(s)) :
+                      </p>
                       <ul className="list-group">
                         {sendAlertRecipients.map((r) => (
                           <li key={r.email} className="list-group-item d-flex justify-content-between align-items-center">
-                            <div>
-                              <div className="fw-semibold">{r.name}</div>
-                              <div className="small text-muted">{r.email}</div>
+                            <div className="form-check">
+                              <input
+                                className="form-check-input"
+                                type="checkbox"
+                                id={`send-alert-recipient-${r.email}`}
+                                checked={!sendAlertExcluded.has(r.email)}
+                                onChange={() => toggleSendAlertRecipient(r.email)}
+                              />
+                              <label className="form-check-label" htmlFor={`send-alert-recipient-${r.email}`}>
+                                <div className="fw-semibold">{r.name}</div>
+                                <div className="small text-muted">{r.email}</div>
+                              </label>
                             </div>
                             <span className="badge bg-secondary">{r.role}</span>
                           </li>
@@ -728,7 +758,7 @@ export function PurchaseOrder() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={sendingAlert || !sendAlertRecipients?.length}
+                    disabled={sendingAlert || !sendAlertRecipients?.length || sendAlertExcluded.size === sendAlertRecipients.length}
                     onClick={handleConfirmSendAlert}
                   >
                     {sendingAlert ? 'Envoi...' : 'Confirmer l\'envoi'}

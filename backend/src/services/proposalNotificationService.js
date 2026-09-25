@@ -75,9 +75,12 @@ async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
 /** Relance pour une proposition GENERATED encore en attente (job de 10h, demande du 25/09/2026 :
  * "les alertes peuvent être entre 9h et 11h", l'entrepôt ne reçoit plus les commandes après 13h).
  * Gravité volontairement plus marquée que le mail initial (couleur rouge, mention explicite du
- * délai) pour se distinguer visuellement d'une simple information. */
-async function notifyShopUsersOfPendingProposal(shop, proposal) {
-  const recipients = await getShopRecipients(shop.rposShopId);
+ * délai) pour se distinguer visuellement d'une simple information.
+ * `overrideRecipients` (optionnel) : liste d'emails choisie à la main (popup de confirmation avant
+ * l'envoi manuel, demande du 25/09/2026 — "les enlever ou pas") — remplace entièrement le calcul
+ * automatique getShopRecipients, jamais utilisé par les jobs planifiés eux-mêmes. */
+async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipients) {
+  const recipients = overrideRecipients || (await getShopRecipients(shop.rposShopId));
   if (!recipients.length) return;
 
   const link = purchaseOrderLink(shop);
