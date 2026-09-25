@@ -918,6 +918,45 @@ async function getSupplierOrderStatus(posId, orderId) {
  * Filtre uniquement les commandes créées par notre plateforme (marqueur dans external_reference),
  * pour ne pas mélanger avec les commandes créées manuellement dans RPOS.
  */
+/**
+ * Bon de commande PDF d'une commande fournisseur (demande du 25/09/2026, endpoint confirmé par
+ * inspection réseau côté interface RPOS elle-même : GET /api/supplier_order_admin/{id}/pdf/,
+ * distinct de /api/supplier_order/ utilisé partout ailleurs). Réponse binaire (application/pdf),
+ * jamais du JSON — rposGet() appelle .json() sans condition et casserait sur ce contenu, d'où une
+ * fonction dédiée qui réutilise le même auth/dispatcher/retry réseau mais renvoie un Buffer brut.
+ */
+async function getSupplierOrderPdf(posId, rposOrderId) {
+  const { baseUrl, user, password } = await getServerConfig(posId);
+  const url = new URL(`/api/supplier_order_admin/${rposOrderId}/pdf/`, baseUrl);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RPOS_REQUEST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: authHeader(user, password) },
+      dispatcher: insecureDispatcher,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    const cause = err.cause;
+    const isTimeout = err.name === 'AbortError' || cause?.code === 'UND_ERR_CONNECT_TIMEOUT';
+    if (isTimeout || (cause && ['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'].includes(cause.code))) {
+      throw new Error(`Serveur RPOS "${posId}" injoignable — vérifiez la connexion réseau/VPN.`);
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`RPOS GET /api/supplier_order_admin/${rposOrderId}/pdf/ -> ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
 async function getSupplierOrders(posId, { shopId, pageSize = 50, page = 1, platformOnly = true }) {
   const params = {
     shop: shopId,
@@ -1182,6 +1221,7 @@ module.exports = {
   validateSupplierOrder,
   cancelSupplierOrder,
   getSupplierOrders,
+  getSupplierOrderPdf,
   getPendingPlatformOrderedEans,
   getLastSaleDate,
   getEarliestSaleDate,

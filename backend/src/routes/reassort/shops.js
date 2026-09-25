@@ -382,6 +382,29 @@ router.get('/orders/:rposOrderId/detail', async (req, res) => {
   }
 });
 
+// GET /api/reassort/orders/:rposOrderId/pdf - bon de commande PDF tel que généré par RPOS
+// (demande du 25/09/2026, endpoint confirmé par inspection réseau côté interface RPOS :
+// /api/supplier_order_admin/{id}/pdf/, distinct de /api/supplier_order/ utilisé ailleurs).
+// Simple proxy binaire : ce backend ne génère ni ne modifie jamais le PDF, il relaie tel quel la
+// réponse de RPOS (source unique de vérité pour le contenu réel envoyé à l'entrepôt).
+router.get('/orders/:rposOrderId/pdf', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    const pdfBuffer = await rpos.getSupplierOrderPdf(posId, req.params.rposOrderId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="commande-${req.params.rposOrderId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Order PDF error:', error);
+    res.status(502).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/orders/:rposOrderId/cancel - annule une commande fournisseur sur RPOS
 // (statut "annulée"), typiquement pour nettoyer une commande de test ou créée par erreur.
 // Réservé ADMIN : action irréversible sur RPOS, affecte potentiellement l'entrepôt.

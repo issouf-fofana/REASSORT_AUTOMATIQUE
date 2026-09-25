@@ -168,6 +168,26 @@ export function PurchaseList() {
         { headerName: 'Date livraison', field: 'delivery_date', filter: 'agDateColumnFilter', width: 160, valueFormatter: (p: any) => formatDate(p.value) },
         { headerName: 'Statut', field: 'status_display', filter: 'agTextColumnFilter', width: 170, cellRenderer: statusCellRenderer },
         { headerName: 'Créée par', field: 'created_by', filter: 'agTextColumnFilter', width: 150, valueFormatter: (p: any) => p.value || '—' },
+        {
+          headerName: 'PDF',
+          width: 80,
+          sortable: false,
+          filter: false,
+          valueGetter: () => '',
+          cellRenderer: (params: any) => {
+            if (params.data?.deletedOnRpos) return '';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-outline-dark';
+            btn.title = 'Télécharger le bon de commande PDF';
+            btn.innerHTML = '<iconify-icon icon="solar:file-pdf-bold-duotone"></iconify-icon>';
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              handleDownloadPdf(params.data.id);
+            });
+            return btn;
+          },
+        },
       ],
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,
@@ -276,6 +296,32 @@ export function PurchaseList() {
     if (!gridApiRef.current) return;
     const shopRef = user?.rposShopReference || 'magasin';
     gridApiRef.current.exportDataAsCsv({ fileName: `commandes-fournisseur-${shopRef}-${new Date().toISOString().slice(0, 10)}.csv` });
+  }
+
+  // Bon de commande PDF (demande du 25/09/2026) : simple proxy binaire côté backend vers RPOS
+  // (endpoint confirmé par inspection réseau côté interface RPOS elle-même), ouvert dans un nouvel
+  // onglet — window.reassortFetch (pas un <a href> direct) car la route est protégée par Bearer,
+  // qu'un lien classique ne peut pas porter.
+  async function handleDownloadPdf(orderId: string) {
+    try {
+      const shopId = selectedShopId();
+      const posId = selectedPosId();
+      const res = await window.reassortFetch(
+        `/reassort/orders/${encodeURIComponent(orderId)}/pdf?shop=${encodeURIComponent(shopId)}&pos=${encodeURIComponent(posId)}`,
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.message || `Échec du téléchargement (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      // L'onglet garde sa propre référence au blob une fois ouvert : révoquer immédiatement après
+      // (plutôt que jamais) évite une fuite mémoire si l'utilisateur enchaîne plusieurs PDF.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err instanceof Error ? err.message : String(err)), 'error');
+    }
   }
 
   async function handleCancelOrder() {
@@ -479,14 +525,23 @@ export function PurchaseList() {
                         <button type="button" className="btn-close" onClick={() => setDetailOpen(false)}></button>
                       </div>
                       <div className="modal-body">{detailBody}</div>
-                      {canCancel && (
-                        <div className="modal-footer">
-                          {cancelError && <div className="alert alert-danger py-2 px-3 mb-0 me-auto small">{cancelError}</div>}
+                      <div className="modal-footer">
+                        {cancelError && <div className="alert alert-danger py-2 px-3 mb-0 me-auto small">{cancelError}</div>}
+                        {currentOrderRef.current && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-dark btn-sm"
+                            onClick={() => currentOrderRef.current && handleDownloadPdf(currentOrderRef.current.id)}
+                          >
+                            <iconify-icon icon="solar:file-pdf-bold-duotone" className="align-middle"></iconify-icon> Télécharger le PDF
+                          </button>
+                        )}
+                        {canCancel && (
                           <button type="button" className="btn btn-outline-danger btn-sm" disabled={cancelling} onClick={handleCancelOrder}>
                             {cancelling ? 'Annulation en cours...' : 'Annuler cette commande sur RPOS'}
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
