@@ -857,4 +857,3 @@ router.post('/improvements/:id/status', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
-module.exports = router;
