@@ -56,7 +56,14 @@ async function getAccessToken(account) {
 }
 
 /** Envoie un email HTML via Microsoft Graph (POST /me/sendMail) avec le compte actif configuré. */
-async function sendMail({ to, subject, htmlBody }) {
+/**
+ * Envoi avec pièce(s) jointe(s) (demande du 25/09/2026 : PDF du bon de commande en pièce jointe
+ * quand une commande est créée) — Microsoft Graph attend chaque pièce jointe en base64 inline dans
+ * le corps JSON de la requête (fileAttachment), pas un upload séparé : suffisant pour un PDF de
+ * quelques dizaines de Ko, jamais des fichiers volumineux avec ce système.
+ * @param {{name: string, contentBytes: Buffer, contentType?: string}[]} [attachments]
+ */
+async function sendMail({ to, subject, htmlBody, attachments = [] }) {
   const account = await getActiveAccount();
   if (!account) throw new Error('Aucun compte mail actif configuré (Paramètres > Comptes mail).');
 
@@ -64,6 +71,13 @@ async function sendMail({ to, subject, htmlBody }) {
 
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean).map((email) => ({ emailAddress: { address: email } }));
   if (!recipients.length) throw new Error('Aucun destinataire fourni.');
+
+  const graphAttachments = attachments.map((a) => ({
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: a.name,
+    contentType: a.contentType || 'application/octet-stream',
+    contentBytes: a.contentBytes.toString('base64'),
+  }));
 
   const res = await fetchWithTimeout(
     'https://graph.microsoft.com/v1.0/me/sendMail',
@@ -75,6 +89,7 @@ async function sendMail({ to, subject, htmlBody }) {
           subject,
           body: { contentType: 'HTML', content: htmlBody },
           toRecipients: recipients,
+          ...(graphAttachments.length ? { attachments: graphAttachments } : {}),
         },
         saveToSentItems: true,
       }),

@@ -1572,6 +1572,25 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
       rposOrderValidated,
     },
   });
+
+  // Alerte email avec bon(s) de commande PDF en pièce jointe (demande du 25/09/2026 : validation
+  // manuelle ET Mode Auto — distingués ici par l'adresse technique utilisée par runAutoOrder,
+  // jamais une vraie adresse de compte). Un échec d'envoi ne doit jamais remonter comme un échec de
+  // LA VALIDATION elle-même (déjà réussie et enregistrée à ce stade) : capturé et loggé séparément,
+  // même principe que l'alerte de nouvelle proposition du job nocturne.
+  try {
+    const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
+    const createdOrders = await prisma.proposalOrder.findMany({
+      where: { proposalId, rposOrderId: { not: null } },
+      select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true },
+    });
+    if (shop && createdOrders.length) {
+      const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
+      await notifyShopUsersOfOrderCreated(shop, { id: proposalId }, createdOrders, { isAutoMode: userEmail === 'auto-order@reassort.local' });
+    }
+  } catch (mailError) {
+    console.error(`[validateProposal] Alerte email de commande créée échouée pour la proposition ${proposalId}:`, mailError.message);
+  }
 }
 
 // =============================================

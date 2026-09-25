@@ -6,6 +6,7 @@
  */
 const prisma = require('../utils/prisma');
 const outlookMailService = require('./outlookMailService');
+const rpos = require('./rposClient');
 const { checkSupplierEligibility } = require('./proposalService');
 
 /** Comptes à alerter pour un magasin donné : rattachement direct (DIRECTOR/DEPARTMENT_HEAD/
@@ -91,4 +92,85 @@ async function notifyShopUsersOfPendingProposal(shop, proposal) {
   });
 }
 
-module.exports = { getShopRecipients, purchaseOrderLink, buildSupplierWarningHtml, notifyShopUsersOfNewProposal, notifyShopUsersOfPendingProposal };
+/** Une ligne <li> par commande RPOS créée (une par rayon, readme §11) — numéro, description, nombre
+ * d'articles : toujours les valeurs réellement enregistrées, jamais une estimation ou un texte
+ * généré par l'IA (cf. commentaire de tête de notifyShopUsersOfOrderCreated). */
+function orderSummaryHtml(orders) {
+  return orders
+    .map((o) => `<li><strong>Commande ${o.rposOrderReference || o.rposOrderId}</strong> — ${o.department} : ${o.linesTotal - o.linesFailed} article(s) commandé(s)${o.linesFailed ? ` (${o.linesFailed} refusé(s) par RPOS)` : ''}</li>`)
+    .join('');
+}
+
+/** Bon(s) de commande PDF des commandes créées, en pièces jointes — un échec de récupération d'un
+ * PDF (RPOS indisponible, commande déjà supprimée...) ne doit jamais empêcher l'envoi du mail
+ * lui-même : cette pièce jointe est alors simplement omise. */
+async function buildOrderPdfAttachments(shop, orders) {
+  const attachments = [];
+  for (const o of orders) {
+    if (!o.rposOrderId) continue;
+    try {
+      const pdfBuffer = await rpos.getSupplierOrderPdf(shop.rposPosId, o.rposOrderId);
+      attachments.push({
+        name: `commande-${o.rposOrderReference || o.rposOrderId}.pdf`,
+        contentBytes: pdfBuffer,
+        contentType: 'application/pdf',
+      });
+    } catch (err) {
+      console.error(`[proposalNotificationService] PDF introuvable pour la commande ${o.rposOrderId}:`, err.message);
+    }
+  }
+  return attachments;
+}
+
+/**
+ * Alerte email quand une ou plusieurs commandes fournisseur sont créées sur RPOS (validation
+ * manuelle OU Mode Auto, demande du 25/09/2026), avec le(s) bon(s) de commande PDF en pièce
+ * jointe. Tous les chiffres du corps du mail (numéro, nombre d'articles) viennent directement des
+ * ProposalOrder déjà enregistrées — jamais inventés par l'IA, même dans la variante "Mode Auto" :
+ * seule la phrase d'introduction y est confiée (isAutoMode=true), et elle ne doit jamais elle-même
+ * énoncer un chiffre précis (un LLM peut se tromper sur un total, jamais sur une tournure de
+ * phrase). Si l'appel IA échoue (clé manquante/quota...), une phrase fixe de repli est utilisée à
+ * la place — l'envoi du mail ne doit jamais dépendre de la disponibilité d'une clé IA.
+ */
+async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMode = false } = {}) {
+  const recipients = await getShopRecipients(shop.rposShopId);
+  if (!recipients.length || !orders.length) return;
+
+  let introHtml;
+  if (isAutoMode) {
+    try {
+      const { streamWithFallback } = require('./aiForecastService');
+      const prompt = `Rédige une seule phrase courte (une vingtaine de mots maximum), en français, pour introduire un email professionnel annonçant qu'une commande de réassort a été validée et envoyée automatiquement par le système d'IA pour le magasin ${shop.reference} (${shop.name}). Ne mentionne AUCUN chiffre précis (ni nombre d'articles, ni numéro de commande, ni montant) : ces détails sont ajoutés séparément après ta phrase. Réponds uniquement avec la phrase, sans guillemets ni mise en forme.`;
+      const { fullText } = await streamWithFallback(prompt, () => {}, 'auto-order-email-intro');
+      introHtml = `<p>${fullText.trim()}</p>`;
+    } catch (err) {
+      console.error('[proposalNotificationService] Intro IA du mail Mode Auto indisponible, repli sur texte fixe:', err.message);
+      introHtml = '<p>Le Mode Auto a validé et envoyé automatiquement la proposition de commande suivante.</p>';
+    }
+  } else {
+    introHtml = `<p>La proposition de commande du magasin <strong>${shop.reference} — ${shop.name}</strong> a été validée et envoyée à l'entrepôt.</p>`;
+  }
+
+  const attachments = await buildOrderPdfAttachments(shop, orders);
+
+  await outlookMailService.sendMail({
+    to: recipients,
+    subject: `${isAutoMode ? '🤖 ' : ''}Réassort Automatique — commande créée pour ${shop.reference} (${shop.name})`,
+    htmlBody: `
+      ${introHtml}
+      <ul>${orderSummaryHtml(orders)}</ul>
+      <p>Le bon de commande PDF de chaque commande est joint à cet email.</p>
+      <p><a href="${purchaseOrderLink(shop)}">${purchaseOrderLink(shop)}</a></p>
+    `,
+    attachments,
+  });
+}
+
+module.exports = {
+  getShopRecipients,
+  purchaseOrderLink,
+  buildSupplierWarningHtml,
+  notifyShopUsersOfNewProposal,
+  notifyShopUsersOfPendingProposal,
+  notifyShopUsersOfOrderCreated,
+};
