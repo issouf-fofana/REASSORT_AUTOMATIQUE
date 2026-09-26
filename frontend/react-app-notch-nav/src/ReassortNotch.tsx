@@ -45,10 +45,13 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       transition={{ type: 'spring', stiffness: 420, damping: 32 }}
       style={{ transformOrigin: 'top', ...radius('1.25rem') }}
       data-radius
-      className="absolute left-1/2 top-full z-50 mt-2 flex w-max max-w-[min(90vw,880px)] -translate-x-1/2 gap-6 rounded-2xl bg-zinc-950 p-4 shadow-lg"
+      // Grille plutôt qu'une simple rangée flex : 7 colonnes (Pilotage/Réassort/IA/Commande/Mail/
+      // Utilisateur/Paramètres, cf. navConfig.ts) ne tiennent pas côte à côte sur un écran classique
+      // — reflue proprement sur plusieurs lignes selon la largeur disponible.
+      className="absolute left-1/2 top-full z-50 mt-2 grid w-max max-w-[min(94vw,960px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
     >
       {groups.map((group) => (
-        <div key={group.label} className="flex min-w-[180px] flex-1 flex-col gap-0.5">
+        <div key={group.label} className="flex min-w-[150px] flex-col gap-0.5">
           <div className="px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
           {group.entries.map((entry) => {
             const Icon = entry.icon;
@@ -138,6 +141,11 @@ export function ReassortNotch() {
     // groupe cliqué un par un. pt-4 : espace au-dessus pour que les ailes incurvées (débordent vers
     // le haut, cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent.
     <div className="relative flex w-full items-start justify-center px-2 pt-4 pb-1">
+      {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
+          barre noire en haut [...] pour ne pas qu'on voie les coins") : sans elle, le fond blanc de
+          la page restait visible de chaque côté de l'île au-dessus de son point d'ancrage — h-4
+          correspond au pt-4 du conteneur (même hauteur que l'espace réservé aux ailes incurvées). */}
+      <div className="absolute inset-x-0 top-0 h-4 bg-zinc-950" />
       <div
         onMouseEnter={openMenu}
         onMouseLeave={scheduleClose}

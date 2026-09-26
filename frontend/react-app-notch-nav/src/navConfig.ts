@@ -41,13 +41,18 @@ export interface NavGroup {
 // Reproduit exactement assets/partials/sidebar.html (13 pages + 6 sous-onglets Paramètres) — jamais
 // une nouvelle route inventée, cf. consigne "ne crée pas de fausses routes". Icônes Lucide en
 // remplacement des <svg> inline d'origine (même sens, bibliothèque différente).
+//
+// Regroupement demandé le 26/09/2026 ("classe aussi : section réassort, paramètre, AI, commande,
+// mail, utilisateur") : plus fin que les 3 groupes Pilotage/Réassort/Administration de la sidebar
+// d'origine — chaque page est reclassée par SUJET plutôt que par section de menu, et les 6
+// sous-onglets Paramètres forment leur propre colonne avec libellé complet (jamais tronqué, cf.
+// bug visuel signalé le 26/09/2026 : "Paramètres · Fichiers ..." illisible dans une colonne étroite).
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Pilotage',
     entries: [
       { id: 'dashboard', label: 'Tableau de bord', href: '/', icon: LayoutDashboard },
       { id: 'admin-dashboard', label: 'Vue globale', href: '/admin-dashboard', icon: Globe, adminOnly: true },
-      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-guide', label: 'Mon accès', href: '/ai-guide', icon: Info },
       { id: 'project-guide', label: 'Guide du projet', href: '/project-guide', icon: BookOpen },
     ],
@@ -58,24 +63,43 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'purchase-order', label: 'Proposition de commande', href: '/purchase-order', icon: ShoppingCart },
       { id: 'purchase-list', label: 'Historique', href: '/purchase-list', icon: History },
       { id: 'sales-history', label: 'Ventes synchronisées', href: '/sales-history', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'IA',
+    entries: [
+      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-predictions', label: 'IA & Prédictions', href: '/ai-predictions', icon: Sparkles },
       { id: 'ai-quality', label: 'Qualité & IA', href: '/ai-quality', icon: Zap, adminOnly: true },
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },
+    ],
+  },
+  {
+    label: 'Commande',
+    entries: [
       { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
     ],
   },
   {
-    label: 'Administration',
+    label: 'Mail',
     entries: [
-      { id: 'users-list', label: 'Utilisateurs', href: '/users-list', icon: Users, adminOnly: true },
       { id: 'mail-recipients', label: 'Destinataires email', href: '/mail-recipients', icon: Mail, adminOnly: true },
       { id: 'feature-requests', label: 'Demandes d\'évolution', href: '/feature-requests', icon: Lightbulb, adminOnly: true },
-      { id: 'settings-reassort', label: 'Paramètres · Réassort', href: '/settings#tab-reassort', icon: Sliders, adminOnly: true },
-      { id: 'settings-files', label: 'Paramètres · Fichiers de ventes', href: '/settings#tab-files', icon: Folder, adminOnly: true },
-      { id: 'settings-rpos', label: 'Paramètres · RPOS & Sécurité', href: '/settings#tab-rpos', icon: ServerCog, adminOnly: true },
-      { id: 'settings-cron', label: 'Paramètres · Planification', href: '/settings#tab-cron', icon: Clock, adminOnly: true },
-      { id: 'settings-sync', label: 'Paramètres · Synchronisation', href: '/settings#tab-sync', icon: RefreshCw, adminOnly: true },
-      { id: 'settings-ai', label: 'Paramètres · IA', href: '/settings#tab-ai', icon: Wand2, adminOnly: true },
+    ],
+  },
+  {
+    label: 'Utilisateur',
+    entries: [{ id: 'users-list', label: 'Utilisateurs', href: '/users-list', icon: Users, adminOnly: true }],
+  },
+  {
+    label: 'Paramètres',
+    entries: [
+      { id: 'settings-reassort', label: 'Réassort', href: '/settings#tab-reassort', icon: Sliders, adminOnly: true },
+      { id: 'settings-files', label: 'Fichiers de ventes', href: '/settings#tab-files', icon: Folder, adminOnly: true },
+      { id: 'settings-rpos', label: 'RPOS & Sécurité', href: '/settings#tab-rpos', icon: ServerCog, adminOnly: true },
+      { id: 'settings-cron', label: 'Planification', href: '/settings#tab-cron', icon: Clock, adminOnly: true },
+      { id: 'settings-sync', label: 'Synchronisation', href: '/settings#tab-sync', icon: RefreshCw, adminOnly: true },
+      { id: 'settings-ai', label: 'IA', href: '/settings#tab-ai', icon: Wand2, adminOnly: true },
     ],
   },
 ];
