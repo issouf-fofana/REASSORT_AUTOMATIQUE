@@ -706,8 +706,19 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // éventuel est un effet de bord silencieux signalé seulement dans featureRequest ci-dessous.
   let featureRequest = null;
   if (!toolResult && !reusedFromHistory) {
-    const decision = await maybeTrackFeatureRequest({ conversationHistory, question, answer: fullText.trim() });
-    if (decision) featureRequest = await recordFeatureRequest(decision, { user });
+    try {
+      const decision = await maybeTrackFeatureRequest({ conversationHistory, question, answer: fullText.trim() });
+      if (decision) featureRequest = await recordFeatureRequest(decision, { user });
+    } catch (err) {
+      // Un échec d'enregistrement (contrainte base, service indisponible...) ne doit JAMAIS faire
+      // échouer toute la réponse de l'assistant — sans ce filet, l'erreur remontait jusqu'au catch
+      // global de la route ask-stream (routes/reassort/ai.js), qui envoyait un événement SSE "error"
+      // à la place de "done" : le texte déjà streamé restait affiché côté utilisateur (buffer local),
+      // mais featureRequest/wantsVisual n'étaient jamais transmis, et rien ne signalait l'échec (bug
+      // trouvé le 26/09/2026 : une demande détectée par le LLM de suivi n'apparaissait jamais sur la
+      // page Demandes d'évolution, sans aucune erreur visible pour l'utilisateur).
+      console.error('[chatbotService] Enregistrement de la demande d\'évolution échoué:', err.message);
+    }
   }
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
