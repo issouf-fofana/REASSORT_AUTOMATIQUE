@@ -162,13 +162,13 @@ export function ProjectGuide() {
   return (
     <div>
       <style>{`
-        /* Pilote notch nav (26/09/2026) : plus de .sidebar dans le DOM sur cette page (remplacée par
-           #notch-nav-slot, cf. index.html) — volt.css applique pourtant toujours sa marge desktop de
-           260px à main.content en présumant qu'une sidebar existe, laissant un vide permanent à
-           gauche. Neutralisé ici plutôt que dans theme-override.css (global) tant que seule cette
-           page a basculé, pour ne rien changer aux 14 pages encore sur l'ancienne sidebar. */
+        /* ÉTAT 2 (barre notch compacte, cf. layout-collapsible.js) : plus de .sidebar dans le DOM
+           quand body a la classe .nav-collapsed — volt.css applique pourtant toujours sa marge
+           desktop de 260px à main.content en présumant une sidebar toujours présente, laissant un
+           vide permanent à gauche. Neutralisé seulement dans cet état, jamais en ÉTAT 1 (sidebar
+           classique, comportement inchangé). */
         @media (min-width: 992px) {
-          main.content { margin-left: 0 !important; }
+          body.nav-collapsed main.content { margin-left: 0 !important; }
         }
         /* Le sommaire (.pg-toc) et la barre d'onglets (.pg-tabs) utilisent position:sticky — rendu
            possible par le passage global de html/body/.content à overflow:visible/clip plutôt que

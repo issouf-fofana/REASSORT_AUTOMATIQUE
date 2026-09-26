@@ -272,14 +272,31 @@ a:not(.sidebar *),
      color: #ffffff;
 }
 
-/* Sidebar masquable sur desktop (bouton topbar, demande du 14/09/2026) : menu escamoté et
-   contenu en pleine largeur. Desktop uniquement (≥992px, là où .content a sa marge de 260px)
-   — sur mobile, le hamburger en overlay reste le mécanisme. */
+/* Deux états de navigation mutuellement exclusifs (demande explicite du 26/09/2026), pilotés par
+   layout-collapsible.js via une seule classe body.nav-collapsed :
+     ÉTAT 1 (par défaut) : sidebar/topbar Volt classiques.
+     ÉTAT 2 : sidebar/topbar cachées, barre compacte "notch" affichée à la place (#notch-nav-slot,
+              cf. notch-nav.js) — jamais les deux visibles ensemble. Desktop uniquement (≥992px, là
+              où .content a sa marge de 260px) — sur mobile, le hamburger en overlay reste le
+              mécanisme, la barre notch n'y est pas encore activée. */
 @media (min-width: 992px) {
+     /* body.sidebar-hidden : les 14 pages pas encore migrées (layout.js), masque la sidebar SEULE,
+        sans barre notch de remplacement (comportement inchangé depuis le 14/09/2026). */
      body.sidebar-hidden .sidebar {
           display: none !important;
      }
      body.sidebar-hidden .content {
+          margin-left: 0;
+     }
+     /* body.nav-collapsed : pages migrées (layout-collapsible.js), masque sidebar ET topbar, barre
+        notch affichée à la place. */
+     body.nav-collapsed .sidebar {
+          display: none !important;
+     }
+     body.nav-collapsed .navbar-top {
+          display: none !important;
+     }
+     body.nav-collapsed .content {
           margin-left: 0;
      }
 }
