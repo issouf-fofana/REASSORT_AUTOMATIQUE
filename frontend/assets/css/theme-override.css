@@ -288,17 +288,16 @@ a:not(.sidebar *),
      body.sidebar-hidden .content {
           margin-left: 0;
      }
-     /* body.nav-collapsed : pages migrées (layout-collapsible.js), masque sidebar + contenu dupliqué
-        de la topbar (titre, magasin, notifications, compte — repris par la barre notch), barre notch
-        affichée à la place. #sidebar-visibility-btn (le bouton qui a déclenché ce basculement) reste
-        volontairement visible : c'est l'UNIQUE moyen de revenir à l'état 1 si la barre notch ne
-        s'affiche pas pour une raison quelconque (bug trouvé le 26/09/2026 : masquer toute la topbar
-        masquait aussi ce bouton, rendant le retour à la sidebar impossible). */
+     /* body.nav-collapsed : pages migrées (layout-collapsible.js), masque sidebar ET topbar Volt en
+        entier, barre notch affichée à la place — celle-ci reproduit son propre bouton "Afficher le
+        menu latéral" (ReassortNotch.tsx), donc plus besoin de garder un fragment de l'ancienne
+        topbar visible. Une tentative précédente ne masquait que le titre/notifications/compte de la
+        topbar en gardant #sidebar-visibility-btn : laissait une bande blanche quasi vide (juste ce
+        bouton) sous la barre notch, cf. capture du 26/09/2026 montrant les deux superposées. */
      body.nav-collapsed .sidebar {
           display: none !important;
      }
-     body.nav-collapsed .navbar-top .d-none.d-md-block,
-     body.nav-collapsed .navbar-top .navbar-nav {
+     body.nav-collapsed .navbar-top {
           display: none !important;
      }
      body.nav-collapsed .content {
