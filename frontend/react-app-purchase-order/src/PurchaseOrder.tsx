@@ -289,6 +289,14 @@ export function PurchaseOrder() {
     [proposal, selectedDepartment],
   );
 
+  // ProposalOrder déjà créée pour le rayon actuellement affiché (demande du 26/09/2026, validation
+  // indépendante par rayon) — présente dès que ce rayon précis a été validé, quel que soit l'état
+  // des autres rayons de la même proposition.
+  const currentDepartmentOrder = useMemo(
+    () => (proposal && selectedDepartment ? (proposal.orders || []).find((o) => o.department === selectedDepartment) || null : null),
+    [proposal, selectedDepartment],
+  );
+
   // Câble le picker + synchronise avec le magasin actif global de la topbar, comme sur les autres
   // pages migrées (cf. SalesHistory.tsx) : select NON contrôlé par React (value=state réécrirait le
   // DOM à chaque rendu et entrerait en conflit avec shop-picker.js/global-shop-selector.js, qui
@@ -630,24 +638,39 @@ export function PurchaseOrder() {
                       {sendingAlert ? 'Envoi...' : 'Envoyer par email'}
                     </button>
                   )}
-                  {!viewingPastGeneration && proposal && (
+                  {/* Validation désormais INDÉPENDANTE par rayon (demande du 26/09/2026 : "si je
+                      valide 1, il doit être marqué validé, et je peux toujours aller dans les
+                      autres") — le bouton n'apparaît que sur la vue détail d'un rayon précis
+                      (selectedDepartment défini), jamais depuis la vue Secteurs globale qui n'a
+                      plus de sens comme "tout valider en bloc". Masqué si ce rayon a déjà sa
+                      propre commande RPOS (currentDepartmentOrder), remplacé par un badge de
+                      statut à la place (cf. plus bas dans le rendu). */}
+                  {!viewingPastGeneration && proposal && selectedDepartment && !currentDepartmentOrder && (
                     <ValidationFlow
                       proposalId={proposal.id}
-                      decisionsProvider={() => proposalTableRef.current?.getDecisions() || []}
-                      selectedDepartment={selectedDepartment}
-                      totalLines={proposal.lines.length}
+                      decisionsProvider={() => proposalTableRef.current?.getDecisionsForDepartment(selectedDepartment) || []}
+                      departmentValidation={selectedDepartment}
                       shopName={(isSingleShop ? user?.rposShopName : selectedShop?.name) || ''}
                       shopQueryParam={shopQueryParam()}
                       onValidated={() => {
-                        // Une fois validée, la proposition n'est plus "en attente" : rester sur la
-                        // vue détail d'un rayon qui n'a plus rien à afficher laissait l'utilisateur
-                        // devant un tableau vide sans explication (bug constaté le 24/09/2026).
-                        // Retour à la vue Secteurs (qui affichera "Aucune proposition en attente"
-                        // avec un message clair) plutôt que de rester sur un rayon désormais orphelin.
-                        navigateTo(buildNavUrl(selectedSector, null));
+                        // Contrairement à l'ancien comportement (retour à la vue Secteurs, la
+                        // proposition entière étant terminée), un seul rayon vient d'être validé —
+                        // les autres restent à traiter. On reste sur cette même vue détail rayon
+                        // (elle affichera désormais le badge "validé" à la place du bouton) plutôt
+                        // que de renvoyer l'utilisateur ailleurs sans raison.
                         loadPendingProposal();
                       }}
                     />
+                  )}
+                  {currentDepartmentOrder && (
+                    <span
+                      className={`badge ${currentDepartmentOrder.status === 'DONE' ? 'bg-success' : currentDepartmentOrder.status === 'FAILED' ? 'bg-danger' : 'bg-secondary'}`}
+                      title={currentDepartmentOrder.errorMessage || undefined}
+                    >
+                      <iconify-icon icon="solar:check-circle-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      Rayon validé — commande {currentDepartmentOrder.rposOrderReference || currentDepartmentOrder.rposOrderId || '—'}
+                      {currentDepartmentOrder.linesFailed > 0 && ` (${currentDepartmentOrder.linesFailed} article(s) refusé(s))`}
+                    </span>
                   )}
                 </div>
               </div>

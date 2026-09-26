@@ -4,6 +4,7 @@ import type { LineState, Proposal, ProposalLine } from './types';
 
 export interface ProposalTableHandle {
   getDecisions: () => { lineId: string; quantity: number; excluded: boolean; price: number }[];
+  getDecisionsForDepartment: (department: string) => { lineId: string; quantity: number; excluded: boolean; price: number }[];
   selectAllToggle: () => void;
   exportCsv: (shopReference: string) => void;
 }
@@ -456,6 +457,18 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         const st = getLineState(l);
         return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0 };
       });
+    },
+    // Décisions du RAYON PRÉCIS demandé uniquement (demande du 26/09/2026 : validation indépendante
+    // par rayon) — contrairement à getDecisions() ci-dessus, jamais les autres rayons de la
+    // proposition : l'API /validate-department attend explicitement les lignes d'UN SEUL rayon.
+    getDecisionsForDepartment(department: string) {
+      const allLines = proposal ? proposal.lines : lines;
+      return allLines
+        .filter((l) => (l.department || 'Sans rayon') === department)
+        .map((l) => {
+          const st = getLineState(l);
+          return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0 };
+        });
     },
     selectAllToggle() {
       const allExcluded = lines.every((l) => getLineState(l).excluded);

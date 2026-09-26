@@ -61,19 +61,22 @@ function StepRow({ label, state }: { label: string; state: StepState }) {
 export function ValidationFlow({
   proposalId,
   decisionsProvider,
-  selectedDepartment,
-  totalLines,
   shopName,
   shopQueryParam,
   onValidated,
+  departmentValidation,
 }: {
   proposalId: string;
   decisionsProvider: () => Decision[];
-  selectedDepartment: string | null;
-  totalLines: number;
   shopName: string;
   shopQueryParam: string;
   onValidated: () => void;
+  // Mode "un seul rayon" (demande du 26/09/2026 : "si je valide 1, il doit être marqué validé, et
+  // je peux toujours aller dans les autres") : requis dès qu'un rayon est affiché — la commande
+  // porte alors UNIQUEMENT sur ce rayon (via /validate-department, synchrone), jamais sur toute la
+  // proposition. `undefined`/absent : ancien comportement (vue Secteurs uniquement, plus de bouton
+  // de validation globale — chaque rayon se valide désormais depuis sa propre vue détail).
+  departmentValidation?: string;
 }) {
   const [confirmData, setConfirmData] = useState<{ decisions: Decision[]; reference: string; comment: string; count: number; total: number } | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -263,6 +266,71 @@ export function ValidationFlow({
     resetSteps(validateAfterCreate);
     setProgressOpen(true);
 
+    if (departmentValidation) {
+      // Route synchrone (demande du 26/09/2026) : un seul rayon, pas de polling nécessaire — le
+      // volume reste raisonnable pour une réponse HTTP classique.
+      setProgressText(`Envoi des articles du rayon ${departmentValidation}...`);
+      try {
+        const data = await apiFetch<{
+          order: { id: string; reference: string | null } | null;
+          processed: number;
+          failed: number;
+          failedLines: { ean: string; label: string | null; reason: string }[];
+          rposOrderValidated: boolean | null;
+        }>(`/reassort/proposal/${proposalId}/validate-department?${shopQueryParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            supplierId: SUPPLIER_CENTRAL_ID,
+            orderDate,
+            deliveryDate,
+            externalReference: ref,
+            comment: cmt,
+            decisions,
+            validateAfterCreate,
+            department: departmentValidation,
+          }),
+        });
+        setCreateStepState('done');
+        setSendStepState('done');
+        if (validateAfterCreate) setValidateStepState(data.rposOrderValidated ? 'done' : 'error');
+        setDoneStepState('done');
+        setProgressPct(100);
+        setProgressBarClass('bg-success');
+        setCanClose(true);
+
+        const validationNote = validateAfterCreate
+          ? data.rposOrderValidated
+            ? " — commande validée sur RPOS (transmise à l'entrepôt)"
+            : ' — validation RPOS a échoué, commande restée "en préparation"'
+          : ' — commande laissée "en préparation" sur RPOS (non transmise à l\'entrepôt)';
+        const hasPartialFailure = data.failed > 0;
+        const variant = hasPartialFailure ? 'warning' : 'success';
+        const failedList = data.failedLines?.length
+          ? `<ul class="mb-0 mt-2 small">${data.failedLines.map((f) => `<li>${f.label || f.ean} — ${f.reason}</li>`).join('')}</ul>`
+          : '';
+        setResultHtml({
+          variant,
+          body:
+            `Commande <strong>${data.order?.reference || ''}</strong> créée sur RPOS pour le rayon <strong>${departmentValidation}</strong> — ${data.processed} article(s) envoyé(s)` +
+            (data.failed ? `, ${data.failed} échec(s)` : '') +
+            validationNote +
+            '.' +
+            failedList,
+        });
+        setProgressText(`Rayon ${departmentValidation} validé.`);
+        setSending(false);
+        shouldReloadOnCloseRef.current = true;
+      } catch (err) {
+        setCreateStepState('error');
+        setProgressText(`Erreur: ${err instanceof Error ? err.message : String(err)}`);
+        setProgressBarClass('bg-danger');
+        setCanClose(true);
+        setSending(false);
+      }
+      return;
+    }
+
     try {
       const data = await apiFetch<{ linesTotal: number }>(`/reassort/proposal/${proposalId}/validate?${shopQueryParam}`, {
         method: 'POST',
@@ -302,7 +370,7 @@ export function ValidationFlow({
     <>
       <div className="d-flex flex-column align-items-end gap-1">
         <button className="btn btn-sm btn-success" disabled={sending} onClick={openConfirm}>
-          Valider et envoyer à RPOS
+          {departmentValidation ? `Valider le rayon ${departmentValidation}` : 'Valider et envoyer à RPOS'}
         </button>
         {warning && <div className="text-danger small">{warning}</div>}
       </div>
@@ -349,11 +417,11 @@ export function ValidationFlow({
                       {confirmData.count} article(s) sélectionné(s)
                     </div>
                     <div className="text-muted small">Total : <strong>{confirmData.total.toLocaleString('fr-FR')} CFA</strong></div>
-                    {selectedDepartment && (
-                      <div className="alert alert-warning small mt-2 mb-0">
-                        <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Filtre actif : seul le rayon{' '}
-                        <strong>{selectedDepartment}</strong> sera envoyé ({confirmData.count}/{totalLines} article(s) au total). Les autres
-                        rayons ne seront pas inclus dans cette commande.
+                    {departmentValidation && (
+                      <div className="alert alert-info small mt-2 mb-0">
+                        <iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon> Seul le rayon{' '}
+                        <strong>{departmentValidation}</strong> sera validé ({confirmData.count} article(s)). Les autres rayons de cette
+                        proposition restent modifiables et pourront être validés séparément.
                       </div>
                     )}
                     {checkingSuppliers && (

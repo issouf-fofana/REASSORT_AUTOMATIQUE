@@ -723,6 +723,10 @@ model ProposalOrder {
 
   receptionEvents ReceptionEvent[]
 
+  // Un seul ProposalOrder par (proposition, rayon) — demande du 26/09/2026 : "chaque rayon
+  // indépendant, validé une seule fois". Empêche toute course/double clic de créer deux
+  // commandes RPOS distinctes pour le même rayon de la même proposition.
+  @@unique([proposalId, department])
   @@map("proposal_orders")
 }
 

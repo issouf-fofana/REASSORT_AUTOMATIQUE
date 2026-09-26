@@ -11,6 +11,7 @@ const {
   generateAndSaveProposal,
   getPendingProposal,
   startProposalValidation,
+  validateProposalDepartment,
   getProposalStatus,
   attachOrderAnomaliesToLines,
   checkSupplierEligibility,
@@ -361,7 +362,9 @@ router.get('/proposal/history', async (req, res) => {
 router.get('/proposal/:id', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
-    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, include: { lines: true, orderAnomalies: true } });
+    // orders inclus : même raison que GET /proposal/pending, un badge "rayon déjà validé" doit
+    // être affichable sur n'importe quelle vue de la proposition, pas seulement la vue par défaut.
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, include: { lines: true, orderAnomalies: true, orders: true } });
     if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
     if (shopId && proposal.rposShopId !== shopId) {
       return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
@@ -468,6 +471,55 @@ router.post('/proposal/:id/validate', async (req, res) => {
     res.status(202).json({ success: true, data: result });
   } catch (error) {
     console.error('Start validation error:', error);
+    res.status(400).json({ success: false, message: error.message, details: error.body });
+  }
+});
+
+// POST /api/reassort/proposal/:id/validate-department - valide UN SEUL rayon de la proposition,
+// indépendamment des autres (demande du 26/09/2026 : "si je valide un rayon, il doit être marqué
+// validé, et je peux toujours aller dans les autres pour voir si je valide ou pas"). Même payload que
+// /validate, plus `department` (obligatoire) — `decisions` ne doit porter QUE sur les lignes de ce
+// rayon (le frontend filtre déjà avant l'appel). Contrairement à /validate, répond de façon
+// SYNCHRONE (pas de polling /status nécessaire) : le volume d'un seul rayon reste raisonnable.
+router.post('/proposal/:id/validate-department', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    const { supplierId, orderDate, deliveryDate, externalReference, comment, decisions, validateAfterCreate, department } = req.body;
+
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    if (!department || !Array.isArray(decisions)) {
+      return res.status(400).json({ success: false, message: 'department et decisions sont requis' });
+    }
+
+    // Même contrôle de périmètre que /validate (Rayonniste/Chef de département) : un compte
+    // restreint ne peut valider que SON rayon assigné, jamais un autre même par cet appel dédié.
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (currentUser && DEPARTMENT_SCOPED_ROLES.has(currentUser.role)) {
+      const scopedProposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { lines: { select: { id: true, department: true } } } });
+      const allowedLines = filterProposalLinesForUser(scopedProposal?.lines || [], currentUser);
+      const allowedDepartments = new Set(allowedLines.map((l) => l.department || 'Sans rayon'));
+      if (!allowedDepartments.has(department)) {
+        return res.status(403).json({ success: false, message: 'Ce rayon n\'est pas dans votre périmètre.' });
+      }
+    }
+
+    const result = await validateProposalDepartment({
+      proposalId: req.params.id,
+      posId,
+      shopId,
+      userEmail: req.user.email,
+      department,
+      decisions,
+      orderHeader: { supplierId, orderDate, deliveryDate, externalReference, comment },
+      validateAfterCreate: !!validateAfterCreate,
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Department validation error:', error);
     res.status(400).json({ success: false, message: error.message, details: error.body });
   }
 });

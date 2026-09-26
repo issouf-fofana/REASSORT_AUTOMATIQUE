@@ -1,4 +1,4 @@
-import type { Proposal, ProposalLine } from './types';
+import type { Proposal, ProposalLine, ProposalOrder } from './types';
 
 interface GroupData {
   count: number;
@@ -47,7 +47,21 @@ function sectorIcon(name: string): string {
   return match ? match[1] : 'solar:widget-2-bold-duotone';
 }
 
-function DeptTile({ name, d, href, onNavigate }: { name: string; d: GroupData; href: string; onNavigate: (href: string) => void }) {
+function DeptTile({
+  name,
+  d,
+  href,
+  onNavigate,
+  order,
+}: {
+  name: string;
+  d: GroupData;
+  href: string;
+  onNavigate: (href: string) => void;
+  // ProposalOrder déjà créée pour ce rayon (demande du 26/09/2026, validation indépendante par
+  // rayon) — undefined au niveau secteur (n'a pas de sens), null si ce rayon n'est pas encore validé.
+  order?: ProposalOrder | null;
+}) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
   return (
     <div className="col-md-4 col-lg-3">
@@ -69,7 +83,17 @@ function DeptTile({ name, d, href, onNavigate }: { name: string; d: GroupData; h
           <div className="tile-icon">
             <iconify-icon icon={sectorIcon(name)}></iconify-icon>
           </div>
-          <h5 className="card-title mb-1">{name}</h5>
+          <div className="d-flex align-items-start justify-content-between gap-1">
+            <h5 className="card-title mb-1">{name}</h5>
+            {order && (
+              <span
+                className={`badge ${order.status === 'DONE' ? 'bg-success' : order.status === 'FAILED' ? 'bg-danger' : 'bg-secondary'}`}
+                title={order.rposOrderReference ? `Commande ${order.rposOrderReference}` : undefined}
+              >
+                ✓ Validé
+              </span>
+            )}
+          </div>
           <div className="tile-count">{d.count} article(s)</div>
           <div className="tile-pct">
             {d.revenuePct.toFixed(1)}
@@ -233,12 +257,23 @@ export function DepartmentListView({
     isSectorLevel ? buildNavUrl(name, null) : buildNavUrl(selectedSector, name),
   ]);
 
+  // ProposalOrder par nom de rayon (demande du 26/09/2026) : uniquement pertinent au niveau rayon,
+  // jamais au niveau secteur (un secteur n'a pas de commande RPOS propre, seuls ses rayons en ont).
+  const orderByDepartment = new Map((proposal?.orders || []).map((o) => [o.department, o]));
+
   return (
     <div>
       <DeptListContext proposal={proposal!} />
       <div className="row g-3">
         {tiles.map(([name, d, href]) => (
-          <DeptTile name={name} d={d} href={href} onNavigate={onNavigate} key={name} />
+          <DeptTile
+            name={name}
+            d={d}
+            href={href}
+            onNavigate={onNavigate}
+            order={isSectorLevel ? undefined : orderByDepartment.get(name) || null}
+            key={name}
+          />
         ))}
         {proposal && (
           <RemainderTile proposal={proposal} rawGroups={groups} onOpenExcluded={(reason, label) => onOpenExcluded(proposal.id, reason, label)} />

@@ -1250,7 +1250,11 @@ async function getPendingProposal(shopId) {
   const proposal = await prisma.proposal.findFirst({
     where: { rposShopId: shopId, status: 'GENERATED' },
     orderBy: { generatedAt: 'desc' },
-    include: { lines: true, orderAnomalies: true },
+    // orders inclus (demande du 26/09/2026) : une proposition GENERATED peut désormais déjà avoir
+    // des ProposalOrder pour les rayons validés indépendamment (cf. validateProposalDepartment) —
+    // le frontend en a besoin dès le chargement pour afficher un badge "déjà validé" par rayon,
+    // sans attendre un polling de statut qui n'a de sens que pendant un envoi en cours.
+    include: { lines: true, orderAnomalies: true, orders: true },
   });
   return attachOrderAnomaliesToLines(proposal);
 }
@@ -1339,6 +1343,187 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
   });
 
   return { proposalId, linesTotal: linesToOrder.length };
+}
+
+/**
+ * Valide UN SEUL rayon d'une proposition, indépendamment des autres (demande du 26/09/2026 : "si je
+ * valide une commande pour un rayon et je n'ai pas fait les autres, tout disparaît [...] ça doit
+ * faire : si je valide 1, il doit être marqué validé, et je peux toujours aller dans les autres").
+ *
+ * Différences avec startProposalValidation (qui traite TOUTE la proposition en un bloc) :
+ *  - Ne touche JAMAIS Proposal.status tant que tous les rayons de la proposition n'ont pas leur
+ *    propre ProposalOrder — la proposition reste "GENERATED" (donc modifiable/visible normalement)
+ *    aussi longtemps qu'il reste au moins un rayon non traité. Ne passe à VALIDATED qu'une fois le
+ *    DERNIER rayon restant validé (calculé ici en comparant les rayons distincts des lignes non
+ *    exclues aux ProposalOrder déjà créés).
+ *  - `decisions` ne porte QUE sur les lignes du rayon demandé (le frontend ne doit plus envoyer les
+ *    lignes des autres rayons) — jamais un filtre côté serveur sur `proposal.lines` entier.
+ *  - La contrainte unique (proposalId, department) sur ProposalOrder empêche nativement une double
+ *    validation du même rayon (retourne une erreur claire plutôt qu'un doublon silencieux).
+ *
+ * Reste synchrone (pas de fire-and-forget comme startProposalValidation) : un seul rayon est un
+ * volume de lignes bien plus faible que la proposition entière, la latence RPOS reste raisonnable
+ * pour une réponse HTTP classique — évite de reproduire tout le mécanisme de polling de progression
+ * pour un cas qui n'en a pas vraiment besoin.
+ */
+async function validateProposalDepartment({ proposalId, posId, shopId, userEmail, department, decisions, orderHeader, validateAfterCreate }) {
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
+  if (!proposal) throw new Error('Proposition introuvable');
+  // GENERATED (rien encore validé) ou VALIDATING/VALIDATED avec au moins un rayon restant sont tous
+  // deux acceptables ici — seul VALIDATION_FAILED/REJECTED bloque vraiment (proposition remplacée).
+  if (proposal.status === 'VALIDATION_FAILED' || proposal.status === 'REJECTED') {
+    throw new Error('Cette proposition a été rejetée ou a échoué, elle ne peut plus être validée.');
+  }
+
+  const existingOrder = await prisma.proposalOrder.findUnique({
+    where: { proposalId_department: { proposalId, department } },
+  });
+  if (existingOrder) {
+    throw new Error(`Le rayon "${department}" a déjà été validé (commande RPOS ${existingOrder.rposOrderReference || existingOrder.rposOrderId || '—'}).`);
+  }
+
+  const departmentLines = proposal.lines.filter((l) => (l.department || 'Sans rayon') === department);
+  if (!departmentLines.length) throw new Error(`Aucun article pour le rayon "${department}".`);
+
+  const decisionByLineId = new Map((decisions || []).map((d) => [d.lineId, d]));
+  const config = await getConfig(shopId);
+
+  const linesToOrder = [];
+  for (const line of departmentLines) {
+    const decision = decisionByLineId.get(line.id);
+    const excluded = decision ? !!decision.excluded : false;
+    const outOfScope = excluded && decision ? !!decision.outOfScope : false;
+    const quantity = decision && decision.quantity != null ? decision.quantity : line.quantitySuggested;
+
+    await prisma.proposalLine.update({
+      where: { id: line.id },
+      data: { quantityValidated: excluded ? null : quantity, wasExcluded: excluded, excludedOutOfScope: outOfScope },
+    });
+
+    if (!excluded && quantity > 0) {
+      linesToOrder.push({
+        lineId: line.id, productId: line.productId, quantity, orderingUnit: line.orderingUnit,
+        department, ean: line.ean, label: line.label,
+      });
+    }
+  }
+
+  if (linesToOrder.length === 0) throw new Error(`Aucun article sélectionné pour le rayon "${department}".`);
+
+  const leadDays = config.receptionLeadTimeDays ?? 1;
+  const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
+
+  const proposalOrder = await prisma.proposalOrder.create({
+    data: { proposalId, department, linesTotal: linesToOrder.length, status: 'PENDING', expectedReceptionDate },
+  });
+
+  let result;
+  try {
+    result = await createOrderForLines(posId, shopId, userEmail, department, linesToOrder, orderHeader, validateAfterCreate);
+  } catch (err) {
+    const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+    await prisma.proposalOrder.update({
+      where: { id: proposalOrder.id },
+      data: { status: 'FAILED', linesFailed: linesToOrder.length, errorMessage: detail.slice(0, 500) },
+    });
+    throw err;
+  }
+
+  const { order, processed, failed, failedLines, rposOrderValidated } = result;
+  const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
+  const failedLinesSummary = failedLines.length
+    ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
+    : null;
+
+  await prisma.proposalOrder.update({
+    where: { id: proposalOrder.id },
+    data: {
+      rposOrderId: order.id,
+      rposOrderReference: order.reference,
+      rposOrderValidated,
+      linesFailed: failed,
+      status: failed === linesToOrder.length ? 'FAILED' : 'DONE',
+      receptionStatus,
+      lastRposStatus: rposOrderValidated ? 2 : 1,
+      lastSyncedAt: new Date(),
+      errorMessage: failedLinesSummary,
+    },
+  });
+
+  // Reste-t-il des rayons non validés ? Comparé aux rayons distincts de TOUTES les lignes de la
+  // proposition ayant AU MOINS UN article à quantité > 0 (pas seulement celles de ce rayon) —
+  // un rayon dont toutes les lignes ont quantitySuggested=0 (rien à commander) n'a jamais de
+  // ProposalOrder possible et ne doit donc jamais bloquer indéfiniment le passage à VALIDATED
+  // (demande du 26/09/2026 : cas réel trouvé — un rayon "ENTRETIEN/DROGUERIE" entièrement à 0).
+  // Inclut le rayon qu'on vient de traiter, exclu explicitement de la comparaison via son propre
+  // ProposalOrder déjà créé ci-dessus.
+  const allPendingDepartments = new Set(
+    proposal.lines
+      .filter((l) => {
+        // Une ligne du rayon qu'on vient de traiter est déjà couverte, quel que soit son état
+        // d'exclusion individuel (déjà décidé ci-dessus) — ne compte que les AUTRES rayons.
+        if ((l.department || 'Sans rayon') === department) return false;
+        return (l.quantitySuggested || 0) > 0;
+      })
+      .map((l) => l.department || 'Sans rayon'),
+  );
+  const remainingOrders = await prisma.proposalOrder.findMany({ where: { proposalId }, select: { department: true } });
+  const alreadyDoneDepartments = new Set(remainingOrders.map((o) => o.department));
+  const stillPending = [...allPendingDepartments].some((d) => !alreadyDoneDepartments.has(d));
+
+  if (!stillPending) {
+    // Dernier rayon traité : la proposition entière passe VALIDATED, agrégeant les compteurs de
+    // TOUS ses ProposalOrder (pas seulement celui-ci) — même sémantique que l'ancien
+    // runValidationInBackground pour ne rien casser des lectures existantes de Proposal.status.
+    const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
+    const totalProcessed = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailed = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    const firstOrderWithId = allOrders.find((o) => o.rposOrderId);
+    const anyValidated = allOrders.some((o) => o.rposOrderValidated === false) ? false : allOrders.some((o) => o.rposOrderValidated === true);
+
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: {
+        status: 'VALIDATED',
+        validatedAt: new Date(),
+        validatedBy: userEmail,
+        linesProcessed: totalProcessed,
+        linesFailed: totalFailed,
+        rposOrderId: firstOrderWithId?.rposOrderId,
+        rposOrderReference: firstOrderWithId?.rposOrderReference,
+        rposOrderValidated: anyValidated,
+      },
+    });
+
+    // Alerte email avec bon(s) de commande PDF (tous rayons confondus) — même comportement final
+    // qu'une validation globale classique, déclenché une seule fois quand tout est terminé.
+    try {
+      const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
+      const createdOrders = await prisma.proposalOrder.findMany({
+        where: { proposalId, rposOrderId: { not: null } },
+        select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true },
+      });
+      if (shop && createdOrders.length) {
+        const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
+        await notifyShopUsersOfOrderCreated(shop, { id: proposalId }, createdOrders, { isAutoMode: false });
+      }
+    } catch (mailError) {
+      console.error(`[validateProposalDepartment] Alerte email de commande créée échouée pour la proposition ${proposalId}:`, mailError.message);
+    }
+  } else {
+    // Rayons restants : Proposal.status ne bouge pas (reste GENERATED, ou VALIDATING si un ancien
+    // appel global l'avait déjà mis dans cet état) — les compteurs globaux sont quand même
+    // rafraîchis pour rester cohérents avec ce qu'affiche déjà l'UI existante (barre de progression).
+    const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
+    const totalProcessed = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailed = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: { linesProcessed: totalProcessed, linesFailed: totalFailed },
+    });
+  }
+
+  return { department, order, processed, failed, failedLines, rposOrderValidated, allDepartmentsDone: !stillPending };
 }
 
 /**
@@ -2237,6 +2422,7 @@ module.exports = {
   generateAndSaveProposal,
   getPendingProposal,
   startProposalValidation,
+  validateProposalDepartment,
   runAutoOrder,
   getProposalStatus,
   getConformityRate,

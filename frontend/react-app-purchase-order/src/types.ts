@@ -54,6 +54,21 @@ export interface ProposalLine {
   wasExcluded?: boolean;
 }
 
+// Commande RPOS déjà créée pour un rayon précis (demande du 26/09/2026 : validation indépendante
+// par rayon) — une proposition peut avoir 0 à N ProposalOrder, un par rayon déjà validé, sans que
+// ça change son status global tant que tous les rayons ne sont pas traités.
+export interface ProposalOrder {
+  id: string;
+  department: string;
+  rposOrderId: string | null;
+  rposOrderReference: string | null;
+  rposOrderValidated: boolean | null;
+  linesTotal: number;
+  linesFailed: number;
+  status: string; // PENDING | DONE | FAILED | CANCELLED
+  errorMessage: string | null;
+}
+
 export interface Proposal {
   id: string;
   status: string;
@@ -69,6 +84,7 @@ export interface Proposal {
   actualDataStart?: string | null;
   actualDataEnd?: string | null;
   lines: ProposalLine[];
+  orders?: ProposalOrder[];
   skippedGenericArticle?: number;
   skippedNegativeStock?: number;
   skippedAlreadyOrdered?: number;
