@@ -540,7 +540,16 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return { toolName: null, toolResult: null };
     }
   } catch (err) {
-    return { toolName, toolResult: { found: false, message: `Donnée momentanément indisponible (${err.message}). Réessayez dans quelques instants.` } };
+    // Message adapté à un utilisateur final (demande du 26/09/2026 : "au lieu de mettre erreur tu
+    // me dis par exemple le serveur est injoignable, merci de contacter l'admin ou actualiser et
+    // ressayer") — le message brut de rposClient.js ("vérifiez la connexion réseau/VPN") n'a aucun
+    // sens pour un utilisateur magasin qui ne gère pas de VPN ; distingué ici du cas générique pour
+    // ne jamais l'exposer tel quel.
+    const isRposUnreachable = /injoignable/i.test(err.message);
+    const message = isRposUnreachable
+      ? 'Le serveur de votre magasin est momentanément injoignable. Merci de réessayer dans quelques instants, ou de contacter votre administrateur si le problème persiste.'
+      : `Donnée momentanément indisponible (${err.message}). Réessayez dans quelques instants.`;
+    return { toolName, toolResult: { found: false, message } };
   }
 }
 
