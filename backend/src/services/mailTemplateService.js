@@ -1,45 +1,46 @@
 /**
- * Template HTML partagé pour tous les emails envoyés par la plateforme (demande du 25/09/2026 :
- * "il faut fais un html pour envoi mail ... un style ex comme la capture") — en-tête, bouton
- * d'action stylé, pied de page, cohérents sur les 3 types d'alerte de proposition (nouvelle
- * proposition, relance, commande créée) plutôt que des balises <p> brutes.
+ * Template HTML partagé pour tous les emails envoyés par la plateforme (demande du 25-26/09/2026).
+ * Style calqué sur la capture d'exemple fournie par l'utilisateur (26/09/2026 : "je veux le style
+ * quand il envoie les mail [...] pas le style avec les bordures rond que tu as fait c'est trop ia") —
+ * fond sombre autour d'une carte blanche à coins CARRÉS (jamais arrondis), logo carré noir en haut,
+ * bouton d'action en forme de pilule noire tout en majuscules, pied de page sombre avec liens.
  *
  * Tables + styles inline uniquement (jamais de <style> dans le <head> ni de CSS externe) : c'est la
  * seule approche fiable en email — la plupart des clients (Outlook desktop en tête, moteur Word)
- * ignorent ou tronquent le CSS non-inline. Palette noir/blanc/gris, cohérente avec le reste du site
- * (cf. THEME_SYSTEM.md) plutôt que la palette bleue de la capture d'inspiration fournie.
+ * ignorent ou tronquent le CSS non-inline.
  */
 
-const SEVERITY_COLORS = {
-  info: { header: '#17181a', accent: '#17181a' },
-  warning: { header: '#b9770e', accent: '#b9770e' },
-  danger: { header: '#c0392b', accent: '#c0392b' },
+const SEVERITY_ACCENT = {
+  info: '#17181a',
+  warning: '#b9770e',
+  danger: '#c0392b',
 };
 
 /**
- * @param {string} title - titre affiché dans le bandeau d'en-tête
- * @param {string} bodyHtml - contenu HTML déjà construit (paragraphes, listes...) — jamais échappé
- *   ici, à l'appelant de garantir qu'aucune donnée utilisateur non fiable n'y est injectée brute
+ * @param {string} title - titre affiché en gras en haut de la carte (ex: "Bonjour Jean, nouvelle proposition.")
+ * @param {string} bodyHtml - contenu HTML déjà construit (paragraphes, listes, tableaux...) — jamais
+ *   échappé ici, à l'appelant de garantir qu'aucune donnée utilisateur non fiable n'y est injectée brute
  * @param {object} [options]
- * @param {'info'|'warning'|'danger'} [options.severity] - couleur du bandeau et du bouton
- * @param {{label: string, url: string}} [options.cta] - bouton d'action principal (ex: "Voir la commande")
+ * @param {'info'|'warning'|'danger'} [options.severity] - couleur du bouton et des accents
+ * @param {{label: string, url: string}} [options.cta] - bouton d'action principal, en pilule noire
+ *   tout en majuscules (ex: "VOIR LA COMMANDE"), comme "TRACK YOUR ORDER" sur la capture d'exemple
  */
 function renderMailTemplate(title, bodyHtml, { severity = 'info', cta } = {}) {
-  const colors = SEVERITY_COLORS[severity] || SEVERITY_COLORS.info;
+  const accent = SEVERITY_ACCENT[severity] || SEVERITY_ACCENT.info;
 
   const ctaHtml = cta
     ? `
-      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 8px;">
         <tr>
-          <td style="border-radius:8px;background-color:${colors.accent};">
+          <td style="background-color:${accent};padding:14px 32px;">
             <a href="${cta.url}" target="_blank"
-               style="display:inline-block;padding:12px 28px;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">
+               style="display:block;font-family:Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px;color:#ffffff;text-decoration:none;text-transform:uppercase;">
               ${cta.label}
             </a>
           </td>
         </tr>
       </table>
-      <p style="font-family:Arial,sans-serif;font-size:12px;color:#9198a1;margin:0 0 24px;">
+      <p style="font-family:Arial,sans-serif;font-size:11px;color:#9198a1;margin:8px 0 0;">
         Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>
         <a href="${cta.url}" style="color:#6c757d;word-break:break-all;">${cta.url}</a>
       </p>
@@ -49,36 +50,42 @@ function renderMailTemplate(title, bodyHtml, { severity = 'info', cta } = {}) {
   return `
 <!DOCTYPE html>
 <html lang="fr">
-  <body style="margin:0;padding:0;background-color:#f1f2f4;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f2f4;padding:24px 0;">
+  <body style="margin:0;padding:0;background-color:#1e1e1e;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1e1e1e;padding:32px 16px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;max-width:600px;width:100%;">
             <tr>
-              <td style="background-color:${colors.header};padding:24px 32px;">
+              <td style="padding:40px 40px 24px;">
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
-                    <td style="font-family:Arial,sans-serif;font-size:18px;font-weight:bold;color:#ffffff;">
-                      ${title}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="font-family:Arial,sans-serif;font-size:12px;color:rgba(255,255,255,0.7);padding-top:4px;">
-                      Réassort Automatique
+                    <td style="width:56px;height:56px;background-color:#17181a;text-align:center;vertical-align:middle;font-size:24px;color:#ffffff;">
+                      ⚡
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
             <tr>
-              <td style="padding:32px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#2c2d30;">
-                ${bodyHtml}
-                ${ctaHtml}
+              <td style="padding:0 40px;font-family:Arial,sans-serif;color:#17181a;">
+                <p style="font-size:19px;font-weight:bold;margin:0 0 12px;">${title}</p>
+                <div style="font-size:14px;line-height:1.6;color:#3a3b3d;">
+                  ${bodyHtml}
+                  ${ctaHtml}
+                </div>
               </td>
             </tr>
             <tr>
-              <td style="padding:20px 32px;background-color:#fafafa;border-top:1px solid #ececec;font-family:Arial,sans-serif;font-size:12px;color:#9198a1;">
-                Ceci est un message automatique — merci de ne pas y répondre directement.
+              <td style="padding:32px 40px 40px;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td style="background-color:#1e1e1e;padding:28px 40px;text-align:center;font-family:Arial,sans-serif;">
+                <p style="font-size:12px;color:#9198a1;margin:0 0 16px;">
+                  Ceci est un message automatique — merci de ne pas y répondre directement.
+                </p>
+                <p style="font-size:11px;color:#6c6d70;margin:0;">
+                  Réassort Automatique — Prosuma
+                </p>
               </td>
             </tr>
           </table>
