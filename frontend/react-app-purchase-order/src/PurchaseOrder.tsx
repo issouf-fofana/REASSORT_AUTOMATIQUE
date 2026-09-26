@@ -45,6 +45,15 @@ export function PurchaseOrder() {
 
   const [orderTotal, setOrderTotal] = useState(0);
 
+  // Articles non rattachés au fournisseur central RPOS (demande du 26/09/2026 : "je dois voir une
+  // vue où je peux voir dans la proposition les articles qui ne son pas rattaché au fournisseur
+  // central") — remplace la liste complète autrefois affichée dans le corps de l'email (devenu
+  // illisible avec 26 articles, cf. buildSupplierWarningHtml côté backend), qui ne montre plus
+  // qu'un résumé + lien vers cette vue.
+  const [supplierIneligible, setSupplierIneligible] = useState<{ ean: string; label: string | null; currentSuppliers: string }[] | null>(null);
+  const [supplierCheckLoading, setSupplierCheckLoading] = useState(false);
+  const supplierCheckTokenRef = useRef(0);
+
   const [excludedModal, setExcludedModal] = useState<{ label: string; items: ExcludedItem[] | null; error: string | null } | null>(null);
   const [sufficiencyModal, setSufficiencyModal] = useState<string | null>(null);
   const [analyticsArticle, setAnalyticsArticle] = useState<{ ean: string; productId: string; label: string } | null>(null);
@@ -214,6 +223,34 @@ export function PurchaseOrder() {
     loadPendingProposal();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShopId]);
+
+  // Contrôle fournisseur (demande du 26/09/2026) : relancé à chaque changement de proposition
+  // affichée (nouvelle génération, historique) — jamais bloquant pour l'affichage principal, un échec
+  // (RPOS indisponible...) laisse simplement la section vide plutôt que de casser toute la page.
+  useEffect(() => {
+    if (!proposal || !proposal.lines.length) {
+      setSupplierIneligible(null);
+      return;
+    }
+    const token = ++supplierCheckTokenRef.current;
+    setSupplierCheckLoading(true);
+    (async () => {
+      try {
+        const data = await apiFetch<{ ineligible: { ean: string; label: string | null; currentSuppliers: string }[] }>(
+          `/reassort/proposal/${proposal.id}/supplier-check?${shopQueryParam()}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: [] }) },
+        );
+        if (token !== supplierCheckTokenRef.current) return;
+        setSupplierIneligible(data.ineligible);
+      } catch {
+        if (token !== supplierCheckTokenRef.current) return;
+        setSupplierIneligible(null);
+      } finally {
+        if (token === supplierCheckTokenRef.current) setSupplierCheckLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposal?.id]);
 
   function handleGenerationSelect(id: string) {
     setSelectedGenerationId(id);
@@ -602,6 +639,37 @@ export function PurchaseOrder() {
                 {viewingPastGeneration && (
                   <div className="alert alert-warning small mb-3">
                     Génération passée en lecture seule — ne peut pas être validée ni envoyée à RPOS.
+                  </div>
+                )}
+                {supplierCheckLoading && (
+                  <p className="small text-muted mb-2">Vérification du rattachement fournisseur...</p>
+                )}
+                {!!supplierIneligible?.length && (
+                  <div className="alert alert-warning small mb-3">
+                    <p className="mb-2">
+                      <strong>⚠️ {supplierIneligible.length} article(s) non rattaché(s) au fournisseur central</strong> — risque
+                      qu'ils manquent à l'envoi réel de la commande :
+                    </p>
+                    <div className="table-responsive" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                      <table className="table table-sm mb-0">
+                        <thead>
+                          <tr>
+                            <th>Article</th>
+                            <th>EAN</th>
+                            <th>Fournisseur actuel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {supplierIneligible.map((item) => (
+                            <tr key={item.ean}>
+                              <td>{item.label || '—'}</td>
+                              <td>{item.ean}</td>
+                              <td>{item.currentSuppliers}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
                 <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">

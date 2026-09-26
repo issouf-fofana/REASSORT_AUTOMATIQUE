@@ -11,21 +11,29 @@ const { checkSupplierEligibility } = require('./proposalService');
 const { renderMailTemplate } = require('./mailTemplateService');
 
 /** Comptes à alerter pour un magasin donné : rattachement direct (DIRECTOR/DEPARTMENT_HEAD/
- * SHELF_STOCKER) + SUPERVISOR qui le couvrent + TOUJOURS les ADMIN en copie (demande du 25/09/2026)
- * — garantit une visibilité globale et évite qu'une alerte parte dans le vide pour un magasin sans
- * aucun compte encore rattaché (repli implicite : la liste n'est alors jamais vide). Renvoie les
- * emails seuls (compatibilité avec les appelants existants qui n'ont besoin que de ça, ex: la popup
- * "retirer un destinataire") — cf. getShopRecipientUsers ci-dessous pour la version avec le nom,
- * nécessaire à la salutation personnalisée ("Bonjour <nom>", demande du 25/09/2026 : LE NOM VIENT
- * TOUJOURS du compte réel de chaque destinataire — AD ou local, jamais un nom en dur). */
-async function getShopRecipientUsers(rposShopId) {
+ * SHELF_STOCKER) + SUPERVISOR qui le couvrent. Les ADMIN ne sont PLUS inclus ici depuis le
+ * 26/09/2026 ("il ne dois pas envoyer à admin en même temps [...] impossible de lire tout") — un
+ * admin recevait un email par magasin à CHAQUE génération nocturne (jusqu'à 50+ emails), illisible
+ * en pratique. Un admin reçoit désormais UN SEUL récap global à la fin du job nocturne (cf.
+ * notifyAdminsOfNightlySummary) plutôt qu'une copie de chaque email individuel — et reste inclus
+ * pour les alertes ponctuelles (relance, commande créée, envoi manuel), dont le volume reste faible.
+ * Renvoie les emails seuls (compatibilité avec les appelants existants qui n'ont besoin que de ça,
+ * ex: la popup "retirer un destinataire") — cf. getShopRecipientUsers ci-dessous pour la version avec
+ * le nom, nécessaire à la salutation personnalisée ("Bonjour <nom>", demande du 25/09/2026 : LE NOM
+ * VIENT TOUJOURS du compte réel de chaque destinataire — AD ou local, jamais un nom en dur).
+ * `includeAdmins` (optionnel, défaut true) : mis à false uniquement par le job nocturne pour l'email
+ * de nouvelle proposition, seul cas à volume élevé — tous les autres appelants gardent le
+ * comportement historique (admin toujours en copie) sans avoir besoin de changer leur appel. */
+async function getShopRecipientUsers(rposShopId, { includeAdmins = true } = {}) {
   const [directUsers, supervisors, admins] = await Promise.all([
     prisma.user.findMany({ where: { rposShopId, isActive: true }, select: { email: true, name: true } }),
     prisma.user.findMany({
       where: { role: 'SUPERVISOR', isActive: true, supervisedShops: { some: { rposShopId } } },
       select: { email: true, name: true },
     }),
-    prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true, name: true } }),
+    includeAdmins
+      ? prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true, name: true } })
+      : Promise.resolve([]),
   ]);
   const byEmail = new Map();
   for (const u of [...directUsers, ...supervisors, ...admins]) byEmail.set(u.email, u);
@@ -34,6 +42,12 @@ async function getShopRecipientUsers(rposShopId) {
 
 async function getShopRecipients(rposShopId) {
   return (await getShopRecipientUsers(rposShopId)).map((u) => u.email);
+}
+
+/** Tous les comptes ADMIN actifs — destinataires du récap global de fin de nuit (cf.
+ * notifyAdminsOfNightlySummary). Séparé de getShopRecipientUsers car indépendant de tout magasin. */
+async function getAdminUsers() {
+  return prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true, name: true } });
 }
 
 /** Envoie le même email à chaque destinataire INDIVIDUELLEMENT (jamais un seul envoi groupé,
@@ -57,42 +71,61 @@ async function sendMailToEachRecipient(users, buildMailForUser) {
  * CORS_ORIGIN, ex: "http://localhost:8080,http://10.0.80.31:8080" pour accepter les deux façons
  * d'atteindre le site) — un lien dans un email ne peut pointer que vers UNE seule URL, jamais les
  * coller ensemble (bug constaté le 25/09/2026 : lien illisible et non cliquable dans Outlook,
- * "[url1]url2" concaténés). On retient toujours la première, cohérente avec l'usage principal.
+ * "[url1]url2" concaténés).
+ * Prendre systématiquement la PREMIÈRE valeur (comme avant le 26/09/2026) est erroné dès que cette
+ * première valeur est "localhost" : ce mot ne désigne le serveur QUE depuis le poste qui l'héberge
+ * lui-même, jamais depuis la machine du destinataire d'un email (bug constaté le 26/09/2026, lien
+ * "http://localhost:8080/..." reçu dans un vrai email, inutilisable pour quiconque d'autre que le
+ * serveur). On retient donc la première origine qui N'EST PAS localhost/127.0.0.1, seule capable
+ * d'avoir un sens pour un destinataire externe — et seulement si aucune n'en sort, on retombe sur la
+ * première quand même (mieux qu'un lien totalement absent).
  */
 function purchaseOrderLink(shop) {
-  const configured = (process.env.FRONTEND_URL || 'https://reassort.local').split(',')[0].trim();
+  const origins = (process.env.FRONTEND_URL || 'https://reassort.local').split(',').map((o) => o.trim()).filter(Boolean);
+  const isLocalhost = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(o);
+  const configured = origins.find((o) => !isLocalhost(o)) || origins[0] || 'https://reassort.local';
   return `${configured}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}`;
 }
 
-/** Liste HTML des articles non rattachés au fournisseur central RPOS (peuvent manquer à l'envoi
- * réel de la commande). Un échec de ce contrôle (RPOS indisponible...) ne doit jamais empêcher
- * l'envoi du mail lui-même : la liste est alors omise plutôt que de bloquer toute la notification. */
-async function buildSupplierWarningHtml(shop, lines) {
+/** Nombre d'articles non rattachés au fournisseur central RPOS, et résumé HTML correspondant (jamais
+ * la liste détaillée) — demande du 26/09/2026 : "quand il liste comme ça c'est pas joli à voir, le
+ * mail devient compliqué à lire" (jusqu'à 26 articles listés un par un dans un email précédent). Le
+ * détail complet est désormais visible directement dans la page Proposition de commande (bandeau
+ * ⚠️), le mail se contente d'alerter et de renvoyer vers cette vue. Un échec de ce contrôle (RPOS
+ * indisponible...) ne doit jamais empêcher l'envoi du mail lui-même : le résumé est alors omis
+ * plutôt que de bloquer toute la notification. Renvoie aussi `count` (jamais recalculé une seconde
+ * fois par l'appelant, ex: pour construire le récap admin de fin de nuit).
+ */
+async function buildSupplierWarningHtml(shop, lines, link) {
   try {
     const ineligible = await checkSupplierEligibility(shop.rposPosId, shop.rposShopId, lines);
-    if (!ineligible.length) return '';
-    const items = ineligible
-      .map((l) => `<li>${l.label || l.ean} (${l.ean}) — fournisseur actuel : ${l.currentSuppliers}</li>`)
-      .join('');
-    return `
-      <p style="color:#b45309;"><strong>⚠️ ${ineligible.length} article(s) non rattaché(s) au fournisseur central</strong> —
-      risque qu'ils manquent à l'envoi réel de la commande :</p>
-      <ul>${items}</ul>
-    `;
+    if (!ineligible.length) return { html: '', count: 0 };
+    return {
+      html: `
+        <p style="color:#b45309;"><strong>⚠️ ${ineligible.length} article(s) non rattaché(s) au fournisseur central</strong> —
+        risque qu'ils manquent à l'envoi réel de la commande. <a href="${link}">Voir le détail dans la proposition</a>.</p>
+      `,
+      count: ineligible.length,
+    };
   } catch (err) {
     console.error(`[proposalNotificationService] Contrôle fournisseur échoué pour ${shop.reference}:`, err.message);
-    return '';
+    return { html: '', count: 0 };
   }
 }
 
 /** Alerte de nouvelle proposition générée (job nocturne) — jamais sur une génération manuelle.
- * Un email individuel par destinataire (demande du 25/09/2026), avec son vrai nom en salutation. */
+ * Un email individuel par destinataire (demande du 25/09/2026), avec son vrai nom en salutation.
+ * N'inclut PLUS les ADMIN (demande du 26/09/2026, cf. commentaire de getShopRecipientUsers) : ils
+ * reçoivent à la place un récap unique en fin de job (cf. notifyAdminsOfNightlySummary), pour lequel
+ * cette fonction renvoie le nombre d'articles non rattachés au fournisseur déjà calculé ici — évite
+ * de refaire le même appel RPOS coûteux une seconde fois côté job pour construire ce récap. */
 async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
-  const users = await getShopRecipientUsers(shop.rposShopId);
-  if (!users.length) return;
+  const users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins: false });
 
   const link = purchaseOrderLink(shop);
-  const supplierWarningHtml = await buildSupplierWarningHtml(shop, proposal.lines);
+  const { html: supplierWarningHtml, count: ineligibleCount } = await buildSupplierWarningHtml(shop, proposal.lines, link);
+
+  if (!users.length) return { ineligibleCount };
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `Réassort Automatique — nouvelle proposition pour ${shop.reference} (${shop.name})`,
@@ -106,6 +139,62 @@ async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
         <p>Merci de vous connecter pour vérifier et valider cette commande.</p>
       `,
       { severity: 'info', cta: { label: 'Voir la commande', url: link } },
+    ),
+  }));
+
+  return { ineligibleCount };
+}
+
+/**
+ * Récap unique envoyé aux ADMIN à la fin du job nocturne (demande du 26/09/2026) — remplace la copie
+ * individuelle de chaque email par magasin (jusqu'à 50+ emails en une nuit, illisible). `summaries`
+ * est un tableau construit par le job au fil du traitement de chaque magasin :
+ * `{ shop: {reference, name}, proposalsGenerated, ineligibleCount }`. N'envoie RIEN si aucun magasin
+ * n'a produit de proposition cette nuit (tableau vide) — un récap vide n'a aucune valeur.
+ */
+async function notifyAdminsOfNightlySummary(summaries) {
+  const nonEmpty = summaries.filter((s) => s.proposalsGenerated > 0);
+  if (!nonEmpty.length) return;
+
+  const admins = await getAdminUsers();
+  if (!admins.length) return;
+
+  const totalArticles = nonEmpty.reduce((sum, s) => sum + s.proposalsGenerated, 0);
+  const totalIneligible = nonEmpty.reduce((sum, s) => sum + (s.ineligibleCount || 0), 0);
+
+  const rows = nonEmpty
+    .map((s) => `
+      <tr>
+        <td>${s.shop.reference} — ${s.shop.name}</td>
+        <td style="text-align:right;">${s.proposalsGenerated}</td>
+        <td style="text-align:right;">${s.ineligibleCount ? `⚠️ ${s.ineligibleCount}` : '—'}</td>
+      </tr>
+    `)
+    .join('');
+
+  const tableHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:12px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ececec;">
+          <th style="text-align:left;padding:6px 8px;">Magasin</th>
+          <th style="text-align:right;padding:6px 8px;">Articles proposés</th>
+          <th style="text-align:right;padding:6px 8px;">Non rattachés fournisseur</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  await sendMailToEachRecipient(admins, async (user) => ({
+    subject: `Réassort Automatique — récap nocturne (${nonEmpty.length} magasin(s), ${totalArticles} article(s))`,
+    htmlBody: renderMailTemplate(
+      'Récap de la génération nocturne',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p><strong>${nonEmpty.length}</strong> magasin(s) ont une nouvelle proposition cette nuit, pour un total de <strong>${totalArticles}</strong> article(s) proposé(s)${totalIneligible ? `, dont <strong>${totalIneligible}</strong> non rattaché(s) au fournisseur central sur l'ensemble des magasins` : ''}.</p>
+        ${tableHtml}
+      `,
+      { severity: totalIneligible ? 'warning' : 'info' },
     ),
   }));
 }
@@ -223,9 +312,11 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
 module.exports = {
   getShopRecipients,
   getShopRecipientUsers,
+  getAdminUsers,
   purchaseOrderLink,
   buildSupplierWarningHtml,
   notifyShopUsersOfNewProposal,
+  notifyAdminsOfNightlySummary,
   notifyShopUsersOfPendingProposal,
   notifyShopUsersOfOrderCreated,
 };

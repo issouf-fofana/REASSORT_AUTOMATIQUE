@@ -9,7 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { runAiForecast } = require('../services/aiForecastService');
 const { MIN_DAYS_FOR_SMOOTHING } = require('../services/forecastService');
 const { getConfig } = require('../services/configService');
-const { notifyShopUsersOfNewProposal } = require('../services/proposalNotificationService');
+const { notifyShopUsersOfNewProposal, notifyAdminsOfNightlySummary } = require('../services/proposalNotificationService');
 
 
 // L'analyse IA n'est lancée automatiquement QUE sur ce job nocturne (une fois par jour par
@@ -68,7 +68,12 @@ async function runNightlyProposalGeneration() {
 
   console.log(`[nightlyProposalJob] Génération pour ${shops.length} magasin(s) (${SHOP_CONCURRENCY} en parallèle)...`);
 
-  await mapWithConcurrency(shops, SHOP_CONCURRENCY, async (shop) => {
+  // Résumé par magasin (demande du 26/09/2026) : accumulé au fil de la boucle pour construire UN
+  // SEUL récap admin en fin de job (cf. notifyAdminsOfNightlySummary), plutôt qu'une copie de chaque
+  // email individuel par magasin comme auparavant. mapWithConcurrency renvoie déjà les retours de
+  // chaque handler (cf. utils/concurrency.js), donc un simple `return` par itération suffit.
+  const summaries = await mapWithConcurrency(shops, SHOP_CONCURRENCY, async (shop) => {
+    let ineligibleCount = 0;
     try {
       const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({
         posId: shop.rposPosId,
@@ -84,7 +89,8 @@ async function runNightlyProposalGeneration() {
 
       if (stats.proposalsGenerated > 0) {
         try {
-          await notifyShopUsersOfNewProposal(shop, stats, proposal);
+          const result = await notifyShopUsersOfNewProposal(shop, stats, proposal);
+          ineligibleCount = result?.ineligibleCount || 0;
         } catch (mailError) {
           console.error(`[nightlyProposalJob] Alerte email échouée pour ${shop.reference}:`, mailError.message);
         }
@@ -146,10 +152,22 @@ async function runNightlyProposalGeneration() {
           console.error(`[nightlyProposalJob] ${shop.reference} : Mode Auto échoué :`, autoOrderError.message);
         }
       }
+
+      return { shop, proposalsGenerated: stats.proposalsGenerated, ineligibleCount };
     } catch (error) {
       console.error(`[nightlyProposalJob] Échec pour ${shop.reference}:`, error.message);
+      return { shop, proposalsGenerated: 0, ineligibleCount: 0 };
     }
   });
+
+  try {
+    await notifyAdminsOfNightlySummary(summaries);
+  } catch (summaryMailError) {
+    // Un échec du récap admin (compte mail indisponible...) ne doit jamais faire échouer le job
+    // nocturne lui-même — toutes les propositions ont déjà été générées et notifiées avec succès à
+    // ce stade, seul ce récap global manquerait.
+    console.error('[nightlyProposalJob] Récap admin échoué:', summaryMailError.message);
+  }
 
   console.log('[nightlyProposalJob] Terminé.');
 }
