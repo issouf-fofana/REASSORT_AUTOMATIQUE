@@ -29,8 +29,13 @@ const LOGO_CONTENT_ID = 'reassort-mail-logo';
 // frontend/assets/ : les images Docker backend et frontend sont deux builds SÉPARÉS, le dossier
 // frontend/ n'existe pas dans le conteneur backend — un chemin cross-projet aurait échoué en
 // production tout en fonctionnant par erreur en local (mêmes fichiers sur disque hôte).
+// logo-reassort-mail.png (fond BLANC, dessin noir) — variante inversée du logo-reassort.png
+// habituel du site (fond noir, dessin blanc), spécifique à l'email : Outlook (constaté en mode
+// sombre) applique une inversion automatique de couleurs sur les images à dominante sombre, rendant
+// un logo à fond noir invisible sur le fond sombre du template (bug trouvé le 26/09/2026, logo joint
+// mais invisible). Le fond blanc reste lisible même si cette inversion s'applique.
 const HEADER_LOGO_CONTENT_ID = 'reassort-mail-header-logo';
-const HEADER_LOGO_PATH = path.join(__dirname, '../../public-fallback/assets/images/logo-reassort.png');
+const HEADER_LOGO_PATH = path.join(__dirname, '../../public-fallback/assets/images/logo-reassort-mail.png');
 let headerLogoBase64Cache = null;
 function getHeaderLogoBase64() {
   if (headerLogoBase64Cache !== null) return headerLogoBase64Cache; // '' si lecture déjà tentée et échouée
