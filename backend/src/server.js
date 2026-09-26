@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -229,6 +229,8 @@ async function start() {
     await startOrRestartImprovementWatchdogJob();
     // Relance des propositions encore en attente (horaire configurable, 10h par défaut).
     await startOrRestartProposalReminderJob();
+    // Récap de fin de journée pour les ADMIN (horaire configurable, 16h30 par défaut).
+    await startOrRestartEndOfDayValidationRecapJob();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

@@ -302,6 +302,57 @@ async function notifyAdminsOfReminderSummary(summaries) {
   }));
 }
 
+/**
+ * Récap de fin de journée pour les ADMIN (demande du 26/09/2026, job endOfDayValidationRecapJob.js à
+ * 16h30) — bilan validé/non-validé pour chaque magasin ayant eu une proposition aujourd'hui. Jamais
+ * envoyé aux magasins eux-mêmes, uniquement à l'ADMIN pour la supervision. `summaries` :
+ * `{ shop: {reference, name}, validated: boolean, articlesCount }` construit par le job.
+ */
+async function notifyAdminsOfEndOfDayRecap(summaries) {
+  if (!summaries.length) return;
+
+  const admins = await getAdminUsers();
+  if (!admins.length) return;
+
+  const notValidated = summaries.filter((s) => !s.validated);
+
+  const rows = summaries
+    .map((s) => `
+      <tr>
+        <td>${s.shop.reference} — ${s.shop.name}</td>
+        <td style="text-align:center;">${s.validated ? '<span style="color:#1e7e34;">✅ Validée</span>' : '<span style="color:#c0392b;">⚠️ Non validée</span>'}</td>
+        <td style="text-align:right;">${s.articlesCount}</td>
+      </tr>
+    `)
+    .join('');
+
+  const tableHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:12px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ececec;">
+          <th style="text-align:left;padding:6px 8px;">Magasin</th>
+          <th style="text-align:center;padding:6px 8px;">Statut</th>
+          <th style="text-align:right;padding:6px 8px;">Article(s)</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  await sendMailToEachRecipient(admins, async (user) => ({
+    subject: `Réassort Automatique — bilan du jour (${summaries.length - notValidated.length}/${summaries.length} magasin(s) validé(s))`,
+    htmlBody: renderMailTemplate(
+      'Bilan de validation du jour',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p>Sur <strong>${summaries.length}</strong> magasin(s) ayant une proposition aujourd'hui, <strong>${summaries.length - notValidated.length}</strong> ont validé leur commande${notValidated.length ? `, et <strong>${notValidated.length}</strong> ne l'ont toujours pas fait` : ''}.</p>
+        ${tableHtml}
+      `,
+      { severity: notValidated.length ? 'warning' : 'info' },
+    ),
+  }));
+}
+
 /** Une ligne <li> par commande RPOS créée (une par rayon, readme §11) — numéro, description, nombre
  * d'articles : toujours les valeurs réellement enregistrées, jamais une estimation ou un texte
  * généré par l'IA (cf. commentaire de tête de notifyShopUsersOfOrderCreated). */
@@ -391,5 +442,6 @@ module.exports = {
   notifyAdminsOfNightlySummary,
   notifyShopUsersOfPendingProposal,
   notifyAdminsOfReminderSummary,
+  notifyAdminsOfEndOfDayRecap,
   notifyShopUsersOfOrderCreated,
 };

@@ -54,6 +54,11 @@ const KEYS = {
   // Relance des propositions encore en attente (demande du 25/09/2026 : l'entrepôt ne reçoit plus
   // les commandes après 13h, une relance en matinée laisse le temps de valider avant cette limite).
   PROPOSAL_REMINDER_CRON: 'PROPOSAL_REMINDER_CRON',
+  // Récap de fin de journée pour les ADMIN (demande du 26/09/2026 : "en fin de journée aussi il
+  // dois me dire pour chaque mag qui on validé les commande") — 16h30 par défaut, juste après la
+  // fermeture de la fenêtre entrepôt (13h) pour voir immédiatement qui n'a pas validé aujourd'hui.
+  END_OF_DAY_VALIDATION_RECAP_CRON: 'END_OF_DAY_VALIDATION_RECAP_CRON',
+  END_OF_DAY_VALIDATION_RECAP_ENABLED: 'END_OF_DAY_VALIDATION_RECAP_ENABLED',
   // Interrupteur marche/arrêt par job planifié, indépendant de son expression cron : à OFF, le job
   // ne se déclenche plus du tout jusqu'à réactivation (au lieu de devoir vider/deviner une
   // expression cron qui ne se déclenche jamais pour le "désactiver").
@@ -168,6 +173,8 @@ const ENV_FALLBACK = {
   [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 * * * *',
   // 10h par défaut : fenêtre 9h-11h demandée, avant la limite de 13h de l'entrepôt.
   [KEYS.PROPOSAL_REMINDER_CRON]: () => process.env.PROPOSAL_REMINDER_CRON || '0 10 * * *',
+  // 16h30 par défaut (demande du 26/09/2026).
+  [KEYS.END_OF_DAY_VALIDATION_RECAP_CRON]: () => process.env.END_OF_DAY_VALIDATION_RECAP_CRON || '30 16 * * *',
   // 10% par défaut (CAHIER_DES_CHARGES.md §16, exemple donné) : en dessous, le changement de
   // quantité totale proposée n'est pas jugé assez significatif pour justifier une nouvelle révision.
   [KEYS.REVISION_CHANGE_THRESHOLD]: () => '0.10',
@@ -248,6 +255,7 @@ Une entrée par article fourni, dans le même ordre. quantity doit être un enti
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
+  [KEYS.END_OF_DAY_VALIDATION_RECAP_ENABLED]: () => 'true',
   [KEYS.IMPROVEMENTS_ENABLED]: () => 'true',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.

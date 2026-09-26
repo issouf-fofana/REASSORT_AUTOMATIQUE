@@ -10,6 +10,7 @@ const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob')
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
 const { runImprovementWatchdog } = require('./improvementWatchdogJob');
 const { runProposalReminder } = require('./proposalReminderJob');
+const { runEndOfDayValidationRecap } = require('./endOfDayValidationRecapJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -23,6 +24,7 @@ let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
 let currentImprovementWatchdogTask = null;
 let currentProposalReminderTask = null;
+let currentEndOfDayValidationRecapTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -37,6 +39,7 @@ const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
 const improvementWatchdogLock = createJobLock('Chien de garde améliorations IA');
 const proposalReminderLock = createJobLock('Relance des propositions en attente');
+const endOfDayValidationRecapLock = createJobLock('Récap de fin de journée');
 
 /** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
 async function isJobEnabled(enabledKey) {
@@ -337,6 +340,36 @@ async function startOrRestartProposalReminderJob() {
   console.log(`⏰ Relance des propositions en attente planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme le récap de fin de journée pour les ADMIN (demande du 26/09/2026, 16h30 par
+ * défaut — juste après la fermeture de la fenêtre entrepôt à 13h). */
+async function startOrRestartEndOfDayValidationRecapJob() {
+  if (currentEndOfDayValidationRecapTask) {
+    currentEndOfDayValidationRecapTask.stop();
+    currentEndOfDayValidationRecapTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.END_OF_DAY_VALIDATION_RECAP_ENABLED))) {
+    console.log('⏸️  Récap de fin de journée désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.END_OF_DAY_VALIDATION_RECAP_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), récap de fin de journée non planifié`);
+    return;
+  }
+
+  currentEndOfDayValidationRecapTask = cron.schedule(cronSchedule, () => {
+    endOfDayValidationRecapLock(async () => {
+      console.log('[cron] Démarrage du récap de fin de journée...');
+      await trackJobRun('endOfDayValidationRecap', runEndOfDayValidationRecap);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Récap de fin de journée planifié: ${cronSchedule}`);
+}
+
 module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
@@ -348,4 +381,5 @@ module.exports = {
   startOrRestartPredictionOutcomeJob,
   startOrRestartImprovementWatchdogJob,
   startOrRestartProposalReminderJob,
+  startOrRestartEndOfDayValidationRecapJob,
 };
