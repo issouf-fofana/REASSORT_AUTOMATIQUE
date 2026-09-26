@@ -48,7 +48,9 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // Grille plutôt qu'une simple rangée flex : 7 colonnes (Pilotage/Réassort/IA/Commande/Mail/
       // Utilisateur/Paramètres, cf. navConfig.ts) ne tiennent pas côte à côte sur un écran classique
       // — reflue proprement sur plusieurs lignes selon la largeur disponible.
-      className="absolute left-1/2 top-full z-50 mt-2 grid w-max max-w-[min(94vw,960px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
+      // mt-0 : collé directement sous l'île, jamais d'écart visible entre les deux (demande explicite
+      // du 26/09/2026, "fais en sorte que ça soit collé à la barre").
+      className="absolute left-1/2 top-full z-50 mt-0 grid w-max max-w-[min(94vw,960px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex min-w-[150px] flex-col gap-0.5">
@@ -138,20 +140,21 @@ export function ReassortNotch() {
     // — demande explicite du 26/09/2026 avec capture de référence ("comme le haut d'écran de
     // l'iPhone X", "il faut être affiché en largeur et non en longueur"). Le survol de TOUTE la
     // barre ouvre un mega-menu listant toutes les pages en colonnes par section, pas un flyout par
-    // groupe cliqué un par un. pt-4 : espace au-dessus pour que les ailes incurvées (débordent vers
-    // le haut, cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent.
-    <div className="relative flex w-full items-start justify-center px-2 pt-4 pb-1">
+    // groupe cliqué un par un. pt-3 : espace au-dessus pour que les ailes incurvées (débordent vers
+    // le haut, cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent —
+    // réduit le 26/09/2026 (avec la bande et l'île elle-même) suite à "la barre est trop grosse".
+    <div className="relative flex w-full items-start justify-center px-2 pt-3 pb-1">
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
           barre noire en haut [...] pour ne pas qu'on voie les coins") : sans elle, le fond blanc de
-          la page restait visible de chaque côté de l'île au-dessus de son point d'ancrage — h-4
-          correspond au pt-4 du conteneur (même hauteur que l'espace réservé aux ailes incurvées). */}
-      <div className="absolute inset-x-0 top-0 h-4 bg-zinc-950" />
+          la page restait visible de chaque côté de l'île au-dessus de son point d'ancrage — h-3
+          correspond au pt-3 du conteneur (même hauteur que l'espace réservé aux ailes incurvées). */}
+      <div className="absolute inset-x-0 top-0 h-3 bg-zinc-950" />
       <div
         onMouseEnter={openMenu}
         onMouseLeave={scheduleClose}
         data-radius
-        style={radius('0 0 24px 24px')}
-        className="relative flex h-11 w-auto max-w-full items-center gap-3 rounded-b-3xl bg-zinc-950 px-3 text-zinc-50"
+        style={radius('0 0 18px 18px')}
+        className="relative flex h-9 w-auto max-w-full items-center gap-3 rounded-b-2xl bg-zinc-950 px-3 text-zinc-50"
       >
         <NotchLeftWing />
         <NotchRightWing />
