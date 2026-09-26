@@ -12,6 +12,21 @@
  */
 const prisma = require('../utils/prisma');
 const { callWithFallback } = require('./aiForecastService');
+const outlookMailService = require('./outlookMailService');
+const { renderMailTemplate } = require('./mailTemplateService');
+
+// Toutes les infos utiles sur un contributeur, déjà présentes sur le compte (demande du 26/09/2026 :
+// "il faut récupérer toutes les informations disponibles sur l'utilisateur : nom, magasin, rôle,
+// e-mail") — jamais dupliquées sur FeatureRequestNote elle-même : le compte reste la source de
+// vérité, une simple relation suffit (cf. FeatureRequestNote.userId dans le schéma).
+const USER_SELECT = {
+  name: true,
+  email: true,
+  role: true,
+  rposShopReference: true,
+  rposShopName: true,
+  assignedDepartment: true,
+};
 
 const OPEN_STATUSES = ['new', 'needs_information', 'pending', 'in_progress'];
 
@@ -98,7 +113,7 @@ async function enrichFeatureRequest(requestId, { content, user }) {
 async function listFeatureRequests({ status } = {}) {
   return prisma.featureRequest.findMany({
     where: status ? { status } : undefined,
-    include: { notes: { orderBy: { createdAt: 'asc' }, include: { user: { select: { name: true, email: true } } } } },
+    include: { notes: { orderBy: { createdAt: 'asc' }, include: { user: { select: USER_SELECT } } } },
     orderBy: { updatedAt: 'desc' },
   });
 }
@@ -106,15 +121,67 @@ async function listFeatureRequests({ status } = {}) {
 async function getFeatureRequest(id) {
   return prisma.featureRequest.findUnique({
     where: { id },
-    include: { notes: { orderBy: { createdAt: 'asc' }, include: { user: { select: { name: true, email: true } } } } },
+    include: { notes: { orderBy: { createdAt: 'asc' }, include: { user: { select: USER_SELECT } } } },
   });
+}
+
+/** Un e-mail par contributeur DISTINCT (jamais deux fois au même compte, même s'il a laissé
+ * plusieurs notes) — même principe que sendMailToEachRecipient (proposalNotificationService.js) :
+ * chaque envoi est individuel pour permettre une salutation personnalisée, et un échec sur UN
+ * destinataire ne doit jamais empêcher les autres de recevoir le leur. */
+async function notifyContributorsOfResolution(request) {
+  const byEmail = new Map();
+  for (const note of request.notes) {
+    if (note.user?.email) byEmail.set(note.user.email, note.user);
+  }
+  for (const user of byEmail.values()) {
+    try {
+      const htmlBody = renderMailTemplate(
+        'Votre demande a été traitée',
+        `
+          <p>Bonjour ${user.name},</p>
+          <p>Bonne nouvelle : votre demande d'évolution <strong>« ${request.title} »</strong> a été traitée.</p>
+          <p>Vous pouvez dès à présent poser vos questions normalement à l'Assistant IA — cette fonctionnalité est maintenant disponible.</p>
+        `,
+        { severity: 'info' },
+      );
+      await outlookMailService.sendMail({
+        to: user.email,
+        subject: `Réassort Automatique — votre demande "${request.title}" a été traitée`,
+        htmlBody,
+      });
+    } catch (err) {
+      console.error(`[featureRequestService] Notification de résolution échouée pour ${user.email}:`, err.message);
+    }
+  }
 }
 
 const VALID_STATUSES = ['new', 'needs_information', 'pending', 'in_progress', 'resolved', 'closed'];
 
+/**
+ * Changement de statut manuel par un développeur/ADMIN (§8 de la spec). Quand le nouveau statut est
+ * "resolved" (demande du 26/09/2026 : "alerter l'utilisateur par e-mail pour lui indiquer que sa
+ * demande a bien été prise en compte et qu'il peut désormais poser ses questions"), un e-mail est
+ * envoyé à chaque contributeur distinct de la demande — jamais sur les autres statuts (in_progress,
+ * closed...), qui ne représentent pas une résolution effective pour l'utilisateur. Un échec d'envoi
+ * ne doit jamais empêcher le changement de statut lui-même de réussir (l'email est un effet de bord,
+ * pas la donnée d'autorité).
+ */
 async function updateFeatureRequestStatus(id, status) {
   if (!VALID_STATUSES.includes(status)) throw new Error(`Statut invalide : ${status}`);
-  return prisma.featureRequest.update({ where: { id }, data: { status } });
+  const previous = await prisma.featureRequest.findUnique({ where: { id } });
+  if (!previous) throw new Error('Demande introuvable.');
+
+  const updated = await prisma.featureRequest.update({ where: { id }, data: { status } });
+
+  if (status === 'resolved' && previous.status !== 'resolved') {
+    const full = await getFeatureRequest(id);
+    await notifyContributorsOfResolution(full).catch((err) => {
+      console.error(`[featureRequestService] Notification de résolution échouée pour la demande ${id}:`, err.message);
+    });
+  }
+
+  return updated;
 }
 
 module.exports = {

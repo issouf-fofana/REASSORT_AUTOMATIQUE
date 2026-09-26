@@ -1,11 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from './api/client';
 
+interface FeatureRequestUser {
+  name: string;
+  email: string;
+  role: string;
+  rposShopReference: string | null;
+  rposShopName: string | null;
+  assignedDepartment: string | null;
+}
+
 interface FeatureRequestNote {
   id: string;
   content: string;
   createdAt: string;
-  user: { name: string; email: string } | null;
+  user: FeatureRequestUser | null;
+}
+
+function formatUserBadge(user: FeatureRequestUser): string {
+  const parts = [user.role];
+  if (user.rposShopReference || user.rposShopName) {
+    parts.push([user.rposShopReference, user.rposShopName].filter(Boolean).join(' — '));
+  }
+  if (user.assignedDepartment) parts.push(user.assignedDepartment);
+  return parts.join(' · ');
 }
 
 interface FeatureRequest {
@@ -195,7 +213,8 @@ export function FeatureRequests() {
                 {selected.notes.map((n) => (
                   <li key={n.id} className="list-group-item px-0">
                     <div className="small text-muted">
-                      {n.user ? n.user.name : 'Utilisateur inconnu'} — {formatDate(n.createdAt)}
+                      {n.user ? `${n.user.name} (${n.user.email})` : 'Utilisateur inconnu'} — {formatDate(n.createdAt)}
+                      {n.user && <div className="fst-italic">{formatUserBadge(n.user)}</div>}
                     </div>
                     <div>{n.content}</div>
                   </li>
