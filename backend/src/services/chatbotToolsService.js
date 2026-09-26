@@ -12,6 +12,7 @@ const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { listAnomalies } = require('./orderAnomalyService');
 
 // Seuil "article générique" identique à excludeGenericArticlesBelowPrice (configService.js,
 // utilisé par proposalService.js) : un article dont le prix de vente RPOS est en dessous n'est pas
@@ -872,10 +873,42 @@ async function getArticleDlvStatus(rposShopId, ean) {
   };
 }
 
+/**
+ * getOrderAnomalies() — commandes récentes dont la quantité validée s'écarte nettement de
+ * l'historique du magasin (page Anomalies de commande, orderAnomalyService.js déjà existant) —
+ * demande du 26/09/2026 : "y a-t-il des anomalies sur mes commandes récentes ?". Ne traite JAMAIS
+ * une anomalie comme "commande incorrecte" par elle-même (règle §9 du document d'origine) : direction
+ * HIGH/LOW et statut (PENDING encore à traiter, ACKNOWLEDGED déjà vu, DISMISSED fausse alerte
+ * confirmée) sont renvoyés tels quels, jamais reformulés en jugement.
+ */
+async function getOrderAnomalies(rposShopId, { status, limit = 20 } = {}) {
+  const rows = await listAnomalies({ rposShopId, status: status || 'PENDING', limit });
+  if (!rows.length) {
+    return { found: true, count: 0, message: 'Aucune anomalie de commande actuellement pour ce magasin.' };
+  }
+  return {
+    found: true,
+    count: rows.length,
+    anomalies: rows.map((r) => ({
+      ean: r.ean,
+      label: r.label,
+      direction: r.direction, // HIGH (quantité inhabituellement élevée) | LOW (inhabituellement basse)
+      newQuantity: r.newQuantity,
+      historicalMean: r.historicalMean,
+      historicalMin: r.historicalMin,
+      historicalMax: r.historicalMax,
+      sampleSize: r.sampleSize,
+      status: r.status,
+      detectedAt: r.detectedAt,
+    })),
+  };
+}
+
 module.exports = {
   getStoreStock,
   getArticleStock,
   getArticleStockAllShops,
+  getOrderAnomalies,
   getArticleDetails,
   getArticlesByGisement,
   getTopGisements,

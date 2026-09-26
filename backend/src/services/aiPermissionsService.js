@@ -54,6 +54,7 @@ const TOOL_CAPABILITY = {
   getParetoArticles: 'sales',
   getOrders: 'orders',
   getCurrentProposal: 'orders',
+  getOrderAnomalies: 'orders',
   getPredictionAccuracy: 'accuracy',
 };
 

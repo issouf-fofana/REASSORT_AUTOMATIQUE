@@ -23,6 +23,7 @@ const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrderAnomalies',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -34,7 +35,7 @@ const FALLBACK_INTENT_RULES = [
   { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', 'quand a-t-il changé de prix', 'quand est-ce que le prix', 'le prix a changé', 'le prix a change', 'quand le prix', 'prix a changé', 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', 'quand est-ce qu\'il', 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
   { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
   { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
-  { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente'], tool: 'getParetoArticles' },
+  { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente', 'quel rayon vend le mieux', 'quel rayon vend le plus', 'meilleur rayon', 'rayon qui vend le plus', 'rayon qui vend le mieux', 'classement des rayons', 'comparer les rayons', 'comparaison des rayons'], tool: 'getParetoArticles' },
   { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
@@ -44,6 +45,9 @@ const FALLBACK_INTENT_RULES = [
   // — écrasant getCurrentProposal ("quoi commander") et getOverstockArticles ("trop commandé") dans
   // 5 cas sur 8 échecs trouvés. Ne garder que des expressions assez précises pour ne jamais matcher
   // un simple verbe conjugué ou une question sur un AUTRE sujet contenant accidentellement ce radical.
+  // Placé AVANT la règle getOrders générique ci-dessous : "anomalie(s) de commande" contient
+  // "commande" mais désigne un besoin précis, jamais la simple liste des commandes récentes.
+  { keywords: ['anomalie', 'anomalies', 'commande anormale', 'commandes anormales', 'quantité anormale', 'quantite anormale', 'écart de commande', 'ecart de commande'], tool: 'getOrderAnomalies' },
   { keywords: ['mes commandes', 'commandes en cours', 'commandes récentes', 'liste des commandes', 'qu\'est-ce qui a été commandé', 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
   // "aujourd'hui" retiré (bug trouvé le 21/09/2026, campagne de fuzzing large) : trop générique,
   // matchait à tort N'IMPORTE QUELLE question du jour (ex: "chiffre d'affaire aujourd'hui" tombait
@@ -303,6 +307,7 @@ const TOOL_CATALOG = [
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin.', params: {} },
+  { name: 'getOrderAnomalies', description: 'Anomalies détectées sur des commandes récentes (quantité validée nettement supérieure ou inférieure à l\'habitude du magasin) — jamais présentées comme des erreurs certaines, seulement des écarts à vérifier.', params: {} },
   { name: 'getDlvArticles', description: 'Articles ayant actuellement du stock en DLV (Date Limite de Vente courte — un stock basculé manuellement par le personnel sur un EAN distinct pour écoulement à prix réduit, PAS une date de péremption automatique), du magasin entier ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel' } },
 ];
 
@@ -505,6 +510,8 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, {}) };
       case 'getOrders':
         return { toolName, toolResult: await tools.getOrders(rposShopId, {}) };
+      case 'getOrderAnomalies':
+        return { toolName, toolResult: await tools.getOrderAnomalies(rposShopId, {}) };
       case 'getCurrentProposal':
         return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
       case 'getSalesHistory':
