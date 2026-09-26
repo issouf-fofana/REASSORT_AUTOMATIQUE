@@ -14,6 +14,20 @@
      border-radius: 0 !important;
 }
 
+/* Exception à la règle "aucun coin arrondi" ci-dessus, décidée le 26/09/2026 : la barre notch
+   compacte (ÉTAT 2, cf. layout-collapsible.js) reproduit délibérément un style "île flottante" à
+   coins très arrondis (pilules, ailes SVG incurvées) fourni explicitement par l'utilisateur comme
+   référence visuelle — sans cette exception, le border-radius:0 !important générique ci-dessus
+   aplatit tout, y compris les coins bas des îlots qui donnent tout son sens à ce design. Plutôt que
+   de dupliquer ici la valeur de chaque classe Tailwind utilisée dans ReassortNotch.tsx (deux sources
+   de vérité à maintenir en sync, piège déjà rencontré ailleurs dans ce projet), un seul attribut
+   data-radius sur chaque élément arrondi de ce composant transporte SA PROPRE valeur — le composant
+   React reste l'unique source de vérité pour "quel arrondi", cette règle ne fait que le laisser
+   passer. N'affecte que .reassort-notch-root (point de montage de notch-nav.js), rien d'autre. */
+.reassort-notch-root [data-radius] {
+     border-radius: var(--radius-override) !important;
+}
+
 /* Résultats de recherche annuaire AD (Utilisateurs > Nouveau compte > Compte Active Directory) :
    volt.css ne cadre pas visuellement un .list-group flottant hors d'une .card — sans bordure
    propre sur le conteneur, les boutons de résultat se fondaient dans le fond blanc de la page. */
