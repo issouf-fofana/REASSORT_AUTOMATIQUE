@@ -571,21 +571,55 @@ router.post('/order-anomalies/:id/status', requireAdmin, async (req, res) => {
 // le récap nocturne global. Lecture seule : la règle reste automatique selon le rôle/rattachement de
 // chaque compte, déjà gérable depuis la page Utilisateurs — cette vue ne fait que la RENDRE VISIBLE,
 // jamais une case à cocher indépendante par personne.
+// N'utilise PAS getShopRecipientUsers/getAdminUsers ici (contrairement aux fonctions d'envoi) : ces
+// fonctions filtrent déjà sur mailAlertsEnabled=true, ce qui empêcherait cette vue de config de
+// montrer — et donc de réactiver — un compte déjà exclu. Requête directe équivalente, mais SANS le
+// filtre mailAlertsEnabled, en exposant id + son état actuel pour permettre le bascule (PUT ci-dessous).
 router.get('/mail-recipients', requireAdmin, async (req, res) => {
   try {
-    const { getShopRecipientUsers, getAdminUsers } = require('../../services/proposalNotificationService');
     const shops = await prisma.shop.findMany({ orderBy: { reference: 'asc' }, select: { rposShopId: true, reference: true, name: true } });
+    const USER_SELECT = { id: true, email: true, name: true, mailAlertsEnabled: true };
 
     const shopsWithRecipients = await Promise.all(
-      shops.map(async (shop) => ({
-        shop: { reference: shop.reference, name: shop.name },
-        recipients: await getShopRecipientUsers(shop.rposShopId, { includeAdmins: false }),
-      })),
+      shops.map(async (shop) => {
+        const [directUsers, supervisors] = await Promise.all([
+          prisma.user.findMany({ where: { rposShopId: shop.rposShopId, isActive: true }, select: USER_SELECT }),
+          prisma.user.findMany({
+            where: { role: 'SUPERVISOR', isActive: true, supervisedShops: { some: { rposShopId: shop.rposShopId } } },
+            select: USER_SELECT,
+          }),
+        ]);
+        const byEmail = new Map();
+        for (const u of [...directUsers, ...supervisors]) byEmail.set(u.email, u);
+        return { shop: { reference: shop.reference, name: shop.name }, recipients: [...byEmail.values()] };
+      }),
     );
 
-    res.json({ success: true, data: { shops: shopsWithRecipients, admins: await getAdminUsers() } });
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: USER_SELECT });
+
+    res.json({ success: true, data: { shops: shopsWithRecipients, admins } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/mail-recipients/:userId - bascule mailAlertsEnabled pour un compte (demande du
+// 26/09/2026 : "ajouter la possibilité de cocher/décocher par personne") — ne modifie JAMAIS
+// role/isActive (l'accès applicatif du compte), uniquement s'il reçoit ou non les emails automatiques.
+router.put('/mail-recipients/:userId', requireAdmin, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'enabled (booléen) est requis' });
+    }
+    const user = await prisma.user.update({
+      where: { id: req.params.userId },
+      data: { mailAlertsEnabled: enabled },
+      select: { id: true, email: true, name: true, mailAlertsEnabled: true },
+    });
+    res.json({ success: true, data: user });
+  } catch (error) {
+    res.status(error.code === 'P2025' ? 404 : 500).json({ success: false, message: error.code === 'P2025' ? 'Compte introuvable' : error.message });
   }
 });
 

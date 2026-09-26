@@ -56,6 +56,14 @@ model User {
 
   isActive Boolean @default(true) @map("is_active")
 
+  // Réglage indépendant du rôle/rattachement magasin (demande du 26/09/2026, page Destinataires
+  // email) : true par défaut — un compte reçoit normalement les alertes email correspondant à son
+  // rôle (rattachement direct au magasin, supervision, ou ADMIN pour le récap global), sauf s'il a
+  // été explicitement exclu ici. Ne modifie JAMAIS l'accès applicatif du compte (role/isActive
+  // restent la seule source de vérité pour ça) — uniquement s'il reçoit ou non les emails
+  // automatiques, cf. getShopRecipientUsers/getAdminUsers (proposalNotificationService.js).
+  mailAlertsEnabled Boolean @default(true) @map("mail_alerts_enabled")
+
   // true si ce compte a été créé automatiquement au premier login réussi contre l'Active Directory
   // Prosuma (STEP 10) plutôt que créé à la main par un ADMIN — sert uniquement à distinguer, dans
   // l'écran Utilisateurs, "en attente de validation après un login LDAP" d'un compte local que

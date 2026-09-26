@@ -24,15 +24,19 @@ const { renderMailTemplate } = require('./mailTemplateService');
  * `includeAdmins` (optionnel, défaut true) : mis à false uniquement par le job nocturne pour l'email
  * de nouvelle proposition, seul cas à volume élevé — tous les autres appelants gardent le
  * comportement historique (admin toujours en copie) sans avoir besoin de changer leur appel. */
+// mailAlertsEnabled=true (demande du 26/09/2026, page Destinataires email) : réglage indépendant du
+// rôle/rattachement, exclut un compte de TOUTE alerte email automatique sans toucher à son accès
+// applicatif (role/isActive restent la seule source de vérité pour ça, cf. schema.prisma). Appliqué
+// systématiquement ici plutôt que dans chaque appelant : un seul point de vérité pour cette règle.
 async function getShopRecipientUsers(rposShopId, { includeAdmins = true } = {}) {
   const [directUsers, supervisors, admins] = await Promise.all([
-    prisma.user.findMany({ where: { rposShopId, isActive: true }, select: { email: true, name: true } }),
+    prisma.user.findMany({ where: { rposShopId, isActive: true, mailAlertsEnabled: true }, select: { email: true, name: true } }),
     prisma.user.findMany({
-      where: { role: 'SUPERVISOR', isActive: true, supervisedShops: { some: { rposShopId } } },
+      where: { role: 'SUPERVISOR', isActive: true, mailAlertsEnabled: true, supervisedShops: { some: { rposShopId } } },
       select: { email: true, name: true },
     }),
     includeAdmins
-      ? prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true, name: true } })
+      ? prisma.user.findMany({ where: { role: 'ADMIN', isActive: true, mailAlertsEnabled: true }, select: { email: true, name: true } })
       : Promise.resolve([]),
   ]);
   const byEmail = new Map();
@@ -44,10 +48,11 @@ async function getShopRecipients(rposShopId) {
   return (await getShopRecipientUsers(rposShopId)).map((u) => u.email);
 }
 
-/** Tous les comptes ADMIN actifs — destinataires du récap global de fin de nuit (cf.
- * notifyAdminsOfNightlySummary). Séparé de getShopRecipientUsers car indépendant de tout magasin. */
+/** Tous les comptes ADMIN actifs ET non exclus des alertes email — destinataires du récap global de
+ * fin de nuit (cf. notifyAdminsOfNightlySummary). Séparé de getShopRecipientUsers car indépendant de
+ * tout magasin. */
 async function getAdminUsers() {
-  return prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { email: true, name: true } });
+  return prisma.user.findMany({ where: { role: 'ADMIN', isActive: true, mailAlertsEnabled: true }, select: { email: true, name: true } });
 }
 
 /** Envoie le même email à chaque destinataire INDIVIDUELLEMENT (jamais un seul envoi groupé,
