@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, LogOut, Menu, User as UserIcon } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Menu, User as UserIcon } from 'lucide-react';
+import { NotchLeftWing, NotchRightWing } from './components/ui/notch-wings';
 import { NAV_GROUPS, activeEntryId, type NavEntry, type NavGroup } from './navConfig';
 import { cn } from '@/lib/utils';
 
@@ -21,22 +22,27 @@ declare global {
 
 // Barre compacte affichée uniquement en ÉTAT 2 (sidebar repliée par l'utilisateur via
 // #sidebar-visibility-btn, cf. layout-collapsible.js) — jamais visible en même temps que la sidebar
-// complète. Un groupe de la sidebar (Pilotage/Réassort/Administration) devient une entrée de cette
-// barre ; le survol ouvre un flyout listant ses pages, le clic navigue directement sans jamais
-// rouvrir la sidebar complète (cf. demande explicite : "conserver la sidebar dans son état fermé").
+// complète. Style à 3 îlots noirs distincts (logo / navigation / actions) avec coins "ailes"
+// incurvés reliant chaque îlot, demande explicite du 26/09/2026 reproduisant le composant
+// adaptive-notch-navigation-bar fourni par l'utilisateur — un seul bloc uniforme auparavant.
 function NavGroupFlyout({
   group,
   isOpen,
   activeId,
   onEnter,
   onLeave,
+  onToggleClick,
   onSelect,
 }: {
   group: NavGroup;
   isOpen: boolean;
   activeId: string;
-  onEnter: () => void;
-  onLeave: () => void;
+  onEnter?: () => void;
+  onLeave?: () => void;
+  // Mobile (< md) : le survol n'a pas de sens sur tactile, le flyout s'ouvre/se ferme au clic sur le
+  // bouton lui-même plutôt qu'au survol du conteneur — jamais les deux mécanismes en même temps sur
+  // le même écran (onEnter/onLeave omis quand onToggleClick est fourni).
+  onToggleClick?: () => void;
   onSelect: (entry: NavEntry) => void;
 }) {
   const hasActive = group.entries.some((e) => e.id === activeId);
@@ -46,12 +52,14 @@ function NavGroupFlyout({
         type="button"
         aria-haspopup="true"
         aria-expanded={isOpen}
+        onClick={onToggleClick}
         className={cn(
           'flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-sm font-medium outline-none transition-colors select-none',
           hasActive ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
         )}
       >
         {group.label}
+        {onToggleClick && <ChevronDown className={cn('size-3.5 transition-transform', isOpen && 'rotate-180')} />}
       </button>
       <AnimatePresence>
         {isOpen && (
@@ -63,11 +71,6 @@ function NavGroupFlyout({
             exit={{ opacity: 0, y: -6, scaleY: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
             style={{ transformOrigin: 'top' }}
-            // left-1/2/-translate-x-1/2 centre le flyout sous son bouton par défaut ; sur un écran
-            // étroit un flyout proche du bord droit déborderait sinon hors viewport (demande
-            // explicite "aucun débordement horizontal" / "se repositionner automatiquement") — clampé
-            // via clamp() plutôt qu'un calcul JS de position, pour rester correct même si la fenêtre
-            // est redimensionnée sans re-render.
             className="absolute left-1/2 top-full z-50 mt-1 w-64 -translate-x-1/2 rounded-2xl bg-zinc-950 p-1.5 shadow-lg"
           >
             <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
@@ -105,8 +108,10 @@ export function ReassortNotch() {
     () => NAV_GROUPS.map((g) => ({ ...g, entries: g.entries.filter((e) => !e.adminOnly || isAdmin) })).filter((g) => g.entries.length > 0),
     [isAdmin],
   );
+
   const [activeId, setActiveId] = useState(() => activeEntryId(groups));
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const activeGroup = groups.find((g) => g.entries.some((e) => e.id === activeId)) ?? groups[0] ?? null;
 
   useEffect(() => {
     function onNavChange() {
@@ -133,27 +138,32 @@ export function ReassortNotch() {
   }
 
   return (
-    <div className="reassort-notch-root flex w-full items-center gap-2 rounded-b-2xl bg-zinc-950 px-3 py-2 text-zinc-50">
-      {/* Bouton de réouverture de la sidebar complète — seul chemin de retour à l'ÉTAT 1, cf. règle
-          absolue "jamais les deux ensemble" : ce bouton ne fait QUE rouvrir la sidebar, jamais
-          basculer lui-même un flyout. */}
-      <button
-        type="button"
-        onClick={() => window.reassortExpandSidebar?.()}
-        aria-label="Afficher le menu latéral"
-        title="Afficher le menu latéral"
-        className="flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-300 outline-none transition-colors hover:bg-zinc-800 hover:text-zinc-50"
-      >
-        <Menu className="size-4" />
-      </button>
+    // pt-4 : espace au-dessus des 3 îlots pour que les ailes incurvées (qui débordent vers le haut,
+    // cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent.
+    <div className="relative flex w-full items-start justify-between gap-2 px-2 pt-4 pb-1">
+      {/* Îlot 1 : logo + bouton de réouverture de la sidebar complète — seul chemin de retour à
+          l'ÉTAT 1, cf. règle absolue "jamais les deux ensemble". */}
+      <aside className="relative flex h-10 shrink-0 items-center gap-2 rounded-b-[20px] bg-zinc-950 px-3 text-zinc-50">
+        <NotchRightWing />
+        <button
+          type="button"
+          onClick={() => window.reassortExpandSidebar?.()}
+          aria-label="Afficher le menu latéral"
+          title="Afficher le menu latéral"
+          className="flex size-7 shrink-0 items-center justify-center rounded-full text-zinc-300 outline-none transition-colors hover:bg-zinc-800 hover:text-zinc-50"
+        >
+          <Menu className="size-4" />
+        </button>
+        <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="hidden h-5 w-auto sm:block" />
+      </aside>
 
-      <div className="hidden shrink-0 sm:flex">
-        <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-5 w-auto" />
-      </div>
-
-      {/* Groupes de navigation : un par section de la sidebar (Pilotage/Réassort/Administration),
-          flyout listant ses pages au survol — jamais de clic nécessaire pour voir le contenu. */}
-      <nav className="flex flex-1 flex-wrap items-center gap-1 overflow-x-auto">
+      {/* Îlot 2 (desktop) : groupes de navigation, flyout au survol — jamais de clic nécessaire pour
+          voir le contenu, cf. demande explicite. En dessous de md, pas assez de place pour tous les
+          groupes côte à côte : remplacé par un seul bouton listant le groupe actif, ouvert au clic
+          (le survol n'a pas de sens sur tactile). */}
+      <nav className="relative hidden h-10 flex-wrap items-center gap-1 overflow-visible rounded-b-[20px] bg-zinc-950 px-2 md:flex">
+        <NotchLeftWing />
+        <NotchRightWing />
         {groups.map((group) => (
           <NavGroupFlyout
             key={group.label}
@@ -166,15 +176,30 @@ export function ReassortNotch() {
           />
         ))}
       </nav>
+      {activeGroup && (
+        <nav className="relative flex h-10 flex-1 items-center justify-center overflow-visible rounded-b-[20px] bg-zinc-950 px-2 md:hidden">
+          <NotchLeftWing />
+          <NotchRightWing />
+          <NavGroupFlyout
+            group={activeGroup}
+            isOpen={openGroup === activeGroup.label}
+            activeId={activeId}
+            onToggleClick={() => setOpenGroup((cur) => (cur === activeGroup.label ? null : activeGroup.label))}
+            onSelect={navigateTo}
+          />
+        </nav>
+      )}
 
-      {/* Actions à droite : magasin (global-shop-selector.js), notifications (notifications-bell.js),
+      {/* Îlot 3 : magasin (global-shop-selector.js), notifications (notifications-bell.js),
           utilisateur/déconnexion — mêmes IDs que topbar.html pour que ces scripts existants
           continuent de fonctionner sans modification (contrat DOM inchangé, juste son enrobage
           visuel qui change). */}
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="hidden flex-col items-end leading-tight md:flex max-w-[180px]">
-          <div id="page-shop-context" className="hidden text-[11px] text-zinc-400 truncate max-w-[180px]" />
-          <button type="button" id="global-shop-selector-btn" className="hidden text-xs font-medium text-zinc-300 hover:text-zinc-50 truncate max-w-[180px]" />
+      <aside className="relative flex h-10 shrink-0 items-center gap-3 rounded-b-[20px] bg-zinc-950 px-3 text-zinc-50">
+        <NotchLeftWing />
+
+        <div className="hidden flex-col items-end leading-tight md:flex max-w-[160px]">
+          <div id="page-shop-context" className="hidden text-[11px] text-zinc-400 truncate max-w-[160px]" />
+          <button type="button" id="global-shop-selector-btn" className="hidden text-xs font-medium text-zinc-300 hover:text-zinc-50 truncate max-w-[160px]" />
         </div>
 
         <div className="relative">
@@ -183,7 +208,7 @@ export function ReassortNotch() {
             id="page-header-notifications-dropdown"
             aria-haspopup="true"
             aria-expanded="false"
-            className="relative flex size-8 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 outline-none"
+            className="relative flex size-7 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 outline-none"
           >
             <Bell className="size-4" />
           </button>
@@ -193,10 +218,10 @@ export function ReassortNotch() {
         </div>
 
         <div className="flex items-center gap-2 border-l border-zinc-800 pl-3">
-          <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
-            <UserIcon className="size-4" />
+          <span className="flex size-6 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
+            <UserIcon className="size-3.5" />
           </span>
-          <span id="user-menu-name" className="hidden lg:inline text-xs font-semibold text-zinc-200 max-w-[100px] truncate">
+          <span id="user-menu-name" className="hidden lg:inline text-xs font-semibold text-zinc-200 max-w-[90px] truncate">
             {user?.name || 'Mon compte'}
           </span>
           <button
@@ -204,12 +229,12 @@ export function ReassortNotch() {
             onClick={() => window.reassortLogout?.()}
             aria-label="Déconnexion"
             title="Déconnexion"
-            className="flex size-7 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-red-400 outline-none"
+            className="flex size-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-red-400 outline-none"
           >
             <LogOut className="size-3.5" />
           </button>
         </div>
-      </div>
+      </aside>
     </div>
   );
 }
