@@ -10,6 +10,10 @@
          du site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
     <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
     <link type="text/css" href="/assets/css/theme-override.css?v=2026-09-25-1" rel="stylesheet" />
+    <!-- Pilote du 26/09/2026 : barre de navigation "notch" (react-app-notch-nav) en remplacement de
+         la sidebar/topbar Volt, sur cette page uniquement le temps de valider en conditions réelles
+         avant généralisation aux 14 autres pages. -->
+    <link type="text/css" href="/assets/css/notch-nav.css?v=2026-09-26-1" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
     <!-- backend-config.js est généré au RUNTIME par docker-entrypoint.sh (pas au build Vite) — pas
@@ -26,16 +30,15 @@
   <body data-page-title="Guide du projet">
     <script src="/assets/js/loading-overlay.js"></script>
 
-    <!-- Sidebar/topbar partagées avec les pages HTML classiques (assets/partials/*.html, injectées
-         par layout.js via XHR synchrone) : réutilisées à l'identique pour zéro divergence visuelle
-         avec les pages pas encore migrées. -->
-    <div id="layout-sidebar-slot"></div>
+    <!-- Barre de navigation "notch" (notch-nav.js, montage React sur ce seul point d'ancrage) — plus
+         de sidebar/topbar Volt sur cette page, cf. commentaire du <link> notch-nav.css ci-dessus. -->
+    <div id="notch-nav-slot"></div>
     <div id="pg-progress-bar"></div>
     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
 
     <main class="content">
-      <div id="layout-topbar-slot"></div>
-      <script src="/assets/js/layout.js?v=2026-09-25-2"></script>
+      <script src="/assets/js/layout-notch.js?v=2026-09-26-1"></script>
+      <script src="/assets/js/notch-nav.js?v=2026-09-26-1"></script>
       <script src="/assets/js/global-shop-selector.js"></script>
 
       <div class="py-4">

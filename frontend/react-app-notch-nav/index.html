@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notch nav — aperçu de dev</title>
+    <style>
+      body { margin: 0; background: #f5f5f5; padding: 2rem; font-family: system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <!-- Aperçu de développement uniquement (npm run dev) : en production, ce même #notch-nav-slot
+         est injecté par assets/js/layout.js dans chacune des 14 pages du site, jamais ce fichier. -->
+    <div id="notch-nav-slot"></div>
+    <script type="module" src="/src/mount.tsx"></script>
+  </body>
+</html>

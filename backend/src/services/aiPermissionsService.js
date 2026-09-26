@@ -138,13 +138,23 @@ const CAPABILITY_LABELS = {
 // jamais un exemple qui échouerait silencieusement une fois posé pour de vrai. Tenu à jour à la main
 // en miroir de INTENT_RULES — pas de source unique automatique entre les deux, faute d'un identifiant
 // commun autre que le nom de la capacité elle-même.
+// Exemples "tous magasins" (demande du 26/09/2026, pilotage réseau) ajoutés uniquement pour
+// ADMIN/SUPERVISOR ci-dessous — un compte à un seul magasin fixe ne doit jamais voir ces exemples,
+// ils échoueraient silencieusement en repli sur son propre magasin (cf. chatbotService.js).
+const NETWORK_CAPABILITY_EXAMPLES = {
+  revenueShop: ['Compare le chiffre d\'affaires de tous les magasins', 'Le réseau progresse-t-il par rapport au mois dernier ?', 'Y a-t-il des magasins sans vente récente ?'],
+  stock: ['Quels magasins ont des ruptures critiques ?', 'Quels magasins sont en surstock ?', 'Le stock de cet article dans tous les magasins'],
+  orders: ['Quelles propositions sont encore en attente sur le réseau ?', 'Y a-t-il des anomalies de commande sur tout le réseau ?'],
+  accuracy: ['Quel magasin a la meilleure précision de l\'IA ?'],
+};
+
 const CAPABILITY_EXAMPLES = {
   revenueShop: ['Quel est le chiffre d\'affaires du magasin aujourd\'hui ?', 'Quelle était la recette d\'hier ?'],
   revenueArticle: ['Quel est le chiffre d\'affaires de cet article ?', 'Quelle part du CA fait mon rayon ?'],
   articleDetails: ['Où se trouve cet article ?', 'Quel est le prix de vente de cet article ?', 'Quand a-t-il changé de prix ?'],
   stock: ['Quel est le stock de cet article ?', 'Quels articles risquent d\'être en rupture ?', 'Quels articles sont en surstock ?', 'Pourquoi le stock de cet article a bougé ?'],
-  sales: ['Comment évoluent les ventes ce mois-ci ?', 'Quels articles font le plus de chiffre d\'affaires ?'],
-  orders: ['Quelles commandes ont été passées récemment ?', 'Quels articles dois-je commander aujourd\'hui ?'],
+  sales: ['Comment évoluent les ventes ce mois-ci ?', 'Quels articles font le plus de chiffre d\'affaires ?', 'Quel rayon vend le mieux ?'],
+  orders: ['Quelles commandes ont été passées récemment ?', 'Quels articles dois-je commander aujourd\'hui ?', 'Y a-t-il des anomalies sur mes commandes récentes ?'],
   accuracy: ['Quelle est la fiabilité de l\'IA sur ce magasin ?'],
 };
 
@@ -157,10 +167,17 @@ const CAPABILITY_EXAMPLES = {
  */
 function getCapabilityGuide(user) {
   const permissions = getEffectivePermissions(user);
+  // ADMIN/SUPERVISOR seulement (cf. resolveAllowedShopIds dans chatbotService.js) : un compte à un
+  // seul magasin fixe ne doit jamais voir ces exemples réseau, la question échouerait en repli
+  // silencieux sur son propre magasin.
+  const isNetworkWide = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
   const allowed = [];
   const denied = [];
   for (const capability of CAPABILITIES) {
-    const entry = { capability, label: CAPABILITY_LABELS[capability], examples: CAPABILITY_EXAMPLES[capability] || [] };
+    const examples = (CAPABILITY_EXAMPLES[capability] || []).concat(
+      isNetworkWide ? (NETWORK_CAPABILITY_EXAMPLES[capability] || []) : []
+    );
+    const entry = { capability, label: CAPABILITY_LABELS[capability], examples };
     if (permissions[capability]) allowed.push(entry);
     else denied.push(entry);
   }
@@ -240,6 +257,9 @@ function getPlatformGuide(user) {
       { name: 'Améliorations IA', description: 'Constats et recommandations du Conseiller d\'amélioration IA (réservé Administrateur).' },
       { name: 'Journal d\'audit', description: 'Historique des erreurs techniques remontées par l\'application (réservé Administrateur).' },
       { name: 'Utilisateurs', description: 'Créer, modifier et désactiver les comptes de la plateforme (réservé Administrateur).' },
+      { name: 'Destinataires email', description: 'Activer ou désactiver les alertes email reçues par chaque compte, magasin par magasin (réservé Administrateur).' },
+      { name: 'Anomalies de commande', description: 'Repérer les écarts inhabituels sur les commandes passées, tous magasins confondus (réservé Administrateur).' },
+      { name: 'Demandes d\'évolution', description: 'Suivre les demandes de nouvelles fonctionnalités remontées via l\'Assistant IA (réservé Administrateur).' },
       { name: 'Paramètres', description: 'Configuration technique complète : réassort, synchronisation, RPOS, IA, planification (réservé Administrateur).' },
     );
   }

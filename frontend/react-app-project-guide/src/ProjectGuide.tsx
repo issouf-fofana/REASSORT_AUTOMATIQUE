@@ -162,6 +162,14 @@ export function ProjectGuide() {
   return (
     <div>
       <style>{`
+        /* Pilote notch nav (26/09/2026) : plus de .sidebar dans le DOM sur cette page (remplacée par
+           #notch-nav-slot, cf. index.html) — volt.css applique pourtant toujours sa marge desktop de
+           260px à main.content en présumant qu'une sidebar existe, laissant un vide permanent à
+           gauche. Neutralisé ici plutôt que dans theme-override.css (global) tant que seule cette
+           page a basculé, pour ne rien changer aux 14 pages encore sur l'ancienne sidebar. */
+        @media (min-width: 992px) {
+          main.content { margin-left: 0 !important; }
+        }
         /* Le sommaire (.pg-toc) et la barre d'onglets (.pg-tabs) utilisent position:sticky — rendu
            possible par le passage global de html/body/.content à overflow:visible/clip plutôt que
            hidden (cf. theme-override.css, demande du 24/09/2026 "la topbar doit rester figée aussi"
