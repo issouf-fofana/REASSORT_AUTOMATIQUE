@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Destinataires email | Réassort Automatique</title>
+
+    <!-- Chemins ABSOLUS (pas relatifs à /mail-recipients-app/) : ces fichiers sont servis à la racine du
+         site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
+    <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/theme-override.css?v=2026-09-25-1" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+    <!-- backend-config.js est généré au RUNTIME par docker-entrypoint.sh (pas au build Vite) à
+         partir de la variable d'env BACKEND_URL — src/api/client.ts lit window.REASSORT_BACKEND_URL
+         qu'il pose, jamais une valeur figée au build (import.meta.env). -->
+    <script src="/assets/js/config.js"></script>
+    <script src="/assets/js/backend-config.js"></script>
+    <!-- reassort-auth.js/shop-picker.js DOIVENT être chargés avant layout.js/global-shop-selector.js
+         (déplacés ici depuis le <body> le 23/09/2026 — bug trouvé : le sélecteur de magasin global de
+         la topbar restait invisible sur cette page, car global-shop-selector.js appelle
+         window.reassortGetUser() dès son premier exécution et échouait silencieusement si
+         reassort-auth.js n'était pas encore chargé à ce moment). Même ordre que dans les pages HTML
+         classiques (ex: admin-dashboard.old.html), où ces deux scripts sont dans le <head>. -->
+    <script src="/assets/js/reassort-auth.js"></script>
+    <script src="/assets/js/shop-picker.js"></script>
+  </head>
+  <body data-page-title="Destinataires email">
+    <script src="/assets/js/loading-overlay.js"></script>
+
+    <!-- Sidebar/topbar partagées avec les pages HTML classiques (assets/partials/*.html, injectées
+         par layout.js via XHR synchrone) : réutilisées à l'identique pour zéro divergence visuelle
+         avec les pages pas encore migrées. -->
+    <div id="layout-sidebar-slot"></div>
+    <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+    <main class="content">
+      <div id="layout-topbar-slot"></div>
+      <script src="/assets/js/layout.js?v=2026-09-25-2"></script>
+      <script src="/assets/js/global-shop-selector.js"></script>
+      <!-- window.reassortConfirm/reassortToast (remplace confirm()/alert() natifs). -->
+      <script src="/assets/js/reassort-toast.js"></script>
+
+      <div class="py-4">
+        <div class="container-xxl">
+          <div id="root"></div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+    <script src="/assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+    <script src="/assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+    <script src="/assets/js/notifications-bell.js"></script>
+    <script src="/assets/js/ai-assistant-widget.js"></script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

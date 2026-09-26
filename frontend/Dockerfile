@@ -135,6 +135,13 @@ RUN npm ci
 COPY react-app-feature-requests/ .
 RUN npm run build
 
+FROM node:20-alpine AS mail-recipients-builder
+WORKDIR /app
+COPY react-app-mail-recipients/package*.json ./
+RUN npm ci
+COPY react-app-mail-recipients/ .
+RUN npm run build
+
 FROM node:20-alpine AS auth-signin-builder
 WORKDIR /app
 COPY react-app-auth-signin/package*.json ./
@@ -214,6 +221,10 @@ COPY --from=auth-signin-builder /app/dist /usr/share/nginx/html/auth-signin-app
 # Résultat du build React (Demandes d'évolution, 25/09/2026), servi sous /feature-requests-app/ par
 # une règle nginx dédiée (voir nginx.conf).
 COPY --from=feature-requests-builder /app/dist /usr/share/nginx/html/feature-requests-app
+
+# Résultat du build React (Destinataires email, 26/09/2026), servi sous /mail-recipients-app/ par
+# une règle nginx dédiée (voir nginx.conf).
+COPY --from=mail-recipients-builder /app/dist /usr/share/nginx/html/mail-recipients-app
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

@@ -564,6 +564,31 @@ router.post('/order-anomalies/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/mail-recipients - vue d'ensemble ADMIN (demande du 26/09/2026 : "je dois voir
+// ceux qui doivent recevoir les mail ou pas magasin et admin") : pour CHAQUE magasin, qui recevra
+// l'alerte de nouvelle proposition (rattachement direct + superviseurs, sans les ADMIN — cf.
+// getShopRecipientUsers({ includeAdmins: false })), et séparément la liste des ADMIN qui recevront
+// le récap nocturne global. Lecture seule : la règle reste automatique selon le rôle/rattachement de
+// chaque compte, déjà gérable depuis la page Utilisateurs — cette vue ne fait que la RENDRE VISIBLE,
+// jamais une case à cocher indépendante par personne.
+router.get('/mail-recipients', requireAdmin, async (req, res) => {
+  try {
+    const { getShopRecipientUsers, getAdminUsers } = require('../../services/proposalNotificationService');
+    const shops = await prisma.shop.findMany({ orderBy: { reference: 'asc' }, select: { rposShopId: true, reference: true, name: true } });
+
+    const shopsWithRecipients = await Promise.all(
+      shops.map(async (shop) => ({
+        shop: { reference: shop.reference, name: shop.name },
+        recipients: await getShopRecipientUsers(shop.rposShopId, { includeAdmins: false }),
+      })),
+    );
+
+    res.json({ success: true, data: { shops: shopsWithRecipients, admins: await getAdminUsers() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/proposal/send-alert/recipients - liste les destinataires SANS envoyer l'email
 // (demande du 25/09/2026 : "voir les personnes qui son assigé avant de valider l'envoi") — appelée
 // par la popup de confirmation avant le vrai envoi manuel ci-dessous.
