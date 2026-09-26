@@ -90,11 +90,16 @@ export function MailRecipients() {
   });
 
   function renderUserCheckbox(user: RecipientUser) {
+    // Styles inline plutôt que les classes Bootstrap bg-light/text-dark (bug trouvé le 26/09/2026 :
+    // .badge impose color:#ffffff dans volt.css, jamais contré de façon fiable par .text-dark selon
+    // l'ordre de chargement des feuilles de style — texte blanc sur fond clair, donc invisible).
+    const enabledStyle = { backgroundColor: '#f1f2f4', color: '#17181a', border: '1px solid #d8d9db' };
+    const disabledStyle = { backgroundColor: '#fbeae7', color: '#c0392b', border: '1px solid #f0c4bc', textDecoration: 'line-through' };
     return (
       <label
         key={user.id}
-        className={`badge border me-1 mb-1 fw-normal d-inline-flex align-items-center gap-1 ${user.mailAlertsEnabled ? 'bg-light text-dark' : 'bg-danger-subtle text-danger text-decoration-line-through'}`}
-        style={{ cursor: 'pointer' }}
+        className="badge fw-normal d-inline-flex align-items-center gap-1 me-1 mb-1"
+        style={{ cursor: 'pointer', ...(user.mailAlertsEnabled ? enabledStyle : disabledStyle) }}
         title={user.mailAlertsEnabled ? 'Décocher pour exclure cette personne des alertes email' : 'Cocher pour réactiver les alertes email pour cette personne'}
       >
         <input
