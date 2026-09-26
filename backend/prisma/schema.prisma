@@ -1312,6 +1312,16 @@ model ChatbotConversation {
   department    String? // rayon sélectionné au moment de la création de cette conversation
   subDepartment String? @map("sub_department")
 
+  // Demande d'évolution en cours de clarification (chatbotService.js maybeTrackFeatureRequest,
+  // demande du 26/09/2026) : { title, problem, expectedBehavior } tant que l'assistant attend encore
+  // une précision de l'utilisateur avant de pouvoir l'enregistrer. Tant que ce champ est rempli, le
+  // tour SUIVANT force le re-test du suivi de demande AVANT le routage normal vers un outil de
+  // données — sans ça, une réponse de clarification contenant un mot-clé métier ("chiffre
+  // d'affaires", "rupture"...) fait basculer sur cet outil et la demande en cours n'est jamais
+  // complétée ni enregistrée (bug trouvé le 26/09/2026). Vidé (null) dès que la demande est
+  // effectivement enregistrée/enrichie, ou si l'IA juge que l'utilisateur a changé de sujet.
+  pendingFeatureRequestJson String? @map("pending_feature_request_json")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

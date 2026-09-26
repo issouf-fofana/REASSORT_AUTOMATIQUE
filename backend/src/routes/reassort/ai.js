@@ -453,6 +453,10 @@ router.post('/chatbot/ask-stream', async (req, res) => {
 
     await prisma.chatbotMessage.create({ data: { conversationId: conversation.id, role: 'user', content: question } });
 
+    // Demande d'évolution en cours de clarification sur CETTE conversation (cf. commentaire de tête
+    // d'askAssistant, demande du 26/09/2026) — relue depuis la conversation, jamais depuis le client.
+    const pendingFeatureRequest = conversation.pendingFeatureRequestJson ? JSON.parse(conversation.pendingFeatureRequestJson) : null;
+
     const result = await chatbotService.askAssistant({
       rposShopId: shopId,
       posId: shop.rposPosId,
@@ -464,11 +468,18 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       question,
       onTextChunk: (text) => send('chunk', { text }),
       user: currentUser,
+      pendingFeatureRequest,
     });
 
     await Promise.all([
       prisma.chatbotMessage.create({ data: { conversationId: conversation.id, role: 'assistant', content: result.answer, toolUsed: result.toolUsed, toolResult: result.toolResult ? JSON.stringify(result.toolResult) : null } }),
-      prisma.chatbotConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } }),
+      prisma.chatbotConversation.update({
+        where: { id: conversation.id },
+        data: {
+          updatedAt: new Date(),
+          pendingFeatureRequestJson: result.pendingFeatureRequest ? JSON.stringify(result.pendingFeatureRequest) : null,
+        },
+      }),
     ]);
 
     send('done', { ...result, conversationId: conversation.id });
