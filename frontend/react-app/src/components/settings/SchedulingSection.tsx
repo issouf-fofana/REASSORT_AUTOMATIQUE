@@ -16,6 +16,7 @@ const JOB_LABELS: Record<string, string> = {
   predictionOutcome: 'Évaluation des prédictions',
   improvementWatchdog: "Chien de garde améliorations IA",
   proposalReminder: 'Relance des propositions en attente',
+  endOfDayValidationRecap: 'Récap de fin de journée',
 };
 
 interface JobHealth {
@@ -244,6 +245,8 @@ interface SystemConfigData {
   PREDICTION_OUTCOME_ENABLED?: string;
   PROPOSAL_REMINDER_CRON?: string;
   PROPOSAL_REMINDER_ENABLED?: string;
+  END_OF_DAY_VALIDATION_RECAP_CRON?: string;
+  END_OF_DAY_VALIDATION_RECAP_ENABLED?: string;
 }
 
 export function SchedulingSection() {
@@ -253,6 +256,7 @@ export function SchedulingSection() {
   const [revisionThreshold, setRevisionThreshold] = useState('10');
   const [predictionOutcomeCron, setPredictionOutcomeCron] = useState('0 * * * *');
   const [proposalReminderCron, setProposalReminderCron] = useState('0 10 * * *');
+  const [endOfDayRecapCron, setEndOfDayRecapCron] = useState('30 16 * * *');
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -263,6 +267,7 @@ export function SchedulingSection() {
         setRevisionThreshold(String(Math.round((parseFloat(d.REVISION_CHANGE_THRESHOLD || '') || 0.1) * 100)));
         setPredictionOutcomeCron(d.PREDICTION_OUTCOME_CRON || '0 * * * *');
         setProposalReminderCron(d.PROPOSAL_REMINDER_CRON || '0 10 * * *');
+        setEndOfDayRecapCron(d.END_OF_DAY_VALIDATION_RECAP_CRON || '30 16 * * *');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -430,6 +435,35 @@ export function SchedulingSection() {
             <div className="form-text">
               Exemple : "0 10 * * *" = tous les jours à 10h00 (défaut, dans la fenêtre 9h-11h recommandée avant la
               limite de 13h de l'entrepôt).
+            </div>
+          </div>
+        </CronJobCard>
+
+        <CronJobCard
+          icon="solar:clipboard-check-bold-duotone"
+          title="Récap de fin de journée"
+          enabledConfigKey="END_OF_DAY_VALIDATION_RECAP_ENABLED"
+          enabledInitial={config.END_OF_DAY_VALIDATION_RECAP_ENABLED !== 'false'}
+          intro="<strong>À quoi ça sert :</strong> juste après la fermeture de la fenêtre entrepôt (13h), ce job envoie un seul email aux administrateurs listant, pour chaque magasin ayant eu une proposition aujourd'hui, si elle a été validée ou non — un bilan de supervision, jamais envoyé aux magasins eux-mêmes."
+          onSave={() => saveSystemConfigKey('END_OF_DAY_VALIDATION_RECAP_CRON', endOfDayRecapCron)}
+          onRunNow={async () => {
+            const d = await apiFetch<{ validated: number; pending: number }>('/reassort/run-end-of-day-validation-recap', { method: 'POST' });
+            return `Terminé : ${d.validated} magasin(s) validé(s), ${d.pending} non validé(s).`;
+          }}
+          runLabel="Envoyer le récap maintenant"
+        >
+          <div className="mb-3">
+            <label className="form-label fw-semibold">Expression cron</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="30 16 * * *"
+              style={{ maxWidth: 300 }}
+              value={endOfDayRecapCron}
+              onChange={(e) => setEndOfDayRecapCron(e.target.value)}
+            />
+            <div className="form-text">
+              Exemple : "30 16 * * *" = tous les jours à 16h30 (défaut).
             </div>
           </div>
         </CronJobCard>

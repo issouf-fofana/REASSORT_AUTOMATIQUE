@@ -110,6 +110,19 @@ router.post('/run-proposal-reminder', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/run-end-of-day-validation-recap - déclenche manuellement le récap admin de fin
+// de journée (ADMIN, pour les tests — s'exécute normalement à 16h30 automatiquement).
+router.post('/run-end-of-day-validation-recap', requireAdmin, async (req, res) => {
+  try {
+    const { runEndOfDayValidationRecap } = require('../../jobs/endOfDayValidationRecapJob');
+    const result = await runEndOfDayValidationRecap();
+    res.json({ success: true, message: 'Récap de fin de journée exécuté', data: result });
+  } catch (error) {
+    console.error('Manual end-of-day validation recap error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/sales-backfill - démarre (ou reprend, si un run existe déjà pour ce magasin
 // et cette période exacte) une récupération historique volumineuse de l'historique de vente d'un
 // magasin, découpée en tranches persistées avec reprise automatique (ADMIN). Ne bloque pas : le
