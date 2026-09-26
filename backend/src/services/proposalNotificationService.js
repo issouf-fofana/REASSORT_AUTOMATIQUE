@@ -230,6 +230,12 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
   if (!users.length) return;
 
   const link = purchaseOrderLink(shop);
+  // Le mail magasin doit rester plus détaillé/actionnable que le récap admin (simple total par
+  // magasin) — demande du 26/09/2026 : "le mail que le magasin reçoit doit être différent de pour
+  // l'admin". Ajout de l'alerte fournisseur (déjà présente sur le mail de nouvelle proposition,
+  // mais oubliée ici) : une personne qui reçoit une relance doit savoir immédiatement si des
+  // articles risquent de manquer à l'envoi réel, pas seulement "350 articles en attente".
+  const { html: supplierWarningHtml } = await buildSupplierWarningHtml(shop, proposal.lines, link);
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `⚠️ Rappel urgent — proposition non validée pour ${shop.reference} (${shop.name})`,
@@ -239,6 +245,7 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
         <p>Bonjour ${user.name},</p>
         <p style="color:#c0392b;"><strong>La proposition de commande du magasin ${shop.reference} — ${shop.name} n'est toujours pas validée.</strong></p>
         <p><strong>${proposal.lines.length}</strong> article(s) en attente de vérification.</p>
+        ${supplierWarningHtml}
         <p style="color:#c0392b;">L'entrepôt ne reçoit plus les commandes après <strong>13h</strong> — au-delà, cette commande sera traitée le lendemain.</p>
         <p>Merci de vous connecter dès que possible pour vérifier et valider cette commande.</p>
       `,
