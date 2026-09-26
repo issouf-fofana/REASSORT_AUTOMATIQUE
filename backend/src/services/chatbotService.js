@@ -23,7 +23,8 @@ const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
-  'getOrderAnomalies',
+  'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
+  'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -136,9 +137,38 @@ const ALL_SHOPS_REVENUE_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l
 // doit gagner sur la règle générique getArticleStock (mono-magasin).
 const ALL_SHOPS_STOCK_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\bstocks?\b|\bstocks?\b.*\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
 
+// "tous/chaque/mes magasins" + un mot-clé du domaine concerné (demande du 26/09/2026, pilotage
+// réseau pour un compte multi-magasins) — même principe que les deux regex ci-dessus : sans cette
+// priorité, "quels magasins ont des ruptures ?" retomberait sur getStockoutRisks mono-magasin.
+// Motif COMPLET (pas juste un préfixe malgré le nom conservé pour cohérence avec les regex
+// ci-dessous) : "quels?/quelles? magasins" contient déjà "magasins", ne jamais lui ajouter
+// "\s+magasins?" par-dessus (bug trouvé le 26/09/2026 : dupliquait "magasins" et ne matchait plus
+// jamais rien).
+const ALL_SHOPS_PREFIX = "(tous les|toutes les|chaque|quels?|quelles?|l'ensemble des?|l'ensemble de mes|mes)\\s+magasins?|magasins?\\s+(du réseau|de mon réseau|de notre réseau)|(tout|toute)\\s+le\\s+réseau|le\\s+réseau\\s+(entier|complet)?";
+const ALL_SHOPS_STOCKOUT_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(rupture|risque)|\\b(rupture|risque).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+const ALL_SHOPS_OVERSTOCK_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\bsurstock|\\bsurstock.*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+const ALL_SHOPS_PENDING_PROPOSAL_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(proposition|valid)|\\b(proposition|valid).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+const ALL_SHOPS_ANOMALY_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\banomalie|\\banomalie.*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+// Pas de \b après "fiabilité" (même bug d'accent que ALL_SHOPS_TREND_REGEX ci-dessous : un \b après
+// un "é" final n'est jamais reconnu par le moteur regex JS, "fiabilité\b" ne matchait donc jamais).
+const ALL_SHOPS_ACCURACY_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*(précision|precision|fiabilité|fiabilite)|(précision|precision|fiabilité|fiabilite).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+// Pas de \b devant "évolu" (bug JS classique trouvé le 26/09/2026 : \b ne reconnaît pas un accent
+// en début de mot comme un caractère "de mot", "\bévolu" ne matchait donc jamais "évolue"/"évolution").
+const ALL_SHOPS_TREND_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*(évolu|evolu|progresse|tendance)|(évolu|evolu|progresse|tendance).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+// "silencieux"/"sans vente" n'a de sens QUE pour une question réseau (jamais une formulation
+// mono-magasin plausible) — pas besoin du préfixe "tous les magasins" pour celui-ci.
+const SILENT_SHOPS_REGEX = /magasins?\s+(silencieux|sans vente|inactifs?)|aucune vente\b.*magasins?|pas de vente\b.*(depuis|récente)/i;
+
 async function detectIntent(question) {
   const normalized = normalize(question);
   if (PARETO_PATTERN_REGEX.test(normalized)) return 'getParetoArticles';
+  if (SILENT_SHOPS_REGEX.test(question)) return 'getSilentShops';
+  if (ALL_SHOPS_STOCKOUT_REGEX.test(question)) return 'getStockoutRisksAllShops';
+  if (ALL_SHOPS_OVERSTOCK_REGEX.test(question)) return 'getOverstockArticlesAllShops';
+  if (ALL_SHOPS_ANOMALY_REGEX.test(question)) return 'getOrderAnomaliesAllShops';
+  if (ALL_SHOPS_ACCURACY_REGEX.test(question)) return 'getPredictionAccuracyAllShops';
+  if (ALL_SHOPS_PENDING_PROPOSAL_REGEX.test(question)) return 'getPendingProposalsAllShops';
+  if (ALL_SHOPS_TREND_REGEX.test(question)) return 'getRevenueTrendAllShops';
   if (ALL_SHOPS_REVENUE_REGEX.test(question)) return 'getRevenueAllShops';
   if (ALL_SHOPS_STOCK_REGEX.test(question)) return 'getArticleStockAllShops';
   if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
@@ -308,6 +338,13 @@ const TOOL_CATALOG = [
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin.', params: {} },
   { name: 'getOrderAnomalies', description: 'Anomalies détectées sur des commandes récentes (quantité validée nettement supérieure ou inférieure à l\'habitude du magasin) — jamais présentées comme des erreurs certaines, seulement des écarts à vérifier.', params: {} },
+  { name: 'getStockoutRisksAllShops', description: 'Nombre d\'articles en risque de rupture, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quels magasins ont des ruptures ?", jamais pour une question sur un seul magasin précis.', params: {} },
+  { name: 'getOverstockArticlesAllShops', description: 'Nombre d\'articles en surstock, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR).', params: {} },
+  { name: 'getPendingProposalsAllShops', description: 'Magasins ayant encore une proposition de commande non validée, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quelles propositions sont encore en attente ?".', params: {} },
+  { name: 'getOrderAnomaliesAllShops', description: 'Anomalies de commande, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR).', params: {} },
+  { name: 'getPredictionAccuracyAllShops', description: 'Classement des magasins par fiabilité des prévisions IA, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quel magasin a la meilleure précision ?".', params: {} },
+  { name: 'getRevenueTrendAllShops', description: 'Évolution du chiffre d\'affaires de chaque magasin entre deux périodes consécutives, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "le réseau progresse-t-il ?", "classe les magasins par évolution des ventes".', params: { currentDays: 'durée en jours de la période récente à comparer, optionnel (défaut 30)' } },
+  { name: 'getSilentShops', description: 'Magasins du réseau sans aucune vente synchronisée récemment (signal d\'alerte : magasin peut-être hors service ou mal synchronisé), réservé ADMIN/SUPERVISOR — utile pour "y a-t-il des magasins silencieux ?".', params: {} },
   { name: 'getDlvArticles', description: 'Articles ayant actuellement du stock en DLV (Date Limite de Vente courte — un stock basculé manuellement par le personnel sur un EAN distinct pour écoulement à prix réduit, PAS une date de péremption automatique), du magasin entier ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel' } },
 ];
 
@@ -348,6 +385,19 @@ async function detectIntentViaLlm(question) {
     // le chatbot se comporte comme si aucun outil n'avait été identifié (message générique existant).
     return null;
   }
+}
+
+/**
+ * Périmètre "tous magasins" d'un compte (demande du 26/09/2026, pilotage réseau) : tous les magasins
+ * pour ADMIN, seulement les magasins supervisés pour SUPERVISOR — même règle déjà appliquée par
+ * getRevenueAllShops/getArticleStockAllShops, extraite ici pour être réutilisée par les 5 nouveaux
+ * outils réseau sans dupliquer cette résolution à chaque case du switch ci-dessous.
+ */
+async function resolveAllowedShopIds(user) {
+  if (!user) return [];
+  if (user.role === 'ADMIN') return (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId);
+  if (user.role === 'SUPERVISOR') return (await prisma.supervisedShop.findMany({ where: { userId: user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
+  return [];
 }
 
 /**
@@ -512,6 +562,53 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
         return { toolName, toolResult: await tools.getOrders(rposShopId, {}) };
       case 'getOrderAnomalies':
         return { toolName, toolResult: await tools.getOrderAnomalies(rposShopId, {}) };
+      // Outils "tous magasins" (demande du 26/09/2026, pilotage réseau) : réservés ADMIN/SUPERVISOR,
+      // même repli silencieux sur le seul magasin courant que getRevenueAllShops pour tout autre
+      // rôle — une question mal formulée ne doit jamais planter.
+      case 'getStockoutRisksAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getStockoutRisks', toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
+        }
+        return { toolName, toolResult: await tools.getStockoutRisksAllShops(await resolveAllowedShopIds(user), {}) };
+      }
+      case 'getOverstockArticlesAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getOverstockArticles', toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
+        }
+        return { toolName, toolResult: await tools.getOverstockArticlesAllShops(await resolveAllowedShopIds(user), {}) };
+      }
+      case 'getPendingProposalsAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getCurrentProposal', toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
+        }
+        return { toolName, toolResult: await tools.getPendingProposalsAllShops(await resolveAllowedShopIds(user)) };
+      }
+      case 'getOrderAnomaliesAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getOrderAnomalies', toolResult: await tools.getOrderAnomalies(rposShopId, {}) };
+        }
+        return { toolName, toolResult: await tools.getOrderAnomaliesAllShops(await resolveAllowedShopIds(user)) };
+      }
+      case 'getPredictionAccuracyAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getPredictionAccuracy', toolResult: await tools.getPredictionAccuracy(rposShopId, {}) };
+        }
+        return { toolName, toolResult: await tools.getPredictionAccuracyAllShops(await resolveAllowedShopIds(user), {}) };
+      }
+      case 'getRevenueTrendAllShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return { toolName: 'getRevenue', toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
+        }
+        return { toolName, toolResult: await tools.getRevenueTrendAllShops(await resolveAllowedShopIds(user), { currentDays: daysQuery || 30 }) };
+      }
+      case 'getSilentShops': {
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          // Pas d'équivalent single-shop pertinent (un compte à un seul magasin sait déjà s'il est
+          // silencieux) : répond simplement hors périmètre plutôt que de rediriger vers un autre outil.
+          return { toolName, toolResult: { found: false, message: 'Cette vue réseau est réservée aux comptes multi-magasins.' } };
+        }
+        return { toolName, toolResult: await tools.getSilentShops(await resolveAllowedShopIds(user), {}) };
+      }
       case 'getCurrentProposal':
         return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
       case 'getSalesHistory':

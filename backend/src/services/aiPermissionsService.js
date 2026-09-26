@@ -47,15 +47,22 @@ const TOOL_CAPABILITY = {
   getStoreStock: 'stock',
   getStockoutRisks: 'stock',
   getOverstockArticles: 'stock',
+  getStockoutRisksAllShops: 'stock', // même capacité que la version single-shop, restriction ADMIN/SUPERVISOR appliquée dans chatbotService.js
+  getOverstockArticlesAllShops: 'stock',
   getStockMoveHistory: 'stock',
   getDlvArticles: 'stock',
   getArticleDlvStatus: 'stock',
   getSalesHistory: 'sales',
   getParetoArticles: 'sales',
+  getRevenueTrendAllShops: 'revenueShop', // classement/évolution du CA réseau, même capacité que le CA global d'un magasin
   getOrders: 'orders',
   getCurrentProposal: 'orders',
   getOrderAnomalies: 'orders',
+  getPendingProposalsAllShops: 'orders',
+  getOrderAnomaliesAllShops: 'orders',
+  getSilentShops: 'stock', // absence de vente synchronisée = un signal de stock/activité, pas une capacité dédiée
   getPredictionAccuracy: 'accuracy',
+  getPredictionAccuracyAllShops: 'accuracy',
 };
 
 /** getRevenue seul est ambigu : CA global (revenueShop) si aucun filtre, CA d'un périmètre précis (revenueArticle) sinon. */

@@ -904,11 +904,212 @@ async function getOrderAnomalies(rposShopId, { status, limit = 20 } = {}) {
   };
 }
 
+// =============================================
+// OUTILS "TOUS MAGASINS" (demande du 26/09/2026 : pilotage réseau pour un compte multi-magasins,
+// ADMIN/SUPERVISOR) — même principe que getRevenueAllShops/getArticleStockAllShops déjà existants :
+// `allowedShopIds` est résolu par l'appelant (chatbotService.js) selon le périmètre réel du compte
+// (tous les magasins pour ADMIN, seulement les magasins supervisés pour SUPERVISOR), jamais recalculé
+// ici. Zéro appel RPOS : uniquement des données déjà synchronisées en base, pour rester rapide même
+// sur un grand nombre de magasins.
+// =============================================
+
+/**
+ * getStockoutRisksAllShops() — pour chaque magasin du périmètre, les articles en risque de rupture
+ * imminente (repris de getStockoutRisks, mais un compte par magasin plutôt que le détail complet —
+ * une vue réseau doit rester lisible, pas une liste de centaines d'articles empilés).
+ */
+async function getStockoutRisksAllShops(allowedShopIds, { maxDays = 3 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  const results = [];
+  for (const shop of shops) {
+    const proposal = await getLatestProposal(shop.rposShopId);
+    if (!proposal) continue;
+    const count = await prisma.proposalLine.count({
+      where: { proposalId: proposal.id, daysUntilStockout: { not: null, lte: maxDays } },
+    });
+    if (count > 0) results.push({ rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, articlesAtRisk: count });
+  }
+  results.sort((a, b) => b.articlesAtRisk - a.articlesAtRisk);
+
+  if (!results.length) return { found: true, maxDays, shopCount: 0, message: `Aucun magasin n'a d'article en risque de rupture (moins de ${maxDays} jour(s) de stock) actuellement.` };
+  return { found: true, maxDays, shopCount: results.length, totalArticlesAtRisk: results.reduce((s, r) => s + r.articlesAtRisk, 0), shops: results };
+}
+
+/** getOverstockArticlesAllShops() — même principe que getStockoutRisksAllShops, pour le surstock. */
+async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage = 6 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  const results = [];
+  for (const shop of shops) {
+    const proposal = await getLatestProposal(shop.rposShopId);
+    if (!proposal) continue;
+    const lines = await prisma.proposalLine.findMany({
+      where: { proposalId: proposal.id },
+      select: { stockAtGeneration: true, avgWeeklySales: true },
+    });
+    const count = lines.filter((l) => l.avgWeeklySales > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage).length;
+    if (count > 0) results.push({ rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, articlesOverstocked: count });
+  }
+  results.sort((a, b) => b.articlesOverstocked - a.articlesOverstocked);
+
+  if (!results.length) return { found: true, minWeeksOfCoverage, shopCount: 0, message: 'Aucun magasin en surstock notable actuellement.' };
+  return { found: true, minWeeksOfCoverage, shopCount: results.length, totalArticlesOverstocked: results.reduce((s, r) => s + r.articlesOverstocked, 0), shops: results };
+}
+
+/**
+ * getPendingProposalsAllShops() — quels magasins du périmètre ont encore une proposition GENERATED
+ * (pas encore validée) — même donnée que proposalReminderJob.js/endOfDayValidationRecapJob.js,
+ * exposée ici en lecture pour une question directe au chat ("quelles propositions sont encore en
+ * attente ?").
+ */
+async function getPendingProposalsAllShops(allowedShopIds) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const pending = await prisma.proposal.findMany({
+    where: { rposShopId: { in: allowedShopIds }, status: 'GENERATED' },
+    select: { rposShopId: true, rposShopReference: true, rposShopName: true, lines: { select: { id: true } } },
+  });
+  if (!pending.length) return { found: true, shopCount: 0, message: 'Aucune proposition en attente de validation sur votre périmètre actuellement.' };
+
+  const shops = pending
+    .map((p) => ({ rposShopId: p.rposShopId, shopReference: p.rposShopReference, shopName: p.rposShopName, articlesPending: p.lines.length }))
+    .sort((a, b) => b.articlesPending - a.articlesPending);
+
+  return { found: true, shopCount: shops.length, totalArticlesPending: shops.reduce((s, r) => s + r.articlesPending, 0), shops };
+}
+
+/** getOrderAnomaliesAllShops() — anomalies de commande PENDING sur tout le périmètre (même donnée
+ * que getOrderAnomalies, agrégée par magasin plutôt que le détail complet). */
+async function getOrderAnomaliesAllShops(allowedShopIds) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const rows = await listAnomalies({ status: 'PENDING', limit: 500 });
+  const filtered = rows.filter((r) => allowedShopIds.includes(r.rposShopId));
+  if (!filtered.length) return { found: true, shopCount: 0, message: 'Aucune anomalie de commande sur votre périmètre actuellement.' };
+
+  const byShop = new Map();
+  for (const r of filtered) {
+    const key = r.rposShopId;
+    if (!byShop.has(key)) byShop.set(key, { rposShopId: key, shopReference: r.shopReference, shopName: r.shopName, anomalyCount: 0 });
+    byShop.get(key).anomalyCount += 1;
+  }
+  const shops = [...byShop.values()].sort((a, b) => b.anomalyCount - a.anomalyCount);
+
+  return { found: true, shopCount: shops.length, totalAnomalies: filtered.length, shops };
+}
+
+/**
+ * getPredictionAccuracyAllShops() — classement des magasins par fiabilité des prévisions IA
+ * (PredictionOutcome déjà évalué par predictionOutcomeJob.js), pour répondre à "quel magasin a la
+ * meilleure/pire précision ?".
+ */
+async function getPredictionAccuracyAllShops(allowedShopIds, { days = 90 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  const results = [];
+  for (const shop of shops) {
+    const outcomes = await prisma.aIPredictionOutcome.findMany({
+      where: { prediction: { rposShopId: shop.rposShopId }, evaluatedAt: { gte: dateStart } },
+      select: { percentageError: true },
+    });
+    const withPct = outcomes.filter((o) => o.percentageError !== null);
+    if (!withPct.length) continue;
+    const avgAbsError = withPct.reduce((s, o) => s + Math.abs(o.percentageError), 0) / withPct.length;
+    results.push({
+      rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name,
+      accuracyPct: Math.round((1 - avgAbsError) * 1000) / 10,
+      sampleSize: withPct.length,
+    });
+  }
+  if (!results.length) return { found: true, days, shopCount: 0, message: `Aucune prédiction évaluée sur les ${days} derniers jours pour votre périmètre.` };
+  results.sort((a, b) => b.accuracyPct - a.accuracyPct);
+
+  return { found: true, days, shopCount: results.length, shops: results };
+}
+
+/**
+ * getRevenueTrendAllShops() — compare le CA de chaque magasin entre deux périodes consécutives de
+ * même durée ("le réseau fait-il mieux que le mois dernier ?", "classe les magasins par évolution
+ * des ventes"). currentDays définit la période récente ; la période précédente de même durée est
+ * comparée automatiquement.
+ */
+async function getRevenueTrendAllShops(allowedShopIds, { currentDays = 30 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const now = new Date();
+  const currentStart = new Date(now.getTime() - currentDays * 24 * 60 * 60 * 1000);
+  const previousStart = new Date(now.getTime() - 2 * currentDays * 24 * 60 * 60 * 1000);
+
+  const [currentGrouped, previousGrouped] = await Promise.all([
+    prisma.salesLine.groupBy({ by: ['rposShopId'], where: { rposShopId: { in: allowedShopIds }, date: { gte: currentStart, lte: now } }, _sum: { revenueExclTax: true } }),
+    prisma.salesLine.groupBy({ by: ['rposShopId'], where: { rposShopId: { in: allowedShopIds }, date: { gte: previousStart, lt: currentStart } }, _sum: { revenueExclTax: true } }),
+  ]);
+  const currentByShop = new Map(currentGrouped.map((g) => [g.rposShopId, g._sum.revenueExclTax || 0]));
+  const previousByShop = new Map(previousGrouped.map((g) => [g.rposShopId, g._sum.revenueExclTax || 0]));
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  const results = shops
+    .map((shop) => {
+      const current = Math.round(currentByShop.get(shop.rposShopId) || 0);
+      const previous = Math.round(previousByShop.get(shop.rposShopId) || 0);
+      const evolutionPct = previous > 0 ? Math.round(((current - previous) / previous) * 1000) / 10 : null;
+      return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, currentRevenueCfa: current, previousRevenueCfa: previous, evolutionPct };
+    })
+    .filter((r) => r.currentRevenueCfa > 0 || r.previousRevenueCfa > 0)
+    .sort((a, b) => (b.evolutionPct ?? -Infinity) - (a.evolutionPct ?? -Infinity));
+
+  if (!results.length) return { found: true, shopCount: 0, message: 'Aucune vente trouvée sur votre périmètre pour cette comparaison.' };
+  return {
+    found: true, currentDays, shopCount: results.length,
+    totalCurrentRevenueCfa: results.reduce((s, r) => s + r.currentRevenueCfa, 0),
+    totalPreviousRevenueCfa: results.reduce((s, r) => s + r.previousRevenueCfa, 0),
+    shops: results,
+  };
+}
+
+/**
+ * getSilentShops() — magasins du périmètre dont AUCUNE vente n'a été synchronisée depuis plus de
+ * `staleDays` jours (cas réel trouvé en session : magasin 050, dernière vente datant d'août 2024) —
+ * un vrai signal d'alerte pour un dirigeant, jamais visible autrement qu'en creusant magasin par
+ * magasin. Zéro dépendance RPOS (pure lecture base).
+ */
+async function getSilentShops(allowedShopIds, { staleDays = 7 } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+
+  const results = [];
+  for (const shop of shops) {
+    const lastSale = await prisma.salesLine.findFirst({ where: { rposShopId: shop.rposShopId }, orderBy: { date: 'desc' }, select: { date: true } });
+    if (!lastSale || lastSale.date < staleThreshold) {
+      const daysSinceLastSale = lastSale ? Math.floor((Date.now() - lastSale.date.getTime()) / (24 * 60 * 60 * 1000)) : null;
+      results.push({ rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, lastSaleDate: lastSale?.date || null, daysSinceLastSale });
+    }
+  }
+  results.sort((a, b) => (b.daysSinceLastSale ?? Infinity) - (a.daysSinceLastSale ?? Infinity));
+
+  if (!results.length) return { found: true, staleDays, shopCount: 0, message: `Tous les magasins de votre périmètre ont des ventes synchronisées récemment (moins de ${staleDays} jour(s)).` };
+  return { found: true, staleDays, shopCount: results.length, shops: results };
+}
+
 module.exports = {
   getStoreStock,
   getArticleStock,
   getArticleStockAllShops,
   getOrderAnomalies,
+  getStockoutRisksAllShops,
+  getOverstockArticlesAllShops,
+  getPendingProposalsAllShops,
+  getOrderAnomaliesAllShops,
+  getPredictionAccuracyAllShops,
+  getRevenueTrendAllShops,
+  getSilentShops,
   getArticleDetails,
   getArticlesByGisement,
   getTopGisements,
