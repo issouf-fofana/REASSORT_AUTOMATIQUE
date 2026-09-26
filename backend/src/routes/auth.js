@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 const prisma = require('../utils/prisma');
 const { requireAuth } = require('../middleware/auth');
 const { getJwtConfig } = require('../services/jwtConfigService');
-const { verifyLdapCredentials, LDAP_DOMAIN_FQDN } = require('../services/ldapService');
+const { verifyLdapCredentials, getLdapUserDetails, LDAP_DOMAIN_FQDN } = require('../services/ldapService');
 const crypto = require('crypto');
 
 
@@ -79,22 +79,47 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (!ldapOk) {
         return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
       }
-      // Premier succès LDAP pour cet utilisateur : le mot de passe AD est valide, mais le compte est
-      // créé INACTIF (pas de rôle/magasin attribué) — un ADMIN doit explicitement le configurer
-      // depuis Utilisateurs (recherche annuaire ou activation directe) avant que la connexion
-      // n'aboutisse (décision du 17/09/2026 : accès refusé par défaut, jamais un rôle par défaut
-      // qui donnerait un accès même limité sans validation humaine).
-      user = await prisma.user.create({
-        data: {
-          email,
-          password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
-          name: ldapUsername,
-          isActive: false,
-          ldapManaged: true,
-        },
-      });
-      console.log(`[auth] Compte LDAP créé en attente de validation : ${email}`);
-      return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
+
+      // Récupère le VRAI email/nom affiché depuis l'annuaire (jamais devinés depuis ce que
+      // l'utilisateur a tapé pour se connecter, bug trouvé le 26/09/2026 : un login avec
+      // l'identifiant court "ifofana" créait un compte "ifofana@prosuma.ci" / nom "ifofana",
+      // DIFFÉRENT du compte "Issouf.Fofana@prosuma.ci" créé par un login avec l'email complet —
+      // même personne, deux comptes, chacun recevant sa propre alerte email). Silencieux si la
+      // recherche AD échoue (compte de service non configuré, AD temporairement injoignable) :
+      // retombe sur l'email/nom tapés, jamais bloquant pour la connexion elle-même.
+      const ldapDetails = await getLdapUserDetails(ldapUsername);
+      const realEmail = ldapDetails?.email || email;
+      const realName = ldapDetails?.displayName || ldapUsername;
+
+      // Un compte existe déjà sous le VRAI email (créé par un login précédent avec l'email complet,
+      // ou préconfiguré depuis Utilisateurs > recherche annuaire) : on le réutilise au lieu d'en
+      // créer un second — c'est la correction du bug de doublon lui-même.
+      const existingByRealEmail = realEmail !== email ? await prisma.user.findUnique({ where: { email: realEmail } }) : null;
+      if (existingByRealEmail) {
+        if (!existingByRealEmail.isActive) {
+          return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
+        }
+        user = existingByRealEmail;
+        // Poursuit directement vers l'émission du token (même chemin que le cas "user.ldapManaged"
+        // ci-dessus) — pas de re-création, pas de nouveau compte inactif à faire valider.
+      } else {
+        // Premier succès LDAP pour cet utilisateur : le mot de passe AD est valide, mais le compte
+        // est créé INACTIF (pas de rôle/magasin attribué) — un ADMIN doit explicitement le
+        // configurer depuis Utilisateurs (recherche annuaire ou activation directe) avant que la
+        // connexion n'aboutisse (décision du 17/09/2026 : accès refusé par défaut, jamais un rôle
+        // par défaut qui donnerait un accès même limité sans validation humaine).
+        user = await prisma.user.create({
+          data: {
+            email: realEmail,
+            password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
+            name: realName,
+            isActive: false,
+            ldapManaged: true,
+          },
+        });
+        console.log(`[auth] Compte LDAP créé en attente de validation : ${realEmail}`);
+        return res.status(403).json({ success: false, message: PENDING_ACCESS_MESSAGE });
+      }
     } else {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }

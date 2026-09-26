@@ -116,4 +116,51 @@ async function searchLdapUsers(query) {
   }
 }
 
-module.exports = { verifyLdapCredentials, searchLdapUsers, LDAP_DOMAIN_FQDN };
+/**
+ * Détails exacts (mail, displayName) d'UN compte AD précis par son sAMAccountName — utilisée après
+ * un bind réussi (verifyLdapCredentials) pour créer/rattacher le compte local avec le VRAI email et
+ * nom affiché de l'annuaire, jamais des valeurs devinées depuis ce que l'utilisateur a tapé pour se
+ * connecter (bug trouvé le 26/09/2026 : un login avec l'identifiant court "ifofana" créait un compte
+ * "ifofana@prosuma.ci" / nom "ifofana", DIFFÉRENT du compte "Issouf.Fofana@prosuma.ci" / "Issouf
+ * Fofana" créé par un login avec l'email complet — même personne réelle, deux comptes en base,
+ * jamais réconciliés, recevant chacun sa propre alerte email).
+ * Retourne null si l'utilisateur n'existe pas dans l'annuaire ou si la recherche n'est pas
+ * configurée/échoue — l'appelant retombe alors sur l'ancien comportement (email/nom devinés), jamais
+ * bloquant.
+ */
+async function getLdapUserDetails(username) {
+  if (!LDAP_BIND_USER || !LDAP_BIND_PASSWORD) return null;
+
+  const client = new Client({ url: LDAP_URL, connectTimeout: LDAP_BIND_TIMEOUT_MS });
+  try {
+    await client.bind(`${LDAP_BIND_USER}@${LDAP_DOMAIN_FQDN}`, LDAP_BIND_PASSWORD);
+
+    const escaped = username.replace(/[\\*()\0]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+    const { searchEntries } = await client.search(LDAP_BASE_DN, {
+      scope: 'sub',
+      filter: `(&(objectClass=user)(objectCategory=person)(sAMAccountName=${escaped}))`,
+      attributes: ['sAMAccountName', 'displayName', 'mail'],
+      sizeLimit: 1,
+    });
+
+    const entry = searchEntries[0];
+    if (!entry) return null;
+
+    return {
+      username: String(entry.sAMAccountName || username),
+      displayName: String(entry.displayName || entry.cn || username),
+      email: String(entry.mail || '') || null, // jamais fabriqué ici : null si l'attribut mail est vide dans AD
+    };
+  } catch (err) {
+    console.error(`[ldapService] Lecture des détails AD échouée pour ${username}:`, err.message);
+    return null;
+  } finally {
+    try {
+      await client.unbind();
+    } catch (err) {
+      // Rien à faire si le unbind échoue après une recherche déjà terminée ou en erreur.
+    }
+  }
+}
+
+module.exports = { verifyLdapCredentials, searchLdapUsers, getLdapUserDetails, LDAP_DOMAIN_FQDN };
