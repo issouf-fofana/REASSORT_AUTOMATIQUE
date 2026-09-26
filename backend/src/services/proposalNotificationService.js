@@ -213,9 +213,14 @@ async function notifyAdminsOfNightlySummary(summaries) {
  * destinataire (demande du 25/09/2026), avec son vrai nom en salutation.
  * `overrideRecipientEmails` (optionnel) : liste d'emails choisie à la main (popup de confirmation
  * avant l'envoi manuel, demande du 25/09/2026 — "les enlever ou pas") — filtre la liste calculée
- * automatiquement, jamais utilisé par les jobs planifiés eux-mêmes. */
-async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipientEmails) {
-  let users = await getShopRecipientUsers(shop.rposShopId);
+ * automatiquement.
+ * `includeAdmins` (optionnel, défaut true) : mis à false uniquement par le job planifié de relance
+ * (demande du 26/09/2026, même raison que notifyShopUsersOfNewProposal — "à la fin de l'opération je
+ * dois recevoir un mail pas plusieurs") : l'admin reçoit désormais UN récap en fin de job plutôt
+ * qu'une copie de chaque relance individuelle. L'envoi manuel depuis la page Proposition de commande
+ * garde l'admin en copie par défaut (volume faible, un seul magasin à la fois). */
+async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipientEmails, { includeAdmins = true } = {}) {
+  let users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins });
   if (overrideRecipientEmails) users = users.filter((u) => overrideRecipientEmails.includes(u.email));
   if (!users.length) return;
 
@@ -233,6 +238,54 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
         <p>Merci de vous connecter dès que possible pour vérifier et valider cette commande.</p>
       `,
       { severity: 'danger', cta: { label: 'Valider maintenant', url: link } },
+    ),
+  }));
+}
+
+/**
+ * Récap unique envoyé aux ADMIN à la fin du job de relance (demande du 26/09/2026, même principe
+ * que notifyAdminsOfNightlySummary) — remplace la copie individuelle de chaque relance par magasin.
+ * `summaries` : tableau `{ shop: {reference, name}, articlesPending }` construit par le job.
+ */
+async function notifyAdminsOfReminderSummary(summaries) {
+  if (!summaries.length) return;
+
+  const admins = await getAdminUsers();
+  if (!admins.length) return;
+
+  const totalArticles = summaries.reduce((sum, s) => sum + s.articlesPending, 0);
+
+  const rows = summaries
+    .map((s) => `
+      <tr>
+        <td>${s.shop.reference} — ${s.shop.name}</td>
+        <td style="text-align:right;">${s.articlesPending}</td>
+      </tr>
+    `)
+    .join('');
+
+  const tableHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:12px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ececec;">
+          <th style="text-align:left;padding:6px 8px;">Magasin</th>
+          <th style="text-align:right;padding:6px 8px;">Articles en attente</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  await sendMailToEachRecipient(admins, async (user) => ({
+    subject: `⚠️ Réassort Automatique — récap relance (${summaries.length} magasin(s) non validé(s))`,
+    htmlBody: renderMailTemplate(
+      '⚠️ Récap des propositions non validées',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p><strong>${summaries.length}</strong> magasin(s) ont encore une proposition non validée, pour un total de <strong>${totalArticles}</strong> article(s) en attente. L'entrepôt ne reçoit plus les commandes après <strong>13h</strong>.</p>
+        ${tableHtml}
+      `,
+      { severity: 'danger' },
     ),
   }));
 }
@@ -325,5 +378,6 @@ module.exports = {
   notifyShopUsersOfNewProposal,
   notifyAdminsOfNightlySummary,
   notifyShopUsersOfPendingProposal,
+  notifyAdminsOfReminderSummary,
   notifyShopUsersOfOrderCreated,
 };

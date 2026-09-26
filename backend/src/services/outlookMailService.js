@@ -8,6 +8,8 @@
  * échangé ici à chaque envoi contre un access token de courte durée — jamais mis en cache entre deux
  * envois pour rester simple (un envoi par magasin la nuit, pas un volume qui justifierait un cache).
  */
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
 const systemConfig = require('./systemConfigService');
@@ -15,6 +17,31 @@ const systemConfig = require('./systemConfigService');
 const TOKEN_TIMEOUT_MS = 15000;
 const SEND_TIMEOUT_MS = 20000;
 const LOGO_CONTENT_ID = 'reassort-mail-logo';
+
+// Logo d'en-tête Réassort Automatique (demande du 26/09/2026 : "le logo dans le mail il n'est pas
+// bien affiché") — joint en pièce jointe INLINE (Content-ID) à CHAQUE email, jamais via une URL
+// publique (frontend/assets/images/logo-reassort.png) : de nombreux clients mail (Outlook en tête,
+// vu dans une capture réelle) bloquent par défaut le chargement d'images distantes, ce qui rendait
+// le logo invisible. Même principe déjà appliqué au logo de signature custom (cf. buildSignatureFooter
+// ci-dessous), mais celui-ci est TOUJOURS présent (pas configurable), donc lu une seule fois au
+// démarrage plutôt qu'à chaque envoi — le fichier ne change jamais en cours de vie du conteneur.
+// Copié dans public-fallback/assets/images/ (backend/public-fallback/) plutôt que référencé depuis
+// frontend/assets/ : les images Docker backend et frontend sont deux builds SÉPARÉS, le dossier
+// frontend/ n'existe pas dans le conteneur backend — un chemin cross-projet aurait échoué en
+// production tout en fonctionnant par erreur en local (mêmes fichiers sur disque hôte).
+const HEADER_LOGO_CONTENT_ID = 'reassort-mail-header-logo';
+const HEADER_LOGO_PATH = path.join(__dirname, '../../public-fallback/assets/images/logo-reassort.png');
+let headerLogoBase64Cache = null;
+function getHeaderLogoBase64() {
+  if (headerLogoBase64Cache !== null) return headerLogoBase64Cache; // '' si lecture déjà tentée et échouée
+  try {
+    headerLogoBase64Cache = fs.readFileSync(HEADER_LOGO_PATH).toString('base64');
+  } catch (err) {
+    console.error('[outlookMailService] Logo d\'en-tête introuvable, les emails partiront sans logo:', err.message);
+    headerLogoBase64Cache = '';
+  }
+  return headerLogoBase64Cache;
+}
 
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
@@ -121,6 +148,21 @@ async function sendMail({ to, subject, htmlBody, attachments = [] }) {
   const { footerHtml, logoAttachment } = await buildSignatureFooter();
   const fullHtmlBody = htmlBody + footerHtml;
 
+  // Logo d'en-tête (cid:reassort-mail-header-logo, référencé par mailTemplateService.js) : joint à
+  // CHAQUE email, indépendamment de la signature custom (logoAttachment ci-dessus, configurable et
+  // optionnelle) — les deux logos peuvent coexister (en-tête de marque + logo de signature perso).
+  const headerLogoBase64 = getHeaderLogoBase64();
+  const headerLogoAttachment = headerLogoBase64
+    ? {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'logo-reassort.png',
+        contentType: 'image/png',
+        contentBytes: headerLogoBase64,
+        contentId: HEADER_LOGO_CONTENT_ID,
+        isInline: true,
+      }
+    : null;
+
   const graphAttachments = [
     ...attachments.map((a) => ({
       '@odata.type': '#microsoft.graph.fileAttachment',
@@ -129,6 +171,7 @@ async function sendMail({ to, subject, htmlBody, attachments = [] }) {
       contentBytes: a.contentBytes.toString('base64'),
     })),
     ...(logoAttachment ? [logoAttachment] : []),
+    ...(headerLogoAttachment ? [headerLogoAttachment] : []),
   ];
 
   const res = await fetchWithTimeout(
@@ -172,4 +215,4 @@ async function sendTestMail() {
   });
 }
 
-module.exports = { sendMail, sendTestMail, getActiveAccount };
+module.exports = { sendMail, sendTestMail, getActiveAccount, HEADER_LOGO_CONTENT_ID };
