@@ -27,7 +27,7 @@
     .reassort-toast-close { background: none; border: none; color: #9ca3af; cursor: pointer; margin-left: auto; padding: 0; font-size: 1rem; line-height: 1; flex-shrink: 0; }
     .reassort-toast-close:hover { color: #ffffff; }
 
-    #reassort-confirm-overlay {
+    .reassort-confirm-overlay-instance {
       position: fixed; inset: 0; background-color: rgba(0,0,0,.5); z-index: 2100;
       display: flex; align-items: center; justify-content: center; padding: 1rem;
       animation: reassort-confirm-fade .15s ease;

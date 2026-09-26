@@ -130,6 +130,23 @@ a:not(.sidebar *),
      background-color: #000000 !important;
 }
 
+/* Tronque proprement les libellés trop longs (ex: "Proposition de commande", "Ventes
+   synchronisées") au lieu de les laisser déborder la largeur fixe de la sidebar et forcer un
+   scroll horizontal indésirable (demande du 26/09/2026 : "il ya des texte qui son trop long ca
+   fait que le sidebar scroll"). Le texte complet reste consultable au survol via title (posé côté
+   HTML par layout.js sur chaque lien). */
+.sidebar .nav-link {
+     overflow: hidden;
+}
+.sidebar .sidebar-text {
+     overflow: hidden;
+     text-overflow: ellipsis;
+     white-space: nowrap;
+     display: inline-block;
+     max-width: 100%;
+     vertical-align: middle;
+}
+
 .sidebar .nav-item.active > .nav-link,
 .sidebar .nav-item .nav-link:hover {
      background-color: #262626 !important;

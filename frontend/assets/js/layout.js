@@ -107,6 +107,12 @@
   document.querySelectorAll('[data-nav-item]').forEach(function (li) {
     if (stripHtmlExt(li.dataset.navItem) === currentPage) li.classList.add('active');
   });
+  // Un `title` sur chaque libellé de sidebar (demande du 26/09/2026, suite à la troncature CSS des
+  // libellés trop longs type "Proposition de commande") : permet de lire le texte complet au survol
+  // plutôt que de le perdre silencieusement une fois coupé visuellement.
+  document.querySelectorAll('.sidebar .sidebar-text').forEach(function (span) {
+    if (!span.title) span.title = span.textContent.trim();
+  });
   // Sous-liens à onglets (sidebar plate, sans groupe repliable) : actif suivi via le hash
   // (#tab-xxx), en live lors des clics sidebar sans rechargement. Généralisé le 22/09/2026
   // (initialement codé en dur pour /settings seul) à toute page à onglets via ce hash — chaque
