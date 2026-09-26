@@ -678,7 +678,11 @@ router.post('/proposal/send-alert', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun destinataire sélectionné pour recevoir l\'alerte.' });
     }
 
-    await notifyShopUsersOfPendingProposal(shop, proposal, recipients);
+    // includeSupplierWarning: false (bug trouvé le 26/09/2026) : l'envoi manuel ne doit jamais
+    // recalculer le contrôle fournisseur (un appel RPOS par article) — l'utilisateur qui clique ce
+    // bouton a déjà ce résumé sous les yeux dans le bandeau de la page, recalculer bloquait/rendait
+    // l'envoi extrêmement lent sur une grosse proposition (500+ articles).
+    await notifyShopUsersOfPendingProposal(shop, proposal, recipients, { includeSupplierWarning: false });
     res.json({ success: true, message: `Alerte envoyée à ${recipients.length} destinataire(s).` });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

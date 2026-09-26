@@ -223,8 +223,16 @@ async function notifyAdminsOfNightlySummary(summaries) {
  * (demande du 26/09/2026, même raison que notifyShopUsersOfNewProposal — "à la fin de l'opération je
  * dois recevoir un mail pas plusieurs") : l'admin reçoit désormais UN récap en fin de job plutôt
  * qu'une copie de chaque relance individuelle. L'envoi manuel depuis la page Proposition de commande
- * garde l'admin en copie par défaut (volume faible, un seul magasin à la fois). */
-async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipientEmails, { includeAdmins = true } = {}) {
+ * garde l'admin en copie par défaut (volume faible, un seul magasin à la fois).
+ * `includeSupplierWarning` (optionnel, défaut true) : mis à false uniquement par l'envoi MANUEL
+ * (bouton "Envoyer par email") — bug trouvé le 26/09/2026 : buildSupplierWarningHtml fait un appel
+ * RPOS par article (checkSupplierEligibility), rendant l'envoi manuel extrêmement lent voire bloqué
+ * sur une grosse proposition (500+ articles, ~100 vagues d'appels séquentiels à 5 en concurrence).
+ * L'utilisateur qui clique ce bouton a déjà ce même résumé sous les yeux dans le bandeau ⚠️ de la
+ * page (calculé une seule fois au chargement) — inutile de le recalculer à chaque clic d'envoi. Le
+ * job planifié de relance (une exécution par jour, jamais déclenchée par un clic utilisateur en
+ * attente) garde ce contrôle. */
+async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipientEmails, { includeAdmins = true, includeSupplierWarning = true } = {}) {
   let users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins });
   if (overrideRecipientEmails) users = users.filter((u) => overrideRecipientEmails.includes(u.email));
   if (!users.length) return;
@@ -235,7 +243,9 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
   // l'admin". Ajout de l'alerte fournisseur (déjà présente sur le mail de nouvelle proposition,
   // mais oubliée ici) : une personne qui reçoit une relance doit savoir immédiatement si des
   // articles risquent de manquer à l'envoi réel, pas seulement "350 articles en attente".
-  const { html: supplierWarningHtml } = await buildSupplierWarningHtml(shop, proposal.lines, link);
+  const supplierWarningHtml = includeSupplierWarning
+    ? (await buildSupplierWarningHtml(shop, proposal.lines, link)).html
+    : '';
 
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `⚠️ Rappel urgent — proposition non validée pour ${shop.reference} (${shop.name})`,
