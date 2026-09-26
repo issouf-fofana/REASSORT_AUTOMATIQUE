@@ -80,11 +80,18 @@ async function sendMailToEachRecipient(users, buildMailForUser) {
  * d'avoir un sens pour un destinataire externe — et seulement si aucune n'en sort, on retombe sur la
  * première quand même (mieux qu'un lien totalement absent).
  */
+// `src=email` (demande du 26/09/2026 : "si admin est connecté il va sur une commande mais dans un
+// autre mag") : marque explicitement ce lien comme venant d'un clic dans un email — le frontend
+// (PurchaseOrder.tsx) doit alors laisser CE magasin gagner sur le magasin actif mémorisé de la
+// topbar, qui peut dater d'une session précédente sans rapport. Sans ce marqueur, un ADMIN qui
+// consultait un autre magasin juste avant de cliquer sur le lien atterrissait sur CE magasin actif
+// au lieu de celui visé par l'email — la protection ajoutée le 24/09/2026 contre une URL périmée
+// restée ouverte dans un onglet s'appliquait à tort à un lien fraîchement cliqué depuis un email.
 function purchaseOrderLink(shop) {
   const origins = (process.env.FRONTEND_URL || 'https://reassort.local').split(',').map((o) => o.trim()).filter(Boolean);
   const isLocalhost = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(o);
   const configured = origins.find((o) => !isLocalhost(o)) || origins[0] || 'https://reassort.local';
-  return `${configured}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}`;
+  return `${configured}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}&src=email`;
 }
 
 /** Nombre d'articles non rattachés au fournisseur central RPOS, et résumé HTML correspondant (jamais

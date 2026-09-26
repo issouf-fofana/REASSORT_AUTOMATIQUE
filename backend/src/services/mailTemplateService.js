@@ -16,6 +16,27 @@ const SEVERITY_ACCENT = {
   danger: '#c0392b',
 };
 
+/** Même logique que purchaseOrderLink (proposalNotificationService.js) : FRONTEND_URL peut contenir
+ * plusieurs origines séparées par des virgules, on retient la première qui n'est pas localhost —
+ * seule capable d'avoir un sens pour un destinataire externe qui charge cette image depuis son
+ * client mail. Dupliqué ici plutôt que partagé pour éviter une dépendance circulaire entre les deux
+ * services (proposalNotificationService importe déjà mailTemplateService). */
+function publicOrigin() {
+  const origins = (process.env.FRONTEND_URL || 'https://reassort.local').split(',').map((o) => o.trim()).filter(Boolean);
+  const isLocalhost = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(o);
+  return origins.find((o) => !isLocalhost(o)) || origins[0] || 'https://reassort.local';
+}
+
+// Logo Réassort Automatique (demande du 26/09/2026 : "tu dois mettre le logo de reassort auto au
+// lieu du logo eclair") — servi statiquement par nginx, même fichier que le favicon des pages HTML
+// (frontend/assets/images/logo-reassort.png). Une image externe référencée par URL absolue, jamais
+// en pièce jointe Content-ID (contrairement au logo de signature d'outlookMailService.js) : ce
+// service ne gère pas les pièces jointes, une simple balise <img> suffit et reste plus simple à
+// propager sans faire dépendre ce module du système d'envoi.
+function logoUrl() {
+  return `${publicOrigin()}/assets/images/logo-reassort.png`;
+}
+
 /**
  * @param {string} title - titre affiché en gras en haut de la carte (ex: "Bonjour Jean, nouvelle proposition.")
  * @param {string} bodyHtml - contenu HTML déjà construit (paragraphes, listes, tableaux...) — jamais
@@ -57,13 +78,7 @@ function renderMailTemplate(title, bodyHtml, { severity = 'info', cta } = {}) {
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;max-width:600px;width:100%;">
             <tr>
               <td style="padding:40px 40px 24px;">
-                <table role="presentation" cellpadding="0" cellspacing="0">
-                  <tr>
-                    <td style="width:56px;height:56px;background-color:#17181a;text-align:center;vertical-align:middle;font-size:24px;color:#ffffff;">
-                      ⚡
-                    </td>
-                  </tr>
-                </table>
+                <img src="${logoUrl()}" alt="Réassort Automatique" width="56" height="56" style="display:block;width:56px;height:56px;">
               </td>
             </tr>
             <tr>

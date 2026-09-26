@@ -309,16 +309,33 @@ export function PurchaseOrder() {
       window.reassortMakeShopPickerSearchable(select);
     }
 
-    // Le magasin ACTIF DE LA TOPBAR gagne toujours sur le `?shop=` de l'URL : un lien profond
+    // Le magasin ACTIF DE LA TOPBAR gagne en général sur le `?shop=` de l'URL : un lien profond
     // partagé, un onglet resté ouvert ou un retour arrière du navigateur peut porter un `shop=`
     // périmé, et le faire quand même gagner sur le sélecteur global visible à l'écran a trompé
     // l'utilisateur le 24/09/2026 (topbar affichait 050, la page agissait sur 110 depuis une URL
-    // restée sur ce magasin) — risque réel d'agir sur le mauvais magasin. Le `?shop=` de l'URL ne
-    // sert donc plus qu'en tout dernier recours (aucun magasin actif connu du tout).
+    // restée sur ce magasin) — risque réel d'agir sur le mauvais magasin.
+    // EXCEPTION explicite (`src=email`, demande du 26/09/2026 : "si admin est connecté il va sur
+    // une commande mais dans un autre mag") : un lien fraîchement cliqué depuis un email (jamais un
+    // onglet resté ouvert ni un retour arrière) porte ce marqueur — il DOIT alors l'emporter sur le
+    // magasin actif mémorisé, qui peut dater d'une consultation précédente sans rapport. Sans cette
+    // exception, un ADMIN qui consultait un autre magasin juste avant de cliquer sur le lien du mail
+    // atterrissait sur CE magasin actif au lieu de celui visé par l'alerte.
     const urlShopId = urlParams.get('shop');
+    const fromEmailLink = urlParams.get('src') === 'email';
     const activeShop = window.reassortGetActiveShop ? window.reassortGetActiveShop() : null;
     const activeMatch = activeShop ? select.querySelector(`option[value="${activeShop.id}"]`) : null;
-    if (activeShop && activeMatch) {
+    if (fromEmailLink && urlShopId && select.querySelector(`option[value="${urlShopId}"]`)) {
+      if (select.value !== urlShopId) select.value = urlShopId;
+      setSelectedShopId(select.value);
+      // Aligne aussi le sélecteur global de la topbar (partagé entre toutes les pages) sur ce
+      // magasin — sans ça, un simple `select.value = ...` ne déclenche pas l'event `change` qui
+      // appelle normalement reassortSetActiveShop (cf. shop-picker.js), et la topbar resterait
+      // visuellement désynchronisée du contenu réel de la page.
+      const emailShop = shops.find((s) => s.id === urlShopId);
+      if (emailShop && window.reassortSetActiveShop) {
+        window.reassortSetActiveShop({ id: emailShop.id, reference: emailShop.reference, name: emailShop.name, posLabel: emailShop.posLabel });
+      }
+    } else if (activeShop && activeMatch) {
       if (select.value !== activeShop.id) select.value = activeShop.id;
       setSelectedShopId(select.value);
     } else if (urlShopId && select.querySelector(`option[value="${urlShopId}"]`)) {

@@ -15,6 +15,7 @@ declare global {
     reassortConfirm: (message: string, options?: { danger?: boolean; okLabel?: string; cancelLabel?: string }) => Promise<boolean>;
     reassortToast: (message: string, type?: 'success' | 'error' | 'info') => void;
     reassortGetActiveShop?: () => { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null;
+    reassortSetActiveShop?: (shop: { id: string; reference: string; name: string; posLabel?: string }) => void;
     reassortOnActiveShopChange?: (cb: (shop: unknown) => void) => void;
     // Panneau partagé "Recommandation IA" (assets/js/ai-recommendation-panel.js) : self-contained,
     // jamais réécrit en React ici (voir react-app-ai-predictions, qui l'utilise aussi).
