@@ -15,11 +15,17 @@ export interface NotchTabBarProps {
   tabs: readonly NotchTab[];
   activeId: string;
   onActiveChange: (id: string) => void;
+  // 'sm' : demande du 26/09/2026 (Guide du projet, libellés bien plus longs que ceux de Paramètres —
+  // "Récupération des données (RPOS)" vs "Réassort" — rendant la barre par défaut visuellement trop
+  // grosse). Jamais le comportement par défaut de Paramètres, pour rester identique là où ce
+  // composant a été validé le 25/09/2026.
+  size?: 'md' | 'sm';
 }
 
-export function NotchTabBar({ tabs, activeId, onActiveChange }: NotchTabBarProps) {
+export function NotchTabBar({ tabs, activeId, onActiveChange, size = 'md' }: NotchTabBarProps) {
+  const isSmall = size === 'sm';
   return (
-    <div className="reassort-tabs-root relative flex flex-wrap items-center gap-1 bg-zinc-100 rounded-full p-1.5 w-fit">
+    <div className={cn('reassort-tabs-root relative flex flex-wrap items-center gap-1 bg-zinc-100 rounded-full w-fit', isSmall ? 'p-1' : 'p-1.5')}>
       {tabs.map((tab) => {
         const isActive = activeId === tab.id;
         return (
@@ -30,7 +36,8 @@ export function NotchTabBar({ tabs, activeId, onActiveChange }: NotchTabBarProps
             aria-selected={isActive}
             onClick={() => onActiveChange(tab.id)}
             className={cn(
-              'relative z-10 flex h-8 cursor-pointer items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors outline-none select-none',
+              'relative z-10 flex cursor-pointer items-center gap-2 rounded-full font-medium transition-colors outline-none select-none',
+              isSmall ? 'h-7 px-3 text-xs' : 'h-8 px-4 text-sm',
               isActive ? 'text-zinc-50' : 'text-zinc-500 hover:text-zinc-700',
             )}
           >

@@ -227,6 +227,7 @@ export function ProjectGuide() {
               tabs={groups.map((group, gi) => ({ id: groupTabId(gi), label: group.label }))}
               activeId={activeTab}
               onActiveChange={(id) => selectTab(id)}
+              size="sm"
             />
           </div>
 
