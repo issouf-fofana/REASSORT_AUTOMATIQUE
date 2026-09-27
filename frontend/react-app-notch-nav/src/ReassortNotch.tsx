@@ -50,12 +50,13 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // sous-infos en bas de chaque"). Colonnes plus étroites qu'avant (160px) pour que 7 tiennent
       // sur un écran classique ; overflow-x-auto en secours sur un écran vraiment trop étroit plutôt
       // que de forcer un retour à la ligne qui romprait la mise en page demandée.
-      // mt-0 : collé directement sous l'île, jamais d'écart visible entre les deux (demande explicite
-      // du 26/09/2026, "fais en sorte que ça soit collé à la barre").
+      // -mt-px : léger chevauchement d'1px avec le bas de l'île plutôt qu'un simple mt-0, pour
+      // absorber tout écart de sous-pixel encore visible (signalé à nouveau le 26/09/2026 malgré
+      // mt-0 déjà en place) — jamais un espace, même infime, entre l'île et le mega-menu.
       // Coins carrés (pas de data-radius/rounded-*) : demande du 26/09/2026, "il faut faire le modale
       // qui s'affiche là en bordure carrée" — seul le mega-menu revient à la règle du site "aucun coin
       // arrondi", l'île compacte au-dessus garde volontairement ses coins arrondis/ailes incurvées.
-      className="absolute left-1/2 top-full z-50 mt-0 flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
+      className="absolute left-1/2 top-full z-50 -mt-px flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
