@@ -235,9 +235,17 @@ export function ReassortNotch() {
             fonctionner sans modification (contrat DOM inchangé, juste son enrobage visuel qui
             change). */}
         <div className="flex shrink-0 items-center gap-3">
-          <div className="hidden flex-col items-end leading-tight md:flex max-w-[160px]">
-            <div id="page-shop-context" className="hidden text-[11px] text-zinc-400 truncate max-w-[160px]" />
-            <button type="button" id="global-shop-selector-btn" className="hidden text-xs font-medium text-zinc-300 hover:text-zinc-50 truncate max-w-[160px]" />
+          {/* global-shop-selector.js pilote la visibilité réelle du bouton via btn.style.display =
+              '' / 'none' (jamais une classe) — un style inline vide ne peut PAS l'emporter sur une
+              classe Tailwind .hidden{display:none} qui n'a pas de !important : le style inline est
+              alors retiré sans valeur de repli, laissant la classe gagner. Bug trouvé le 27/09/2026 :
+              le sélecteur de magasin restait invisible en permanence dans la barre compacte, alors
+              qu'il fonctionne normalement dans l'ancienne topbar Volt (où ce même bouton n'a jamais
+              de classe .hidden au départ). Remplacé par un style inline display:none par défaut,
+              jamais une classe, pour que le script garde le contrôle total de la visibilité. */}
+          <div className="flex flex-col items-end leading-tight max-w-[160px]">
+            <div id="page-shop-context" style={{ display: 'none' }} className="text-[11px] text-zinc-400 truncate max-w-[160px]" />
+            <button type="button" id="global-shop-selector-btn" style={{ display: 'none' }} className="text-xs font-medium text-zinc-300 hover:text-zinc-50 truncate max-w-[160px]" />
           </div>
 
           <div className="relative">
