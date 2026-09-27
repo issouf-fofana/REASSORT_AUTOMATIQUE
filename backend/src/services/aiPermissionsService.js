@@ -148,20 +148,24 @@ const CAPABILITY_LABELS = {
 // ADMIN/SUPERVISOR ci-dessous — un compte à un seul magasin fixe ne doit jamais voir ces exemples,
 // ils échoueraient silencieusement en repli sur son propre magasin (cf. chatbotService.js).
 const NETWORK_CAPABILITY_EXAMPLES = {
-  revenueShop: ['Compare le chiffre d\'affaires de tous les magasins', 'Le réseau progresse-t-il par rapport au mois dernier ?', 'Y a-t-il des magasins sans vente récente ?'],
+  revenueShop: ['Compare le chiffre d\'affaires de tous les magasins', 'Le magasin 035 a un CA de combien hier ?', 'Le réseau progresse-t-il par rapport au mois dernier ?', 'Y a-t-il des magasins sans vente récente ?'],
   stock: ['Quels magasins ont des ruptures critiques ?', 'Quels magasins sont en surstock ?', 'Le stock de cet article dans tous les magasins'],
   orders: ['Quelles propositions sont encore en attente sur le réseau ?', 'Y a-t-il des anomalies de commande sur tout le réseau ?'],
   accuracy: ['Quel magasin a la meilleure précision de l\'IA ?'],
 };
 
+// Complétée le 27/09/2026 pour couvrir toutes les questions listées dans la capture d'écran de
+// l'utilisateur ("Ce que je peux vous demander" doit refléter ce que le chatbot sait VRAIMENT faire,
+// pas seulement un sous-ensemble) — chaque exemple correspond à un mot-clé/outil réellement branché
+// dans chatbotService.js, jamais une question inventée qui échouerait si elle était vraiment posée.
 const CAPABILITY_EXAMPLES = {
-  revenueShop: ['Quel est le chiffre d\'affaires du magasin aujourd\'hui ?', 'Quelle était la recette d\'hier ?'],
-  revenueArticle: ['Quel est le chiffre d\'affaires de cet article ?', 'Quelle part du CA fait mon rayon ?'],
-  articleDetails: ['Où se trouve cet article ?', 'Quel est le prix de vente de cet article ?', 'Quand a-t-il changé de prix ?'],
-  stock: ['Quel est le stock de cet article ?', 'Quels articles risquent d\'être en rupture ?', 'Quels articles sont en surstock ?', 'Pourquoi le stock de cet article a bougé ?'],
-  sales: ['Comment évoluent les ventes ce mois-ci ?', 'Quels articles font le plus de chiffre d\'affaires ?', 'Quel rayon vend le mieux ?'],
-  orders: ['Quelles commandes ont été passées récemment ?', 'Quels articles dois-je commander aujourd\'hui ?', 'Y a-t-il des anomalies sur mes commandes récentes ?'],
-  accuracy: ['Quelle est la fiabilité de l\'IA sur ce magasin ?'],
+  revenueShop: ['Quel est le chiffre d\'affaires du magasin aujourd\'hui ?', 'Quelle était la recette d\'hier ?', 'Quel est le CA de cette semaine ?', 'Quel est le CA du mois dernier ?'],
+  revenueArticle: ['Quel est le chiffre d\'affaires de cet article ?', 'Quel est le CA de ce rayon ?', 'Quelle part du CA fait mon rayon ?'],
+  articleDetails: ['Où se trouve cet article ?', 'Quel est le prix de vente de cet article ?', 'Cet article est-il en promo ?', 'Quand a-t-il changé de prix ?', 'Y a-t-il eu de la casse sur cet article ?', 'Quels articles sont dans ce gisement ?', 'Quel est le top des gisements ?'],
+  stock: ['Combien il reste de cet article ?', 'Quel est le stock du magasin ?', 'Quels articles risquent d\'être en rupture ?', 'Quels articles sont en surstock ?', 'Quels articles sont en DLV ?', 'Pourquoi le stock de cet article a bougé ?'],
+  sales: ['Comment évoluent les ventes ce mois-ci ?', 'Combien on a vendu de cet article sur les 30 derniers jours ?', 'Quels articles font 80% du chiffre d\'affaires ?', 'Quel rayon vend le mieux ?', 'Quel est le meilleur rayon ?'],
+  orders: ['Quoi commander aujourd\'hui ?', 'Quelle est la proposition en attente ?', 'Mes commandes récentes', 'Quelles commandes ont été passées récemment ?', 'Y a-t-il des anomalies sur mes commandes récentes ?'],
+  accuracy: ['Quelle est la précision de l\'IA sur ce magasin ?'],
 };
 
 /**

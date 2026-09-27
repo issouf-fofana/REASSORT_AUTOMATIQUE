@@ -278,15 +278,20 @@ Réponds en français, de façon directe et concise, en Markdown léger (gras **
 - Sinon (réponse à une seule idée) : 1-2 phrases courtes.
 Ne réponds jamais par un seul chiffre agrégé quand la question demande explicitement "quels articles" — l'utilisateur veut toujours savoir lesquels, pas seulement combien.
 Si la question posée contient PLUSIEURS demandes distinctes (ex: "donne-moi le prix ET l'historique de rupture") et que les données ci-dessus ne couvrent qu'UNE seule de ces demandes : réponds à celle que tu peux avec ces données, PUIS indique explicitement en une phrase que l'autre partie de la question nécessite une question séparée (précise laquelle) — ne l'ignore jamais silencieusement.`,
+  // Gardée volontairement courte (boutons cliquables affichés en flex-wrap dans l'Assistant IA,
+  // cf. AiAssistant.tsx — une trop longue liste rendrait cette zone illisible) mais élargie le
+  // 27/09/2026 pour représenter au moins un exemple de chaque grande famille de questions (CA,
+  // rayons, stock, DLV, fiche article, commandes, IA) plutôt que de sur-représenter certaines
+  // familles (ruptures/surstock) au détriment d'autres jamais suggérées (fiche article, DLV, rayon).
   [KEYS.CHATBOT_SUGGESTED_QUESTIONS]: () => [
+    'Quel est le CA du magasin aujourd\'hui ?',
     'Quels articles risquent d\'être en rupture ?',
     'Quels articles sont en surstock ?',
-    'Quels articles font 80% du chiffre d\'affaires ?',
+    'Quel rayon vend le mieux ?',
+    'Quel est le prix de cet article ?',
+    'Quels articles sont en DLV ?',
+    'Quoi commander aujourd\'hui ?',
     'Quelle est la précision de l\'IA sur ce magasin ?',
-    'Comment évoluent les ventes ce mois-ci ?',
-    'Quel est le CA du magasin aujourd\'hui ?',
-    'Quels articles dois-je commander aujourd\'hui ?',
-    'Quelles commandes ont été passées récemment ?',
   ].join('\n'),
   [KEYS.IMPROVEMENTS_PROMPT_TEMPLATE]: () => `Tu es un expert maintenance d'une plateforme de réassort (backend Node.js/Express/Prisma/Postgres, frontend HTML/Bootstrap vanilla, intégration ERP RPOS).
 Fichiers réels du projet (ne cite QUE ceux-ci) : {{files}}
