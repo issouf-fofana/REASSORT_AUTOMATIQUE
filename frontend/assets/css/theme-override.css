@@ -149,6 +149,31 @@ a:not(.sidebar *),
    scroll horizontal indésirable (demande du 26/09/2026 : "il ya des texte qui son trop long ca
    fait que le sidebar scroll"). Le texte complet reste consultable au survol via title (posé côté
    HTML par layout.js sur chaque lien). */
+/* white-space:nowrap sur .sidebar .nav (volt.css) force le calcul de la largeur INTRINSÈQUE de
+   chaque .nav-item d'après son texte complet non retourné à la ligne, quel que soit le overflow
+   posé sur ses enfants — donc même avec le fix ci-dessous, "Proposition de commande" continuait
+   à provoquer un scroll horizontal du panneau entier (signalé une 2e fois le 27/09/2026, capture à
+   l'appui). Neutralisé pour ce panneau : la largeur du panneau redevient celle du panneau lui-même
+   (260px puis 290px ci-dessous), pas celle de son plus long libellé.
+   max-width élargi 260px -> 290px (desktop) : compromis pour que "Proposition de commande" tienne
+   sur une ligne sans troncature dans le cas courant, plutôt que de réduire la taille du texte
+   (décision explicite de l'utilisateur, "il faut agrandir un peu"). */
+.sidebar .nav {
+     white-space: normal;
+}
+@media (min-width: 768px) {
+     .sidebar {
+          max-width: 290px !important;
+     }
+}
+/* .content a une marge fixe de 260px (volt.css) pour laisser la place à la sidebar — sans l'ajuster
+   en même temps que le nouvel élargissement à 290px ci-dessus, le contenu principal chevaucherait
+   les 30 derniers pixels de la sidebar sur desktop. */
+@media (min-width: 992px) {
+     .content {
+          margin-left: 290px !important;
+     }
+}
 /* display:flex ajouté le 27/09/2026 : sidebar.html pose déjà d-flex align-items-center en dur sur
    chaque <a class="nav-link">, mais .sidebar-text (display:inline-block + max-width:100%) ne se
    réduisait pas de façon fiable dans ce contexte flex : un enfant flex a par défaut
@@ -157,7 +182,9 @@ a:not(.sidebar *),
    pas l'absence de flex, qui laissait "Proposition de commande" déborder sur un écran étroit
    (signalé à nouveau le 27/09/2026, la correction précédente du 26/09 ne suffisait donc pas).
    flex-shrink:0 sur l'icône : sans lui, elle aussi pourrait se faire compresser au lieu de garder
-   sa taille pendant que le texte se tronque. */
+   sa taille pendant que le texte se tronque. Reste en filet de sécurité même une fois le panneau
+   élargi : un libellé encore plus long qu'aujourd'hui se tronquera toujours proprement au lieu de
+   recréer le même bug. */
 .sidebar .nav-link {
      overflow: hidden;
      display: flex;
