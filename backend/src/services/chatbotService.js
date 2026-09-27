@@ -539,7 +539,18 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
   // après "quels articles sont en rupture ?" doit aussi continuer sur getStockoutRisks, pas juste sur
   // une fiche article (bug trouvé le 15/09/2026 : "et le 14-09 il y a eu quoi" perdait le contexte
   // de l'historique de prix demandé juste avant).
-  if (!toolName && conversationHistory && conversationHistory.length) {
+  //
+  // Restreint aux questions commençant par "et"/"aussi"/"sinon" (bug trouvé le 27/09/2026 : ce filet
+  // capturait aussi une question totalement hors sujet et sans aucun rapport avec la précédente
+  // ("tu prends la donnée en local ou en serveur ?", posée juste après "le CA aujourd'hui ?") — sans
+  // restriction, toute question sans mot-clé reconnu réutilisait le dernier outil, poussant le LLM à
+  // improviser une réponse à partir d'un JSON sans rapport plutôt que de dire honnêtement qu'il ne
+  // sait pas répondre à ce type de question (violation silencieuse de la règle anti-hallucination
+  // §35, cf. buildChatbotPrompt). Une vraie relance elliptique commence quasi systématiquement par
+  // une conjonction de continuation ; une nouvelle question autonome (même courte) commence par un
+  // vrai début de phrase ("tu peux...", "quel est...").
+  const FOLLOWUP_STARTER_REGEX = /^(et|aussi|sinon|donc)\b/i;
+  if (!toolName && conversationHistory && conversationHistory.length && FOLLOWUP_STARTER_REGEX.test(question.trim())) {
     const lastTurn = conversationHistory[conversationHistory.length - 1];
     if (lastTurn.toolUsed) toolName = lastTurn.toolUsed;
   }
