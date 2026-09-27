@@ -69,6 +69,14 @@ const TOOL_CAPABILITY = {
   getSilentShops: 'stock', // absence de vente synchronisée = un signal de stock/activité, pas une capacité dédiée
   getPredictionAccuracy: 'accuracy',
   getPredictionAccuracyAllShops: 'accuracy',
+  // getShopUsers (liste des comptes d'un magasin, ajouté le 27/09/2026) : donnée de gestion des
+  // comptes, pas une des 7 capacités métier ci-dessus — mappé sur 'orders' juste pour ne pas être
+  // bloqué par le fail-closed générique (même piège que getArticleStockAllShops trouvé plus haut : un
+  // outil absent de cette table est refusé pour TOUT utilisateur, y compris ADMIN). La vraie barrière
+  // de sécurité est le contrôle explicite `user.role !== 'ADMIN'` posé directement dans le case
+  // getShopUsers de chatbotService.js, jamais cette capacité — un SUPERVISOR a 'orders' autorisé par
+  // défaut mais reste bloqué là où ça compte réellement.
+  getShopUsers: 'orders',
 };
 
 /** getRevenue seul est ambigu : CA global (revenueShop) si aucun filtre, CA d'un périmètre précis (revenueArticle) sinon. */

@@ -1105,8 +1105,47 @@ async function getSilentShops(allowedShopIds, { staleDays = 7 } = {}) {
   return { found: true, staleDays, shopCount: results.length, shops: results };
 }
 
+/**
+ * Compte les comptes utilisateurs actifs rattachés à un magasin — demande du 27/09/2026 : "est-ce
+ * que le système peut répondre combien d'utilisateurs sont dans ce magasin ?". Deux façons distinctes
+ * d'être rattaché à un magasin (cf. schema.prisma, User) : rposShopId direct (DIRECTOR/
+ * DEPARTMENT_HEAD/SHELF_STOCKER, un seul magasin fixe) OU via SupervisedShop (SUPERVISOR, plusieurs
+ * magasins choisis) — un SUPERVISOR de ce magasin compte donc lui aussi, listé séparément pour ne
+ * jamais laisser croire qu'il y travaille au même titre qu'un compte mono-magasin. isActive
+ * uniquement : un compte désactivé n'est plus vraiment "dans" ce magasin au sens où l'utilisateur
+ * pose la question (qui y travaille réellement aujourd'hui), mais compté à part pour rester complet
+ * plutôt que silencieusement absent des chiffres.
+ */
+async function getShopUsers(rposShopId) {
+  const shop = await prisma.shop.findUnique({ where: { rposShopId }, select: { reference: true, name: true } });
+  const directUsers = await prisma.user.findMany({
+    where: { rposShopId },
+    select: { name: true, role: true, isActive: true, assignedDepartment: true },
+  });
+  const supervisors = await prisma.supervisedShop.findMany({
+    where: { rposShopId },
+    select: { user: { select: { name: true, isActive: true } } },
+  });
+
+  const activeDirect = directUsers.filter((u) => u.isActive);
+  const inactiveDirect = directUsers.filter((u) => !u.isActive);
+  const activeSupervisors = supervisors.filter((s) => s.user.isActive).map((s) => s.user.name);
+
+  return {
+    found: true,
+    shopReference: shop?.reference || null,
+    shopName: shop?.name || null,
+    directUserCount: activeDirect.length,
+    directUsers: activeDirect.map((u) => ({ name: u.name, role: u.role, assignedDepartment: u.assignedDepartment || null })),
+    inactiveDirectUserCount: inactiveDirect.length,
+    supervisorCount: activeSupervisors.length,
+    supervisorNames: activeSupervisors,
+  };
+}
+
 module.exports = {
   getStoreStock,
+  getShopUsers,
   getArticleStock,
   getArticleStockAllShops,
   getOrderAnomalies,

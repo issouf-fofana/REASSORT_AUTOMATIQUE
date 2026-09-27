@@ -102,7 +102,13 @@
 
     if (readOnlyEl) readOnlyEl.style.display = 'none';
     const shop = getActiveShop();
-    btn.textContent = shop ? shop.posLabel + ' : ' + shop.name + ' (' + shop.reference + ') ▾' : 'Choisir un magasin ▾';
+    // Texte visible réduit à la seule référence le 27/09/2026 ("Serveur Prosuma Prod... : NOM
+    // MAGASIN (035)" débordait et se tronquait de façon illisible dans la barre notch, largeur bien
+    // plus étroite que l'ancienne topbar) — jamais de troncature possible quelle que soit la longueur
+    // du nom réel du magasin. Le posLabel et le nom complet restent consultables au survol via title,
+    // et en un clic (ouvre le sélecteur de magasin, cf. openSelector plus bas).
+    btn.textContent = shop ? shop.reference + ' ▾' : 'Choisir un magasin ▾';
+    btn.title = shop ? (shop.posLabel ? shop.posLabel + ' : ' : '') + shop.name + ' (' + shop.reference + ')' : '';
     btn.style.display = '';
 
     // Amorce le magasin par défaut si nécessaire (voir initDefaultShopIfNeeded ci-dessus) — non

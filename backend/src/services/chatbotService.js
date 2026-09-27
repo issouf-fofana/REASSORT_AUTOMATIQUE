@@ -24,7 +24,7 @@ const VALID_INTENT_TOOLS = new Set([
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
-  'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops',
+  'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -74,6 +74,10 @@ const FALLBACK_INTENT_RULES = [
   // DLV (demande du 22/09/2026) : PAS une date de péremption, un stock basculé manuellement par le
   // personnel sur un EAN distinct pour écoulement à prix réduit — cf. chatbotToolsService.js.
   { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
+  // Ajouté le 27/09/2026 : "est-ce que le système peut répondre combien d'utilisateurs sont dans ce
+  // magasin ?" — donnée de gestion des comptes (pas ventes/stock/réassort), réservée ADMIN
+  // (aiPermissionsService.js, capacité dédiée) contrairement au reste des capacités du chatbot.
+  { keywords: ['combien d\'utilisateurs', 'combien dutilisateurs', 'combien de user', 'combien de comptes', 'nombre d\'utilisateurs', 'nombre dutilisateurs', 'utilisateurs de ce magasin', 'comptes de ce magasin', 'qui travaille dans ce magasin', 'qui a accès à ce magasin', 'qui a acces a ce magasin'], tool: 'getShopUsers' },
 ];
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
@@ -821,6 +825,15 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         return ean
           ? { toolName: 'getArticleDlvStatus', toolResult: await tools.getArticleDlvStatus(rposShopId, ean) }
           : { toolName, toolResult: await tools.getDlvArticles(rposShopId, {}) };
+      case 'getShopUsers':
+        // Donnée de gestion des comptes (qui a accès à quoi), pas ventes/stock/réassort — réservée
+        // ADMIN uniquement, contrairement au reste des capacités du chatbot (checkToolPermission
+        // gère déjà revenueShop/stock/orders/etc. mais n'a pas de notion de "gestion des comptes" :
+        // vérifié explicitement ici plutôt que d'ajouter une capacité dédiée pour ce seul outil).
+        if (!user || user.role !== 'ADMIN') {
+          return { toolName, toolResult: { found: false, permissionDenied: true, message: 'Seul un compte Administrateur peut consulter la liste des utilisateurs d\'un magasin.' } };
+        }
+        return { toolName, toolResult: await tools.getShopUsers(rposShopId) };
       default:
         return { toolName: null, toolResult: null };
     }
