@@ -78,6 +78,16 @@ export function RoleScopedFields({ idPrefix, role, shops, state, onChange, initi
     onChange({ ...state, supervisedShopIds: next });
   }
 
+  // Demande du 27/09/2026 : "donne la possibilité de cocher tout ou pas" — un Superviseur qui gère
+  // la quasi-totalité du réseau devait sinon cocher chaque magasin un par un dans une liste qui en
+  // compte plusieurs dizaines (52 magasins vus dans les tests de cette session).
+  function selectAllSupervised() {
+    onChange({ ...state, supervisedShopIds: shops.map((s) => s.id) });
+  }
+  function clearAllSupervised() {
+    onChange({ ...state, supervisedShopIds: [] });
+  }
+
   function toggleAiPerm(key: string, checked: boolean) {
     onChange({ ...state, aiPermCustom: { ...state.aiPermCustom, [key]: checked } });
   }
@@ -147,8 +157,18 @@ export function RoleScopedFields({ idPrefix, role, shops, state, onChange, initi
 
       {role === 'SUPERVISOR' && (
         <div className="mb-3">
-          <label className="form-label">Magasins supervisés</label>
-          <div className="border rounded p-2" style={{ maxHeight: 220, overflowY: 'auto' }}>
+          <div className="d-flex justify-content-between align-items-center">
+            <label className="form-label mb-0">Magasins supervisés</label>
+            <div>
+              <button type="button" className="btn btn-link btn-sm p-0 me-2" onClick={selectAllSupervised}>
+                Tout cocher
+              </button>
+              <button type="button" className="btn btn-link btn-sm p-0" onClick={clearAllSupervised}>
+                Tout décocher
+              </button>
+            </div>
+          </div>
+          <div className="border rounded p-2 mt-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
             {shops.map((s) => (
               <div className="form-check" key={s.id}>
                 <input

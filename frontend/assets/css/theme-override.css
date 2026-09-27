@@ -149,16 +149,30 @@ a:not(.sidebar *),
    scroll horizontal indésirable (demande du 26/09/2026 : "il ya des texte qui son trop long ca
    fait que le sidebar scroll"). Le texte complet reste consultable au survol via title (posé côté
    HTML par layout.js sur chaque lien). */
+/* display:flex ajouté le 27/09/2026 : sidebar.html pose déjà d-flex align-items-center en dur sur
+   chaque <a class="nav-link">, mais .sidebar-text (display:inline-block + max-width:100%) ne se
+   réduisait pas de façon fiable dans ce contexte flex : un enfant flex a par défaut
+   min-width:auto (basé sur son contenu, pas sur l'espace disponible), qui empêche justement la
+   troncature de s'appliquer avant que le texte n'ait déjà débordé — c'est ce min-width manquant,
+   pas l'absence de flex, qui laissait "Proposition de commande" déborder sur un écran étroit
+   (signalé à nouveau le 27/09/2026, la correction précédente du 26/09 ne suffisait donc pas).
+   flex-shrink:0 sur l'icône : sans lui, elle aussi pourrait se faire compresser au lieu de garder
+   sa taille pendant que le texte se tronque. */
 .sidebar .nav-link {
      overflow: hidden;
+     display: flex;
+     align-items: center;
+}
+.sidebar .nav-link .sidebar-icon {
+     flex-shrink: 0;
 }
 .sidebar .sidebar-text {
      overflow: hidden;
      text-overflow: ellipsis;
      white-space: nowrap;
-     display: inline-block;
-     max-width: 100%;
-     vertical-align: middle;
+     display: block;
+     min-width: 0;
+     flex: 1 1 auto;
 }
 
 .sidebar .nav-item.active > .nav-link,
