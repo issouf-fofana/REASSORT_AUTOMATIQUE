@@ -45,15 +45,18 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       transition={{ type: 'spring', stiffness: 420, damping: 32 }}
       style={{ transformOrigin: 'top', ...radius('1.25rem') }}
       data-radius
-      // Grille plutôt qu'une simple rangée flex : 7 colonnes (Pilotage/Réassort/IA/Commande/Mail/
-      // Utilisateur/Paramètres, cf. navConfig.ts) ne tiennent pas côte à côte sur un écran classique
-      // — reflue proprement sur plusieurs lignes selon la largeur disponible.
+      // Une seule ligne, les 7 colonnes (Pilotage/Réassort/IA/Commande/Mail/Utilisateur/Paramètres,
+      // cf. navConfig.ts) côte à côte plutôt que sur plusieurs lignes — demande explicite du
+      // 26/09/2026 avec exemple de mise en page ("je veux que tout soit sur la même ligne [...] les
+      // sous-infos en bas de chaque"). Colonnes plus étroites qu'avant (160px) pour que 7 tiennent
+      // sur un écran classique ; overflow-x-auto en secours sur un écran vraiment trop étroit plutôt
+      // que de forcer un retour à la ligne qui romprait la mise en page demandée.
       // mt-0 : collé directement sous l'île, jamais d'écart visible entre les deux (demande explicite
       // du 26/09/2026, "fais en sorte que ça soit collé à la barre").
-      className="absolute left-1/2 top-full z-50 mt-0 grid w-max max-w-[min(96vw,1120px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
+      className="absolute left-1/2 top-full z-50 mt-0 flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto rounded-2xl bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
-        <div key={group.label} className="flex min-w-[220px] flex-col gap-0.5">
+        <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
           <div className="px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
           {group.entries.map((entry) => {
             const Icon = entry.icon;
@@ -67,12 +70,12 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
                 data-radius
                 style={radius('0.75rem')}
                 className={cn(
-                  'flex w-full cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-xl px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
+                  'flex w-full cursor-pointer items-start gap-2 rounded-xl px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
                   isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                 )}
               >
-                <Icon className={cn('size-4 shrink-0', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
-                <span>{entry.label}</span>
+                <Icon className={cn('size-4 shrink-0 mt-0.5', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
+                <span className="leading-tight">{entry.label}</span>
               </button>
             );
           })}
@@ -155,8 +158,8 @@ export function ReassortNotch() {
         onMouseEnter={openMenu}
         onMouseLeave={scheduleClose}
         data-radius
-        style={radius('0 0 18px 18px')}
-        className="relative flex h-9 w-auto max-w-full items-center gap-3 rounded-b-2xl bg-zinc-950 px-3 text-zinc-50"
+        style={radius('0 0 14px 14px')}
+        className="relative flex h-8 w-auto max-w-full items-center gap-2.5 rounded-b-2xl bg-zinc-950 px-2.5 text-zinc-50"
       >
         <NotchLeftWing />
         <NotchRightWing />
@@ -173,12 +176,12 @@ export function ReassortNotch() {
           title="Afficher le menu latéral"
           data-radius
           style={radius('9999px')}
-          className="flex size-7 shrink-0 items-center justify-center rounded-full text-zinc-400 outline-none transition-colors hover:bg-zinc-800 hover:text-zinc-50"
+          className="flex size-6 shrink-0 items-center justify-center rounded-full text-zinc-400 outline-none transition-colors hover:bg-zinc-800 hover:text-zinc-50"
         >
           <PanelLeftOpen className="size-4" />
         </button>
 
-        <div className="h-6 w-px shrink-0 bg-zinc-800" />
+        <div className="h-5 w-px shrink-0 bg-zinc-800" />
 
         <button
           type="button"
@@ -187,7 +190,7 @@ export function ReassortNotch() {
           onClick={() => setIsOpen((v) => !v)}
           data-radius
           style={radius('9999px')}
-          className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-semibold outline-none transition-colors hover:bg-zinc-900"
+          className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-semibold outline-none transition-colors hover:bg-zinc-900"
         >
           {ActiveIcon && <ActiveIcon className="size-4 shrink-0 text-zinc-300" />}
           <span className="max-w-[220px] truncate leading-none">{activeEntry?.label}</span>
@@ -196,7 +199,7 @@ export function ReassortNotch() {
 
         <AnimatePresence>{isOpen && <MegaMenu groups={groups} activeId={activeId} onSelect={navigateTo} />}</AnimatePresence>
 
-        <div className="h-6 w-px shrink-0 bg-zinc-800" />
+        <div className="h-5 w-px shrink-0 bg-zinc-800" />
 
         {/* Magasin (global-shop-selector.js), notifications (notifications-bell.js), utilisateur/
             déconnexion — mêmes IDs que topbar.html pour que ces scripts existants continuent de
@@ -216,7 +219,7 @@ export function ReassortNotch() {
               aria-expanded="false"
               data-radius
               style={radius('9999px')}
-              className="relative flex size-7 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 outline-none"
+              className="relative flex size-6 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 outline-none"
             >
               <Bell className="size-4" />
             </button>
@@ -226,7 +229,7 @@ export function ReassortNotch() {
           </div>
 
           <div className="flex items-center gap-2 border-l border-zinc-800 pl-3">
-            <span data-radius style={radius('9999px')} className="flex size-6 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
+            <span data-radius style={radius('9999px')} className="flex size-5 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
               <UserIcon className="size-3.5" />
             </span>
             <span id="user-menu-name" className="hidden lg:inline text-xs font-semibold text-zinc-200 max-w-[90px] truncate">
@@ -239,7 +242,7 @@ export function ReassortNotch() {
               title="Déconnexion"
               data-radius
               style={radius('9999px')}
-              className="flex size-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-red-400 outline-none"
+              className="flex size-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-red-400 outline-none"
             >
               <LogOut className="size-3.5" />
             </button>
