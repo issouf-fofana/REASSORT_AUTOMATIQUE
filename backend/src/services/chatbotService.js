@@ -275,6 +275,94 @@ function extractDate(question) {
 }
 
 /**
+ * Résolveur de périodes en français (bug trouvé le 27/09/2026, campagne de test dynamique après
+ * résolution de la panne disque qui avait empêché toute exécution) : jusqu'ici, aucune formulation
+ * de période autre que "jj/mm/aaaa" (extractDate) ou "N jours" (extractDays) n'était comprise.
+ * "aujourd'hui", "hier", "cette semaine", "la semaine dernière", "ce mois-ci", "le mois dernier",
+ * "sur N mois" retombaient SILENCIEUSEMENT sur le défaut de chaque outil (souvent days=1 ou 30),
+ * sans jamais avertir l'utilisateur que sa période n'avait pas été prise en compte — l'utilisateur
+ * pouvait ainsi croire lire le CA "du mois dernier" alors qu'il s'agissait des dernières 24h.
+ *
+ * Renvoie soit { days: N } (fenêtre glissante de N jours, compatible avec le paramètre `days` déjà
+ * utilisé par tous les outils), soit { date: 'aaaa-mm-jj' } pour "aujourd'hui"/"hier" (un seul jour
+ * calendaire précis, réutilise le paramètre `date` déjà géré par getRevenue), soit null si aucune
+ * formulation reconnue (laisse alors extractDate/extractDays tenter leur propre détection, inchangée).
+ *
+ * Choix de calcul pour "cette semaine"/"la semaine dernière"/"ce mois-ci"/"le mois dernier" : calendaire
+ * (depuis lundi de la semaine courante, depuis le 1er du mois courant, etc.), pas une fenêtre glissante
+ * de 7/30 jours — c'est le sens naturel de ces expressions et distinct de "les 7 derniers jours" (déjà
+ * couvert par extractDays) qui reste une fenêtre glissante explicite. "sur N mois" est en revanche
+ * converti en N*30 jours glissants (approximation documentée : pas de vrai calendrier ici, cohérent
+ * avec le fait qu'aucun outil de ce fichier ne raisonne autrement qu'en fenêtre de jours pour une
+ * durée en mois — seuls "ce mois-ci"/"le mois dernier" méritent un calcul calendaire strict car ce
+ * sont des expressions qui désignent un mois précis, pas une durée approximative).
+ *
+ * Horloge système utilisée ici (Date.now()), contrairement à resolveDayOnlyDate qui se cale sur la
+ * dernière vente connue : ces expressions relatives ("aujourd'hui", "cette semaine"...) désignent le
+ * moment réel où la question est posée, pas une date à déduire des données déjà en base.
+ */
+function resolveDateRange(question) {
+  const q = normalize(question || '');
+
+  // "sur 3 mois" / "sur les 3 derniers mois" / "3 mois" — avant "mois dernier"/"ce mois" pour ne pas
+  // confondre un nombre explicite de mois avec la formulation calendaire "le mois dernier".
+  const monthsMatch = q.match(/\b(\d{1,2})\s+(?:derniers?\s+)?mois\b/);
+  if (monthsMatch) {
+    const n = parseInt(monthsMatch[1], 10);
+    if (n >= 1 && n <= 24) return { days: n * 30 };
+  }
+
+  if (/\bavant[ -]hier\b/.test(q)) {
+    const d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    return { date: d.toISOString().slice(0, 10) };
+  }
+  if (/\bhier\b/.test(q)) {
+    const d = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return { date: d.toISOString().slice(0, 10) };
+  }
+  if (/\baujourd\s*'?\s*hui\b/.test(q)) {
+    return { date: new Date().toISOString().slice(0, 10) };
+  }
+
+  if (/\b(la\s+)?semaine\s+derniere\b|\bsemaine\s+precedente\b/.test(q)) {
+    // Semaine calendaire ISO précédente (lundi -> dimanche). Le nombre de jours écoulés depuis le
+    // début de CETTE semaine-là jusqu'à maintenant sert de fenêtre `days` (compatible avec le seul
+    // paramètre que les outils savent consommer) : les outils filtrent sur `date >= now - days*24h`,
+    // donc englober toute la semaine dernière + la semaine courante écoulée est nécessaire pour ne
+    // rien couper — un peu plus large que la semaine dernière seule, mais jamais moins.
+    const now = new Date();
+    const dayOfWeek = (now.getUTCDay() + 6) % 7; // 0 = lundi
+    const daysSinceLastMonday = dayOfWeek + 7;
+    return { days: daysSinceLastMonday + 1 };
+  }
+  if (/\bcette\s+semaine\b/.test(q)) {
+    // Depuis lundi de la semaine courante (convention déjà utilisée pour les rapports hebdomadaires
+    // du projet : semaine calendaire ISO, pas une fenêtre glissante de 7 jours).
+    const now = new Date();
+    const dayOfWeek = (now.getUTCDay() + 6) % 7; // 0 = lundi ... 6 = dimanche
+    return { days: dayOfWeek + 1 };
+  }
+
+  if (/\b(le\s+)?mois\s+dernier\b|\bmois\s+precedent\b/.test(q)) {
+    const now = new Date();
+    // Nombre de jours écoulés depuis le 1er du mois précédent jusqu'à maintenant — englobe tout le
+    // mois précédent complet (même logique que "semaine dernière" ci-dessus : les outils ne savent
+    // filtrer que par une fenêtre glissante de N jours, jamais par bornes calendaires arbitraires).
+    const firstOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const daysSince = Math.ceil((now.getTime() - firstOfLastMonth.getTime()) / (24 * 60 * 60 * 1000));
+    return { days: daysSince };
+  }
+  if (/\bce\s+mois([ -]ci)?\b|\bmois\s+en\s+cours\b|\bmois\s+courant\b/.test(q)) {
+    const now = new Date();
+    const firstOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const daysSince = Math.ceil((now.getTime() - firstOfMonth.getTime()) / (24 * 60 * 60 * 1000)) || 1;
+    return { days: daysSince };
+  }
+
+  return null;
+}
+
+/**
  * Résout un jour seul (1-31) en date complète "aaaa-mm-jj", en complétant mois/année avec la
  * dernière vente locale connue pour ce magasin — jamais avec l'horloge système (cf. extractDate).
  * Prend le mois de cette dernière vente si le jour demandé lui est antérieur ou égal, sinon le mois
@@ -472,10 +560,18 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
     }
   }
   const rawDate = extractDate(question);
-  const date = (rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate) || (llmParams ? llmParams.date : null) || null;
+  const explicitDate = rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate;
+  const explicitDays = extractDays(question);
+  // resolveDateRange ("hier", "cette semaine", "le mois dernier"...) n'intervient QUE si aucune date
+  // ou nombre de jours explicite n'a déjà été trouvé par extractDate/extractDays ci-dessus — une
+  // formulation numérique précise ("le 14/09/2026", "les 45 derniers jours") reste toujours prioritaire
+  // sur une formulation relative détectée par erreur dans la même question (peu probable mais sans
+  // ambiguïté à trancher autrement).
+  const naturalRange = (!explicitDate && !explicitDays) ? resolveDateRange(question) : null;
+  const date = explicitDate || naturalRange?.date || (llmParams ? llmParams.date : null) || null;
   const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
   const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
-  const daysQuery = extractDays(question) || (llmParams ? llmParams.days : null) || null;
+  const daysQuery = explicitDays || naturalRange?.days || (llmParams ? llmParams.days : null) || null;
 
   // Permissions IA par capacité (plan de rôles validé le 15/09/2026) : vérifiées ici, APRÈS avoir
   // résolu ean/department, car getRevenue est ambigu (CA magasin vs CA article/département — seul
@@ -538,7 +634,12 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
       case 'getParetoArticles':
         return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
       case 'getRevenue':
-        return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, department, ean }) };
+        // Bug trouvé le 27/09/2026 : `days` n'était jamais transmis à getRevenue (seul `date` l'était),
+        // alors que getRevenue accepte bien un `days` pour une fenêtre glissante (défaut interne 1 jour
+        // seulement) — "le CA de cette semaine"/"le CA sur 3 mois" retombait toujours sur les dernières
+        // 24h sans jamais utiliser daysQuery/resolveDateRange. `date` reste prioritaire quand présent
+        // (getRevenue.js ignore déjà `days` si `date` est fourni).
+        return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, days: daysQuery || 1, department, ean }) };
       case 'getRevenueAllShops': {
         // Réservé ADMIN/SUPERVISOR (demande du 19/09/2026) : un DIRECTOR/DEPARTMENT_HEAD/
         // SHELF_STOCKER (compte à un seul magasin fixe) retombe silencieusement sur SON magasin
@@ -557,10 +658,16 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
       case 'getOverstockArticles':
         return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
       case 'getPredictionAccuracy':
-        return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, {}) };
+        // Même bug que getSalesHistory (days ignoré) : "la fiabilité de l'IA ce mois-ci" retombait
+        // silencieusement sur le défaut de l'outil (90 jours) sans jamais utiliser daysQuery.
+        return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, { days: daysQuery || 90 }) };
       case 'getOrders':
-        return { toolName, toolResult: await tools.getOrders(rposShopId, {}) };
+        // Idem : "mes commandes du mois dernier" ignorait daysQuery et retombait sur le défaut (14j).
+        return { toolName, toolResult: await tools.getOrders(rposShopId, { days: daysQuery || 14 }) };
       case 'getOrderAnomalies':
+        // getOrderAnomalies ne connaît pas de notion de période (statut PENDING/ACKNOWLEDGED/DISMISSED
+        // + limit uniquement, cf. chatbotToolsService.js) : aucune régression de période à corriger ici,
+        // contrairement à getOrders — laissé inchangé intentionnellement.
         return { toolName, toolResult: await tools.getOrderAnomalies(rposShopId, {}) };
       // Outils "tous magasins" (demande du 26/09/2026, pilotage réseau) : réservés ADMIN/SUPERVISOR,
       // même repli silencieux sur le seul magasin courant que getRevenueAllShops pour tout autre
@@ -612,7 +719,12 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
       case 'getCurrentProposal':
         return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
       case 'getSalesHistory':
-        return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: 30, department }) };
+        // Bug trouvé le 27/09/2026 (lecture de code confirmée puis testée dynamiquement) : `days`
+        // était codé en dur à 30, ignorant totalement `daysQuery` (extrait par extractDays/
+        // resolveDateRange) — "les ventes des 7 derniers jours" retournait en réalité 30 jours de
+        // ventes sans jamais le signaler. Aligné sur les autres cases (getRevenueTrendAllShops,
+        // getTopGisements, getRevenueAllShops) qui utilisaient déjà `daysQuery || <défaut>`.
+        return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: daysQuery || 30, department }) };
       case 'getArticleStock':
         return ean
           ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
@@ -904,4 +1016,4 @@ async function getSuggestedQuestions() {
   return (raw || '').split('\n').map((q) => q.trim()).filter(Boolean);
 }
 
-module.exports = { askAssistant, detectIntent, extractEan, getSuggestedQuestions, VALID_INTENT_TOOLS, isVisualRequest };
+module.exports = { askAssistant, detectIntent, extractEan, extractDays, extractDate, resolveDateRange, getSuggestedQuestions, VALID_INTENT_TOOLS, isVisualRequest, runToolForQuestion };
