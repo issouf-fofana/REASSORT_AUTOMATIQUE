@@ -209,7 +209,7 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
 
   const lines = await prisma.salesLine.findMany({
     where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart, lte: dateEnd } },
-    select: { revenueExclTax: true, revenueInclTax: true, receiptId: true },
+    select: { revenueExclTax: true, revenueInclTax: true, receiptId: true, syncedAt: true },
   });
 
   if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période ${date || `des ${days || 1} derniers jours`}${ean ? ` pour l'article ${ean}` : department ? ` pour le rayon ${department}` : ''}.` };
@@ -237,6 +237,13 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
     // présente jamais comme "nombre de ventes"/"nombre de tickets" : c'est le nombre de LIGNES
     // vendues (un article vendu = une ligne), une notion différente de salesCount ci-dessus.
     articleLineCount: lines.length,
+    // Demande du 27/09/2026 : "il doit me donner en signalant la dernière heure/date où il a pris
+    // les données" — les ventes sont synchronisées depuis RPOS toutes les 15 minutes (jamais en
+    // temps réel), donc un CA "d'aujourd'hui" peut avoir jusqu'à ~15 minutes de retard sur la
+    // réalité RPOS. lastSyncedAt = la synchronisation la plus récente parmi les lignes retournées,
+    // pour que la réponse dise explicitement jusqu'à quelle heure les données sont à jour plutôt que
+    // de donner un chiffre sans préciser sa fraîcheur.
+    lastSyncedAt: lines.reduce((max, l) => (!max || l.syncedAt > max ? l.syncedAt : max), null),
   };
 }
 

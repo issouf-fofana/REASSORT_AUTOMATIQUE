@@ -853,6 +853,8 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
 
 Si les données contiennent un champ "salesCount"/"totalSalesCount" (nombre de ventes = tickets de caisse distincts) non nul : c'est la bonne réponse à "combien de ventes"/"nombre de ventes", y compris par article ou par jour précis (dailyHistory[].salesCount pour un jour donné). Si ce champ est null, dis explicitement que le nombre de tickets n'est pas disponible pour cette période plutôt que d'utiliser "articleLineCount"/"totalQuantity"/"quantity" à sa place. Les champs "articleLineCount"/"totalQuantity"/"quantity" sont des LIGNES ou QUANTITÉS d'articles vendus (un article vendu = une ligne, plusieurs unités possibles par vente) : ne les présente JAMAIS comme "nombre de ventes" ou "nombre de tickets" — utilise-les seulement si la question porte explicitement sur le nombre/la quantité d'articles vendus.
 
+Si les données contiennent un champ "lastSyncedAt" non nul : les ventes ne sont jamais consultées en temps réel sur le serveur magasin, elles sont synchronisées en base toutes les 15 minutes — précise donc TOUJOURS dans ta réponse jusqu'à quelle heure les données sont à jour (ex: "données à jour jusqu'à 14h32"), converti en heure lisible (fuseau Africa/Abidjan, pas de date si c'est aujourd'hui, avec la date si c'est un jour différent). Si la question porte sur "aujourd'hui"/le jour même, ajoute que les ventes les plus récentes (moins de 15 minutes) peuvent ne pas encore être comptabilisées. Si "lastSyncedAt" est absent ou null (aucune vente trouvée sur la période), ne mentionne pas cette fraîcheur, elle n'a pas de sens sans donnée.
+
 ${persona}`;
 }
 
