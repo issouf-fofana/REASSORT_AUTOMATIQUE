@@ -35,8 +35,16 @@ const VALID_INTENT_TOOLS = new Set([
 const FALLBACK_INTENT_RULES = [
   { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', 'quand a-t-il changé de prix', 'quand est-ce que le prix', 'le prix a changé', 'le prix a change', 'quand le prix', 'prix a changé', 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', 'quand est-ce qu\'il', 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
   { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
-  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
+  // Pareto AVANT ArticleDetails (bug trouvé le 27/09/2026 lors d'un test réel : "quel rayon vend le
+  // mieux ?" répondait la fiche du dernier article consulté) — "quel rayon" (ArticleDetails, cherche
+  // le rayon D'UN article précis) est un sous-ensemble textuel de "quel rayon vend le mieux/le plus"
+  // (Pareto, classement des rayons), donc ArticleDetails gagnait toujours en premier tant qu'il était
+  // testé avant dans cette liste ("premier qui matche gagne", cf. detectIntent). Les deux règles
+  // avaient pourtant déjà cet ordre inversé en théorie (PARETO_PATTERN_REGEX testé avant dans
+  // detectIntent) mais celui-ci ne couvre que le motif "X% du CA", jamais "quel rayon vend le mieux"
+  // qui ne passe que par cette liste générique.
   { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente', 'quel rayon vend le mieux', 'quel rayon vend le plus', 'meilleur rayon', 'rayon qui vend le plus', 'rayon qui vend le mieux', 'classement des rayons', 'comparer les rayons', 'comparaison des rayons'], tool: 'getParetoArticles' },
+  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
   { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
@@ -59,7 +67,10 @@ const FALLBACK_INTENT_RULES = [
   // "son stock"/"le stock" ajoutés le 27/09/2026 (bug trouvé via une question à deux volets : "le CA
   // de cet article et son stock est à combien ?" — le segment isolé "son stock est à combien" ne
   // matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible" explicite).
-  { keywords: ['stock de', 'stock actuel', 'stock disponible', 'son stock', 'le stock est', 'stock est a', 'stock est à', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
+  // "stock du magasin" ajouté le 27/09/2026 (bug trouvé via test réel : "quel est le stock du
+  // magasin ?" ne matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible/son
+  // stock" — jamais "stock du").
+  { keywords: ['stock de', 'stock du', 'stock actuel', 'stock disponible', 'son stock', 'le stock est', 'stock est a', 'stock est à', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
   // DLV (demande du 22/09/2026) : PAS une date de péremption, un stock basculé manuellement par le
   // personnel sur un EAN distinct pour écoulement à prix réduit — cf. chatbotToolsService.js.
   { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
@@ -218,6 +229,21 @@ function extractEan(question) {
   const compact = (question || '').replace(/\b(\d[\d\s-]{6,17}\d)\b/g, (m) => m.replace(/[\s-]/g, ''));
   const match = compact.match(/\b\d{8,13}\b/);
   return match ? match[0] : null;
+}
+
+/**
+ * Tente d'extraire une référence de magasin CIBLÉ explicitement dans la question ("le magasin 035",
+ * "magasin 414 a combien fait ?"), distinct du magasin courant de la conversation — demande du
+ * 27/09/2026 : un ADMIN qui demande "le magasin 035 a un CA de combien hier ?" recevait un refus
+ * ("les données transmises ne contiennent pas... du magasin 035") car aucun outil ne savait cibler
+ * un AUTRE magasin par sa référence, seulement "tous les magasins" (déjà pris en charge) ou le
+ * magasin de la session en cours. Réservé aux comptes multi-magasins (vérifié à l'appel, jamais ici).
+ * Exige le mot "magasin" explicitement avant le nombre (jamais un nombre isolé dans la question, qui
+ * serait presque toujours autre chose : un pourcentage, une quantité, un jour du mois...).
+ */
+function extractTargetShopReference(question) {
+  const match = (question || '').match(/\bmagasins?\s+(?:n[o°]\s*)?(\d{2,4})\b/i);
+  return match ? match[1] : null;
 }
 
 /** Tente d'extraire un pourcentage explicite ("80%", "80 %") mentionné dans la question. */
@@ -594,6 +620,27 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
   const daysQuery = explicitDays || naturalRange?.days || (llmParams ? llmParams.days : null) || null;
 
+  // Un ADMIN/SUPERVISOR peut cibler UN AUTRE magasin que celui de la session en cours en le nommant
+  // explicitement ("le magasin 035 a un CA de combien ?", cf. extractTargetShopReference) — jamais
+  // pour un rôle mono-magasin (STORE/DIRECTOR/...), qui reste cloisonné à son unique magasin comme
+  // partout ailleurs. Uniquement pour getRevenue pour l'instant (seul cas demandé le 27/09/2026) ;
+  // extensible à d'autres outils mono-magasin si besoin. rposShopId de la session reste le défaut si
+  // la référence ne correspond à aucun magasin réel ou hors du périmètre autorisé de l'utilisateur —
+  // jamais un magasin arbitraire, exposé à quelqu'un qui n'y a pas droit.
+  let effectiveShopId = rposShopId;
+  let targetShopLabel = null;
+  if (toolName === 'getRevenue' && user && (user.role === 'ADMIN' || user.role === 'SUPERVISOR')) {
+    const targetReference = extractTargetShopReference(question);
+    if (targetReference) {
+      const allowedShopIds = await resolveAllowedShopIds(user);
+      const targetShop = await prisma.shop.findFirst({ where: { reference: targetReference, rposShopId: { in: allowedShopIds } } });
+      if (targetShop) {
+        effectiveShopId = targetShop.rposShopId;
+        targetShopLabel = `${targetShop.reference} ${targetShop.name}`;
+      }
+    }
+  }
+
   // Permissions IA par capacité (plan de rôles validé le 15/09/2026) : vérifiées ici, APRÈS avoir
   // résolu ean/department, car getRevenue est ambigu (CA magasin vs CA article/département — seul
   // le second est autorisé à un Chef de département) et ne peut être tranché qu'une fois ces
@@ -654,13 +701,18 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         return { toolName, toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, { days: 14 }) };
       case 'getParetoArticles':
         return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
-      case 'getRevenue':
+      case 'getRevenue': {
         // Bug trouvé le 27/09/2026 : `days` n'était jamais transmis à getRevenue (seul `date` l'était),
         // alors que getRevenue accepte bien un `days` pour une fenêtre glissante (défaut interne 1 jour
         // seulement) — "le CA de cette semaine"/"le CA sur 3 mois" retombait toujours sur les dernières
         // 24h sans jamais utiliser daysQuery/resolveDateRange. `date` reste prioritaire quand présent
         // (getRevenue.js ignore déjà `days` si `date` est fourni).
-        return { toolName, toolResult: await tools.getRevenue(rposShopId, { date, days: daysQuery || 1, department, ean }) };
+        const revenueResult = await tools.getRevenue(effectiveShopId, { date, days: daysQuery || 1, department, ean });
+        // targetShopLabel présent seulement si un AUTRE magasin a été explicitement ciblé (cf. plus
+        // haut) : le LLM doit alors préciser DANS QUEL magasin, sinon la réponse resterait ambiguë
+        // pour un ADMIN qui vient de nommer un magasin différent du sien.
+        return { toolName, toolResult: targetShopLabel ? { ...revenueResult, targetShopLabel } : revenueResult };
+      }
       case 'getRevenueAllShops': {
         // Réservé ADMIN/SUPERVISOR (demande du 19/09/2026) : un DIRECTOR/DEPARTMENT_HEAD/
         // SHELF_STOCKER (compte à un seul magasin fixe) retombe silencieusement sur SON magasin
@@ -923,7 +975,9 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
 
 Si les données contiennent un champ "salesCount"/"totalSalesCount" (nombre de ventes = tickets de caisse distincts) non nul : c'est la bonne réponse à "combien de ventes"/"nombre de ventes", y compris par article ou par jour précis (dailyHistory[].salesCount pour un jour donné). Si ce champ est null, dis explicitement que le nombre de tickets n'est pas disponible pour cette période plutôt que d'utiliser "articleLineCount"/"totalQuantity"/"quantity" à sa place. Les champs "articleLineCount"/"totalQuantity"/"quantity" sont des LIGNES ou QUANTITÉS d'articles vendus (un article vendu = une ligne, plusieurs unités possibles par vente) : ne les présente JAMAIS comme "nombre de ventes" ou "nombre de tickets" — utilise-les seulement si la question porte explicitement sur le nombre/la quantité d'articles vendus.
 
-Si les données contiennent un champ "lastSyncedAt" non nul : les ventes ne sont jamais consultées en temps réel sur le serveur magasin, elles sont synchronisées en base toutes les 15 minutes — précise donc TOUJOURS dans ta réponse jusqu'à quelle heure les données sont à jour (ex: "données à jour jusqu'à 14h32"), converti en heure lisible (fuseau Africa/Abidjan, pas de date si c'est aujourd'hui, avec la date si c'est un jour différent). Si la question porte sur "aujourd'hui"/le jour même, ajoute que les ventes les plus récentes (moins de 15 minutes) peuvent ne pas encore être comptabilisées. Si "lastSyncedAt" est absent ou null (aucune vente trouvée sur la période), ne mentionne pas cette fraîcheur, elle n'a pas de sens sans donnée.
+Si les données contiennent un champ "lastSyncedAt" non nul : les ventes ne sont jamais consultées en temps réel sur le serveur magasin, elles sont synchronisées en base toutes les 15 minutes — précise donc TOUJOURS dans ta réponse jusqu'à quelle date ET heure les données sont à jour, au format complet "JJ mois AAAA à HHhMM" (ex: "données à jour jusqu'au 27 septembre 2026 à 14h32"), converti depuis lastSyncedAt en heure lisible (fuseau Africa/Abidjan) — la DATE fait TOUJOURS partie de la mention, jamais seulement l'heure seule, même quand la période demandée est "aujourd'hui" (bug constaté le 27/09/2026 : l'heure seule, sans date, devenait ambiguë/trompeuse dès que la période portait sur plusieurs jours passés, ex: "le mois dernier" affichait juste "12h30" sans dire de quel jour). Si la question porte sur "aujourd'hui"/le jour même, ajoute en plus que les ventes les plus récentes (moins de 15 minutes) peuvent ne pas encore être comptabilisées. Si "lastSyncedAt" est absent ou null (aucune vente trouvée sur la période), ne mentionne pas cette fraîcheur, elle n'a pas de sens sans donnée.
+
+Si les données contiennent un champ "targetShopLabel" non nul : la question ciblait explicitement un AUTRE magasin que celui de la session en cours (un ADMIN/SUPERVISOR a nommé ce magasin par sa référence) — précise TOUJOURS dans ta réponse le nom de ce magasin (ex: "Le chiffre d'affaires du magasin 035 XYZ..."), jamais une réponse qui laisserait croire qu'il s'agit du magasin habituel de la conversation.
 
 ${persona}`;
 }
