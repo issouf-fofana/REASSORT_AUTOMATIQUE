@@ -56,7 +56,10 @@ const FALLBACK_INTENT_RULES = [
   // pour cet outil sans avoir besoin de ce mot-clé fourre-tout.
   { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
   { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
-  { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
+  // "son stock"/"le stock" ajoutés le 27/09/2026 (bug trouvé via une question à deux volets : "le CA
+  // de cet article et son stock est à combien ?" — le segment isolé "son stock est à combien" ne
+  // matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible" explicite).
+  { keywords: ['stock de', 'stock actuel', 'stock disponible', 'son stock', 'le stock est', 'stock est a', 'stock est à', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
   // DLV (demande du 22/09/2026) : PAS une date de péremption, un stock basculé manuellement par le
   // personnel sur un EAN distinct pour écoulement à prix réduit — cf. chatbotToolsService.js.
   { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
@@ -499,8 +502,10 @@ async function resolveAllowedShopIds(user) {
  * pertinent n'a pu être identifié (le LLM répond alors sans données spécifiques, en le disant).
  * conversationHistory permet de retomber sur le dernier outil utilisé quand la question demande
  * juste une représentation visuelle d'un résultat déjà obtenu, sans nommer une nouvelle donnée.
+ * Renommée depuis runToolForQuestion (cf. wrapper du même nom juste après) : cette fonction ne gère
+ * plus qu'UN SEUL segment de question à la fois, jamais une phrase à double intention.
  */
-async function runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user } = {}) {
+async function runSingleTool(rposShopId, question, { department, conversationHistory, posId, user } = {}) {
   let toolName = await detectIntent(question);
 
   // "gisement" + un EAN explicite ("quel gisement pour l'article X", "gisement de l'article X") :
@@ -778,13 +783,71 @@ async function runToolForQuestion(rposShopId, question, { department, conversati
   }
 }
 
+// Sépare une question en segments sur les conjonctions de coordination les plus courantes dans une
+// phrase à double intention ("le CA de cet article et son stock ?", "quoi commander aujourd'hui et
+// y a-t-il des anomalies ?") — volontairement restreint à "et"/"puis"/"ainsi que" en DÉBUT de
+// proposition plutôt qu'un découpage naïf sur chaque "et" du texte (couperait à tort "chips ET
+// biscuits" ou "produits d'entretien"). Limité à 2 segments : une question à 3 intentions ou plus
+// reste hors périmètre pour l'instant, plutôt que de complexifier sans demande explicite en ce sens.
+const QUESTION_SPLIT_REGEX = /\s+(?:et|puis|ainsi que)\s+(?=\w)/i;
+
+function splitCompoundQuestion(question) {
+  const parts = question.split(QUESTION_SPLIT_REGEX);
+  if (parts.length < 2) return null;
+  return [parts[0], parts.slice(1).join(' et ')];
+}
+
+/**
+ * Point d'entrée public (nom historique conservé) : gère maintenant le cas d'une question à DEUX
+ * intentions dans la même phrase (demande du 27/09/2026, bug signalé : "le CA de cet article ET son
+ * stock ?" ne répondait qu'au CA, le stock étant purement ignoré). Reste un simple passe-plat vers
+ * runSingleTool pour toute question à une seule intention (l'immense majorité des cas) — AUCUN
+ * changement de comportement pour ces cas-là, seul un nouveau chemin s'ajoute pour le cas composé.
+ *
+ * Le second résultat est exposé sous une clé séparée (secondaryToolName/secondaryToolResult), JAMAIS
+ * fusionné dans toolResult lui-même : le frontend (AiAssistant.tsx, buildVisualFromToolResult)
+ * suppose un toolResult unique pour construire un graphique/tableau — y injecter une liste casserait
+ * ce contrat sans navigateur disponible pour vérifier le rendu réel. toolResult reste donc toujours
+ * l'objet de l'outil PRINCIPAL comme avant ; le secondaire n'est utilisé que dans le texte du prompt
+ * (cf. buildChatbotPrompt) pour que le LLM réponde aussi au second volet de la question.
+ */
+async function runToolForQuestion(rposShopId, question, options = {}) {
+  const primary = await runSingleTool(rposShopId, question, options);
+  if (!primary.toolName) return primary;
+
+  const segments = splitCompoundQuestion(question);
+  if (!segments) return primary;
+
+  const [firstSegment, secondSegment] = segments;
+  // Le premier segment doit rester celui qui porte l'intention principale déjà résolue (sinon la
+  // question n'était pas vraiment composée, juste une phrase contenant "et" sans rapport avec une
+  // seconde intention, ex: "les articles en rupture et en surstock" — un seul segment ferait double
+  // emploi avec le même outil).
+  const secondIntent = await detectIntent(secondSegment);
+  if (!secondIntent || secondIntent === primary.toolName) return primary;
+
+  // Le second segment isolé ("son stock est à combien ?") ne contient généralement plus l'EAN,
+  // déjà cité dans le premier ("le CA de l'article 100013729 et..."). Réutilise le mécanisme
+  // existant de retour sur le dernier EAN d'un tour de conversation précédent (cf. plus haut,
+  // ARTICLE_SCOPED_TOOLS) en injectant le premier segment comme historique simulé — sans ça, le
+  // second outil répondrait sur le magasin entier au lieu de l'article visé par la question.
+  const secondaryOptions = {
+    ...options,
+    conversationHistory: [...(options.conversationHistory || []), { question: firstSegment, toolUsed: null, toolResult: null }],
+  };
+  const secondary = await runSingleTool(rposShopId, secondSegment, secondaryOptions);
+  if (!secondary.toolName || secondary.toolName === primary.toolName) return primary;
+
+  return { ...primary, secondaryToolName: secondary.toolName, secondaryToolResult: secondary.toolResult };
+}
+
 /**
  * Construit le prompt final : contexte utilisateur (magasin, rayon si précisé — jamais plus que ce
  * que ses permissions autorisent, appliqué en amont par la route), historique de conversation,
  * résultat de l'outil appelé le cas échéant, et consigne stricte de ne jamais inventer de données
  * (§35).
  */
-async function buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult, reusedFromHistory, suggestedQuestions }) {
+async function buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult, reusedFromHistory, suggestedQuestions, secondaryToolName, secondaryToolResult }) {
   const context = [
     `Magasin : ${shopReference || ''} ${shopName || ''}`,
     department ? `Rayon sélectionné : ${department}` : null,
@@ -815,6 +878,13 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
           : '')
       : '';
     dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}`;
+    // Question à deux intentions dans la même phrase (demande du 27/09/2026, bug signalé : "le CA de
+    // cet article et son stock ?" ne répondait qu'au CA) — le second résultat est donné en texte
+    // seulement, JAMAIS retourné comme toolResult au frontend (cf. commentaire de runToolForQuestion :
+    // le frontend suppose un toolResult unique pour construire un graphique/tableau).
+    if (secondaryToolResult) {
+      dataSection += `\n\nLa question contient AUSSI une seconde demande distincte, à laquelle tu dois répondre en plus de la première (les deux dans la même réponse) — données réelles pour ce second volet (outil "${secondaryToolName}") :\n${JSON.stringify(secondaryToolResult, null, 2)}`;
+    }
   } else {
     // Aucun outil de données identifié pour cette question : deux cas très différents à distinguer
     // (demande du 16/09/2026 : "si je pose une question qu'il ne comprend pas, il doit demander une
@@ -941,7 +1011,7 @@ async function recordFeatureRequest(decision, { user }) {
  * d'origine — un résumé quotidien WhatsApp — n'étant alors jamais complétée ni enregistrée).
  */
 async function askAssistant({ rposShopId, posId, shopReference, shopName, department, subDepartment, conversationHistory, question, onTextChunk, user, pendingFeatureRequest }) {
-  const { toolName, toolResult, reusedFromHistory } = await runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user });
+  const { toolName, toolResult, reusedFromHistory, secondaryToolName, secondaryToolResult } = await runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user });
   // En clarification active, le suivi de demande doit passer AVANT tout affichage de données : la
   // réponse de l'utilisateur à "quelles infos voulez-vous dans ce résumé ?" ne doit jamais être
   // interprétée comme une nouvelle question de données, même si elle mentionne "CA"/"rupture".
@@ -950,7 +1020,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   const suggestedQuestions = effectiveToolResult || reusedFromHistory ? null : await getSuggestedQuestions();
   const prompt = skipToolForPendingClarification
     ? `Tu es l'Assistant IA d'une application de gestion de stock/réassort. Tu avais précédemment demandé une précision à l'utilisateur au sujet d'un besoin d'évolution non encore disponible dans l'application : "${pendingFeatureRequest.problem}". L'utilisateur répond maintenant : "${question}". Accuse réception de sa précision en une phrase brève, sans inventer de fonctionnalité ni prétendre l'avoir déjà mise en place.`
-    : await buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult: effectiveToolResult, reusedFromHistory, suggestedQuestions });
+    : await buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult: effectiveToolResult, reusedFromHistory, suggestedQuestions, secondaryToolName, secondaryToolResult: skipToolForPendingClarification ? null : secondaryToolResult });
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);
