@@ -50,10 +50,10 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // — reflue proprement sur plusieurs lignes selon la largeur disponible.
       // mt-0 : collé directement sous l'île, jamais d'écart visible entre les deux (demande explicite
       // du 26/09/2026, "fais en sorte que ça soit collé à la barre").
-      className="absolute left-1/2 top-full z-50 mt-0 grid w-max max-w-[min(94vw,960px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
+      className="absolute left-1/2 top-full z-50 mt-0 grid w-max max-w-[min(96vw,1120px)] -translate-x-1/2 grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-zinc-950 p-4 shadow-lg sm:grid-cols-3 lg:grid-cols-4"
     >
       {groups.map((group) => (
-        <div key={group.label} className="flex min-w-[150px] flex-col gap-0.5">
+        <div key={group.label} className="flex min-w-[220px] flex-col gap-0.5">
           <div className="px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
           {group.entries.map((entry) => {
             const Icon = entry.icon;
@@ -67,12 +67,12 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
                 data-radius
                 style={radius('0.75rem')}
                 className={cn(
-                  'flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
+                  'flex w-full cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-xl px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
                   isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                 )}
               >
                 <Icon className={cn('size-4 shrink-0', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
-                <span className="truncate">{entry.label}</span>
+                <span>{entry.label}</span>
               </button>
             );
           })}
@@ -145,10 +145,12 @@ export function ReassortNotch() {
     // réduit le 26/09/2026 (avec la bande et l'île elle-même) suite à "la barre est trop grosse".
     <div className="relative flex w-full items-start justify-center px-2 pt-3 pb-1">
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
-          barre noire en haut [...] pour ne pas qu'on voie les coins") : sans elle, le fond blanc de
-          la page restait visible de chaque côté de l'île au-dessus de son point d'ancrage — h-3
-          correspond au pt-3 du conteneur (même hauteur que l'espace réservé aux ailes incurvées). */}
-      <div className="absolute inset-x-0 top-0 h-3 bg-zinc-950" />
+          barre noire en haut [...] pour ne pas qu'on voie les coins") puis "il y a un espace entre
+          la barre noire et notre sidebar en haut, corrige ça" : volontairement plus haute que pt-3
+          (déborde légèrement sous le sommet de l'île) pour absorber tout écart résiduel — peu
+          importe sa source exacte (line-height, marge d'un ancêtre...), aucun pixel du fond de page
+          ne doit rester visible entre le haut de l'écran et l'île. */}
+      <div className="absolute inset-x-0 top-0 h-6 bg-zinc-950" />
       <div
         onMouseEnter={openMenu}
         onMouseLeave={scheduleClose}
@@ -188,7 +190,7 @@ export function ReassortNotch() {
           className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-semibold outline-none transition-colors hover:bg-zinc-900"
         >
           {ActiveIcon && <ActiveIcon className="size-4 shrink-0 text-zinc-300" />}
-          <span className="max-w-[160px] truncate leading-none">{activeEntry?.label}</span>
+          <span className="max-w-[220px] truncate leading-none">{activeEntry?.label}</span>
           <ChevronDown className={cn('size-3.5 text-zinc-400 transition-transform duration-200', isOpen && 'rotate-180')} />
         </button>
 
