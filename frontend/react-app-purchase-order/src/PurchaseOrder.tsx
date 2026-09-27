@@ -566,7 +566,12 @@ export function PurchaseOrder() {
                   <iconify-icon icon="solar:history-bold-duotone" className="align-middle"></iconify-icon> Historique de la semaine
                 </button>
               )}
-              <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
+              {/* Recharge par ID si une proposition est déjà affichée (même bug/fix que onValidated
+                  ci-dessous : /proposal/pending renvoie null dès que status passe VALIDATED,
+                  effaçant tout l'écran même pour une proposition déjà entièrement traitée qu'on
+                  devrait pouvoir continuer à consulter) — sinon (aucune proposition chargée), le
+                  comportement d'origine reste inchangé. */}
+              <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={() => (proposal ? loadProposalById(proposal.id) : loadPendingProposal())}>
                 Actualiser
               </button>
               {!!proposal && (
@@ -624,7 +629,7 @@ export function PurchaseOrder() {
                 </div>
                 <div className="d-flex gap-2 align-items-center flex-wrap">
                   <span className="text-muted small">{status}</span>
-                  <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadPendingProposal}>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={() => (proposal ? loadProposalById(proposal.id) : loadPendingProposal())}>
                     Actualiser
                   </button>
                   {!!proposal && (
@@ -658,7 +663,19 @@ export function PurchaseOrder() {
                         // les autres restent à traiter. On reste sur cette même vue détail rayon
                         // (elle affichera désormais le badge "validé" à la place du bouton) plutôt
                         // que de renvoyer l'utilisateur ailleurs sans raison.
-                        loadPendingProposal();
+                        //
+                        // Bug trouvé le 27/09/2026 (capture à l'appui : "les autres propositions
+                        // disparaissent") : loadPendingProposal() appelle GET /proposal/pending, qui
+                        // ne retourne QUE les propositions status=GENERATED (cf.
+                        // proposalService.getPendingProposal) — si ce dernier rayon fait basculer
+                        // Proposal.status à VALIDATED (tous les rayons avec des articles à commander
+                        // ont désormais leur ProposalOrder), cet appel renvoie null et l'écran entier
+                        // se vide ("Aucune proposition en attente"), empêchant même de CONSULTER les
+                        // autres secteurs/rayons déjà traités. loadProposalById (GET /proposal/:id)
+                        // fonctionne quel que soit le statut — la navigation reste possible, la
+                        // proposition passe juste en lecture seule (viewingPastGeneration) si elle
+                        // est vraiment entièrement terminée, sans jamais faire disparaître l'écran.
+                        loadProposalById(proposal.id);
                       }}
                     />
                   )}
