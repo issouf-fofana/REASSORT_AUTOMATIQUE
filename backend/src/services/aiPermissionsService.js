@@ -49,6 +49,12 @@ const TOOL_CAPABILITY = {
   getOverstockArticles: 'stock',
   getStockoutRisksAllShops: 'stock', // même capacité que la version single-shop, restriction ADMIN/SUPERVISOR appliquée dans chatbotService.js
   getOverstockArticlesAllShops: 'stock',
+  // Bug trouvé le 27/09/2026 lors d'une campagne de test dynamique : cet outil (stock d'un article
+  // dans tous les magasins) était totalement fonctionnel dans chatbotService.js/chatbotToolsService.js
+  // mais absent de cette table -> bloqué en fail-closed pour TOUT utilisateur, y compris ADMIN, sans
+  // aucun message d'erreur explicite autre que "cette fonctionnalité" (capability 'unclassified').
+  // Même capacité que la version single-shop (getArticleStock -> 'stock').
+  getArticleStockAllShops: 'stock',
   getStockMoveHistory: 'stock',
   getDlvArticles: 'stock',
   getArticleDlvStatus: 'stock',
