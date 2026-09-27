@@ -68,30 +68,40 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // même temps que ce commentaire, cf. plus bas) donc 32px est directement où l'île se termine.
       className="absolute inset-x-0 top-[32px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
-      {groups.map((group) => (
-        <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
-          <div className="px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
-          {group.entries.map((entry) => {
-            const Icon = entry.icon;
-            const isActive = entry.id === activeId;
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                role="menuitem"
-                onClick={() => onSelect(entry)}
-                className={cn(
-                  'flex w-full cursor-pointer items-start gap-2 px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
-                  isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
-                )}
-              >
-                <Icon className={cn('size-4 shrink-0 mt-0.5', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
-                <span className="leading-tight">{entry.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+      {groups.map((group) => {
+        // Demande du 27/09/2026 : une colonne à trop d'entrées (Paramètres, 6 sous-onglets) s'étirait
+        // en une seule liste verticale longue — répartie ici sur 2 colonnes internes dès qu'un groupe
+        // dépasse 4 entrées (seuil générique, pas un cas spécial câblé sur "Paramètres" par son nom :
+        // s'applique pareil à tout futur groupe qui grossirait au-delà de 4 items), rendant la colonne
+        // plus courte en hauteur et un peu plus large.
+        const useTwoCols = group.entries.length > 4;
+        return (
+          <div key={group.label} className={cn('flex shrink-0 flex-col gap-0.5', useTwoCols ? 'w-[300px]' : 'w-[160px]')}>
+            <div className="px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{group.label}</div>
+            <div className={useTwoCols ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}>
+              {group.entries.map((entry) => {
+                const Icon = entry.icon;
+                const isActive = entry.id === activeId;
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => onSelect(entry)}
+                    className={cn(
+                      'flex w-full cursor-pointer items-start gap-2 px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
+                      isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+                    )}
+                  >
+                    <Icon className={cn('size-4 shrink-0 mt-0.5', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
+                    <span className="leading-tight">{entry.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </motion.div>
   );
 }
