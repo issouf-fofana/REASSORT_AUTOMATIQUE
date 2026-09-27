@@ -144,7 +144,12 @@ const ALL_SHOPS_STOCK_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'e
 // ci-dessous) : "quels?/quelles? magasins" contient déjà "magasins", ne jamais lui ajouter
 // "\s+magasins?" par-dessus (bug trouvé le 26/09/2026 : dupliquait "magasins" et ne matchait plus
 // jamais rien).
-const ALL_SHOPS_PREFIX = "(tous les|toutes les|chaque|quels?|quelles?|l'ensemble des?|l'ensemble de mes|mes)\\s+magasins?|magasins?\\s+(du réseau|de mon réseau|de notre réseau)|(tout|toute)\\s+le\\s+réseau|le\\s+réseau\\s+(entier|complet)?";
+// Bug trouvé le 27/09/2026 (campagne de test dynamique) : "le\\s+réseau\\s+(entier|complet)?" ne
+// matchait JAMAIS "le réseau" seul (ni même "le réseau entier") — le \s+ obligatoire avant un groupe
+// optionnel vide laisse le curseur juste après l'espace, à une position où le \b de fin de motif ne
+// peut jamais se satisfaire (aucune transition mot/non-mot à cet endroit précis quand le groupe est
+// vide). Restructuré en rendant l'espace ET le qualificatif optionnels ensemble (\s+(entier|complet))?.
+const ALL_SHOPS_PREFIX = "(tous les|toutes les|chaque|quels?|quelles?|l'ensemble des?|l'ensemble de mes|mes)\\s+magasins?|magasins?\\s+(du réseau|de mon réseau|de notre réseau)|(tout|toute)\\s+le\\s+réseau|le\\s+réseau(\\s+(entier|complet))?";
 const ALL_SHOPS_STOCKOUT_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(rupture|risque)|\\b(rupture|risque).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
 const ALL_SHOPS_OVERSTOCK_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\bsurstock|\\bsurstock.*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
 const ALL_SHOPS_PENDING_PROPOSAL_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(proposition|valid)|\\b(proposition|valid).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
