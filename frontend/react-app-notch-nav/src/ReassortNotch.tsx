@@ -60,7 +60,13 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // Coins carrés (pas de data-radius/rounded-*) : demande du 26/09/2026, "il faut faire le modale
       // qui s'affiche là en bordure carrée" — seul le mega-menu revient à la règle du site "aucun coin
       // arrondi", l'île compacte au-dessus garde volontairement ses coins arrondis/ailes incurvées.
-      className="absolute inset-x-0 top-full z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
+      // top-[44px] plutôt que top-full : un espace résiduel restait visible malgré pb-1 retiré
+      // (commit précédent, insuffisant) — top-full dépend de la hauteur totale du conteneur racine,
+      // fragile à toute variation (line-height, rendu du texte tronqué du bouton central...) qui
+      // changerait cette hauteur de quelques pixels sans qu'on le remarque. Valeur fixe et explicite
+      // à la place : pt-3 (12px) + hauteur de l'île (h-8, 32px) = 44px, les deux seules dimensions qui
+      // déterminent réellement où l'île se termine.
+      className="absolute inset-x-0 top-[44px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
