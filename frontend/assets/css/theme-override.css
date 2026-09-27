@@ -358,6 +358,19 @@ a:not(.sidebar *),
      body.nav-collapsed .content {
           margin-left: 0;
      }
+     /* Demande du 27/09/2026 : "toutes les pages vont sur un côté quand il n'y a pas la sidebar" —
+        .container-xxl (Bootstrap, app.min.css) garde son max-width fixe (1320px sur grand écran)
+        même une fois la sidebar cachée, alors que bien plus de largeur devient disponible : le
+        contenu (tableaux, formulaires) restait à sa largeur habituelle, collé à gauche par le
+        centrage automatique de Bootstrap (margin:auto) qui ne peut centrer QUE dans les 1320px,
+        jamais dans la largeur réelle de l'écran élargi. max-width retiré uniquement dans cet état
+        (jamais en ÉTAT 1, où cette limite reste utile pour la lisibilité avec la sidebar visible) :
+        le contenu remplit maintenant tout l'espace libéré plutôt que de laisser un vide à droite. */
+     body.nav-collapsed .content .container-xxl,
+     body.nav-collapsed .content .container-xl,
+     body.nav-collapsed .content .container-lg {
+          max-width: 100% !important;
+     }
 }
 
 /* Onglets (nav-tabs) : volt.css définit plusieurs règles concurrentes pour l'état actif, dont le
