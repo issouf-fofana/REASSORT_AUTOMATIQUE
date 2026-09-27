@@ -22,7 +22,7 @@
 
   const sidebarSlot = document.getElementById('layout-sidebar-slot');
   const topbarSlot = document.getElementById('layout-topbar-slot');
-  const PARTIALS_VERSION = '2026-09-16-9';
+  const PARTIALS_VERSION = '2026-09-27-1';
   if (sidebarSlot) sidebarSlot.outerHTML = loadPartialSync('assets/partials/sidebar.html?v=' + PARTIALS_VERSION);
   if (topbarSlot) topbarSlot.outerHTML = loadPartialSync('assets/partials/topbar.html?v=' + PARTIALS_VERSION);
 

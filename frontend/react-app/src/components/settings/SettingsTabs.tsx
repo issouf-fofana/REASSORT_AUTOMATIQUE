@@ -24,7 +24,7 @@ const TABS = [
   { id: 'tab-rpos', label: 'RPOS & Sécurité', icon: Server },
   { id: 'tab-cron', label: 'Planification', icon: Clock },
   { id: 'tab-sync', label: 'Synchronisation', icon: RefreshCw },
-  { id: 'tab-ai', label: 'IA', icon: Sparkles },
+  { id: 'tab-ai', label: 'Config IA', icon: Sparkles },
   { id: 'tab-mail', label: 'Comptes mail', icon: Mail },
 ] as const;
 

@@ -97,7 +97,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'settings-rpos', label: 'RPOS & Sécurité', href: '/settings#tab-rpos', icon: ServerCog, adminOnly: true },
       { id: 'settings-cron', label: 'Planification', href: '/settings#tab-cron', icon: Clock, adminOnly: true },
       { id: 'settings-sync', label: 'Synchronisation', href: '/settings#tab-sync', icon: RefreshCw, adminOnly: true },
-      { id: 'settings-ai', label: 'IA', href: '/settings#tab-ai', icon: Wand2, adminOnly: true },
+      { id: 'settings-ai', label: 'Config IA', href: '/settings#tab-ai', icon: Wand2, adminOnly: true },
     ],
   },
 ];
