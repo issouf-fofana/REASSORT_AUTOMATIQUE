@@ -238,11 +238,14 @@ function extractEan(question) {
  * ("les données transmises ne contiennent pas... du magasin 035") car aucun outil ne savait cibler
  * un AUTRE magasin par sa référence, seulement "tous les magasins" (déjà pris en charge) ou le
  * magasin de la session en cours. Réservé aux comptes multi-magasins (vérifié à l'appel, jamais ici).
- * Exige le mot "magasin" explicitement avant le nombre (jamais un nombre isolé dans la question, qui
- * serait presque toujours autre chose : un pourcentage, une quantité, un jour du mois...).
+ * Exige le mot "magasin"/"mag" explicitement avant le nombre (jamais un nombre isolé dans la
+ * question, qui serait presque toujours autre chose : un pourcentage, une quantité, un jour du
+ * mois...) — "mag" ajouté le 27/09/2026 (bug trouvé via test réel : "le CA du mag 110 hier ?"
+ * n'était pas reconnu, seul "magasin" en toutes lettres l'était, le repli silencieux sur le
+ * magasin de la session passait alors inaperçu).
  */
 function extractTargetShopReference(question) {
-  const match = (question || '').match(/\bmagasins?\s+(?:n[o°]\s*)?(\d{2,4})\b/i);
+  const match = (question || '').match(/\b(?:magasins?|mag)\s+(?:n[o°]\s*)?(\d{2,4})\b/i);
   return match ? match[1] : null;
 }
 

@@ -58,11 +58,26 @@
     window.location.href = '/login';
   }
 
+  // Bug trouvé le 27/09/2026 : un compte SUPERVISOR (multi-magasins comme ADMIN, mais pas admin)
+  // affichait "— Admin" à tort, faute d'un vrai libellé de rôle — le code précédent supposait
+  // qu'un compte sans rposShopName fixe était forcément ADMIN, ce qui n'est vrai que pour ADMIN lui-
+  // même. Libellés explicites par rôle, jamais une supposition sur ce que "pas de magasin fixe" veut
+  // dire.
+  var ROLE_LABELS = {
+    ADMIN: 'Admin',
+    SUPERVISOR: 'Superviseur',
+    DIRECTOR: 'Directeur',
+    DEPARTMENT_HEAD: 'Chef de département',
+    SHELF_STOCKER: 'Rayonniste',
+    STORE: 'Magasin',
+  };
+
   document.addEventListener('DOMContentLoaded', function () {
     const user = window.reassortGetUser();
     const nameEl = document.getElementById('user-menu-name');
     if (user && nameEl) {
-      nameEl.textContent = user.name + (user.rposShopName ? ' — ' + user.rposShopName : ' — Admin');
+      const suffix = user.rposShopName || ROLE_LABELS[user.role] || user.role || '';
+      nameEl.textContent = user.name + (suffix ? ' — ' + suffix : '');
     }
     const usersMenuItem = document.getElementById('menu-item-users');
     if (user && user.role === 'ADMIN' && usersMenuItem) {
