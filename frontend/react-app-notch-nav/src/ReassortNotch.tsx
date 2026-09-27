@@ -146,7 +146,12 @@ export function ReassortNotch() {
     // groupe cliqué un par un. pt-3 : espace au-dessus pour que les ailes incurvées (débordent vers
     // le haut, cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent —
     // réduit le 26/09/2026 (avec la bande et l'île elle-même) suite à "la barre est trop grosse".
-    <div className="relative flex w-full items-start justify-center px-2 pt-3 pb-1">
+    // sticky top-0 : demande explicite du 26/09/2026 ("quand je scroll il doit rester, pas se fermer
+    // [disparaître]") — ce conteneur est monté directement dans <body> (#notch-nav-slot), en dehors
+    // du flux de <main class="content"> qui défile, donc position:relative laissait la barre remonter
+    // hors écran avec le reste de la page. z-[100] : même valeur que .navbar-top dans
+    // theme-override.css, pour rester au-dessus du contenu de page sans dépendre d'un ordre DOM.
+    <div className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3 pb-1">
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
           barre noire en haut [...] pour ne pas qu'on voie les coins") puis "il y a un espace entre
           la barre noire et notre sidebar en haut, corrige ça" : volontairement plus haute que pt-3
