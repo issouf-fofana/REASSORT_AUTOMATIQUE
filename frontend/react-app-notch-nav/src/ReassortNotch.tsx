@@ -43,8 +43,7 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       animate={{ opacity: 1, y: 0, scaleY: 1 }}
       exit={{ opacity: 0, y: -6, scaleY: 0.96 }}
       transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-      style={{ transformOrigin: 'top', ...radius('1.25rem') }}
-      data-radius
+      style={{ transformOrigin: 'top' }}
       // Une seule ligne, les 7 colonnes (Pilotage/Réassort/IA/Commande/Mail/Utilisateur/Paramètres,
       // cf. navConfig.ts) côte à côte plutôt que sur plusieurs lignes — demande explicite du
       // 26/09/2026 avec exemple de mise en page ("je veux que tout soit sur la même ligne [...] les
@@ -53,7 +52,10 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // que de forcer un retour à la ligne qui romprait la mise en page demandée.
       // mt-0 : collé directement sous l'île, jamais d'écart visible entre les deux (demande explicite
       // du 26/09/2026, "fais en sorte que ça soit collé à la barre").
-      className="absolute left-1/2 top-full z-50 mt-0 flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto rounded-2xl bg-zinc-950 p-4 shadow-lg"
+      // Coins carrés (pas de data-radius/rounded-*) : demande du 26/09/2026, "il faut faire le modale
+      // qui s'affiche là en bordure carrée" — seul le mega-menu revient à la règle du site "aucun coin
+      // arrondi", l'île compacte au-dessus garde volontairement ses coins arrondis/ailes incurvées.
+      className="absolute left-1/2 top-full z-50 mt-0 flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
@@ -67,10 +69,8 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
                 type="button"
                 role="menuitem"
                 onClick={() => onSelect(entry)}
-                data-radius
-                style={radius('0.75rem')}
                 className={cn(
-                  'flex w-full cursor-pointer items-start gap-2 rounded-xl px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
+                  'flex w-full cursor-pointer items-start gap-2 px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
                   isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                 )}
               >
