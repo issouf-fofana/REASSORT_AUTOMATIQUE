@@ -519,7 +519,24 @@ export function AiAssistant() {
         .aia-md-list li:last-child { margin-bottom: 0; }
         .aia-stream-cursor { display: inline-block; animation: aia-blink 1s step-end infinite; }
         @keyframes aia-blink { 50% { opacity: 0; } }
-        .aia-suggestion-btn { text-align: left; }
+        /* Style "plus pro" demandé le 27/09/2026 (l'outline Bootstrap brut, bordure grise fine,
+           paraissait basique) : fond plein gris clair discret plutôt qu'un simple contour, sans
+           bordure ni ombre — cohérent avec la palette noir/blanc/gris stricte du site (jamais de
+           coin arrondi, cf. theme-override.css) tout en donnant un rendu plus soigné qu'un bouton
+           Bootstrap générique. */
+        .aia-suggestion-btn {
+          text-align: left;
+          background-color: #f1f3f5;
+          border: none;
+          color: #1a1a1a;
+          font-weight: 500;
+          transition: background-color .15s ease;
+        }
+        .aia-suggestion-btn:hover,
+        .aia-suggestion-btn:focus {
+          background-color: #000000;
+          color: #ffffff;
+        }
         .aia-chart-wrap { margin-top: .75rem; padding: .75rem 0 0; border-top: 1px solid #eeeeee; }
         .aia-table { font-size: .85rem; margin-top: .5rem; }
         .aia-table th { font-weight: 600; color: #666666; font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; border-bottom-width: 2px; }
@@ -646,7 +663,7 @@ export function AiAssistant() {
                         <button
                           key={i}
                           type="button"
-                          className="btn btn-outline-secondary btn-sm aia-suggestion-btn"
+                          className="btn btn-sm aia-suggestion-btn"
                           onClick={() => sendQuestion(q)}
                         >
                           {q}
@@ -693,7 +710,7 @@ export function AiAssistant() {
                     <button
                       key={i}
                       type="button"
-                      className="btn btn-outline-secondary btn-sm aia-suggestion-btn"
+                      className="btn btn-sm aia-suggestion-btn"
                       onClick={() => sendQuestion(q)}
                     >
                       {q}

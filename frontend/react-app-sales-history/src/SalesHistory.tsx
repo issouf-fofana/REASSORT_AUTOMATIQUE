@@ -530,7 +530,7 @@ export function SalesHistory() {
         </div>
         <div className="card-body p-0">
           {!showGridState && <div className="text-center text-muted py-4">{emptyMessage}</div>}
-          <div ref={gridDivRef} style={{ display: showGridState ? '' : 'none' }}></div>
+          <div id="sh-grid" ref={gridDivRef} style={{ display: showGridState ? '' : 'none' }}></div>
         </div>
       </div>
     </div>
