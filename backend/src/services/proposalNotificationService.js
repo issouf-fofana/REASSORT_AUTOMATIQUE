@@ -330,7 +330,7 @@ async function notifyAdminsOfEndOfDayRecap(summaries) {
     .map((s) => `
       <tr>
         <td>${s.shop.reference} — ${s.shop.name}</td>
-        <td style="text-align:center;">${s.validated ? '<span style="color:#1e7e34;">✅ Validée</span>' : '<span style="color:#c0392b;">⚠️ Non validée</span>'}</td>
+        <td style="text-align:center;">${s.validated ? '<span style="color:#1e7e34;">✅ Validée</span>' : `<span style="color:#c0392b;">⚠️ ${s.validatedDepartments}/${s.totalDepartments} rayon(s) validé(s)</span>`}</td>
         <td style="text-align:right;">${s.articlesCount}</td>
       </tr>
     `)

@@ -184,11 +184,21 @@ export function PurchaseOrder() {
     }
   }
 
-  async function loadProposalById(id: string) {
+  // `isExplicitHistoryPick` distingue deux usages bien différents de cette fonction :
+  // - true (handleGenerationSelect) : l'utilisateur choisit EXPRÈS une génération dans l'historique,
+  //   potentiellement ancienne/remplacée → lecture seule si son statut n'est plus GENERATED.
+  // - false (rechargements après validation d'un rayon, bouton Actualiser) : on recharge la MÊME
+  //   proposition en cours de traitement — un rayon qui vient de faire passer Proposal.status à
+  //   VALIDATED ne doit JAMAIS rendre les AUTRES rayons non traités inaccessibles en lecture seule
+  //   (bug du 27/09/2026 : "les autres rayons disparaissent" — en réalité le bouton Valider
+  //   disparaissait pour tous les rayons dès que le statut global changeait, alors qu'il restait des
+  //   rayons sans ProposalOrder). Le vrai signal de "lecture seule" reste `currentDepartmentOrder`
+  //   (ce rayon précis a-t-il déjà sa commande ?), pas le statut global de la proposition.
+  async function loadProposalById(id: string, isExplicitHistoryPick = false) {
     setStatus('Chargement...');
     try {
       const data = await apiFetch<Proposal>(`/reassort/proposal/${id}?${shopQueryParam()}`);
-      setViewingPastGeneration(data.status !== 'GENERATED');
+      if (isExplicitHistoryPick) setViewingPastGeneration(data.status !== 'GENERATED');
       setProposal(data);
       setSelectedGenerationId(id);
       setStatus(`${data.lines.length} article(s) — ${data.status}`);
@@ -254,7 +264,7 @@ export function PurchaseOrder() {
 
   function handleGenerationSelect(id: string) {
     setSelectedGenerationId(id);
-    if (id) loadProposalById(id);
+    if (id) loadProposalById(id, true);
   }
 
   function handleBackToLatest() {

@@ -18,7 +18,15 @@ async function runEndOfDayValidationRecap() {
 
   const proposalsToday = await prisma.proposal.findMany({
     where: { generatedAt: { gte: startOfToday } },
-    select: { rposShopId: true, status: true, generatedAt: true, validatedAt: true, lines: { select: { id: true } } },
+    select: {
+      id: true,
+      rposShopId: true,
+      status: true,
+      generatedAt: true,
+      validatedAt: true,
+      lines: { select: { id: true, department: true, quantitySuggested: true } },
+      orders: { select: { department: true } },
+    },
     orderBy: { generatedAt: 'desc' },
   });
 
@@ -41,11 +49,25 @@ async function runEndOfDayValidationRecap() {
     select: { rposShopId: true, reference: true, name: true },
   });
 
+  // Bilan PAR RAYON (pas juste Proposal.status) : demande du 27/09/2026 — un rayon validé pouvait
+  // faire passer Proposal.status à VALIDATED alors qu'il restait d'autres rayons non traités
+  // (même incohérence corrigée côté écran de validation, cf. PurchaseOrder.tsx), ce qui faisait dire
+  // à tort à ce récap "tout validé" quand un seul rayon l'était réellement. Un rayon compte comme
+  // "en attente" seulement s'il a au moins une ligne à quantité > 0 (même règle que
+  // validateProposalDepartment côté proposalService.js).
   const summaries = shops.map((shop) => {
     const proposal = latestByShop.get(shop.rposShopId);
+    const pendingDepartments = new Set(
+      proposal.lines.filter((l) => (l.quantitySuggested || 0) > 0).map((l) => l.department || 'Sans rayon'),
+    );
+    const doneDepartments = new Set(proposal.orders.map((o) => o.department));
+    const totalDepartments = pendingDepartments.size;
+    const validatedDepartments = [...pendingDepartments].filter((d) => doneDepartments.has(d)).length;
     return {
       shop,
-      validated: proposal.status === 'VALIDATED',
+      validated: totalDepartments > 0 && validatedDepartments === totalDepartments,
+      validatedDepartments,
+      totalDepartments,
       articlesCount: proposal.lines.length,
     };
   });
