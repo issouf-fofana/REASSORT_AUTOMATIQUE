@@ -60,13 +60,13 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // Coins carrés (pas de data-radius/rounded-*) : demande du 26/09/2026, "il faut faire le modale
       // qui s'affiche là en bordure carrée" — seul le mega-menu revient à la règle du site "aucun coin
       // arrondi", l'île compacte au-dessus garde volontairement ses coins arrondis/ailes incurvées.
-      // top-[44px] plutôt que top-full : un espace résiduel restait visible malgré pb-1 retiré
+      // top-[32px] plutôt que top-full : un espace résiduel restait visible malgré pb-1 retiré
       // (commit précédent, insuffisant) — top-full dépend de la hauteur totale du conteneur racine,
       // fragile à toute variation (line-height, rendu du texte tronqué du bouton central...) qui
       // changerait cette hauteur de quelques pixels sans qu'on le remarque. Valeur fixe et explicite
-      // à la place : pt-3 (12px) + hauteur de l'île (h-8, 32px) = 44px, les deux seules dimensions qui
-      // déterminent réellement où l'île se termine.
-      className="absolute inset-x-0 top-[44px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
+      // à la place : hauteur de l'île (h-8) = 32px, plus de pt-3 sur le conteneur racine (retiré en
+      // même temps que ce commentaire, cf. plus bas) donc 32px est directement où l'île se termine.
+      className="absolute inset-x-0 top-[32px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
@@ -154,9 +154,11 @@ export function ReassortNotch() {
     // — demande explicite du 26/09/2026 avec capture de référence ("comme le haut d'écran de
     // l'iPhone X", "il faut être affiché en largeur et non en longueur"). Le survol de TOUTE la
     // barre ouvre un mega-menu listant toutes les pages en colonnes par section, pas un flyout par
-    // groupe cliqué un par un. pt-3 : espace au-dessus pour que les ailes incurvées (débordent vers
-    // le haut, cf. notch-wings.tsx) restent visibles sans être rognées par le conteneur parent —
-    // réduit le 26/09/2026 (avec la bande et l'île elle-même) suite à "la barre est trop grosse".
+    // groupe cliqué un par un. pt-0 (retiré le 26/09/2026, était pt-3) : l'île doit toucher
+    // directement le bas de la bande noire du haut, sans le moindre espace — un pt-3 sur ce
+    // conteneur, même plus petit que la hauteur de la bande, laissait un doute sur le rendu exact et
+    // n'apportait aucune valeur réelle (les ailes de l'île débordent horizontalement, jamais
+    // au-dessus d'elle).
     // sticky top-0 : demande explicite du 26/09/2026 ("quand je scroll il doit rester, pas se fermer
     // [disparaître]") — ce conteneur est monté directement dans <body> (#notch-nav-slot), en dehors
     // du flux de <main class="content"> qui défile, donc position:relative laissait la barre remonter
@@ -176,14 +178,14 @@ export function ReassortNotch() {
       // supprimer. Le padding sert uniquement à faire de la place pour les ailes qui débordent EN
       // BAS de l'île (aucune ici), donc sans utilité réelle — jamais remarqué avant que le mega-menu
       // ne devienne sensible à cette hauteur.
-      className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3"
+      className="sticky top-0 z-[100] flex w-full items-start justify-center px-2"
     >
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
-          barre noire en haut [...] pour ne pas qu'on voie les coins") puis "il y a un espace entre
-          la barre noire et notre sidebar en haut, corrige ça" : volontairement plus haute que pt-3
-          (déborde légèrement sous le sommet de l'île) pour absorber tout écart résiduel — peu
-          importe sa source exacte (line-height, marge d'un ancêtre...), aucun pixel du fond de page
-          ne doit rester visible entre le haut de l'écran et l'île. */}
+          barre noire en haut [...] pour ne pas qu'on voie les coins") : masque le fond blanc de la
+          page sur les côtés de l'île (bien plus étroite que l'écran). Le conteneur parent n'a plus de
+          padding-top (pt-3 retiré) donc l'île touche déjà directement le sommet de l'écran — cette
+          bande chevauche volontairement ses 24 premiers pixels (h-6 > différence avec l'île) sans
+          incidence visuelle, l'île étant rendue après dans le DOM et donc toujours au-dessus. */}
       <div className="absolute inset-x-0 top-0 h-6 bg-zinc-950" />
       <div
         data-radius
