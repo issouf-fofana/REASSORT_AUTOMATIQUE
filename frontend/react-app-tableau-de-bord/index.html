@@ -11,6 +11,7 @@
          ici. -->
     <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
     <link type="text/css" href="/assets/css/theme-override.css?v=2026-09-25-1" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/notch-nav.css?v=2026-09-27-2" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
 
     <!-- backend-config.js est généré au RUNTIME par docker-entrypoint.sh (pas au build Vite) à
@@ -34,11 +35,14 @@
          par layout.js via XHR synchrone) : réutilisées à l'identique pour zéro divergence visuelle
          avec les pages pas encore migrées. -->
     <div id="layout-sidebar-slot"></div>
+    <div id="notch-nav-slot" style="display:none;"></div>
+    <div id="notch-nav-slot" style="display:none;"></div>
     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
 
     <main class="content">
       <div id="layout-topbar-slot"></div>
-      <script src="/assets/js/layout.js?v=2026-09-25-2"></script>
+      <script src="/assets/js/layout-collapsible.js?v=2026-09-26-1"></script>
+      <script src="/assets/js/notch-nav.js?v=2026-09-27-2"></script>
       <script src="/assets/js/global-shop-selector.js"></script>
       <!-- window.reassortConfirm/reassortToast (remplace confirm()/alert() natifs). -->
       <script src="/assets/js/reassort-toast.js"></script>

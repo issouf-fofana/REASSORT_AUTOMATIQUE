@@ -58,11 +58,15 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // "Commande" fusionné ici le 26/09/2026 ("met commande anomalie dans le lot de réassort c'est
+    // même famille") : Anomalies de commande n'avait pas assez de contenu pour justifier sa propre
+    // colonne, et relève du même sujet que le réassort.
     label: 'Réassort',
     entries: [
       { id: 'purchase-order', label: 'Proposition de commande', href: '/purchase-order', icon: ShoppingCart },
       { id: 'purchase-list', label: 'Historique', href: '/purchase-list', icon: History },
       { id: 'sales-history', label: 'Ventes synchronisées', href: '/sales-history', icon: BarChart3 },
+      { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
     ],
   },
   {
@@ -72,12 +76,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'ai-predictions', label: 'IA & Prédictions', href: '/ai-predictions', icon: Sparkles },
       { id: 'ai-quality', label: 'Qualité & IA', href: '/ai-quality', icon: Zap, adminOnly: true },
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },
-    ],
-  },
-  {
-    label: 'Commande',
-    entries: [
-      { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
     ],
   },
   {
