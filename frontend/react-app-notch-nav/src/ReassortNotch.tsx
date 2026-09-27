@@ -164,7 +164,13 @@ export function ReassortNotch() {
       // instantanément. Posés sur ce conteneur qui englobe les deux, le survol reste continu.
       onMouseEnter={openMenu}
       onMouseLeave={scheduleClose}
-      className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3 pb-1"
+      // pb-1 retiré (26/09/2026) : le mega-menu pleine largeur (top-full, cf. plus bas) se positionne
+      // par rapport à la hauteur TOTALE de ce conteneur, padding inclus — un pb-1 ici décalait donc
+      // le mega-menu de 4px sous le bas réel de l'île, recréant l'espace qu'on cherche justement à
+      // supprimer. Le padding sert uniquement à faire de la place pour les ailes qui débordent EN
+      // BAS de l'île (aucune ici), donc sans utilité réelle — jamais remarqué avant que le mega-menu
+      // ne devienne sensible à cette hauteur.
+      className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3"
     >
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
           barre noire en haut [...] pour ne pas qu'on voie les coins") puis "il y a un espace entre
