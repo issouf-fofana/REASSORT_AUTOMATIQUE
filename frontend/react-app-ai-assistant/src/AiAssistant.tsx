@@ -226,6 +226,11 @@ async function consumeSseStream(res: Response, onEvent: (eventName: string, data
 const SUGGESTIONS_HIDDEN_KEY = 'aia-suggestions-hidden';
 
 export function AiAssistant() {
+  // Demande du 27/09/2026 : "IA doit connaître la personne qui est connectée [...] on doit avoir un
+  // message d'accueil ex: Bonjour Issouf Fofana je suis l'IA Réassort" — window.reassortGetUser() lit
+  // localStorage (reassort_user), posé une seule fois à la connexion (cf. reassort-auth.js) : jamais
+  // besoin de le relire en continu, un seul appel au montage suffit.
+  const [userName] = useState<string | null>(() => window.reassortGetUser()?.name || null);
   const [shopsById, setShopsById] = useState<Map<string, Shop>>(new Map());
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [suggestionsHidden, setSuggestionsHidden] = useState(() => localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === '1');
@@ -620,10 +625,36 @@ export function AiAssistant() {
           <div id="aia-chat-window" ref={chatWindowRef}>
             {conversationError && <div className="text-danger small p-3">Erreur : {conversationError}</div>}
             {turns.length === 0 && !conversationError && (
-              <div className="aia-empty-hint">
-                {shopReady
-                  ? 'Sélectionnez un magasin puis posez une question, ou choisissez une suggestion ci-dessous.'
-                  : 'Sélectionnez un magasin puis posez une question, ou choisissez une suggestion ci-dessous.'}
+              // Écran d'accueil personnalisé (demande du 27/09/2026, capture de référence à
+              // l'appui) : salue l'utilisateur connecté par son nom (reassort_user, jamais deviné ni
+              // laissé vide) plutôt que le simple texte d'instruction générique d'avant. Les
+              // suggestions de questions déjà chargées (cf. plus bas) servent aussi d'actions
+              // rapides ici, pas une liste dupliquée à maintenir séparément.
+              <div className="aia-welcome text-center py-5">
+                <div className="aia-welcome-title h4 fw-bold mb-1">
+                  {userName ? `Bonjour ${userName}` : 'Bonjour'}
+                </div>
+                <p className="text-muted mb-4">
+                  Je suis l'Assistant IA Réassort. Comment puis-je vous aider aujourd'hui ?
+                </p>
+                {!shopReady ? (
+                  <p className="text-muted small">Sélectionnez un magasin (en haut de page) pour commencer.</p>
+                ) : (
+                  suggestedQuestions.length > 0 && (
+                    <div className="d-flex flex-wrap justify-content-center gap-2" style={{ maxWidth: 640, margin: '0 auto' }}>
+                      {suggestedQuestions.slice(0, 6).map((q, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm aia-suggestion-btn"
+                          onClick={() => sendQuestion(q)}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                )}
               </div>
             )}
             {turns.map((turn, i) => (
@@ -683,6 +714,12 @@ export function AiAssistant() {
                   : ["Ex : quels articles risquent d'être en rupture ?"]
               }
             />
+            {/* Demande du 27/09/2026 : "l'IA en bas aussi mets à jour" (capture de référence d'un
+                autre produit portant un disclaimer sous la zone de saisie) — identité réelle du
+                produit, jamais le nom de l'exemple fourni. */}
+            <div className="text-center text-muted mt-1" style={{ fontSize: '0.75rem' }}>
+              Assistant IA Réassort — peut faire des erreurs, vérifiez les informations importantes.
+            </div>
           </div>
         </div>
       </div>
