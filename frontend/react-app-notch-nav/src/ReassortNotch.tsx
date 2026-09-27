@@ -50,13 +50,17 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // sous-infos en bas de chaque"). Colonnes plus étroites qu'avant (160px) pour que 7 tiennent
       // sur un écran classique ; overflow-x-auto en secours sur un écran vraiment trop étroit plutôt
       // que de forcer un retour à la ligne qui romprait la mise en page demandée.
-      // -mt-px : léger chevauchement d'1px avec le bas de l'île plutôt qu'un simple mt-0, pour
-      // absorber tout écart de sous-pixel encore visible (signalé à nouveau le 26/09/2026 malgré
-      // mt-0 déjà en place) — jamais un espace, même infime, entre l'île et le mega-menu.
+      // Pleine largeur collée aux 2 bords de l'écran, fusionnée visuellement avec la bande noire du
+      // haut (demande explicite du 26/09/2026, "il faut coller à la barre noire qui est en haut au
+      // long à gauche et à droite") — plus un panneau centré flottant sous l'île : fixed inset-x-0
+      // top-full plutôt que positionné par rapport à l'île elle-même, pour ignorer sa largeur propre
+      // (bien plus étroite que l'écran) et s'étendre d'un bord à l'autre comme la bande du haut.
+      // justify-center : les colonnes restent groupées au centre à l'intérieur de cette pleine
+      // largeur, jamais étirées jusqu'aux bords elles-mêmes (resterait illisible sur un grand écran).
       // Coins carrés (pas de data-radius/rounded-*) : demande du 26/09/2026, "il faut faire le modale
       // qui s'affiche là en bordure carrée" — seul le mega-menu revient à la règle du site "aucun coin
       // arrondi", l'île compacte au-dessus garde volontairement ses coins arrondis/ailes incurvées.
-      className="absolute left-1/2 top-full z-50 -mt-px flex w-max max-w-[96vw] -translate-x-1/2 gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
+      className="absolute inset-x-0 top-full z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
     >
       {groups.map((group) => (
         <div key={group.label} className="flex w-[160px] shrink-0 flex-col gap-0.5">
@@ -152,7 +156,16 @@ export function ReassortNotch() {
     // du flux de <main class="content"> qui défile, donc position:relative laissait la barre remonter
     // hors écran avec le reste de la page. z-[100] : même valeur que .navbar-top dans
     // theme-override.css, pour rester au-dessus du contenu de page sans dépendre d'un ordre DOM.
-    <div className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3 pb-1">
+    <div
+      // onMouseEnter/onMouseLeave posés ici plutôt que sur l'île seule : le mega-menu est maintenant
+      // rendu comme FRÈRE de l'île (cf. commentaire plus bas, nécessaire pour qu'il colle pleine
+      // largeur à l'écran) — s'ils restaient sur l'île uniquement, déplacer la souris de l'île vers le
+      // mega-menu traverserait un onMouseLeave avant même d'atteindre ce dernier, le refermant
+      // instantanément. Posés sur ce conteneur qui englobe les deux, le survol reste continu.
+      onMouseEnter={openMenu}
+      onMouseLeave={scheduleClose}
+      className="sticky top-0 z-[100] flex w-full items-start justify-center px-2 pt-3 pb-1"
+    >
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
           barre noire en haut [...] pour ne pas qu'on voie les coins") puis "il y a un espace entre
           la barre noire et notre sidebar en haut, corrige ça" : volontairement plus haute que pt-3
@@ -161,8 +174,6 @@ export function ReassortNotch() {
           ne doit rester visible entre le haut de l'écran et l'île. */}
       <div className="absolute inset-x-0 top-0 h-6 bg-zinc-950" />
       <div
-        onMouseEnter={openMenu}
-        onMouseLeave={scheduleClose}
         data-radius
         style={radius('0 0 14px 14px')}
         className="relative flex h-8 w-auto max-w-full items-center gap-2.5 rounded-b-2xl bg-zinc-950 px-2.5 text-zinc-50"
@@ -202,8 +213,6 @@ export function ReassortNotch() {
           <span className="max-w-[220px] truncate leading-none">{activeEntry?.label}</span>
           <ChevronDown className={cn('size-3.5 text-zinc-400 transition-transform duration-200', isOpen && 'rotate-180')} />
         </button>
-
-        <AnimatePresence>{isOpen && <MegaMenu groups={groups} activeId={activeId} onSelect={navigateTo} />}</AnimatePresence>
 
         <div className="h-5 w-px shrink-0 bg-zinc-800" />
 
@@ -255,6 +264,12 @@ export function ReassortNotch() {
           </div>
         </div>
       </div>
+
+      {/* Rendu comme frère de l'île (pas comme enfant) : positionné par rapport au conteneur racine
+          sticky ci-dessus (pleine largeur), pas par rapport à l'île elle-même (bien plus étroite) —
+          seul moyen pour que "inset-x-0" colle réellement aux 2 bords de l'écran plutôt qu'aux 2
+          bords de l'île. */}
+      <AnimatePresence>{isOpen && <MegaMenu groups={groups} activeId={activeId} onSelect={navigateTo} />}</AnimatePresence>
     </div>
   );
 }
