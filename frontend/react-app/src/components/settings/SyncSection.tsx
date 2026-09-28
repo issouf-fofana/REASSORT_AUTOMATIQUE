@@ -234,7 +234,7 @@ export function SyncSection() {
               <div className="mb-3">
                 <label className="form-label small">Magasins concernés par la synchro automatique</label>
                 <div>
-                  <ShopMultiPicker shops={shops} selectedIds={syncShopIds} onChange={setSyncShopIds} />
+                  <ShopMultiPicker shops={shops} selectedIds={syncShopIds} onChange={setSyncShopIds} showSelectAllNone />
                 </div>
                 <div className="form-text">
                   Aucune sélection = tous les magasins actifs (comportement par défaut). Cochez un ou
