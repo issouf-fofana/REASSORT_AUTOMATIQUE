@@ -61,6 +61,26 @@ async function getLatestProposal(rposShopId) {
 }
 
 /**
+ * getShopDepartments(rposShopId) — liste des rayons RÉELS de ce magasin, tels que connus par la
+ * dernière proposition générée (spec du 28/09/2026 : "CA de ce rayon liquide" ne trouvait jamais le
+ * rayon car `department` n'était jamais extrait du texte de la question, uniquement transmis par le
+ * sélecteur d'interface). Utilisée par chatbotService.extractDepartment pour faire correspondre un
+ * nom de rayon mentionné en langage libre à un nom RÉEL (ex: "liquide" -> "BOISSONS LIQUIDES"),
+ * plutôt que de transmettre le texte brut tel quel à un filtre Prisma qui ne matcherait jamais une
+ * égalité exacte.
+ */
+async function getShopDepartments(rposShopId) {
+  const proposal = await getLatestProposal(rposShopId);
+  if (!proposal) return [];
+  const rows = await prisma.proposalLine.findMany({
+    where: { proposalId: proposal.id, department: { not: null } },
+    select: { department: true },
+    distinct: ['department'],
+  });
+  return rows.map((r) => r.department).filter(Boolean);
+}
+
+/**
  * getDataAvailability(rposShopId) — étendue RÉELLE de l'historique de ventes disponible en base
  * pour ce magasin (spec du 28/09/2026 §7 : "utiliser TOUTES les données disponibles par magasin,
  * pas une fenêtre fixe arbitraire" + "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA"). Distinct
@@ -1298,4 +1318,5 @@ module.exports = {
   getDlvArticles,
   getArticleDlvStatus,
   getDataAvailability,
+  getShopDepartments,
 };

@@ -148,6 +148,14 @@ const PARETO_PATTERN_REGEX = /articles?.*\d{1,3}\s*%.*(ca\b|chiffre)|.*\d{1,3}\s
 const GISEMENT_MENTION_REGEX = /\b(?:gisement|adressage)s?\b/i;
 const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|le\s+)?([^?.!]+)/i;
 
+// Extrait le nom de rayon mentionné après "rayon" (spec du 28/09/2026 : "CA de ce rayon liquide"
+// retombait toujours sur le CA de tout le magasin car department n'était jamais lu depuis le texte
+// de la question, seulement transmis par le sélecteur d'interface). Même structure que
+// GISEMENT_NAME_REGEX ci-dessus : capture ce qui suit "rayon"/"ce rayon"/"du rayon", le nettoyage/
+// filtrage des mots génériques et la résolution vers un nom RÉEL se font dans extractDepartment.
+const DEPARTMENT_NAME_REGEX = /\brayons?\s+(?:de\s+|du\s+|des\s+|ce\s+|cette\s+|le\s+|la\s+)?([^?.!]+)/i;
+const DEPARTMENT_GENERIC_WORDS = new Set(['ce', 'cette', 'du', 'de', 'des', 'le', 'la', 'les', 'quel', 'quelle', 'notre', 'votre']);
+
 // "tous/chaque/l'ensemble de mes magasins" en même temps qu'une question de CA (demande du
 // 19/09/2026, réservé ADMIN/SUPERVISOR — cf. runToolForQuestion) doit gagner sur la règle générique
 // getRevenue (mot-clé "ca") — sans cette priorité, "quel est le CA de tous les magasins" retombait
@@ -223,6 +231,61 @@ function extractGisement(question) {
   const GENERIC_WORDS = new Set(['chaque', 'tous', 'tout', 'toutes', 'les', 'des', 'de', 'sur', 'pour', 'avec', 'dans']);
   const firstWord = captured.split(/\s+/)[0].toLowerCase();
   return GENERIC_WORDS.has(firstWord) ? null : captured;
+}
+
+function normalizeForMatch(str) {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // retire les accents
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Extrait le rayon mentionné dans la question ("le CA de ce rayon liquide", "articles en rupture
+ * dans le rayon boisson") et le fait correspondre à un nom RÉEL de rayon de ce magasin (spec du
+ * 28/09/2026 : contrairement à l'EAN, un nom de rayon tapé en langage libre — "liquide" — ne
+ * correspond presque jamais exactement au nom RPOS complet — "BOISSONS LIQUIDES" — un filtre Prisma
+ * sur égalité exacte ne trouverait donc jamais rien). Async car nécessite de connaître les rayons
+ * réels de CE magasin (chatbotToolsService.getShopDepartments, depuis la dernière proposition) avant
+ * de pouvoir comparer. Retourne null si aucun rayon n'est mentionné, ou si aucun rayon réel ne
+ * correspond d'assez près (jamais un rayon halluciné/approximatif transmis aux outils).
+ */
+async function extractDepartment(question, rposShopId) {
+  const match = (question || '').match(DEPARTMENT_NAME_REGEX);
+  if (!match) return null;
+  const captured = match[1].trim();
+  const firstWord = captured.split(/\s+/)[0].toLowerCase();
+  if (DEPARTMENT_GENERIC_WORDS.has(firstWord)) return null;
+
+  const realDepartments = await tools.getShopDepartments(rposShopId);
+  if (!realDepartments.length) return null;
+
+  const normalizedCaptured = normalizeForMatch(captured);
+  if (!normalizedCaptured) return null;
+
+  // Correspondance dans les deux sens (le nom tapé peut être un sous-mot du vrai nom, ex: "liquide"
+  // dans "BOISSONS LIQUIDES", ou l'inverse pour un nom tapé plus complet que nécessaire) — jamais une
+  // simple égalité stricte, qui ne matcherait quasiment jamais un nom RPOS tapé de mémoire.
+  const exactOrContains = realDepartments.find((d) => {
+    const normalizedReal = normalizeForMatch(d);
+    return normalizedReal === normalizedCaptured
+      || normalizedReal.includes(normalizedCaptured)
+      || normalizedCaptured.includes(normalizedReal);
+  });
+  if (exactOrContains) return exactOrContains;
+
+  // Repli mot-à-mot : au moins un mot significatif (3+ lettres) du nom tapé apparaît dans le nom réel
+  // — capture des cas comme "rayon liquides" (pluriel) vs "BOISSON LIQUIDE" (singulier) que la
+  // correspondance par inclusion de chaîne entière ci-dessus raterait.
+  const capturedWords = normalizedCaptured.split(' ').filter((w) => w.length >= 3);
+  if (!capturedWords.length) return null;
+  const wordMatch = realDepartments.find((d) => {
+    const normalizedReal = normalizeForMatch(d);
+    return capturedWords.some((w) => normalizedReal.includes(w));
+  });
+  return wordMatch || null;
 }
 
 /**
@@ -618,6 +681,16 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   }
 
   if (!toolName) return { toolName: null, toolResult: null };
+
+  // Rayon mentionné en texte libre (spec du 28/09/2026 : "quel est le CA de ce rayon liquide ?"
+  // retombait toujours sur le CA de TOUT le magasin, car department n'était jusqu'ici jamais lu
+  // depuis la question — uniquement transmis par le sélecteur de rayon de l'interface). Le filtre de
+  // l'interface reste TOUJOURS prioritaire s'il est déjà présent : l'extraction texte n'est qu'un
+  // repli, jamais un remplacement d'un choix explicite déjà fait ailleurs dans l'UI.
+  const DEPARTMENT_CAPABLE_TOOLS = new Set(['getRevenue', 'getSalesHistory', 'getArticleStock', 'getCurrentProposal', 'getStockoutRisks', 'getOverstockArticles', 'getParetoArticles']);
+  if (!department && DEPARTMENT_CAPABLE_TOOLS.has(toolName)) {
+    department = await extractDepartment(question, rposShopId);
+  }
 
   // getRevenue seul est ambigu par nature (CA magasin ENTIER par défaut, contrairement aux autres
   // outils de ARTICLE_SCOPED_TOOLS qui portent TOUJOURS sur un seul article) : une question sans EAN
