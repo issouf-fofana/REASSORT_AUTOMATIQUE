@@ -372,23 +372,41 @@ function orderSummaryHtml(orders) {
     .join('');
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Bon(s) de commande PDF des commandes créées, en pièces jointes — un échec de récupération d'un
  * PDF (RPOS indisponible, commande déjà supprimée...) ne doit jamais empêcher l'envoi du mail
- * lui-même : cette pièce jointe est alors simplement omise. */
+ * lui-même : cette pièce jointe est alors simplement omise (le mail le signale explicitement,
+ * cf. pdfNote dans notifyShopUsersOfOrderCreated — jamais une fausse promesse de PDF joint).
+ *
+ * Une nouvelle tentative après un court délai (constaté le 28/09/2026 : le PDF d'une commande tout
+ * juste créée peut ne pas être immédiatement disponible côté RPOS — génération asynchrone de leur
+ * côté — alors que la commande existe bel et bien, confirmé en interrogeant RPOS quelques minutes
+ * plus tard) réduit ce faux négatif sans faire dépendre l'envoi du mail d'un vrai délai RPOS
+ * imprévisible : un seul essai supplémentaire, jamais une boucle qui retarderait indéfiniment
+ * l'alerte au magasin. */
 async function buildOrderPdfAttachments(shop, orders) {
   const attachments = [];
   for (const o of orders) {
     if (!o.rposOrderId) continue;
+    let pdfBuffer;
     try {
-      const pdfBuffer = await rpos.getSupplierOrderPdf(shop.rposPosId, o.rposOrderId);
-      attachments.push({
-        name: `commande-${o.rposOrderReference || o.rposOrderId}.pdf`,
-        contentBytes: pdfBuffer,
-        contentType: 'application/pdf',
-      });
+      pdfBuffer = await rpos.getSupplierOrderPdf(shop.rposPosId, o.rposOrderId);
     } catch (err) {
-      console.error(`[proposalNotificationService] PDF introuvable pour la commande ${o.rposOrderId}:`, err.message);
+      console.warn(`[proposalNotificationService] PDF pas encore disponible pour la commande ${o.rposOrderId}, nouvel essai dans 5s: ${err.message}`);
+      await sleep(5000);
+      try {
+        pdfBuffer = await rpos.getSupplierOrderPdf(shop.rposPosId, o.rposOrderId);
+      } catch (err2) {
+        console.error(`[proposalNotificationService] PDF introuvable pour la commande ${o.rposOrderId} après nouvel essai:`, err2.message);
+        continue;
+      }
     }
+    attachments.push({
+      name: `commande-${o.rposOrderReference || o.rposOrderId}.pdf`,
+      contentBytes: pdfBuffer,
+      contentType: 'application/pdf',
+    });
   }
   return attachments;
 }
@@ -426,6 +444,19 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
   // tout le monde, un appel RPOS répété par personne serait un gaspillage inutile.
   const attachments = await buildOrderPdfAttachments(shop, orders);
 
+  // Le texte annonçant le PDF ne doit JAMAIS affirmer une jointure qui n'a pas eu lieu (demande du
+  // 28/09/2026 : "il va mentir" — buildOrderPdfAttachments omet silencieusement un PDF en cas
+  // d'échec RPOS, ex: commande introuvable côté RPOS au moment de la génération du bon). Trois cas
+  // distincts : tous les PDF obtenus (texte inchangé), aucun (avertissement explicite, jamais de
+  // fausse promesse), ou un sous-ensemble (précise combien manquent, sans jamais prétendre "chaque
+  // commande" si ce n'est pas vrai).
+  const pdfNote =
+    attachments.length === orders.length
+      ? 'Le bon de commande PDF de chaque commande est joint à cet email.'
+      : attachments.length === 0
+        ? '<span style="color:#b45309;">⚠️ Le bon de commande PDF n\'a pas pu être récupéré (commande indisponible côté RPOS au moment de l\'envoi) — consultez directement la commande sur RPOS.</span>'
+        : `<span style="color:#b45309;">⚠️ Le bon de commande PDF n'a pu être récupéré que pour ${attachments.length} commande(s) sur ${orders.length} — les autres sont consultables directement sur RPOS.</span>`;
+
   await sendMailToEachRecipient(users, async (user) => ({
     subject: `${isAutoMode ? '🤖 ' : ''}Réassort Automatique — commande créée pour ${shop.reference} (${shop.name})`,
     htmlBody: renderMailTemplate(
@@ -434,7 +465,7 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
         <p>Bonjour ${user.name},</p>
         <p>${introText}</p>
         <ul>${orderSummaryHtml(orders)}</ul>
-        <p>Le bon de commande PDF de chaque commande est joint à cet email.</p>
+        <p>${pdfNote}</p>
       `,
       { severity: 'info', cta: { label: 'Voir la commande', url: purchaseOrderLink(shop) } },
     ),
