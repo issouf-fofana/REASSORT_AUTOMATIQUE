@@ -91,12 +91,18 @@
   if (pageTitleEl) pageTitleEl.textContent = document.body.dataset.pageTitle || '';
 
   window.reassortSetShopContext = function (posLabel, shopName, shopReference) {
-    const el = document.getElementById('page-shop-context');
-    if (!el) return;
+    // querySelectorAll, pas getElementById : #page-shop-context existe en double (topbar classique +
+    // barre notch, toutes deux dans le DOM en même temps, cf. global-shop-selector.js) — même bug de
+    // synchronisation que le sélecteur de magasin sinon.
+    const els = document.querySelectorAll('#page-shop-context');
+    if (!els.length) return;
     const user = window.reassortGetUser && window.reassortGetUser();
-    if (!shopName || (user && !window.reassortIsSingleShopRole(user.role))) { el.style.display = 'none'; el.textContent = ''; return; }
-    el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
-    el.style.display = '';
+    const hide = !shopName || (user && !window.reassortIsSingleShopRole(user.role));
+    els.forEach(function (el) {
+      if (hide) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
+      el.style.display = '';
+    });
   };
 
   // --- Bascule ÉTAT 1 <-> ÉTAT 2 ------------------------------------------------------------

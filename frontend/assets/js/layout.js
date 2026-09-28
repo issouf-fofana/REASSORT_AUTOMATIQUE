@@ -145,12 +145,18 @@
   // doublon visuel (bug observé : "CASH CENTER ZONE 4" en lecture seule ET "SUPER U VALLON"
   // cliquable superposés), la décision est donc centralisée ici plutôt que dans chaque appelant.
   window.reassortSetShopContext = function (posLabel, shopName, shopReference) {
-    const el = document.getElementById('page-shop-context');
-    if (!el) return;
+    // querySelectorAll, pas getElementById : #page-shop-context existe en double (topbar classique +
+    // barre notch, toutes deux dans le DOM en même temps, cf. global-shop-selector.js) — même bug de
+    // synchronisation que le sélecteur de magasin sinon.
+    const els = document.querySelectorAll('#page-shop-context');
+    if (!els.length) return;
     const user = window.reassortGetUser && window.reassortGetUser();
-    if (!shopName || (user && !window.reassortIsSingleShopRole(user.role))) { el.style.display = 'none'; el.textContent = ''; return; }
-    el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
-    el.style.display = '';
+    const hide = !shopName || (user && !window.reassortIsSingleShopRole(user.role));
+    els.forEach(function (el) {
+      if (hide) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.textContent = (posLabel ? posLabel + ' : ' : '') + shopName + (shopReference ? ' (' + shopReference + ')' : '');
+      el.style.display = '';
+    });
   };
 
   // Masquer/afficher la sidebar sur desktop (bouton #sidebar-visibility-btn de la topbar,

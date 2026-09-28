@@ -86,9 +86,19 @@
   window.reassortRenderShopSelector = renderButton;
 
   function renderButton() {
-    const btn = document.getElementById('global-shop-selector-btn');
-    const readOnlyEl = document.getElementById('page-shop-context');
-    if (!btn) return;
+    // querySelectorAll, PAS getElementById (bug trouvé le 28/09/2026 : "je suis en mode sidebar
+    // magasin 110, je passe en mode notch magasin 120, je reviens en sidebar je suis toujours sur
+    // 110 — deux sélecteurs indépendants") — la topbar classique (#layout-topbar-slot) ET la barre
+    // notch (#notch-nav-slot) sont TOUJOURS toutes les deux présentes dans le DOM en même temps
+    // (seul du CSS masque l'une ou l'autre selon body.nav-collapsed), chacune avec son propre
+    // <button id="global-shop-selector-btn"> — deux éléments partageant le même id. getElementById
+    // ne renvoie jamais que le premier du DOM, donc un seul des deux boutons était mis à jour ; l'autre
+    // gardait un texte figé (souvent vide au tout premier rendu), donnant l'impression de deux
+    // sélecteurs de magasin distincts et non synchronisés alors qu'un seul état existe réellement
+    // (reassort_active_shop_<userId> en localStorage, lu par les DEUX modes).
+    const btns = document.querySelectorAll('#global-shop-selector-btn');
+    const readOnlyEls = document.querySelectorAll('#page-shop-context');
+    if (!btns.length) return;
     const user = window.reassortGetUser && window.reassortGetUser();
     if (!user) return;
 
@@ -96,20 +106,22 @@
       // Un seul magasin possible (DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER, ex-STORE) : pas de
       // sélecteur, juste l'affichage déjà géré par shop-picker.js/purchase-order.html via
       // #page-shop-context (lecture seule).
-      btn.style.display = 'none';
+      btns.forEach(function (btn) { btn.style.display = 'none'; });
       return;
     }
 
-    if (readOnlyEl) readOnlyEl.style.display = 'none';
+    readOnlyEls.forEach(function (el) { el.style.display = 'none'; });
     const shop = getActiveShop();
     // Texte visible réduit à la seule référence le 27/09/2026 ("Serveur Prosuma Prod... : NOM
     // MAGASIN (035)" débordait et se tronquait de façon illisible dans la barre notch, largeur bien
     // plus étroite que l'ancienne topbar) — jamais de troncature possible quelle que soit la longueur
     // du nom réel du magasin. Le posLabel et le nom complet restent consultables au survol via title,
     // et en un clic (ouvre le sélecteur de magasin, cf. openSelector plus bas).
-    btn.textContent = shop ? shop.reference + ' ▾' : 'Choisir un magasin ▾';
-    btn.title = shop ? (shop.posLabel ? shop.posLabel + ' : ' : '') + shop.name + ' (' + shop.reference + ')' : '';
-    btn.style.display = '';
+    btns.forEach(function (btn) {
+      btn.textContent = shop ? shop.reference + ' ▾' : 'Choisir un magasin ▾';
+      btn.title = shop ? (shop.posLabel ? shop.posLabel + ' : ' : '') + shop.name + ' (' + shop.reference + ')' : '';
+      btn.style.display = '';
+    });
 
     // Amorce le magasin par défaut si nécessaire (voir initDefaultShopIfNeeded ci-dessus) — non
     // bloquant : renderButton() a déjà affiché "Choisir un magasin" pendant que la requête tourne,
