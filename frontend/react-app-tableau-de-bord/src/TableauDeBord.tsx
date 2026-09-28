@@ -170,9 +170,6 @@ export function TableauDeBord() {
   shops.forEach((s) => (byPos[s.posId] ||= []).push(s));
   const sortedPosIds = Object.keys(byPos).sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
 
-  const shopRefLabel = isSingleShop ? user?.rposShopReference || '—' : selectedShop?.reference || '—';
-  const shopNameLabel = isSingleShop ? user?.rposShopName || '—' : selectedShop?.name || '—';
-
   return (
     <div>
       <style>{`
@@ -307,22 +304,6 @@ export function TableauDeBord() {
           </div>
         </div>
 
-        <div className="col">
-          <div className="card kpi-card h-100 mb-0">
-            <div className="card-body d-flex align-items-start gap-2">
-              <div className="kpi-icon bg-primary-subtle">
-                <iconify-icon icon="solar:shop-bold-duotone" className="text-primary"></iconify-icon>
-              </div>
-              <div>
-                <p className="kpi-label">Magasin</p>
-                <h3 className="kpi-value" style={{ fontSize: '1.15rem' }}>
-                  {shopRefLabel}
-                </h3>
-              </div>
-            </div>
-            <div className="kpi-footer">{shopNameLabel}</div>
-          </div>
-        </div>
       </div>
 
       <div className="row">
