@@ -159,9 +159,10 @@ async function getArticleStockAllShops(allowedShopIds, ean) {
  * calculé depuis SalesLine.revenueExclTax. Distinct de getSalesHistory (quantités vendues) : une
  * question sur "le CA" porte sur un montant en CFA, jamais une quantité d'unités.
  */
-async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
+async function getRevenue(rposShopId, { date, days, department, ean, posId } = {}) {
   let dateStart;
   let dateEnd;
+  let periodMode = null;
   if (date) {
     dateStart = new Date(date + 'T00:00:00.000Z');
     dateEnd = new Date(date + 'T23:59:59.999Z');
@@ -184,9 +185,33 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
     if (Number.isNaN(dateStart.getTime()) || Number.isNaN(dateEnd.getTime()) || rolledOver) {
       return { found: false, message: `La date "${date}" n'est pas une date valide.` };
     }
+  } else if (days) {
+    dateEnd = new Date();
+    dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    periodMode = 'CUSTOM_DAYS';
+  } else if (ean && posId) {
+    // "Le CA de l'article X" sans période précisée (spec du 28/09/2026 §1 : "si la période n'est
+    // pas précisée, utiliser la période d'analyse par défaut du système") : reprend la même
+    // résolution que la génération de proposition/Pareto (periodService.resolvePeriod) plutôt qu'un
+    // défaut de 1 jour arbitraire et invisible — un CA "d'hier" en réponse à "quel est le CA de cet
+    // article" avait déjà été trouvé trompeur (bug similaire à getParetoArticles, même correctif).
+    try {
+      const configService = require('./configService');
+      const periodService = require('./periodService');
+      const config = await configService.getConfig(rposShopId);
+      const period = await periodService.resolvePeriod(posId, rposShopId, config);
+      dateStart = new Date(period.start);
+      dateEnd = new Date(period.end);
+      periodMode = config.periodMode;
+    } catch (err) {
+      dateEnd = new Date();
+      dateStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      periodMode = 'FALLBACK_1_DAY';
+    }
   } else {
     dateEnd = new Date();
     dateStart = new Date(Date.now() - (days || 1) * 24 * 60 * 60 * 1000);
+    periodMode = 'DEFAULT_1_DAY';
   }
 
   // Un article précis (EAN) prime sur un filtre par département — une question "le CA de cet
@@ -212,7 +237,15 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
     select: { revenueExclTax: true, revenueInclTax: true, receiptId: true, syncedAt: true },
   });
 
-  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période ${date || `des ${days || 1} derniers jours`}${ean ? ` pour l'article ${ean}` : department ? ` pour le rayon ${department}` : ''}.` };
+  if (!lines.length) {
+    return {
+      found: false,
+      message: `Aucune vente enregistrée sur la période${ean ? ` pour l'article ${ean}` : department ? ` pour le rayon ${department}` : ''}.`,
+      periodStart: dateStart.toISOString(),
+      periodEnd: dateEnd.toISOString(),
+      periodMode,
+    };
+  }
 
   // Nombre de VENTES au sens tickets de caisse (receipt.id distincts, ajouté le 16/09/2026 —
   // confirmé par test direct que ce comptage retombe exactement sur le "Nb de ventes" de l'écran
@@ -225,7 +258,10 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
   return {
     found: true,
     date: date || null,
-    days: date ? null : (days || 1),
+    // days reflète le nombre de jours réellement transmis par l'appelant, jamais un défaut implicite
+    // de 1 reconstruit après coup : quand la période vient d'un mode résolu (periodMode ci-dessous,
+    // ex: LAST_365_DAYS), days reste null — periodStart/periodEnd font foi, pas ce champ.
+    days: date ? null : (days || null),
     ean: ean || null,
     department: department || null,
     // periodStart/periodEnd (28/09/2026, spec "toujours afficher clairement la période d'analyse" —
@@ -235,6 +271,7 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
     // dise. Bornes explicites en ISO, la seule source de vérité pour la période réellement utilisée.
     periodStart: dateStart.toISOString(),
     periodEnd: dateEnd.toISOString(),
+    periodMode,
     revenueExclTaxCfa: Math.round(lines.reduce((s, l) => s + l.revenueExclTax, 0)),
     revenueInclTaxCfa: lines.every((l) => l.revenueInclTax !== null) ? Math.round(lines.reduce((s, l) => s + (l.revenueInclTax || 0), 0)) : null,
     // Nombre de VENTES (tickets de caisse distincts) — comparable au "Nb de ventes" de RMaster.

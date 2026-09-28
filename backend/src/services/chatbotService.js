@@ -721,7 +721,12 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // seulement) — "le CA de cette semaine"/"le CA sur 3 mois" retombait toujours sur les dernières
         // 24h sans jamais utiliser daysQuery/resolveDateRange. `date` reste prioritaire quand présent
         // (getRevenue.js ignore déjà `days` si `date` est fourni).
-        const revenueResult = await tools.getRevenue(effectiveShopId, { date, days: daysQuery || 1, department, ean });
+        // days: daysQuery seul (pas de `|| 1`, spec du 28/09/2026 §1) : quand ni date ni days ne sont
+        // précisés pour une question sur un ARTICLE précis, getRevenue résout maintenant lui-même la
+        // période d'analyse par défaut du magasin (posId transmis ci-dessous) plutôt qu'un repli
+        // silencieux sur 1 jour — imposer `|| 1` ici aurait empêché ce nouveau comportement de
+        // s'appliquer.
+        const revenueResult = await tools.getRevenue(effectiveShopId, { date, days: daysQuery || null, department, ean, posId });
         // targetShopLabel présent seulement si un AUTRE magasin a été explicitement ciblé (cf. plus
         // haut) : le LLM doit alors préciser DANS QUEL magasin, sinon la réponse resterait ambiguë
         // pour un ADMIN qui vient de nommer un magasin différent du sien.
