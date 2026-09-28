@@ -52,6 +52,11 @@ export interface ProposalLine {
   aiReasoning?: string | null;
   classicQuantitySuggested?: number | null;
   wasExcluded?: boolean;
+  // Commandabilité fournisseur (spec du 28/09/2026, §1-§2) : null = proposition générée avant ce
+  // champ (jamais traité comme "non commandable" par défaut, cf. proposalService.js), true/false
+  // calculé à la génération depuis le rattachement au fournisseur central RPOS.
+  supplierIneligible?: boolean | null;
+  currentSuppliers?: string | null;
 }
 
 // Commande RPOS déjà créée pour un rayon précis (demande du 26/09/2026 : validation indépendante

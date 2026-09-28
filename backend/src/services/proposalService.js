@@ -1403,7 +1403,12 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
   const decisionByLineId = new Map((decisions || []).map((d) => [d.lineId, d]));
   const config = await getConfig(shopId);
 
+  // Séparation proposition/commandabilité (spec du 28/09/2026, §7) : TOUS les articles calculés
+  // restent dans la proposition et visibles à l'utilisateur, quel que soit leur rattachement
+  // fournisseur — seule la commande finale envoyée à RPOS exclut les non-commandables. Un article
+  // non commandable reste sélectionnable/visible à l'écran, mais n'est jamais transmis (§4).
   const linesToOrder = [];
+  const skippedIneligible = [];
   for (const line of departmentLines) {
     const decision = decisionByLineId.get(line.id);
     const excluded = decision ? !!decision.excluded : false;
@@ -1416,6 +1421,15 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     });
 
     if (!excluded && quantity > 0) {
+      // supplierIneligible === true (calculé à la génération, §1) : article non commandable connu
+      // dès la génération — jamais ajouté à la commande. null (proposition générée avant ce champ)
+      // est traité comme "à vérifier", pas comme non commandable, pour ne jamais bloquer une
+      // commande légitime sur une simple absence de donnée historique — la re-vérification RPOS
+      // fraîche juste avant l'envoi (§5, plus bas) reste le vrai filet de sécurité dans ce cas.
+      if (line.supplierIneligible === true) {
+        skippedIneligible.push({ ean: line.ean, label: line.label, reason: 'Fournisseur central non renseigné.' });
+        continue;
+      }
       linesToOrder.push({
         lineId: line.id, productId: line.productId, quantity, orderingUnit: line.orderingUnit,
         department, ean: line.ean, label: line.label,
@@ -1423,7 +1437,12 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     }
   }
 
-  if (linesToOrder.length === 0) throw new Error(`Aucun article sélectionné pour le rayon "${department}".`);
+  if (linesToOrder.length === 0 && skippedIneligible.length === 0) {
+    throw new Error(`Aucun article sélectionné pour le rayon "${department}".`);
+  }
+  if (linesToOrder.length === 0) {
+    throw new Error(`Les ${skippedIneligible.length} article(s) sélectionné(s) pour le rayon "${department}" ne sont pas rattachés au fournisseur central — aucune commande ne peut être créée.`);
+  }
 
   const leadDays = config.receptionLeadTimeDays ?? 1;
   const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
@@ -1538,7 +1557,18 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     });
   }
 
-  return { department, order, processed, failed, failedLines, rposOrderValidated, allDepartmentsDone: !stillPending };
+  // skippedIneligible (spec du 28/09/2026, §6) : articles écartés AVANT même la tentative d'envoi
+  // (connus dès la génération), distincts de failedLines (rejetés par RPOS, ou détectés par la
+  // re-vérification fraîche juste avant l'envoi dans createOrderForLines) — les deux ensemble
+  // couvrent tous les articles réellement non intégrés à la commande, pour le récapitulatif final.
+  return {
+    department, order, processed, failed, failedLines, rposOrderValidated, allDepartmentsDone: !stillPending,
+    skippedIneligible,
+    totalRequested: departmentLines.filter((l) => {
+      const decision = decisionByLineId.get(l.id);
+      return !(decision && decision.excluded);
+    }).length,
+  };
 }
 
 /**
@@ -1555,6 +1585,23 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const referenceSuffix = department ? ` — ${department}` : '';
 
+  // Sécurité avant création (spec du 28/09/2026, §5) : le filtrage fait dans
+  // validateProposalDepartment se base sur ProposalLine.supplierIneligible, calculé À LA
+  // GÉNÉRATION — un rattachement fournisseur a pu changer côté RPOS entre-temps (génération la
+  // nuit, validation plusieurs heures après). Re-vérifie ici avec un appel RPOS FRAIS, juste avant
+  // l'envoi réel, sur les seules lignes qui restent à ce stade (jamais toute la proposition) — ne
+  // fait jamais confiance au seul statut affiché côté UI. Un aléa réseau sur cette vérification ne
+  // doit jamais bloquer la commande (checkSupplierEligibility avale déjà ses propres erreurs par
+  // ligne) : au pire, une ligne non re-vérifiable passe et sera de toute façon rattrapée par le
+  // vrai refus RPOS plus bas (failedLines).
+  // checkSupplierEligibility lit line.id (contrat historique, cf. supplier-check côté route) —
+  // `lines` ici porte `lineId` (contrat de linesToOrder construit dans validateProposalDepartment) :
+  // adapté ponctuellement plutôt que de faire diverger l'un des deux contrats déjà établis ailleurs.
+  const freshlyIneligible = await checkSupplierEligibility(posId, shopId, lines.map((l) => ({ ...l, id: l.lineId })));
+  const freshlyIneligibleIds = new Set(freshlyIneligible.map((i) => i.lineId));
+  const eligibleLines = lines.filter((l) => !freshlyIneligibleIds.has(l.lineId));
+  const newlyIneligibleLines = lines.filter((l) => freshlyIneligibleIds.has(l.lineId));
+
   // L'UUID RPOS du fournisseur "central" est PROPRE À CHAQUE MAGASIN (une entité fournisseur
   // distincte par shop côté RPOS, confirmé par test direct le 15/09/2026) — jamais un ID unique
   // valable partout. Résolu ici par son code stable (000000), plutôt que de faire confiance à
@@ -1569,6 +1616,10 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
     console.warn(`[validateProposal] Résolution du fournisseur central échouée pour ${shopId}, repli sur supplierId fourni: ${err.message}`);
   }
 
+  if (eligibleLines.length === 0) {
+    throw new Error(`Aucun article n'est rattaché au fournisseur central pour le rayon "${department}" (vérification RPOS juste avant l'envoi) — aucune commande créée.`);
+  }
+
   const order = await rpos.createSupplierOrder(posId, {
     shopId,
     supplierId,
@@ -1581,16 +1632,20 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
   // Envoi par lots parallèles plutôt qu'une ligne à la fois (audit performance : une proposition de
   // plusieurs centaines de lignes pouvait prendre plusieurs minutes rien que pour cette étape,
   // prolongeant d'autant la fenêtre où la commande RPOS reste incomplète côté fournisseur).
-  let processed = 0;
-  let failed = 0;
+  // processed/failed comptent TOUTES les lignes initialement demandées (lines.length), pas
+  // seulement eligibleLines : une ligne écartée par la re-vérification fraîche est un vrai échec
+  // du point de vue de linesTotal (posé sur lines.length plus haut dans validateProposalDepartment),
+  // sinon linesTotal ne correspondrait plus jamais à processed+failed.
+  let processed = newlyIneligibleLines.length;
+  let failed = newlyIneligibleLines.length;
   // Détail des lignes refusées PAR RPOS LUI-MÊME (ex: article non rattaché au fournisseur central
   // pour ce magasin, cf. 400 constaté le 24/09/2026 sur "PAIN ARABE DIET PQT X7") : jusqu'ici
   // seulement compté (`linesFailed`), jamais identifié — la commande se créait "avec succès" aux
   // yeux de l'utilisateur alors qu'un article manquait silencieusement dedans. Capturé ici pour
   // remonter jusqu'à l'UI un message explicite par article, pas juste un total.
-  const failedLines = [];
+  const failedLines = newlyIneligibleLines.map((l) => ({ ean: l.ean, label: l.label, reason: 'Fournisseur central non renseigné (détecté juste avant l\'envoi).' }));
   const LINE_CONCURRENCY = 5;
-  await mapWithConcurrency(lines, LINE_CONCURRENCY, async (line) => {
+  await mapWithConcurrency(eligibleLines, LINE_CONCURRENCY, async (line) => {
     try {
       await rpos.addSupplierOrderLine(posId, {
         orderId: order.id,

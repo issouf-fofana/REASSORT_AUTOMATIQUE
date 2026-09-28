@@ -95,6 +95,22 @@ function avgSalesCellRenderer(params: any) {
   return wrap;
 }
 
+// Commandabilité fournisseur (spec du 28/09/2026, §2) : badge clair par article, avec raison
+// affichée au survol pour les non-commandables — supplierIneligible null (proposition générée
+// avant ce champ) n'affiche rien, jamais un badge "non commandable" trompeur faute de donnée.
+function supplierEligibilityCellRenderer(params: any) {
+  const l = params.data as ProposalLine;
+  const wrap = document.createElement('div');
+  if (l.supplierIneligible === null || l.supplierIneligible === undefined) {
+    wrap.innerHTML = '<span class="text-muted">—</span>';
+    return wrap;
+  }
+  wrap.innerHTML = l.supplierIneligible
+    ? `<span class="badge reassort-mini-badge bg-danger-subtle text-danger" title="Fournisseur central non renseigné — cet article ne sera pas intégré à la commande. Fournisseur(s) actuel(s) : ${l.currentSuppliers || 'aucun'}"><iconify-icon icon="solar:close-circle-bold"></iconify-icon> Non commandable</span>`
+    : '<span class="badge reassort-mini-badge bg-success-subtle text-success"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable</span>';
+  return wrap;
+}
+
 function stockoutCellRenderer(params: any) {
   const l = params.data as ProposalLine;
   const wrap = document.createElement('div');
@@ -288,6 +304,15 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         { headerName: 'Vente moy./sem.', field: 'avgWeeklySales', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 150, autoHeight: true, cellRenderer: avgSalesCellRenderer },
         { headerName: 'Stock actuel', field: 'stockAtGeneration', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 140, autoHeight: true, cellRenderer: stockCellRenderer },
         { headerName: 'Rupture dans', field: 'daysUntilStockout', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, cellRenderer: stockoutCellRenderer },
+        {
+          headerName: 'Commandable',
+          field: 'supplierIneligible',
+          width: 150,
+          sortable: true,
+          filter: false,
+          cellRenderer: supplierEligibilityCellRenderer,
+          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
+        },
         {
           headerName: 'Dernier achat',
           width: 170,

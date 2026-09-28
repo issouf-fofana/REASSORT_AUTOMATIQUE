@@ -282,6 +282,8 @@ export function ValidationFlow({
           failed: number;
           failedLines: { ean: string; label: string | null; reason: string }[];
           rposOrderValidated: boolean | null;
+          skippedIneligible: { ean: string; label: string | null; reason: string }[];
+          totalRequested: number;
         }>(`/reassort/proposal/${proposalId}/validate-department?${shopQueryParam}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -309,18 +311,27 @@ export function ValidationFlow({
             ? " — commande validée sur RPOS (transmise à l'entrepôt)"
             : ' — validation RPOS a échoué, commande restée "en préparation"'
           : ' — commande laissée "en préparation" sur RPOS (non transmise à l\'entrepôt)';
-        const hasPartialFailure = data.failed > 0;
+        // Récapitulatif "X articles commandés sur Y proposés" (spec du 28/09/2026, §6) :
+        // skippedIneligible (connus dès la génération, jamais envoyés à RPOS) + failedLines (rejetés
+        // par RPOS ou détectés par la re-vérification fraîche juste avant l'envoi) couvrent
+        // ensemble TOUS les articles du rayon non intégrés à la commande finale.
+        const nonIntegratedCount = (data.skippedIneligible?.length || 0) + (data.failed || 0);
+        const hasPartialFailure = nonIntegratedCount > 0;
         const variant = hasPartialFailure ? 'warning' : 'success';
-        const failedList = data.failedLines?.length
-          ? `<ul class="mb-0 mt-2 small">${data.failedLines.map((f) => `<li>${f.label || f.ean} — ${f.reason}</li>`).join('')}</ul>`
+        const nonIntegratedList = [...(data.skippedIneligible || []), ...(data.failedLines || [])];
+        const failedList = nonIntegratedList.length
+          ? `<ul class="mb-0 mt-2 small">${nonIntegratedList.map((f) => `<li>${f.label || f.ean} — ${f.reason}</li>`).join('')}</ul>`
+          : '';
+        const summaryLine = hasPartialFailure
+          ? `<br><strong>${data.processed - data.failed} article(s) commandé(s) sur ${data.totalRequested} proposé(s)</strong> — ${nonIntegratedCount} article(s) non intégré(s) car non rattaché(s) au fournisseur central.`
           : '';
         setResultHtml({
           variant,
           body:
-            `Commande <strong>${data.order?.reference || ''}</strong> créée sur RPOS pour le rayon <strong>${departmentValidation}</strong> — ${data.processed} article(s) envoyé(s)` +
-            (data.failed ? `, ${data.failed} échec(s)` : '') +
+            `Commande <strong>${data.order?.reference || ''}</strong> créée sur RPOS pour le rayon <strong>${departmentValidation}</strong> — ${data.processed - data.failed} article(s) envoyé(s)` +
             validationNote +
             '.' +
+            summaryLine +
             failedList,
         });
         setProgressText(`Rayon ${departmentValidation} validé.`);

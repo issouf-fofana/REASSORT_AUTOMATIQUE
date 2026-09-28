@@ -307,6 +307,26 @@ export function PurchaseOrder() {
     [proposal, selectedDepartment],
   );
 
+  // Synthèse commandable/non commandable du rayon affiché (spec du 28/09/2026, §3) : calculée
+  // localement depuis ProposalLine.supplierIneligible (déjà chargé avec la proposition), jamais un
+  // nouvel appel réseau. Ignore les lignes exclues par l'utilisateur (wasExcluded) — la synthèse
+  // porte sur ce qui SERAIT commandé, pas sur tout ce qui a été calculé au départ.
+  const eligibilitySummary = useMemo(() => {
+    const active = detailLines.filter((l) => !l.wasExcluded);
+    const commandable = active.filter((l) => l.supplierIneligible !== true);
+    const nonCommandable = active.filter((l) => l.supplierIneligible === true);
+    const qty = (lines: typeof active) => lines.reduce((sum, l) => sum + (l.quantitySuggested || 0), 0);
+    return {
+      total: active.length,
+      commandableCount: commandable.length,
+      nonCommandableCount: nonCommandable.length,
+      totalQty: qty(active),
+      commandableQty: qty(commandable),
+      nonCommandableQty: qty(nonCommandable),
+      nonCommandableLines: nonCommandable,
+    };
+  }, [detailLines]);
+
   // Câble le picker + synchronise avec le magasin actif global de la topbar, comme sur les autres
   // pages migrées (cf. SalesHistory.tsx) : select NON contrôlé par React (value=state réécrirait le
   // DOM à chaque rendu et entrerait en conflit avec shop-picker.js/global-shop-selector.js, qui
@@ -710,6 +730,53 @@ export function PurchaseOrder() {
                 )}
                 {supplierCheckLoading && (
                   <p className="small text-muted mb-2">Vérification du rattachement fournisseur...</p>
+                )}
+                {/* Synthèse commandable/non commandable du rayon (spec du 28/09/2026, §3) — calculée
+                    localement depuis les lignes déjà chargées, jamais un appel réseau supplémentaire.
+                    Masquée si aucune ligne n'a encore ce champ renseigné (proposition générée avant
+                    son ajout) : dans ce cas, l'alerte legacy ci-dessous (supplierIneligible, issue de
+                    l'appel /supplier-check) reste le seul repli disponible. */}
+                {eligibilitySummary.total > 0 && detailLines.some((l) => l.supplierIneligible !== null && l.supplierIneligible !== undefined) && (
+                  <div className={`alert small mb-3 ${eligibilitySummary.nonCommandableCount > 0 ? 'alert-warning' : 'alert-light border'}`}>
+                    <p className="mb-1">
+                      <strong>{eligibilitySummary.total} article(s) dans la proposition de ce rayon</strong>
+                    </p>
+                    <p className="mb-1">
+                      <iconify-icon icon="solar:check-circle-bold" className="text-success align-middle me-1"></iconify-icon>
+                      {eligibilitySummary.commandableCount} article(s) commandable(s) — quantité totale {eligibilitySummary.commandableQty.toLocaleString('fr-FR')}
+                    </p>
+                    {eligibilitySummary.nonCommandableCount > 0 && (
+                      <p className="mb-2">
+                        <iconify-icon icon="solar:close-circle-bold" className="text-danger align-middle me-1"></iconify-icon>
+                        {eligibilitySummary.nonCommandableCount} article(s) non commandable(s) — quantité totale {eligibilitySummary.nonCommandableQty.toLocaleString('fr-FR')}
+                      </p>
+                    )}
+                    <p className="mb-0 text-muted">
+                      Les {eligibilitySummary.commandableCount} article(s) commandable(s) sont rattachés au fournisseur central et pourront être intégrés à la commande.
+                    </p>
+                    {eligibilitySummary.nonCommandableCount > 0 && (
+                      <div className="table-responsive mt-2" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                        <table className="table table-sm mb-0">
+                          <thead>
+                            <tr>
+                              <th>Article</th>
+                              <th>EAN</th>
+                              <th>Fournisseur actuel</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {eligibilitySummary.nonCommandableLines.map((item) => (
+                              <tr key={item.id}>
+                                <td>{item.label || '—'}</td>
+                                <td>{item.ean}</td>
+                                <td>{item.currentSuppliers || 'aucun'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {!!supplierIneligible?.length && (
                   <div className="alert alert-warning small mb-3">
