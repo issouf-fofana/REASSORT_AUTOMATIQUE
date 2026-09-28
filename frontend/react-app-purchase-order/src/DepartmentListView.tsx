@@ -90,7 +90,7 @@ function DeptTile({
                 className={`badge ${order.status === 'DONE' ? 'bg-success' : order.status === 'FAILED' ? 'bg-danger' : 'bg-secondary'}`}
                 title={order.rposOrderReference ? `Commande ${order.rposOrderReference}` : undefined}
               >
-                ✓ Validé
+                <iconify-icon icon="solar:check-circle-bold" className="align-middle me-1"></iconify-icon>Validé
               </span>
             )}
           </div>

@@ -714,8 +714,11 @@ export function PurchaseOrder() {
                 {!!supplierIneligible?.length && (
                   <div className="alert alert-warning small mb-3">
                     <p className="mb-2">
-                      <strong>⚠️ {supplierIneligible.length} article(s) non rattaché(s) au fournisseur central</strong> — risque
-                      qu'ils manquent à l'envoi réel de la commande :
+                      <strong>
+                        <iconify-icon icon="solar:danger-triangle-bold" className="align-middle me-1"></iconify-icon>
+                        {supplierIneligible.length} article(s) non rattaché(s) au fournisseur central
+                      </strong>{' '}
+                      — risque qu'ils manquent à l'envoi réel de la commande :
                     </p>
                     <div className="table-responsive" style={{ maxHeight: 220, overflowY: 'auto' }}>
                       <table className="table table-sm mb-0">

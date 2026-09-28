@@ -204,7 +204,12 @@ export function ValidationFlow({
           if (orders.length > 1) {
             const list = orders
               .map((o) => {
-                const badge = o.status === 'DONE' && o.linesFailed === 0 ? '✓' : o.rposOrderReference ? '⚠' : '✗';
+                const badge =
+                  o.status === 'DONE' && o.linesFailed === 0
+                    ? '<iconify-icon icon="solar:check-circle-bold" class="text-success align-middle"></iconify-icon>'
+                    : o.rposOrderReference
+                      ? '<iconify-icon icon="solar:danger-triangle-bold" class="text-warning align-middle"></iconify-icon>'
+                      : '<iconify-icon icon="solar:close-circle-bold" class="text-danger align-middle"></iconify-icon>';
                 const label = o.rposOrderReference
                   ? `commande <strong>${o.rposOrderReference}</strong>`
                   : `<span class="text-danger">échec de création${o.errorMessage ? ' — ' + o.errorMessage : ''}</span>`;
