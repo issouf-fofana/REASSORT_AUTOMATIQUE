@@ -1,5 +1,14 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { apiFetch } from './api/client';
 import type { Proposal } from './types';
+
+interface DataAvailability {
+  found: boolean;
+  oldestDate?: string;
+  newestDate?: string;
+  spanDays?: number;
+  coversAtLeastOneYear?: boolean;
+}
 
 const STATUS_LABEL: Record<string, string> = {
   GENERATED: 'Générée, en attente de validation',
@@ -39,6 +48,22 @@ function fmtDate(iso: string): string {
  * contrairement à eligibilitySummary dans PurchaseOrder.tsx qui ne porte que sur le rayon affiché.
  */
 export function ProposalHeader({ proposal }: { proposal: Proposal }) {
+  // Étendue réelle de l'historique de ventes disponible pour ce magasin (spec du 28/09/2026, §7 :
+  // "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA") — distinct de la période d'analyse
+  // ci-dessous (la fenêtre RÉSOLUE pour CETTE proposition précise), ceci montre jusqu'où on pourrait
+  // remonter si on voulait comparer sur une plus longue période. Chargé une fois par proposition
+  // (pas par changement de département/vue), jamais bloquant : un échec de chargement laisse
+  // simplement cette ligne absente plutôt que de gêner l'affichage du reste de l'en-tête.
+  const [dataAvailability, setDataAvailability] = useState<DataAvailability | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setDataAvailability(null);
+    apiFetch<DataAvailability>(`/reassort/proposal/${proposal.id}/data-availability`)
+      .then((data) => { if (!cancelled) setDataAvailability(data); })
+      .catch(() => { /* non bloquant : l'en-tête reste utilisable sans cette info */ });
+    return () => { cancelled = true; };
+  }, [proposal.id]);
+
   const summary = useMemo(() => {
     const active = proposal.lines.filter((l) => !l.wasExcluded);
     const commandable = active.filter((l) => l.supplierIneligible !== true);
@@ -94,6 +119,14 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
               {periodModeLabel && <span className="text-muted fw-normal"> ({periodModeLabel})</span>}
             </div>
           </div>
+          {dataAvailability?.found && dataAvailability.oldestDate && dataAvailability.newestDate && (
+            <div className="col-6 col-md-3">
+              <div className="text-muted">Données disponibles</div>
+              <div className="fw-semibold" title="Étendue complète de l'historique de ventes synchronisé pour ce magasin, indépendamment de la période d'analyse ci-dessus.">
+                {fmtDate(dataAvailability.oldestDate)} → {fmtDate(dataAvailability.newestDate)}
+              </div>
+            </div>
+          )}
           <div className="col-6 col-md-3">
             <div className="text-muted">Nombre total d'articles</div>
             <div className="fw-semibold">{summary.total}</div>

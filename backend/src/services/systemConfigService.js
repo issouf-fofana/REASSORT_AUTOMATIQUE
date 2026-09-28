@@ -337,6 +337,7 @@ CONFIANCE: <0-100, ton niveau de confiance dans cette analyse vu les preuves fou
     { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
     { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien'], tool: 'getArticleStock' },
     { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
+    { keywords: ['depuis quand avez-vous', 'depuis quand avez vous', 'depuis quand tu as', 'depuis quand as-tu', 'depuis quand as tu', 'historique disponible', 'données disponibles', 'donnees disponibles', 'combien de temps d\'historique', 'combien de temps dhistorique', 'jusqu\'où remonte', 'jusqu ou remonte'], tool: 'getDataAvailability' },
   ]),
 };
 

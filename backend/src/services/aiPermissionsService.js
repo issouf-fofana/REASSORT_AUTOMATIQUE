@@ -77,6 +77,10 @@ const TOOL_CAPABILITY = {
   // getShopUsers de chatbotService.js, jamais cette capacité — un SUPERVISOR a 'orders' autorisé par
   // défaut mais reste bloqué là où ça compte réellement.
   getShopUsers: 'orders',
+  // Étendue de l'historique de ventes disponible (spec du 28/09/2026, §7) — même capacité que
+  // getSalesHistory/getParetoArticles, cette information n'a de sens que pour qui peut déjà consulter
+  // les ventes du magasin.
+  getDataAvailability: 'sales',
 };
 
 /** getRevenue seul est ambigu : CA global (revenueShop) si aucun filtre, CA d'un périmètre précis (revenueArticle) sinon. */

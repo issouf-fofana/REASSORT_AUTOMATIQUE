@@ -60,6 +60,44 @@ async function getLatestProposal(rposShopId) {
   });
 }
 
+/**
+ * getDataAvailability(rposShopId) — étendue RÉELLE de l'historique de ventes disponible en base
+ * pour ce magasin (spec du 28/09/2026 §7 : "utiliser TOUTES les données disponibles par magasin,
+ * pas une fenêtre fixe arbitraire" + "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA"). Distinct
+ * de periodStart/periodEnd d'une réponse getRevenue/getParetoArticles (la fenêtre RÉSOLUE pour UNE
+ * question précise) : ceci répond à "jusqu'où peut-on remonter pour CE magasin", indépendamment de
+ * toute période choisie — utile pour cadrer une comparaison "12 derniers mois" avant de la lancer
+ * (si le magasin n'a que 3 mois de recul, le dire plutôt que de renvoyer une comparaison tronquée
+ * sans prévenir). Même source que la route ADMIN /sales-lines/coverage (sales.js), extraite ici pour
+ * être appelable par le chatbot sans passer par requireAdmin (une question "depuis quand avez-vous
+ * mes données ?" est légitime pour tout rôle ayant accès à son propre magasin).
+ */
+async function getDataAvailability(rposShopId) {
+  const [oldest, newest, count] = await Promise.all([
+    prisma.salesLine.findFirst({ where: { rposShopId }, orderBy: { date: 'asc' }, select: { date: true } }),
+    prisma.salesLine.findFirst({ where: { rposShopId }, orderBy: { date: 'desc' }, select: { date: true } }),
+    prisma.salesLine.count({ where: { rposShopId } }),
+  ]);
+
+  if (!oldest || !newest) {
+    return { found: false, message: 'Aucune vente synchronisée pour ce magasin pour le moment.' };
+  }
+
+  const spanDays = Math.round((newest.date.getTime() - oldest.date.getTime()) / (24 * 60 * 60 * 1000));
+
+  return {
+    found: true,
+    oldestDate: oldest.date.toISOString(),
+    newestDate: newest.date.toISOString(),
+    spanDays,
+    // Signale explicitement quand une comparaison "12 mois glissants" ou "même période l'an dernier"
+    // ne peut être que partielle voire impossible, plutôt que de laisser le LLM/l'utilisateur découvrir
+    // après coup qu'un chiffre "sur 12 mois" ne portait en fait que sur 3 mois de données réelles.
+    coversAtLeastOneYear: spanDays >= 365,
+    lineCount: count,
+  };
+}
+
 /** getStoreStock() — vision d'ensemble du stock du magasin sur sa dernière proposition connue. */
 async function getStoreStock(rposShopId, { department } = {}) {
   const proposal = await getLatestProposal(rposShopId);
@@ -1259,4 +1297,5 @@ module.exports = {
   getStockMoveHistory,
   getDlvArticles,
   getArticleDlvStatus,
+  getDataAvailability,
 };

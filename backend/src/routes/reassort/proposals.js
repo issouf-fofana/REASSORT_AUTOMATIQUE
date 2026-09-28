@@ -22,6 +22,7 @@ const { resolvePeriod } = require('../../services/periodService');
 const { filterProposalLinesForUser, DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 const orderAnomalyService = require('../../services/orderAnomalyService');
+const chatbotTools = require('../../services/chatbotToolsService');
 const { requireAdmin } = require('../../middleware/auth');
 
 router.get('/proposal', async (req, res) => {
@@ -374,6 +375,27 @@ router.get('/proposal/:id', async (req, res) => {
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
     proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
     res.json({ success: true, data: proposal });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal/:id/data-availability - étendue réelle de l'historique de ventes
+// disponible en base pour le magasin de CETTE proposition (spec du 28/09/2026, §7 : "Données
+// disponibles : du DD/MM/AAAA au DD/MM/AAAA" par magasin, affichée aux côtés de la proposition).
+// Ouvert à tout rôle ayant accès à cette proposition (même contrôle shopId que GET /proposal/:id
+// ci-dessus) — contrairement à /sales-lines/coverage (sales.js), réservée ADMIN pour un usage de
+// backfill, cette info est légitime pour n'importe quel rôle consultant sa propre proposition.
+router.get('/proposal/:id/data-availability', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { rposShopId: true } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+    if (shopId && proposal.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
+    }
+    const result = await chatbotTools.getDataAvailability(proposal.rposShopId);
+    res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

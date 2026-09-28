@@ -24,7 +24,7 @@ const VALID_INTENT_TOOLS = new Set([
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
-  'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers',
+  'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
 ]);
 
 // Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
@@ -78,6 +78,11 @@ const FALLBACK_INTENT_RULES = [
   // magasin ?" — donnée de gestion des comptes (pas ventes/stock/réassort), réservée ADMIN
   // (aiPermissionsService.js, capacité dédiée) contrairement au reste des capacités du chatbot.
   { keywords: ['combien d\'utilisateurs', 'combien dutilisateurs', 'combien de user', 'combien de comptes', 'nombre d\'utilisateurs', 'nombre dutilisateurs', 'utilisateurs de ce magasin', 'comptes de ce magasin', 'qui travaille dans ce magasin', 'qui a accès à ce magasin', 'qui a acces a ce magasin'], tool: 'getShopUsers' },
+  // Ajouté le 28/09/2026 (spec §7 : "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA") : répond à
+  // "depuis quand avez-vous mes données ?" / "sur combien de temps portent vos données ?" — distinct
+  // de getSalesHistory (l'évolution DES VENTES elles-mêmes) : ici la question porte sur l'étendue de
+  // l'historique disponible, pas sur un chiffre de vente.
+  { keywords: ['depuis quand avez-vous', 'depuis quand avez vous', 'depuis quand tu as', 'depuis quand as-tu', 'depuis quand as tu', 'historique disponible', 'données disponibles', 'donnees disponibles', 'combien de temps d\'historique', 'combien de temps dhistorique', 'sur quelle période portent vos données', 'sur quelle periode portent vos donnees', 'jusqu\'où remonte', 'jusqu ou remonte', 'jusqu\'où peut-on remonter', 'jusqu ou peut on remonter'], tool: 'getDataAvailability' },
 ];
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
@@ -475,6 +480,7 @@ const TOOL_CATALOG = [
   { name: 'getRevenueTrendAllShops', description: 'Évolution du chiffre d\'affaires de chaque magasin entre deux périodes consécutives, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "le réseau progresse-t-il ?", "classe les magasins par évolution des ventes".', params: { currentDays: 'durée en jours de la période récente à comparer, optionnel (défaut 30)' } },
   { name: 'getSilentShops', description: 'Magasins du réseau sans aucune vente synchronisée récemment (signal d\'alerte : magasin peut-être hors service ou mal synchronisé), réservé ADMIN/SUPERVISOR — utile pour "y a-t-il des magasins silencieux ?".', params: {} },
   { name: 'getDlvArticles', description: 'Articles ayant actuellement du stock en DLV (Date Limite de Vente courte — un stock basculé manuellement par le personnel sur un EAN distinct pour écoulement à prix réduit, PAS une date de péremption automatique), du magasin entier ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel' } },
+  { name: 'getDataAvailability', description: 'Étendue réelle de l\'historique de ventes disponible en base pour ce magasin (date la plus ancienne / la plus récente) — utile pour "depuis quand avez-vous mes données ?", "sur combien de temps portent vos données ?", avant de lancer une comparaison sur une longue période (12 mois, année précédente...).', params: {} },
 ];
 
 const TOOL_CALL_SYSTEM_PROMPT_HEADER = `Tu es un routeur d'intention pour un assistant de réassort en magasin. Voici la liste des outils de données disponibles, au format JSON :
@@ -837,6 +843,8 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         return ean
           ? { toolName: 'getArticleDlvStatus', toolResult: await tools.getArticleDlvStatus(rposShopId, ean) }
           : { toolName, toolResult: await tools.getDlvArticles(rposShopId, {}) };
+      case 'getDataAvailability':
+        return { toolName, toolResult: await tools.getDataAvailability(rposShopId) };
       case 'getShopUsers':
         // Donnée de gestion des comptes (qui a accès à quoi), pas ventes/stock/réassort — réservée
         // ADMIN uniquement, contrairement au reste des capacités du chatbot (checkToolPermission
