@@ -269,7 +269,7 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:danger-triangle-bold-duotone" className="text-danger"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Taux de rupture</p>
+                <p className="kpi-label" title="Parmi les articles des commandes validées, proportion qui était déjà en rupture de stock AU MOMENT de la génération de la proposition — mesure si le réassort intervient assez tôt, pas un taux de non-conformité de commande.">Taux de rupture de stock</p>
                 <h3 className="kpi-value">{stockout.text}</h3>
               </div>
             </div>
