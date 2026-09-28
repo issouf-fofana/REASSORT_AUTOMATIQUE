@@ -71,11 +71,27 @@ interface KeyModalState {
 
 const EMPTY_KEY_MODAL: KeyModalState = { id: '', label: '', provider: 'gemini', apiKey: '', model: '', priority: '0', valueHint: '' };
 
+interface AiModelOption {
+  id: string;
+  label: string | null;
+}
+
+interface ModelsModalState {
+  keyId: string;
+  keyLabel: string;
+  currentModel: string;
+  loading: boolean;
+  error: string | null;
+  models: AiModelOption[];
+}
+
 function AiKeysCard() {
   const [keys, setKeys] = useState<AiKey[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<KeyModalState | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [modelsModal, setModelsModal] = useState<ModelsModalState | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
 
   async function loadAiKeys() {
     setError(null);
@@ -129,6 +145,34 @@ function AiKeysCard() {
     } catch (err) {
       window.reassortToast('Erreur : ' + (err as Error).message, 'error');
       loadAiKeys();
+    }
+  }
+
+  async function handleOpenModels(k: AiKey) {
+    setModelsModal({ keyId: k.id, keyLabel: k.label, currentModel: k.model || '', loading: true, error: null, models: [] });
+    try {
+      const models = await apiFetch<AiModelOption[]>(`/reassort/ai/keys/${k.id}/models`);
+      setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, models } : prev));
+    } catch (err) {
+      setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, error: (err as Error).message } : prev));
+    }
+  }
+
+  async function handleSelectModel(modelId: string) {
+    if (!modelsModal) return;
+    setSavingModel(true);
+    try {
+      await apiFetch(`/reassort/ai/keys/${modelsModal.keyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId }),
+      });
+      setModelsModal(null);
+      loadAiKeys();
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err as Error).message, 'error');
+    } finally {
+      setSavingModel(false);
     }
   }
 
@@ -223,6 +267,15 @@ function AiKeysCard() {
                         onClick={() => handleTest(k.id)}
                       >
                         {testingId === k.id ? 'Test...' : 'Tester'}
+                      </button>{' '}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary"
+                        title="Voir les modèles réellement disponibles pour cette clé"
+                        onClick={() => handleOpenModels(k)}
+                      >
+                        <iconify-icon icon="solar:list-check-bold" className="align-middle me-1" />
+                        Modèles
                       </button>{' '}
                       <button
                         type="button"
@@ -329,6 +382,78 @@ function AiKeysCard() {
                   </button>
                   <button type="button" className="btn btn-primary" onClick={handleSaveModal}>
                     Enregistrer
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
+
+      {modelsModal && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1}>
+            <div className="modal-dialog">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">Modèles disponibles — {modelsModal.keyLabel}</h5>
+                  <button type="button" className="btn-close" onClick={() => setModelsModal(null)} />
+                </div>
+                <div className="modal-body">
+                  <p className="text-muted small">
+                    Liste récupérée en direct depuis le fournisseur avec cette clé API. Cliquez sur un modèle pour
+                    en faire le modèle utilisé par cette clé.
+                  </p>
+                  {modelsModal.loading && <div className="text-center text-muted py-3">Chargement...</div>}
+                  {modelsModal.error && <div className="alert alert-danger">{modelsModal.error}</div>}
+                  {!modelsModal.loading && !modelsModal.error && (
+                    <div className="table-responsive" style={{ maxHeight: 400, overflowY: 'auto' }}>
+                      <table className="table table-sm table-hover align-middle">
+                        <thead>
+                          <tr>
+                            <th>Modèle</th>
+                            <th>Libellé</th>
+                            <th>Actif</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {modelsModal.models.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="text-center text-muted py-3">Aucun modèle trouvé pour cette clé.</td>
+                            </tr>
+                          ) : (
+                            modelsModal.models.map((m) => (
+                              <tr key={m.id}>
+                                <td className="font-monospace small">{m.id}</td>
+                                <td className="text-muted small">{m.label || '—'}</td>
+                                <td>
+                                  {m.id === modelsModal.currentModel ? (
+                                    <span className="badge bg-success-subtle text-success">Utilisé</span>
+                                  ) : null}
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-primary"
+                                    disabled={savingModel || m.id === modelsModal.currentModel}
+                                    onClick={() => handleSelectModel(m.id)}
+                                  >
+                                    Utiliser
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-light" onClick={() => setModelsModal(null)}>
+                    Fermer
                   </button>
                 </div>
               </div>

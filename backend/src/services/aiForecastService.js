@@ -616,6 +616,65 @@ async function testProviderKey(keyId) {
 }
 
 /**
+ * Liste les modèles RÉELLEMENT disponibles pour une clé (demande du 28/09/2026 : "comme sur cet
+ * autre outil, il affiche les modèles dispo sur la clé utilisée") — interroge directement l'API
+ * "list models" de chaque fournisseur avec la clé déchiffrée, plutôt que de se fier à une liste
+ * codée en dur qui se périmerait à chaque nouveau modèle sorti côté fournisseur.
+ */
+async function listModelsForProvider(provider, apiKey) {
+  if (provider === 'gemini') {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=200`, { method: 'GET' });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(geminiErrorMessage(res.status, errText));
+    }
+    const data = await res.json();
+    return (data.models || [])
+      // generateContent seul nous intéresse ici (prévision/chatbot) — les modèles embedding-only,
+      // par ex., ne répondraient jamais à nos appels et polluent inutilement la liste.
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m) => ({ id: (m.name || '').replace(/^models\//, ''), label: m.displayName || null }));
+  }
+  if (provider === 'openai') {
+    const res = await fetchWithTimeout('https://api.openai.com/v1/models', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`OpenAI ${res.status}: ${errText}`);
+    }
+    const data = await res.json();
+    return (data.data || [])
+      // Ne garde que les familles de modèles de chat connues — le catalogue OpenAI inclut aussi
+      // whisper/tts/embeddings/dall-e, jamais utilisables par nos appels chat.completions ici.
+      .filter((m) => /^(gpt-|o1|o3|o4|chatgpt-)/.test(m.id))
+      .map((m) => ({ id: m.id, label: null }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+  if (provider === 'anthropic') {
+    const res = await fetchWithTimeout('https://api.anthropic.com/v1/models?limit=200', {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`Anthropic ${res.status}: ${errText}`);
+    }
+    const data = await res.json();
+    return (data.data || []).map((m) => ({ id: m.id, label: m.display_name || null }));
+  }
+  throw new Error(`Fournisseur "${provider}" non supporté`);
+}
+
+async function listModelsForKey(keyId) {
+  const key = await prisma.aiProviderKey.findUnique({ where: { id: keyId } });
+  if (!key) throw new Error('Clé introuvable');
+  const apiKey = crypto.decrypt(key.encryptedApiKey);
+  return listModelsForProvider(key.provider, apiKey);
+}
+
+/**
  * Analyse un ensemble d'articles par lots (ARTICLES_PER_BATCH, en parallèle contrôlé par
  * BATCH_CONCURRENCY) : construit le résumé de chaque article (buildArticleSummary), appelle le LLM
  * configuré avec fallback multi-clés, et retourne les suggestions obtenues par EAN. Un lot en échec
@@ -874,4 +933,4 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   return { answer: fullText.trim(), providerUsed };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, listModelsForKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage };

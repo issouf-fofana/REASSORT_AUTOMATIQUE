@@ -112,6 +112,19 @@ router.post('/ai/keys/:id/test', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/ai/keys/:id/models - liste les modèles réellement disponibles pour cette clé
+// (demande du 28/09/2026, "comme sur cet autre outil il affiche les modèles dispo sur la clé
+// utilisée") — interroge l'API "list models" du fournisseur avec la clé déchiffrée, jamais une
+// liste figée côté code qui se périmerait à chaque nouveau modèle publié.
+router.get('/ai/keys/:id/models', requireAdmin, async (req, res) => {
+  try {
+    const models = await aiForecastService.listModelsForKey(req.params.id);
+    res.json({ success: true, data: models });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/:proposalId/ai-forecast - lance une analyse IA à la demande sur une
 // proposition existante (ne modifie jamais la proposition classique).
 router.post('/proposal/:proposalId/ai-forecast', requireAdmin, async (req, res) => {
