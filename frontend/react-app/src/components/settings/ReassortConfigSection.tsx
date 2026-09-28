@@ -40,7 +40,7 @@ const DEFAULT_VALUES: ConfigValues = {
 };
 
 export function ReassortConfigSection() {
-  const { shops, selectedShopIds, toggleShop, isSingleShop, isBulk } = useShopSelector();
+  const { shops, selectedShopIds, toggleShop, selectAll, deselectAll, isSingleShop, isBulk } = useShopSelector();
   const [values, setValues] = useState<ConfigValues>(DEFAULT_VALUES);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -152,6 +152,15 @@ export function ReassortConfigSection() {
                       : `${selectedShopIds.length} magasins`}
                 </button>
                 <div className="dropdown-menu p-2" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
+                  <div className="d-flex gap-2 mb-2 pb-2 border-bottom">
+                    <button type="button" className="btn btn-sm btn-link p-0" onClick={selectAll}>
+                      Tout cocher
+                    </button>
+                    <span className="text-muted">·</span>
+                    <button type="button" className="btn btn-sm btn-link p-0" onClick={deselectAll}>
+                      Tout décocher
+                    </button>
+                  </div>
                   {shops.map((shop) => (
                     <div className="form-check" key={shop.id}>
                       <input

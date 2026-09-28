@@ -57,11 +57,23 @@ export function useShopSelector() {
     );
   }, []);
 
+  // "Tout cocher/décocher" (demande du 28/09/2026) : appliquer une config à tous les magasins en un
+  // clic plutôt que de cocher un par un une liste qui peut compter 50+ magasins.
+  const selectAll = useCallback(() => {
+    setSelectedIds(shops.map((s) => s.id));
+  }, [shops]);
+
+  const deselectAll = useCallback(() => {
+    setSelectedIds([]);
+  }, []);
+
   return {
     isSingleShop,
     shops,
     selectedShopIds: effectiveShopIds,
     toggleShop,
+    selectAll,
+    deselectAll,
     loading,
     error,
     isBulk: effectiveShopIds.length > 1,
