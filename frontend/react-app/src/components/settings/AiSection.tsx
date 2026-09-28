@@ -394,7 +394,7 @@ function AiKeysCard() {
       {modelsModal && (
         <>
           <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1}>
-            <div className="modal-dialog">
+            <div className="modal-dialog modal-lg">
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">Modèles disponibles — {modelsModal.keyLabel}</h5>
@@ -402,47 +402,45 @@ function AiKeysCard() {
                 </div>
                 <div className="modal-body">
                   <p className="text-muted small">
-                    Liste récupérée en direct depuis le fournisseur avec cette clé API. Cliquez sur un modèle pour
-                    en faire le modèle utilisé par cette clé.
+                    Liste récupérée en direct depuis le fournisseur avec cette clé API. Cochez un modèle pour en
+                    faire le modèle utilisé par cette clé.
                   </p>
                   {modelsModal.loading && <div className="text-center text-muted py-3">Chargement...</div>}
                   {modelsModal.error && <div className="alert alert-danger">{modelsModal.error}</div>}
                   {!modelsModal.loading && !modelsModal.error && (
-                    <div className="table-responsive" style={{ maxHeight: 400, overflowY: 'auto' }}>
-                      <table className="table table-sm table-hover align-middle">
+                    <div className="table-responsive" style={{ maxHeight: 450, overflowY: 'auto' }}>
+                      <table className="table table-sm table-hover align-middle mb-0">
                         <thead>
                           <tr>
+                            <th style={{ width: 40 }}></th>
                             <th>Modèle</th>
                             <th>Libellé</th>
-                            <th>Actif</th>
-                            <th></th>
                           </tr>
                         </thead>
                         <tbody>
                           {modelsModal.models.length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="text-center text-muted py-3">Aucun modèle trouvé pour cette clé.</td>
+                              <td colSpan={3} className="text-center text-muted py-3">Aucun modèle trouvé pour cette clé.</td>
                             </tr>
                           ) : (
                             modelsModal.models.map((m) => (
-                              <tr key={m.id}>
+                              <tr
+                                key={m.id}
+                                role="button"
+                                className={m.id === modelsModal.currentModel ? 'table-success' : undefined}
+                                onClick={() => !savingModel && m.id !== modelsModal.currentModel && handleSelectModel(m.id)}
+                              >
+                                <td>
+                                  <input
+                                    type="radio"
+                                    className="form-check-input"
+                                    checked={m.id === modelsModal.currentModel}
+                                    disabled={savingModel}
+                                    onChange={() => handleSelectModel(m.id)}
+                                  />
+                                </td>
                                 <td className="font-monospace small">{m.id}</td>
                                 <td className="text-muted small">{m.label || '—'}</td>
-                                <td>
-                                  {m.id === modelsModal.currentModel ? (
-                                    <span className="badge bg-success-subtle text-success">Utilisé</span>
-                                  ) : null}
-                                </td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="btn btn-sm btn-outline-primary"
-                                    disabled={savingModel || m.id === modelsModal.currentModel}
-                                    onClick={() => handleSelectModel(m.id)}
-                                  >
-                                    Utiliser
-                                  </button>
-                                </td>
                               </tr>
                             ))
                           )}
