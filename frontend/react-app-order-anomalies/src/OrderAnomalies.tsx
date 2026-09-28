@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './api/client';
 import type { OrderAnomaly } from './types';
+import { SupplierIneligibleTab } from './SupplierIneligibleTab';
 
 const STATUS_LABEL: Record<string, string> = { PENDING: 'À vérifier', ACKNOWLEDGED: 'Acceptée', DISMISSED: 'Ignorée' };
 const DIRECTION_LABEL: Record<string, string> = {
@@ -56,6 +57,7 @@ function AnomalyCard({ a, onAction }: { a: OrderAnomaly; onAction: (id: string, 
 }
 
 export function OrderAnomalies() {
+  const [activeTab, setActiveTab] = useState<'anomalies' | 'supplier'>('anomalies');
   const [status, setStatus] = useState('');
   const [rows, setRows] = useState<OrderAnomaly[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,25 +148,44 @@ export function OrderAnomalies() {
         .oa-note { font-size: .82rem; color: #6c757d; font-style: italic; margin-top: .6rem; }
       `}</style>
 
-      <div className="oa-intro">
-        <strong>À quoi ça sert :</strong> chaque fois qu'une quantité proposée pour un article s'écarte significativement de l'historique des
-        quantités déjà validées pour ce même article, une anomalie apparaît ici — <strong>trop haute</strong> (risque de surstock) ou{' '}
-        <strong>trop basse</strong> (risque de rupture malgré la commande). Une anomalie ne signifie jamais "erreur" : elle signale seulement
-        un écart par rapport à l'habitude — une promotion, une reprise d'activité ou un événement particulier peut parfaitement l'expliquer.
-        Vérifiez le contexte avant de valider la commande concernée.
-      </div>
+      <ul className="nav nav-tabs mb-4">
+        <li className="nav-item">
+          <button type="button" className={`nav-link ${activeTab === 'anomalies' ? 'active' : ''}`} onClick={() => setActiveTab('anomalies')}>
+            Anomalies de quantité
+          </button>
+        </li>
+        <li className="nav-item">
+          <button type="button" className={`nav-link ${activeTab === 'supplier' ? 'active' : ''}`} onClick={() => setActiveTab('supplier')}>
+            Fournisseur non rattaché
+          </button>
+        </li>
+      </ul>
 
-      <div className="oa-toolbar">
-        <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">Toutes (sauf traitées)</option>
-          <option value="PENDING">À vérifier</option>
-          <option value="ACKNOWLEDGED">Acceptées</option>
-          <option value="DISMISSED">Ignorées</option>
-        </select>
-        <span className="oa-toolbar-count">{rows ? `${rows.length} anomalie(s)` : ''}</span>
-      </div>
+      {activeTab === 'supplier' ? (
+        <SupplierIneligibleTab />
+      ) : (
+        <>
+          <div className="oa-intro">
+            <strong>À quoi ça sert :</strong> chaque fois qu'une quantité proposée pour un article s'écarte significativement de l'historique des
+            quantités déjà validées pour ce même article, une anomalie apparaît ici — <strong>trop haute</strong> (risque de surstock) ou{' '}
+            <strong>trop basse</strong> (risque de rupture malgré la commande). Une anomalie ne signifie jamais "erreur" : elle signale seulement
+            un écart par rapport à l'habitude — une promotion, une reprise d'activité ou un événement particulier peut parfaitement l'expliquer.
+            Vérifiez le contexte avant de valider la commande concernée.
+          </div>
 
-      {error ? (
+          <div className="oa-toolbar">
+            <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">Toutes (sauf traitées)</option>
+              <option value="PENDING">À vérifier</option>
+              <option value="ACKNOWLEDGED">Acceptées</option>
+              <option value="DISMISSED">Ignorées</option>
+            </select>
+            <span className="oa-toolbar-count">{rows ? `${rows.length} anomalie(s)` : ''}</span>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'supplier' ? null : error ? (
         <div className="alert alert-danger">{error}</div>
       ) : rows === null ? (
         <div className="text-center text-muted py-4">Chargement...</div>

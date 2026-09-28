@@ -851,6 +851,17 @@ model ProposalLine {
   // faussé par ce filtrage de sécurité qui n'a rien à voir avec la qualité des recommandations IA.
   excludedOutOfScope Boolean @default(false) @map("excluded_out_of_scope")
 
+  // Rattachement au fournisseur central RPOS (demande du 26/09/2026, renforcée le 28/09/2026 :
+  // "il faut le faire pendant la génération, pas à l'ouverture de page") — calculé GRATUITEMENT à
+  // la génération à partir du champ `suppliers` déjà présent dans l'objet produit récupéré en lot
+  // (getProductsByEans, pas d'appel RPOS supplémentaire). Avant ce champ, la vérification refaisait
+  // un appel RPOS PAR ARTICLE à l'ouverture de chaque page Proposition de commande (checkSupplier-
+  // Eligibility), pouvant bloquer plusieurs minutes sur un rayon à fort catalogue (550+ articles) —
+  // en plus de vérifier TOUTE la proposition au lieu du seul rayon affiché. supplierIneligible=null
+  // pour les propositions générées AVANT ce champ (jamais recalculé rétroactivement).
+  supplierIneligible Boolean? @map("supplier_ineligible")
+  currentSuppliers   String?  @map("current_suppliers") // noms des fournisseurs actuels, séparés par virgule ("aucun" si vide)
+
   // Précision des prévisions (readme §17) : quantité réellement vendue sur la fenêtre de mesure
   // (ReassortConfig.forecastAccuracyWindowDays) après la validation, calculée une seule fois à la
   // demande puis mise en cache ici (la période mesurée est figée dans le passé, jamais recalculée).

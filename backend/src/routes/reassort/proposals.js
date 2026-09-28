@@ -384,6 +384,13 @@ router.get('/proposal/:id', async (req, res) => {
 // suite à une commande créée avec un article silencieusement absent car refusé par RPOS après
 // coup). body: { decisions: [{ lineId, excluded }] } — mêmes décisions que /validate, pour ne
 // vérifier que les lignes qui seraient réellement envoyées.
+//
+// Corrigé le 28/09/2026 : lit désormais ProposalLine.supplierIneligible/currentSuppliers, calculés
+// GRATUITEMENT à la génération (proposalService.js, depuis product.suppliers déjà récupéré en lot)
+// au lieu de refaire un appel RPOS PAR ARTICLE à chaque ouverture de page — sur une proposition à
+// fort catalogue (550+ articles observés), l'ancien code pouvait bloquer plusieurs minutes.
+// checkSupplierEligibility (appel RPOS individuel) reste utilisée en repli UNIQUEMENT pour les
+// lignes provenant d'une proposition générée AVANT ce champ (supplierIneligible === null).
 router.post('/proposal/:id/supplier-check', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -405,8 +412,13 @@ router.post('/proposal/:id/supplier-check', async (req, res) => {
       return !(decision && decision.excluded);
     });
 
-    const ineligible = await checkSupplierEligibility(posId, shopId, linesToCheck);
-    res.json({ success: true, data: { ineligible } });
+    const legacyLines = linesToCheck.filter((line) => line.supplierIneligible === null);
+    const ineligibleFromField = linesToCheck
+      .filter((line) => line.supplierIneligible === true)
+      .map((line) => ({ lineId: line.id, ean: line.ean, label: line.label, currentSuppliers: line.currentSuppliers || 'aucun' }));
+    const ineligibleFromLegacyCheck = legacyLines.length ? await checkSupplierEligibility(posId, shopId, legacyLines) : [];
+
+    res.json({ success: true, data: { ineligible: [...ineligibleFromField, ...ineligibleFromLegacyCheck] } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -596,6 +608,40 @@ router.get('/order-anomalies', requireAdmin, async (req, res) => {
       rposShopId: req.query.shopId || undefined,
       limit: req.query.limit ? parseInt(req.query.limit, 10) : undefined,
     });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/supplier-ineligible-articles - liste TOUS les articles non rattachés au
+// fournisseur central, tous magasins confondus, sur les propositions actives (status=GENERATED) —
+// demande du 28/09/2026 : "faire en sorte qu'après la génération on ait ça sur une vue", pour ne
+// plus avoir à ouvrir chaque rayon de chaque magasin un par un pour découvrir ce problème. Lecture
+// pure (ProposalLine.supplierIneligible, calculé gratuitement à la génération, cf.
+// proposalService.js) : aucun appel RPOS ici, réponse instantanée quel que soit le volume.
+router.get('/supplier-ineligible-articles', requireAdmin, async (req, res) => {
+  try {
+    const lines = await prisma.proposalLine.findMany({
+      where: { supplierIneligible: true, proposal: { status: 'GENERATED' } },
+      select: {
+        id: true, ean: true, label: true, currentSuppliers: true, department: true, sector: true,
+        proposal: { select: { id: true, rposShopId: true, rposShopReference: true, rposShopName: true } },
+      },
+      orderBy: [{ proposal: { rposShopReference: 'asc' } }, { label: 'asc' }],
+    });
+    const data = lines.map((l) => ({
+      lineId: l.id,
+      ean: l.ean,
+      label: l.label,
+      currentSuppliers: l.currentSuppliers || 'aucun',
+      department: l.department,
+      sector: l.sector,
+      proposalId: l.proposal.id,
+      rposShopId: l.proposal.rposShopId,
+      shopReference: l.proposal.rposShopReference,
+      shopName: l.proposal.rposShopName,
+    }));
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

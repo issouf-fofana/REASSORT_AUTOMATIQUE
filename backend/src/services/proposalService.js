@@ -694,6 +694,17 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     const dlvStock = dlvStockByEan.get(ean) || 0;
     if (dlvStock > 0) stock = Math.max(0, stock - dlvStock);
 
+    // Rattachement au fournisseur central RPOS (demande du 26/09/2026, renforcée le 28/09/2026) :
+    // calculé ici GRATUITEMENT depuis product.suppliers, déjà présent dans l'objet produit récupéré
+    // en lot plus haut (getProductsByEans) — jamais un appel RPOS supplémentaire par article. Avant
+    // ce champ, checkSupplierEligibility (routes/reassort/proposals.js) refaisait un appel RPOS PAR
+    // ARTICLE à CHAQUE ouverture de la page Proposition de commande, sur TOUTE la proposition (pas
+    // seulement le rayon affiché) — pouvant bloquer plusieurs minutes sur un rayon à fort catalogue
+    // (550+ articles observés en pratique).
+    const suppliers = product.suppliers || [];
+    const supplierIneligible = !suppliers.some((s) => s.code === SUPPLIER_CENTRAL_CODE);
+    const currentSuppliers = suppliers.map((s) => s.name).join(', ') || 'aucun';
+
     // La quantité déjà commandée déduite du besoin cumule notre propre suivi des commandes en
     // transit de cette plateforme et les commandes RPOS récentes non livrées (hors plateforme),
     // sans compter deux fois la même chose : RPOS finit généralement par refléter la commande de
@@ -826,6 +837,8 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         // uniquement si une commande RPOS/POS est déjà en cours pour cet article — null sinon,
         // rien à raisonner.
         orderSufficiencyReasoning,
+        supplierIneligible,
+        currentSuppliers,
       },
     };
   }
@@ -1131,6 +1144,8 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           trendChangePct: p.trendChangePct ?? null,
           orderSufficiencyReasoning: p.orderSufficiencyReasoning ? p.orderSufficiencyReasoning.message : null,
           orderSufficient: p.orderSufficiencyReasoning ? p.orderSufficiencyReasoning.sufficient : null,
+          supplierIneligible: p.supplierIneligible,
+          currentSuppliers: p.currentSuppliers,
         })),
       },
     },
