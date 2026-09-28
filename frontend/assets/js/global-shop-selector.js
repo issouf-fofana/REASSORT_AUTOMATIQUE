@@ -112,13 +112,17 @@
 
     readOnlyEls.forEach(function (el) { el.style.display = 'none'; });
     const shop = getActiveShop();
-    // Texte visible réduit à la seule référence le 27/09/2026 ("Serveur Prosuma Prod... : NOM
-    // MAGASIN (035)" débordait et se tronquait de façon illisible dans la barre notch, largeur bien
-    // plus étroite que l'ancienne topbar) — jamais de troncature possible quelle que soit la longueur
-    // du nom réel du magasin. Le posLabel et le nom complet restent consultables au survol via title,
-    // et en un clic (ouvre le sélecteur de magasin, cf. openSelector plus bas).
+    // Texte réduit à la seule référence dans la barre notch depuis le 27/09/2026 ("Serveur Prosuma
+    // Prod... : NOM MAGASIN (035)" débordait et se tronquait de façon illisible, largeur bien plus
+    // étroite que l'ancienne topbar) — jamais de troncature possible quelle que soit la longueur du
+    // nom réel. Demande du 28/09/2026 : dans la sidebar classique (assez de place), afficher en plus
+    // le NOM du magasin, pas juste sa référence — seul le bouton de la barre notch (#notch-nav-slot)
+    // reste réduit à la référence seule, celui de la topbar classique (#layout-topbar-slot) montre
+    // "NOM (référence)". Le posLabel et le nom complet restent consultables au survol via title dans
+    // les deux cas, et en un clic (ouvre le sélecteur de magasin, cf. openSelector plus bas).
     btns.forEach(function (btn) {
-      btn.textContent = shop ? shop.reference + ' ▾' : 'Choisir un magasin ▾';
+      const inNotch = !!btn.closest('#notch-nav-slot');
+      btn.textContent = shop ? (inNotch ? shop.reference : shop.name + ' (' + shop.reference + ')') + ' ▾' : 'Choisir un magasin ▾';
       btn.title = shop ? (shop.posLabel ? shop.posLabel + ' : ' : '') + shop.name + ' (' + shop.reference + ')' : '';
       btn.style.display = '';
     });
