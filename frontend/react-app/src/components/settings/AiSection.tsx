@@ -423,7 +423,7 @@ function AiKeysCard() {
       {modelsModal && (
         <>
           <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1}>
-            <div className="modal-dialog modal-lg">
+            <div className="modal-dialog modal-xl">
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">Modèles disponibles — {modelsModal.keyLabel}</h5>
@@ -438,14 +438,14 @@ function AiKeysCard() {
                   {modelsModal.loading && <div className="text-center text-muted py-3">Chargement...</div>}
                   {modelsModal.error && <div className="alert alert-danger">{modelsModal.error}</div>}
                   {!modelsModal.loading && !modelsModal.error && (
-                    <div className="table-responsive" style={{ maxHeight: 450, overflowY: 'auto' }}>
+                    <div style={{ maxHeight: 480, overflowY: 'auto' }}>
                       <table className="table table-sm table-hover align-middle mb-0">
                         <thead>
                           <tr>
                             <th style={{ width: 40 }}></th>
-                            <th>Modèle</th>
+                            <th style={{ width: '35%' }}>Modèle</th>
                             <th>Libellé</th>
-                            <th></th>
+                            <th style={{ width: 220 }}></th>
                           </tr>
                         </thead>
                         <tbody>
