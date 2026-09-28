@@ -49,8 +49,17 @@ async function filterSalesLinesForUser(lines, user, posId) {
 
 router.get('/sales-lines', async (req, res) => {
   try {
-    const shopId = resolveShopId(req);
-    const posId = resolvePosId(req);
+    // resolveShopId (middleware/auth.js) lit req.query.shop pour un ADMIN/SUPERVISOR, mais TOUT le
+    // reste de ce fichier (/sales-lines/departments, /sales-lines/coverage) ainsi que le frontend
+    // (SalesHistory.tsx) utilisent le paramètre "shopId" — incohérence trouvée le 28/09/2026 (bug
+    // rapporté : "Erreur: Aucun magasin assigné à ce compte" alors qu'un magasin était bien
+    // sélectionné). Pour un rôle mono-magasin, resolveShopId ignore déjà toute query et renvoie
+    // rposShopId — ne JAMAIS laisser req.query.shopId le court-circuiter, sous peine de permettre à
+    // un compte cloisonné de lire les ventes d'un autre magasin en changeant juste l'URL. On ne
+    // retombe sur req.query.shopId QUE quand resolveShopId lui-même n'a rien trouvé (ADMIN/SUPERVISOR
+    // qui a utilisé l'ancien nom de paramètre "shop"), jamais pour l'écraser.
+    const shopId = resolveShopId(req) || req.query.shopId;
+    const posId = resolvePosId(req) || req.query.posId;
     if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
 
     const { dateStart, dateEnd, ean, page, pageSize } = req.query;
