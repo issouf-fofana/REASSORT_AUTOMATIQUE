@@ -168,9 +168,15 @@ a:not(.sidebar *),
 }
 /* .content a une marge fixe de 260px (volt.css) pour laisser la place à la sidebar — sans l'ajuster
    en même temps que le nouvel élargissement à 290px ci-dessus, le contenu principal chevaucherait
-   les 30 derniers pixels de la sidebar sur desktop. */
+   les 30 derniers pixels de la sidebar sur desktop.
+   :not(.nav-collapsed) (ajouté le 28/09/2026) : ce !important s'appliquait AUSSI en mode notch
+   (body.nav-collapsed), où la sidebar est masquée et .content doit revenir à margin-left:0 (cf.
+   règle plus bas) — un !important gagne toujours sur une règle normale quelle que soit sa
+   spécificité, donc ce correctif plus bas ne pouvait jamais s'appliquer tant que celui-ci restait
+   inconditionnel. Bug rapporté le 28/09/2026 : "toutes les pages restent à droite [...] non
+   centré" en mode notch, un vide à gauche large comme l'ancienne sidebar. */
 @media (min-width: 992px) {
-     .content {
+     body:not(.nav-collapsed) .content {
           margin-left: 290px !important;
      }
 }
