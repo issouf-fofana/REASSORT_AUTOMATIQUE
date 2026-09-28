@@ -255,10 +255,15 @@ model ReassortConfig {
   // Ratio de stock de sécurité appliqué sur la vente moyenne de la période (0.5 = 50%)
   safetyStockRatio Float @default(0.5) @map("safety_stock_ratio")
 
-  // Mode de période d'analyse des ventes : YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, CUSTOM
+  // Mode de période d'analyse des ventes : YESTERDAY, LAST_7_DAYS, LAST_365_DAYS, CUSTOM, ALL_TIME...
   // Toujours calculé relativement à la dernière vente connue du magasin (pas à "aujourd'hui"),
   // pour rester pertinent même sur un magasin fermé ou dont les ventes RPOS ont du retard.
-  periodMode  String    @default("LAST_30_DAYS") @map("period_mode")
+  // Le VRAI défaut appliqué en pratique est configService.js DEFAULTS.periodMode (LAST_365_DAYS,
+  // changé le 28/09/2026) : upsertConfig() le passe toujours explicitement au create Prisma, donc ce
+  // défaut SQL n'est utilisé que si une ligne était créée par un autre chemin sans passer par
+  // upsertConfig — aligné ici sur la même valeur pour ne jamais laisser un magasin retomber sur 30
+  // jours par un chemin de code différent et oublié.
+  periodMode  String    @default("LAST_365_DAYS") @map("period_mode")
   customStart DateTime? @map("custom_start")
   customEnd   DateTime? @map("custom_end")
 
