@@ -745,6 +745,7 @@ function AnomalyThresholdCard({ initialValue }: { initialValue: string }) {
 interface AiSystemConfig {
   AI_QUANTITY_ADJUSTMENT_ENABLED?: string;
   CHATBOT_LLM_FALLBACK_ENABLED?: string;
+  CHATBOT_FEATURE_TRACKING_ENABLED?: string;
   ANOMALY_MIN_DAILY_SALES?: string;
   AI_ANALYSIS_PROMPT_TEMPLATE?: string;
   CHATBOT_PROMPT_TEMPLATE?: string;
@@ -794,6 +795,20 @@ export function AiSection() {
         reconnue par les règles de mots-clés — coût et latence additionnels, uniquement sur ces questions-là. Un
         échec (LLM indisponible, réponse mal formée) ne bloque jamais la conversation : elle se comporte alors
         comme si ce réglage était désactivé.
+      </ToggleOnlyCard>
+      <ToggleOnlyCard
+        title="Assistant IA — suivi des demandes d'évolution"
+        configKey="CHATBOT_FEATURE_TRACKING_ENABLED"
+        initialChecked={config.CHATBOT_FEATURE_TRACKING_ENABLED === 'true'}
+      >
+        <strong>À quoi ça sert :</strong> quand l'Assistant IA ne trouve pas de réponse à une question
+        (fonctionnalité manquante, donnée absente pour cet article/cette période...), active ce réglage pour
+        qu'il analyse automatiquement la conversation et, s'il juge qu'il s'agit d'un vrai besoin exploitable,
+        l'enregistre comme demande d'évolution (visible dans Demandes d'évolution) — l'utilisateur reçoit une
+        confirmation explicite dans sa réponse ("j'ai enregistré ce besoin..."), jamais silencieusement.{' '}
+        <strong>Impact</strong> : un appel LLM supplémentaire (non streamé) est fait après chaque question sans
+        réponse trouvée — coût et latence additionnels, uniquement sur ces questions-là. Sans ce réglage, le
+        chatbot explique toujours pourquoi il ne peut pas répondre, mais rien n'est enregistré automatiquement.
       </ToggleOnlyCard>
       <AnomalyThresholdCard initialValue={config.ANOMALY_MIN_DAILY_SALES || '1'} />
       <AiAnalysisPromptCard initialValue={config.AI_ANALYSIS_PROMPT_TEMPLATE || ''} />
