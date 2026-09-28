@@ -656,12 +656,18 @@
           else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
         }
         if (!dataStr) continue;
+        let parsed;
         try {
-          onEvent(eventName, JSON.parse(dataStr));
+          parsed = JSON.parse(dataStr);
         } catch {
           // ligne data mal formée : ignorée plutôt que de faire planter tout le flux pour un
           // seul événement corrompu (le flux continue, l'événement 'done' final reste attendu).
+          continue;
         }
+        // onEvent peut volontairement lever (ex: eventName === 'error') pour interrompre le flux
+        // avec le vrai message d'erreur backend — cette exception ne doit jamais être avalée ici,
+        // sinon l'appelant ne voit plus qu'un générique "flux terminé sans résultat exploitable".
+        onEvent(eventName, parsed);
       }
     }
   }
@@ -721,6 +727,9 @@
       if (myToken !== aiAnalysisToken) return;
       const box = document.getElementById('aip-simple-view');
       if (box) {
+        box.classList.add('aip-two-col');
+        const panelElOnError = document.getElementById('aip-detail-panel');
+        if (panelElOnError) panelElOnError.classList.add('aip-wide');
         box.innerHTML = aiErrorHtml(err.message, item);
         const retryBtn = document.getElementById('aip-ai-retry-btn');
         if (retryBtn) retryBtn.addEventListener('click', function () { runAiAnalysis(item); });
