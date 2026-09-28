@@ -4,7 +4,13 @@ const prisma = require('../utils/prisma');
 const DEFAULTS = {
   paretoThreshold: 0.80,
   safetyStockRatio: 0.5,
-  periodMode: 'LAST_30_DAYS',
+  // Changé de LAST_30_DAYS à LAST_365_DAYS le 28/09/2026 (demande explicite : "je veux que l'analyse
+  // par défaut soit sur 1 an") — période glissante sur la dernière vente réelle, jamais bloquante si
+  // le magasin a moins d'un an d'historique : le calcul se fait alors simplement sur les données
+  // réellement disponibles dans cette fenêtre (cf. periodService.js resolvePeriod). N'affecte que
+  // les magasins SANS configuration personnalisée en base (ReassortConfig) — un magasin déjà réglé
+  // explicitement sur un autre mode garde son réglage, inchangé par ce changement de défaut.
+  periodMode: 'LAST_365_DAYS',
   customStart: null,
   customEnd: null,
   treatNegativeStockAsZero: true,

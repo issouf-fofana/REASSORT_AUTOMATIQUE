@@ -13,7 +13,10 @@ type ConfigValues = Record<string, string | number | boolean>;
 const DEFAULT_VALUES: ConfigValues = {
   paretoThreshold: 80,
   safetyStockRatio: 50,
-  periodMode: 'LAST_30_DAYS',
+  // Doit rester identique à configService.js DEFAULTS.periodMode côté backend (changé à
+  // LAST_365_DAYS le 28/09/2026) — cette valeur ne sert que d'affichage initial avant le premier
+  // chargement réel de la config (cf. useEffect plus bas), jamais la vraie source de vérité.
+  periodMode: 'LAST_365_DAYS',
   treatNegativeStockAsZero: 'true',
   ignoreRposStockInCalculation: 'false',
   revenueSharePeriodDays: 1,
