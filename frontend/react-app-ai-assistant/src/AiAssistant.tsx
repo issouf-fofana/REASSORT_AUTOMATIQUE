@@ -555,6 +555,17 @@ export function AiAssistant() {
         .aia-md-list li:last-child { margin-bottom: 0; }
         .aia-stream-cursor { display: inline-block; animation: aia-blink 1s step-end infinite; }
         @keyframes aia-blink { 50% { opacity: 0; } }
+        /* "L'assistant réfléchit..." (demande du 28/09/2026 : "quand j'ai posé une question il doit
+           faire un truc qui montre que ça charge") — tant que le premier morceau de texte n'est pas
+           encore arrivé (résolution de l'outil de données + latence avant le 1er chunk LLM, qui peut
+           prendre plusieurs secondes), turn.streamText reste vide et seul un curseur clignotant SEUL
+           s'affichait : trop discret, ressemblait à un gel plutôt qu'à un chargement en cours. */
+        .aia-thinking { display: inline-flex; align-items: center; gap: .5rem; color: #6c757d; font-size: .9rem; }
+        .aia-thinking-dots { display: inline-flex; gap: .25rem; }
+        .aia-thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: #000000; animation: aia-thinking-bounce 1.2s ease-in-out infinite; }
+        .aia-thinking-dots span:nth-child(2) { animation-delay: .15s; }
+        .aia-thinking-dots span:nth-child(3) { animation-delay: .3s; }
+        @keyframes aia-thinking-bounce { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
         /* Style "plus pro" demandé le 27/09/2026 (l'outline Bootstrap brut, bordure grise fine,
            paraissait basique) : fond plein gris clair discret plutôt qu'un simple contour, sans
            bordure ni ombre — cohérent avec la palette noir/blanc/gris stricte du site (jamais de
@@ -715,10 +726,19 @@ export function AiAssistant() {
                 <div className="aia-question">{turn.question}</div>
                 <div className="aia-answer">
                   {turn.streaming ? (
-                    <>
-                      {turn.streamText}
-                      <span className="aia-stream-cursor">▍</span>
-                    </>
+                    turn.streamText ? (
+                      <>
+                        {turn.streamText}
+                        <span className="aia-stream-cursor">▍</span>
+                      </>
+                    ) : (
+                      <span className="aia-thinking">
+                        L'assistant réfléchit
+                        <span className="aia-thinking-dots">
+                          <span></span><span></span><span></span>
+                        </span>
+                      </span>
+                    )
                   ) : turn.error ? (
                     <span className="text-danger">Erreur : {turn.error}</span>
                   ) : (
