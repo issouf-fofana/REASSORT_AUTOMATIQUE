@@ -435,11 +435,47 @@ export function AiAssistant() {
       setCurrentConversationId(finalResult.conversationId);
       if (isNewConversation) loadConversations();
       else setConversations((prev) => [...prev]);
+
+      // Le suivi de demande d'évolution (§2-§9) tourne désormais en tâche de fond côté serveur,
+      // APRÈS la fin de cette réponse (demande du 28/09/2026 : il ne doit plus retarder l'affichage
+      // de la réponse principale) — quand aucun outil de données n'a répondu (toolResult absent),
+      // ce suivi a pu se déclencher et ajouter une confirmation/clarification au message déjà
+      // affiché, quelques secondes plus tard. Un seul re-fetch différé de cette conversation suffit
+      // à la récupérer si elle arrive ; sans confirmation possible côté client de si ce suivi a
+      // effectivement tourné, mieux vaut un re-fetch inutile de temps en temps qu'un texte enregistré
+      // en base mais jamais vu par l'utilisateur avant de rouvrir la conversation.
+      if (!finalResult.toolResult) {
+        const convId = finalResult.conversationId;
+        window.setTimeout(() => {
+          if (currentConversationId === convId || !currentConversationId) refreshLastTurnIfUpdated(convId, turnIndex, q);
+        }, 4000);
+      }
     }
 
     abortControllerRef.current = null;
     setSending(false);
     scrollToBottom();
+  }
+
+  // Relit UNIQUEMENT le dernier message assistant de la conversation et remplace le texte affiché
+  // s'il a changé (post-scriptum ajouté par runFeatureRequestTracking en tâche de fond) — ne touche
+  // jamais aux tours précédents ni ne perturbe une saisie en cours.
+  async function refreshLastTurnIfUpdated(conversationId: string, turnIndex: number, question: string) {
+    try {
+      const data = await apiFetch<ConversationDetail>(`/reassort/chatbot/conversations/${conversationId}`);
+      const lastAssistant = [...data.messages].reverse().find((m) => m.role === 'assistant');
+      if (!lastAssistant) return;
+      setTurns((prev) => {
+        if (turnIndex >= prev.length || prev[turnIndex].question !== question) return prev;
+        const newHtml = markdownLiteToHtml(lastAssistant.content);
+        if (prev[turnIndex].answerHtml.includes(newHtml) || newHtml.length <= prev[turnIndex].answerHtml.length) return prev;
+        const next = [...prev];
+        next[turnIndex] = { ...next[turnIndex], answerHtml: newHtml };
+        return next;
+      });
+    } catch {
+      // best-effort : un échec laisse simplement le texte déjà affiché tel quel
+    }
   }
 
   function stopGeneration() {

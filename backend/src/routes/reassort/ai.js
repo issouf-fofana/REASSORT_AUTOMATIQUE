@@ -490,7 +490,7 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       pendingFeatureRequest,
     });
 
-    await Promise.all([
+    const [assistantMessage] = await Promise.all([
       prisma.chatbotMessage.create({ data: { conversationId: conversation.id, role: 'assistant', content: result.answer, toolUsed: result.toolUsed, toolResult: result.toolResult ? JSON.stringify(result.toolResult) : null } }),
       prisma.chatbotConversation.update({
         where: { id: conversation.id },
@@ -501,8 +501,33 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       }),
     ]);
 
-    send('done', { ...result, conversationId: conversation.id });
+    // _featureTrackingContext n'est jamais transmis au client (retiré ici) — envoyé dans l'événement
+    // "done" dès que la réponse principale est prête, SANS attendre le suivi de demande d'évolution
+    // (cf. commentaire d'askAssistant, demande du 28/09/2026 : ce suivi ne doit plus retarder la fin
+    // de la conversation pour l'utilisateur).
+    const { _featureTrackingContext, ...clientResult } = result;
+    send('done', { ...clientResult, conversationId: conversation.id });
     res.end();
+
+    // Suivi de demande d'évolution en tâche de fond, APRÈS la fin de la réponse HTTP (res.end() déjà
+    // appelé ci-dessus) : si un texte doit être ajouté (confirmation d'enregistrement ou question de
+    // clarification), le message assistant déjà persisté est mis à jour a posteriori — le frontend le
+    // découvre à la prochaine ouverture de cette conversation (GET /chatbot/conversations/:id), sans
+    // jamais avoir dû attendre ce traitement pour voir sa réponse.
+    if (_featureTrackingContext) {
+      chatbotService.runFeatureRequestTracking(_featureTrackingContext, async ({ appendText, pendingFeatureRequest: newPendingFeatureRequest }) => {
+        await Promise.all([
+          prisma.chatbotMessage.update({
+            where: { id: assistantMessage.id },
+            data: { content: assistantMessage.content + appendText },
+          }),
+          prisma.chatbotConversation.update({
+            where: { id: conversation.id },
+            data: { pendingFeatureRequestJson: newPendingFeatureRequest ? JSON.stringify(newPendingFeatureRequest) : null },
+          }),
+        ]);
+      }).catch((err) => console.error('[chatbot/ask-stream] Suivi de demande d\'évolution en tâche de fond échoué:', err.message));
+    }
   } catch (error) {
     send('error', { message: error.message });
     res.end();

@@ -1096,59 +1096,15 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
     if (onTextChunk) onTextChunk(chunk);
   }, 'chatbot-answer');
 
-  // Suivi des demandes d'évolution (§2-§9 de la spec) : uniquement quand aucun outil de données n'a
-  // répondu à la question (toolResult null, ou ignoré parce qu'une clarification était en attente) —
-  // une question normale déjà traitée par un outil n'est jamais un manque fonctionnel. Se produit
-  // APRÈS le streaming de la réponse conversationnelle principale (elle a besoin du texte de cette
-  // réponse pour juger), jamais à sa place.
-  // Un post-scriptum est ajouté au texte final ET streamé comme un chunk supplémentaire (demande du
-  // 26/09/2026 : "il dois lui dire quil a enregistré ca demande") — l'utilisateur doit voir
-  // explicitement que sa demande a été prise en compte, jamais un enregistrement silencieux qu'il ne
-  // peut pas constater. Transparence stricte (§9) : ce message n'apparaît QUE si l'enregistrement a
-  // réellement eu lieu, jamais anticipé avant que recordFeatureRequest n'ait effectivement réussi.
-  let featureRequest = null;
-  let newPendingFeatureRequest = null;
-  let finalAnswer = fullText.trim();
-  if (!effectiveToolResult && !reusedFromHistory) {
-    try {
-      // Avec une clarification en attente, on fusionne le besoin déjà connu et la précision qui vient
-      // d'être donnée : le LLM de suivi juge sur l'ensemble, jamais seulement sur ce dernier message
-      // isolé (qui, seul, ne ressemble à rien — ex: "surtout les ruptures et le CA de la veille").
-      const effectiveQuestion = pendingFeatureRequest
-        ? `Besoin déjà exprimé précédemment : ${pendingFeatureRequest.problem}\nPrécision supplémentaire de l'utilisateur : ${question}`
-        : question;
-      const decision = await maybeTrackFeatureRequest({ conversationHistory, question: effectiveQuestion, answer: finalAnswer });
-      if (decision && decision.readyToRecord) {
-        featureRequest = await recordFeatureRequest(decision, { user });
-        const confirmation = featureRequest.action === 'enriched'
-          ? `\n\n✅ J'ai bien noté ce besoin et l'ai ajouté à une demande déjà enregistrée (« ${featureRequest.title} »). Si vous avez d'autres précisions à ajouter, n'hésitez pas à me les donner.`
-          : `\n\n✅ J'ai enregistré ce besoin comme demande d'évolution (« ${featureRequest.title} »), transmise à l'équipe de développement. Si vous avez d'autres précisions à ajouter, n'hésitez pas à me les donner.`;
-        finalAnswer += confirmation;
-        if (onTextChunk) onTextChunk(confirmation);
-      } else if (decision && decision.clarifyingQuestion) {
-        // Besoin réel mais encore trop vague pour être exploitable (§3 de la spec : "poser des
-        // questions ciblées") — rien n'est enregistré tant que la précision n'est pas obtenue.
-        // newPendingFeatureRequest persiste ce besoin sur la conversation (cf. route ask-stream) pour
-        // que le tour suivant force à nouveau ce suivi, quel que soit son contenu.
-        newPendingFeatureRequest = { title: decision.title, problem: decision.problem, expectedBehavior: decision.expectedBehavior };
-        const clarification = `\n\n${decision.clarifyingQuestion}`;
-        finalAnswer += clarification;
-        if (onTextChunk) onTextChunk(clarification);
-      }
-    } catch (err) {
-      // Un échec d'enregistrement (contrainte base, service indisponible...) ne doit JAMAIS faire
-      // échouer toute la réponse de l'assistant — sans ce filet, l'erreur remontait jusqu'au catch
-      // global de la route ask-stream (routes/reassort/ai.js), qui envoyait un événement SSE "error"
-      // à la place de "done" : le texte déjà streamé restait affiché côté utilisateur (buffer local),
-      // mais featureRequest/wantsVisual n'étaient jamais transmis, et rien ne signalait l'échec (bug
-      // trouvé le 26/09/2026 : une demande détectée par le LLM de suivi n'apparaissait jamais sur la
-      // page Demandes d'évolution, sans aucune erreur visible pour l'utilisateur).
-      console.error('[chatbotService] Enregistrement de la demande d\'évolution échoué:', err.message);
-      // En cas d'échec avec une clarification déjà en attente, on la garde telle quelle plutôt que de
-      // la perdre silencieusement (l'utilisateur pourra réessayer sans tout redécrire).
-      if (pendingFeatureRequest) newPendingFeatureRequest = pendingFeatureRequest;
-    }
-  }
+  // Suivi des demandes d'évolution (§2-§9 de la spec) NE bloque plus la réponse principale (demande
+  // du 28/09/2026 : "pourquoi le chatbot prend du temps pour répondre" — ce 2e appel LLM, complet et
+  // synchrone, retardait la fin de CHAQUE question hors-sujet/non reconnue de plusieurs secondes,
+  // alors que l'utilisateur avait déjà lu sa réponse). Extrait dans runFeatureRequestTracking
+  // ci-dessous, appelé par la route ask-stream APRÈS avoir envoyé l'événement SSE "done" — le message
+  // assistant est mis à jour en base une fois ce suivi terminé (cf. routes/reassort/ai.js), jamais
+  // achevé avant que la conversation n'ait déjà été rendue à l'utilisateur.
+  const finalAnswer = fullText.trim();
+  const shouldTrackFeatureRequest = !effectiveToolResult && !reusedFromHistory;
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
@@ -1163,7 +1119,53 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // OU si elle réutilise un résultat déjà affiché visuellement plus tôt dans la conversation. Une
   // simple question texte ("quels articles risquent d'être en rupture ?") ne doit renvoyer QUE la
   // réponse en langage naturel, jamais un tableau brut en plus.
-  return { answer: finalAnswer, providerUsed, toolUsed: toolName, toolResult: effectiveToolResult, wantsVisual: isVisualRequest(question) || !!reusedFromHistory, featureRequest, pendingFeatureRequest: newPendingFeatureRequest };
+  return {
+    answer: finalAnswer, providerUsed, toolUsed: toolName, toolResult: effectiveToolResult,
+    wantsVisual: isVisualRequest(question) || !!reusedFromHistory,
+    featureRequest: null, pendingFeatureRequest,
+    // Consommés uniquement par la route ask-stream, jamais renvoyés au client (cf. plus bas) — tout
+    // ce dont runFeatureRequestTracking a besoin pour tourner après coup, sans redemander ces
+    // valeurs au moment de l'appeler.
+    _featureTrackingContext: shouldTrackFeatureRequest ? { conversationHistory, question, answer: finalAnswer, pendingFeatureRequest, user } : null,
+  };
+}
+
+/**
+ * Exécute le suivi de demande d'évolution (§2-§9) APRÈS que la réponse principale a déjà été
+ * envoyée à l'utilisateur (cf. commentaire dans askAssistant ci-dessus) — jamais awaité par la route
+ * avant d'envoyer l'événement SSE "done". `onUpdate(patch)` est appelé une seule fois si ce suivi
+ * produit un texte à ajouter ou un nouvel état de clarification à persister ; reste silencieux
+ * (n'appelle jamais onUpdate) si rien ne change, pour ne jamais réécrire un message pour rien.
+ */
+async function runFeatureRequestTracking({ conversationHistory, question, answer, pendingFeatureRequest, user }, onUpdate) {
+  try {
+    // Avec une clarification en attente, on fusionne le besoin déjà connu et la précision qui vient
+    // d'être donnée : le LLM de suivi juge sur l'ensemble, jamais seulement sur ce dernier message
+    // isolé (qui, seul, ne ressemble à rien — ex: "surtout les ruptures et le CA de la veille").
+    const effectiveQuestion = pendingFeatureRequest
+      ? `Besoin déjà exprimé précédemment : ${pendingFeatureRequest.problem}\nPrécision supplémentaire de l'utilisateur : ${question}`
+      : question;
+    const decision = await maybeTrackFeatureRequest({ conversationHistory, question: effectiveQuestion, answer });
+
+    if (decision && decision.readyToRecord) {
+      const featureRequest = await recordFeatureRequest(decision, { user });
+      const confirmation = featureRequest.action === 'enriched'
+        ? `\n\n✅ J'ai bien noté ce besoin et l'ai ajouté à une demande déjà enregistrée (« ${featureRequest.title} »). Si vous avez d'autres précisions à ajouter, n'hésitez pas à me les donner.`
+        : `\n\n✅ J'ai enregistré ce besoin comme demande d'évolution (« ${featureRequest.title} »), transmise à l'équipe de développement. Si vous avez d'autres précisions à ajouter, n'hésitez pas à me les donner.`;
+      onUpdate({ appendText: confirmation, featureRequest, pendingFeatureRequest: null });
+    } else if (decision && decision.clarifyingQuestion) {
+      // Besoin réel mais encore trop vague pour être exploitable (§3 de la spec : "poser des
+      // questions ciblées") — rien n'est enregistré tant que la précision n'est pas obtenue.
+      const newPendingFeatureRequest = { title: decision.title, problem: decision.problem, expectedBehavior: decision.expectedBehavior };
+      onUpdate({ appendText: `\n\n${decision.clarifyingQuestion}`, featureRequest: null, pendingFeatureRequest: newPendingFeatureRequest });
+    }
+    // decision null (pas un vrai besoin d'évolution) : rien à ajouter, onUpdate jamais appelé.
+  } catch (err) {
+    // Un échec d'enregistrement (contrainte base, service indisponible...) ne doit JAMAIS faire
+    // planter ce traitement en tâche de fond — il tourne après que la réponse a déjà été rendue,
+    // aucun appelant n'attend son résultat pour continuer.
+    console.error('[chatbotService] Enregistrement de la demande d\'évolution échoué:', err.message);
+  }
 }
 
 // Questions suggérées (§34) : éditables depuis Paramètres > IA (CHATBOT_SUGGESTED_QUESTIONS, une par
@@ -1174,4 +1176,4 @@ async function getSuggestedQuestions() {
   return (raw || '').split('\n').map((q) => q.trim()).filter(Boolean);
 }
 
-module.exports = { askAssistant, detectIntent, extractEan, extractDays, extractDate, resolveDateRange, getSuggestedQuestions, VALID_INTENT_TOOLS, isVisualRequest, runToolForQuestion };
+module.exports = { askAssistant, runFeatureRequestTracking, detectIntent, extractEan, extractDays, extractDate, resolveDateRange, getSuggestedQuestions, VALID_INTENT_TOOLS, isVisualRequest, runToolForQuestion };
