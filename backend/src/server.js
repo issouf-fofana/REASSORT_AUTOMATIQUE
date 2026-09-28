@@ -15,6 +15,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const fallbackRoutes = require('./routes/fallback');
 const oauthOutlookRoutes = require('./routes/oauthOutlook');
+const publicAssetsRoutes = require('./routes/publicAssets');
 
 // Initialize Express
 const app = express();
@@ -98,6 +99,10 @@ app.use(fallbackRoutes);
 // =============================================
 // API ROUTES
 // =============================================
+// Hors /api/reassort volontairement (comme oauthOutlookRoutes plus bas) : requireAuth y est
+// appliqué globalement, mais le logo/favicon du site doit rester lisible SANS connexion (page de
+// login incluse) — ce routeur applique requireAuth lui-même, uniquement sur ses routes protégées.
+app.use('/api', publicAssetsRoutes);
 app.use('/api/reassort', reassortRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

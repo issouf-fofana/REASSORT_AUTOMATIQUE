@@ -11,6 +11,7 @@ import {
 
 import { NotchTabBar } from '@/components/ui/NotchTabBar';
 import { ReassortConfigSection } from './ReassortConfigSection';
+import { SiteBrandingSection } from './SiteBrandingSection';
 import { SalesFilesSection } from './SalesFilesSection';
 import { RposSecuritySection } from './RposSecuritySection';
 import { SchedulingSection } from './SchedulingSection';
@@ -69,6 +70,7 @@ export function SettingsTabs() {
       <div className="tab-content">
         {activeTab === 'tab-reassort' && (
           <div className="tab-pane show active">
+            <SiteBrandingSection />
             <ReassortConfigSection />
           </div>
         )}

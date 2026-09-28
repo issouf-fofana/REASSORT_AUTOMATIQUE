@@ -51,6 +51,18 @@ const KEYS = {
   // d'exposer un nouvel endpoint de fichiers statiques juste pour cette image.
   MAIL_LOGO_BASE64: 'MAIL_LOGO_BASE64',
   MAIL_LOGO_CONTENT_TYPE: 'MAIL_LOGO_CONTENT_TYPE',
+  // Logo/favicon du SITE (demande du 28/09/2026 : "donne la possibilité de modifier le logo,
+  // favicon sur mon ui") — distinct du logo email ci-dessus. Un seul fichier statique
+  // (frontend/assets/images/logo-reassort.png) sert à la fois de logo (sidebar) ET de favicon sur
+  // les ~30 pages du site : un seul réglage suffit donc, pas deux images séparées. Frontend et
+  // backend sont deux conteneurs Docker séparés sans volume partagé : impossible d'écrire
+  // directement ce fichier statique depuis une route backend. Stocké ici en base64 comme le logo
+  // email, servi dynamiquement par une route backend que nginx proxifie (frontend/nginx.conf,
+  // location = /assets/images/logo-reassort.png) — si vide, cette route retombe sur le fichier
+  // statique d'origine (fallback), donc rien ne casse tant qu'aucun logo personnalisé n'a jamais
+  // été uploadé.
+  SITE_LOGO_BASE64: 'SITE_LOGO_BASE64',
+  SITE_LOGO_CONTENT_TYPE: 'SITE_LOGO_CONTENT_TYPE',
   // Relance des propositions encore en attente (demande du 25/09/2026 : l'entrepôt ne reçoit plus
   // les commandes après 13h, une relance en matinée laisse le temps de valider avant cette limite).
   PROPOSAL_REMINDER_CRON: 'PROPOSAL_REMINDER_CRON',

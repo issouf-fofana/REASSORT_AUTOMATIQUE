@@ -660,6 +660,8 @@ router.delete('/mail-signature/logo', requireAdmin, async (req, res) => {
 });
 
 // --- IA (LLM) : gestion des clés API multi-fournisseurs et prévision à la demande ---
+// Logo/favicon du site : voir routes/publicAssets.js (monté hors /api/reassort, car la lecture doit
+// rester accessible SANS authentification — un logo doit s'afficher dès la page de login).
 
 // GET /api/reassort/ai/keys - liste les clés configurées (ADMIN uniquement), sans jamais renvoyer
 // la clé en clair : seul un aperçu masqué (4 derniers caractères) est exposé.
