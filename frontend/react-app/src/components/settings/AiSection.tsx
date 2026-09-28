@@ -21,6 +21,7 @@ interface AiKey {
   label: string;
   provider: string;
   model?: string;
+  effectiveModel?: string | null;
   priority: number;
   maskedKey: string;
   isActive: boolean;
@@ -149,7 +150,7 @@ function AiKeysCard() {
   }
 
   async function handleOpenModels(k: AiKey) {
-    setModelsModal({ keyId: k.id, keyLabel: k.label, currentModel: k.model || '', loading: true, error: null, models: [] });
+    setModelsModal({ keyId: k.id, keyLabel: k.label, currentModel: k.model || k.effectiveModel || '', loading: true, error: null, models: [] });
     try {
       const models = await apiFetch<AiModelOption[]>(`/reassort/ai/keys/${k.id}/models`);
       setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, models } : prev));
@@ -244,7 +245,9 @@ function AiKeysCard() {
                     <td>{k.priority}</td>
                     <td>{k.label}</td>
                     <td>{PROVIDER_LABELS[k.provider] || k.provider}</td>
-                    <td className="text-muted">{k.model || '—'}</td>
+                    <td className="text-muted">
+                      {k.model ? k.model : k.effectiveModel ? <>{k.effectiveModel} <span className="badge bg-secondary-subtle text-secondary">défaut</span></> : '—'}
+                    </td>
                     <td className="text-muted">{k.maskedKey}</td>
                     <td>
                       <AiKeyStatusBadge k={k} />

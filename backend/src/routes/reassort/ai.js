@@ -37,6 +37,10 @@ router.get('/ai/keys', requireAdmin, async (req, res) => {
       provider: k.provider,
       label: k.label,
       model: k.model,
+      // Champ "model" vide en base = le fournisseur par défaut codé en dur est utilisé
+      // silencieusement (cf. DEFAULT_MODEL_BY_PROVIDER, aiForecastService.js) — exposé ici pour que
+      // l'écran Paramètres > IA n'affiche jamais un "—" trompeur alors qu'un modèle est bien utilisé.
+      effectiveModel: k.model || aiForecastService.DEFAULT_MODEL_BY_PROVIDER[k.provider] || null,
       priority: k.priority,
       isActive: k.isActive,
       lastUsedAt: k.lastUsedAt,
