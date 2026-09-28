@@ -804,6 +804,16 @@ model ProposalLine {
   // "si c'est bon je propose rien, sinon j'ai un badge") sans reparser le texte du message.
   orderSufficient           Boolean? @map("order_sufficient")
 
+  // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3 : "Suffisant / Partiellement suffisant /
+  // Insuffisant / Non déterminable") — distinct de orderSufficient ci-dessus (binaire, jugé trop
+  // pauvre pour distinguer "rien n'est prévu" de "quelque chose est prévu mais pas assez", et qui ne
+  // couvrait pas le cas où le besoin lui-même n'est pas estimable faute d'historique de vente).
+  // Valeurs : SUFFISANT | PARTIELLEMENT_SUFFISANT | INSUFFISANT | NON_DETERMINABLE (cf.
+  // proposalService.computeCoverageStatus, seule source de vérité, réutilisée à l'identique par
+  // l'analyse statique d'article). Null pour les propositions générées avant l'ajout de ce champ.
+  coverageStatus       String? @map("coverage_status")
+  coverageStatusReason String? @map("coverage_status_reason")
+
   // Instantané du stock et de la vente moyenne au moment de la génération, pour affichage
   // (permet de montrer "stock actuel" et "rupture dans X jours" sans recalcul en temps réel).
   stockAtGeneration Float? @map("stock_at_generation")

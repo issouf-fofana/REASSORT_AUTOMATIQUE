@@ -406,6 +406,33 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
         },
         {
+          // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé une seule fois à la
+          // génération (proposalService.computeCoverageStatus) — même champ que celui affiché dans le
+          // panneau d'analyse statique par article, jamais une seconde logique.
+          headerName: 'Couverture',
+          field: 'coverageStatus',
+          width: 170,
+          filter: 'agTextColumnFilter',
+          headerTooltip: 'Suffisant / Partiellement suffisant / Insuffisant / Non déterminable — cf. infobulle sur la valeur pour le détail.',
+          cellRenderer: (p: any) => {
+            const l = p.data as ProposalLine;
+            const labelByStatus: Record<string, { text: string; cls: string }> = {
+              SUFFISANT: { text: 'Suffisant', cls: 'text-success' },
+              PARTIELLEMENT_SUFFISANT: { text: 'Partiellement suffisant', cls: 'text-warning' },
+              INSUFFISANT: { text: 'Insuffisant', cls: 'text-danger' },
+              NON_DETERMINABLE: { text: 'Non déterminable', cls: 'text-muted' },
+            };
+            const info = l.coverageStatus ? labelByStatus[l.coverageStatus] : null;
+            if (!info) return '—';
+            const span = document.createElement('span');
+            span.className = info.cls;
+            span.style.fontSize = '.86rem';
+            span.textContent = info.text;
+            if (l.coverageStatusReason) span.title = l.coverageStatusReason;
+            return span;
+          },
+        },
+        {
           headerName: 'Qté proposée',
           type: 'numericColumn',
           width: 170,

@@ -70,6 +70,12 @@ export interface ProposalLine {
   // CA HT réel de l'article sur TOUTE la période d'analyse (nouveau champ backend, ajouté avec le
   // même correctif) — distinct de revenueSharePct (fenêtre courte), jamais à confondre.
   caHtOnPeriod?: number | null;
+  // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3) : SUFFISANT | PARTIELLEMENT_SUFFISANT |
+  // INSUFFISANT | NON_DETERMINABLE — distinct de orderSufficient (binaire, ci-dessus), calculé une
+  // seule fois par proposalService.computeCoverageStatus et réutilisé à l'identique par le panneau
+  // d'analyse statique par article (aiForecastService.buildStaticArticleAnalysis).
+  coverageStatus?: string | null;
+  coverageStatusReason?: string | null;
 }
 
 // Commande RPOS déjà créée pour un rayon précis (demande du 26/09/2026 : validation indépendante

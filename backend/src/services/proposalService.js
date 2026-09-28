@@ -371,6 +371,70 @@ function capitalize(str) {
 }
 
 /**
+ * Statut de couverture à 4 niveaux (spec du 28/09/2026 §3 : "Suffisant / Partiellement suffisant /
+ * Insuffisant / Non déterminable" plutôt que le simple true/false de buildOrderSufficiencyReasoning
+ * ci-dessus, jugé trop binaire pour un cas comme "une commande en cours couvre une PARTIE du
+ * besoin"). Calculée ici, UNE SEULE FOIS, pour être réutilisée à l'identique par la génération de
+ * proposition (ProposalLine.coverageStatus) et par l'analyse statique d'article
+ * (aiForecastService.buildStaticArticleAnalysis) — jamais une seconde logique divergente entre les
+ * deux (même principe que la période/Pareto unifiés, §8).
+ *
+ * - NON_DETERMINABLE : pas assez de recul sur les ventes pour estimer un besoin (avgWeeklySales <= 0
+ *   alors qu'aucune commande n'est en cours à comparer) — dire "suffisant" ou "insuffisant" ici
+ *   serait une fausse certitude, cf. le cas réel trouvé le 28/09/2026 où un article à 0 vente
+ *   récente avait un stock RPOS négatif non fiable : ni "couvert" ni "à commander" n'aurait été
+ *   honnête sans context supplémentaire.
+ * - SUFFISANT : stock + commandé en cours couvre au moins le besoin sur la période de couverture
+ *   visée (coverageDays, cohérent avec computeQuantityToOrder) — aucune commande complémentaire
+ *   nécessaire (quantityProposed <= 0).
+ * - PARTIELLEMENT_SUFFISANT : une commande est en cours (orderedQty > 0) et couvre une partie du
+ *   besoin, mais pas tout (quantityProposed > 0) — distinct d'INSUFFISANT pour ne pas donner la même
+ *   alerte à "rien n'est prévu" et "quelque chose est prévu mais pas assez".
+ * - INSUFFISANT : aucune commande en cours ET un besoin réel existe (quantityProposed > 0), ou une
+ *   commande en cours mais qui ne couvre presque rien du besoin.
+ */
+function computeCoverageStatus({ avgWeeklySales, stock, orderedQty, quantityProposed, coverageDays = 7 }) {
+  const avgDailySales = avgWeeklySales / 7;
+  const hasSalesHistory = avgWeeklySales > 0;
+  const hasOrder = orderedQty > 0;
+
+  if (!hasSalesHistory && !hasOrder) {
+    return { status: 'NON_DETERMINABLE', reason: 'Aucune vente récente et aucune commande en cours : le besoin ne peut pas être estimé de façon fiable.' };
+  }
+
+  if (quantityProposed <= 0) {
+    return {
+      status: 'SUFFISANT',
+      reason: hasOrder
+        ? 'Le stock actuel et la commande en cours couvrent le besoin estimé.'
+        : 'Le stock actuel couvre le besoin estimé, aucune commande nécessaire pour le moment.',
+    };
+  }
+
+  if (!hasSalesHistory) {
+    // Besoin non nul malgré 0 vente récente (ex: stock négatif RPOS à combler, cf. proposalService
+    // treatNegativeStockAsZero) : dire "insuffisant" impliquerait une consommation réelle qu'on n'a
+    // pas observée — on qualifie plutôt d'indéterminable, avec le besoin chiffré fourni séparément
+    // (quantityProposed) pour que l'utilisateur juge lui-même.
+    return { status: 'NON_DETERMINABLE', reason: 'Aucune vente récente enregistrée, mais le calcul indique un besoin (ex: écart de stock à corriger) — à vérifier manuellement.' };
+  }
+
+  if (hasOrder) {
+    const totalAvailable = stock + orderedQty;
+    const daysCovered = avgDailySales > 0 ? totalAvailable / avgDailySales : null;
+    const targetDaysCovered = coverageDays;
+    if (daysCovered !== null && daysCovered >= targetDaysCovered * 0.4) {
+      // Couvre une partie non négligeable de la fenêtre visée (seuil à 40%, cf. buildOrderSufficiencyReasoning
+      // qui distinguait déjà "quelques jours de couverture" de "quasi rien") sans couvrir tout le besoin.
+      return { status: 'PARTIELLEMENT_SUFFISANT', reason: `La commande en cours couvre environ ${Math.round(daysCovered)} jour(s) sur les ${targetDaysCovered} visés — un complément reste nécessaire.` };
+    }
+    return { status: 'INSUFFISANT', reason: 'La commande en cours ne couvre presque pas le besoin estimé sur la période visée.' };
+  }
+
+  return { status: 'INSUFFISANT', reason: 'Aucune commande en cours et un besoin de réassort a été estimé.' };
+}
+
+/**
  * Génère la proposition de commande pour un magasin : calcule le Pareto sur les ventes de la
  * période configurée, puis croise avec l'état courant du stock RPOS (API, en temps réel).
  *
@@ -745,6 +809,15 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       orderCount: recentRposOrder.orderCount || 1,
     });
 
+    // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé sur les MÊMES valeurs que
+    // orderSufficiencyReasoning et quantityProposed juste au-dessus, pas un second calcul divergent.
+    const coverageDaysForStatus = config.useReceptionLeadTimeInCalculation && config.receptionLeadTimeDays
+      ? config.receptionLeadTimeDays
+      : 7;
+    const coverageStatus = computeCoverageStatus({
+      avgWeeklySales, stock, orderedQty, quantityProposed, coverageDays: coverageDaysForStatus,
+    });
+
     // Détection d'anomalie de commande (backend/amelioration.md, 18/09/2026) : compare cette
     // proposition à l'historique des quantités RÉELLEMENT VALIDÉES par un humain pour cet article —
     // détectée ICI, à la génération, pour que l'alerte soit visible AVANT toute validation, jamais
@@ -843,6 +916,10 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         // uniquement si une commande RPOS/POS est déjà en cours pour cet article — null sinon,
         // rien à raisonner.
         orderSufficiencyReasoning,
+        // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3) : { status, reason }, status parmi
+        // SUFFISANT/PARTIELLEMENT_SUFFISANT/INSUFFISANT/NON_DETERMINABLE — cf. computeCoverageStatus.
+        coverageStatus: coverageStatus.status,
+        coverageStatusReason: coverageStatus.reason,
         supplierIneligible,
         currentSuppliers,
       },
@@ -1151,6 +1228,8 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           trendChangePct: p.trendChangePct ?? null,
           orderSufficiencyReasoning: p.orderSufficiencyReasoning ? p.orderSufficiencyReasoning.message : null,
           orderSufficient: p.orderSufficiencyReasoning ? p.orderSufficiencyReasoning.sufficient : null,
+          coverageStatus: p.coverageStatus || null,
+          coverageStatusReason: p.coverageStatusReason || null,
           supplierIneligible: p.supplierIneligible,
           currentSuppliers: p.currentSuppliers,
         })),
@@ -2495,6 +2574,7 @@ module.exports = {
   generateProposal,
   computeQuantityToOrder,
   buildOrderSufficiencyReasoning,
+  computeCoverageStatus,
   computeParetoFromLines,
   generateAndSaveProposal,
   getPendingProposal,

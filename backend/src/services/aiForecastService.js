@@ -826,14 +826,25 @@ async function getLatestAiForecast(proposalId) {
 function buildStaticArticleAnalysis(line, shopConfig, shopActivity, periodInfo) {
   const summary = buildArticleSummary(line, shopConfig, shopActivity);
 
-  // Statut de couverture simple (2 états, cohérent avec computeQuantityToOrder : une commande de
-  // systemSuggestedQuantity > 0 couvre exactement le besoin visé par construction — le calcul ne
-  // propose jamais moins que nécessaire). Le statut à 4 niveaux (Suffisant/Partiellement suffisant/
-  // Insuffisant/Non déterminable) de la spec §3 est traité séparément (orderSufficiencyReasoning),
-  // pas dupliqué ici.
-  const coverage = summary.hasRecentOrder
-    ? (summary.quantityIfIgnoringRecentOrder !== null && summary.quantityIfIgnoringRecentOrder > summary.currentOrderedQuantity ? 'insuffisante' : 'suffisante')
-    : (summary.systemSuggestedQuantity > 0 ? 'à commander' : 'couverte sans commande');
+  // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3 : "Suffisant / Partiellement suffisant /
+  // Insuffisant / Non déterminable"). Priorité au champ déjà persisté à la génération de la
+  // proposition (line.coverageStatus, calculé par proposalService.computeCoverageStatus) — jamais un
+  // second calcul divergent (§8, une seule source de vérité). Recalculé ici uniquement en repli pour
+  // les propositions générées avant l'ajout de ce champ (line.coverageStatus alors null).
+  let coverageStatus = line.coverageStatus || null;
+  let coverageStatusReason = line.coverageStatusReason || null;
+  if (!coverageStatus) {
+    const { computeCoverageStatus } = require('./proposalService');
+    const computed = computeCoverageStatus({
+      avgWeeklySales: summary.avgWeeklySales,
+      stock: summary.currentStock,
+      orderedQty: summary.currentOrderedQuantity,
+      quantityProposed: summary.systemSuggestedQuantity,
+      coverageDays: shopConfig?.receptionLeadTimeDays || 7,
+    });
+    coverageStatus = computed.status;
+    coverageStatusReason = computed.reason;
+  }
 
   return {
     ean: summary.ean,
@@ -851,7 +862,8 @@ function buildStaticArticleAnalysis(line, shopConfig, shopActivity, periodInfo) 
     daysUntilStockout: summary.daysUntilStockout,
     currentOrderedQuantity: summary.currentOrderedQuantity,
     systemSuggestedQuantity: summary.systemSuggestedQuantity,
-    coverage,
+    coverageStatus,
+    coverageStatusReason,
     seasonalityAdjusted: summary.seasonalityAdjusted,
     seasonalityDeviationPct: summary.seasonalityDeviationPct,
     trendCategory: summary.trendCategory,

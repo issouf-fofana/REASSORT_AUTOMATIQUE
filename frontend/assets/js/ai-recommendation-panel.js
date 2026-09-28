@@ -472,16 +472,19 @@
     return start.toDateString() === end.toDateString() ? fmt(start) : 'du ' + fmt(start) + ' au ' + fmt(end);
   }
 
-  function coverageLabel(coverage) {
-    if (coverage === 'insuffisante') return { text: 'Insuffisante', cls: 'text-danger' };
-    if (coverage === 'suffisante') return { text: 'Suffisante', cls: 'text-success' };
-    if (coverage === 'à commander') return { text: 'À commander', cls: 'text-warning' };
-    return { text: 'Couverte sans commande', cls: 'text-success' };
+  // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé côté backend
+  // (proposalService.computeCoverageStatus) — jamais recalculé ici, seulement traduit en libellé/
+  // couleur pour l'affichage.
+  function coverageLabel(coverageStatus) {
+    if (coverageStatus === 'SUFFISANT') return { text: 'Suffisant', cls: 'text-success' };
+    if (coverageStatus === 'PARTIELLEMENT_SUFFISANT') return { text: 'Partiellement suffisant', cls: 'text-warning' };
+    if (coverageStatus === 'INSUFFISANT') return { text: 'Insuffisant', cls: 'text-danger' };
+    return { text: 'Non déterminable', cls: 'text-muted' };
   }
 
   function staticAnalysisHtml(d, item) {
     const periodLabel = fmtPeriodLabel(d.periodStart, d.periodEnd);
-    const cov = coverageLabel(d.coverage);
+    const cov = coverageLabel(d.coverageStatus);
 
     const leftColumn =
       '<div class="aip-reco-column">' +
@@ -516,6 +519,7 @@
             '<div class="col-6"><span class="text-muted">Rupture dans</span><br><strong>' + (d.daysUntilStockout !== null && d.daysUntilStockout !== undefined ? Math.round(d.daysUntilStockout) + ' j' : '—') + '</strong></div>' +
             '<div class="col-6"><span class="text-muted">Couverture</span><br><strong class="' + cov.cls + '">' + cov.text + '</strong></div>' +
           '</div>' +
+          (d.coverageStatusReason ? '<div class="small text-muted mt-2">' + escapeHtml(d.coverageStatusReason) + '</div>' : '') +
           (d.trendCategory ? '<div class="small text-muted mt-2">Tendance : ' + escapeHtml(d.trendCategory) + (d.trendChangePct !== null && d.trendChangePct !== undefined ? ' (' + (d.trendChangePct > 0 ? '+' : '') + d.trendChangePct.toFixed(1) + ' %)' : ')') + '</div>' : '') +
           (d.seasonalityAdjusted && d.seasonalityDeviationPct !== null && d.seasonalityDeviationPct !== undefined ? '<div class="small text-muted mt-1">Écart vs l\'an dernier : ' + (d.seasonalityDeviationPct > 0 ? '+' : '') + d.seasonalityDeviationPct.toFixed(1) + ' %</div>' : '') +
           (d.anomalies && d.anomalies.length ? '<div class="alert alert-warning small mt-2 mb-0"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + d.anomalies.length + ' anomalie(s) détectée(s) sur cet article — vérifiez avant de valider.</div>' : '') +
