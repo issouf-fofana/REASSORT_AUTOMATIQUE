@@ -9,6 +9,15 @@ export interface ProposalTableHandle {
   exportCsv: (shopReference: string) => void;
 }
 
+// Libellé court "hier" / "29/08-28/09" pour la fenêtre de calcul du % CA (revenueShareStart/End) —
+// cohérent avec DeptListContext (DepartmentListView.tsx), même format de date.
+function fmtRevenueShareWindow(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const fmt = (d: Date) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+  return start.toDateString() === end.toDateString() ? fmt(start) : `${fmt(start)}-${fmt(end)}`;
+}
+
 function lineUnit(l: ProposalLine): number {
   return Number(l.orderingUnit) || 1;
 }
@@ -336,11 +345,22 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
-          headerName: '% CA magasin',
+          // En-tête + tooltip dynamiques (28/09/2026, spec "toujours afficher clairement la période
+          // d'analyse") : revenueSharePct est calculé sur une fenêtre COURTE et DISTINCTE de la
+          // période d'analyse/Pareto (revenueShareStart/End, souvent 1 seul jour par défaut) — déjà
+          // expliqué dans le bandeau au-dessus de la liste des rayons (DeptListContext), mais ce
+          // contexte se perd une fois qu'on défile dans le tableau détaillé d'un rayon. Le nom de
+          // colonne et l'infobulle rappellent maintenant la vraie fenêtre à cet endroit précis.
+          headerName: proposal?.revenueShareStart && proposal?.revenueShareEnd
+            ? `% CA (${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)})`
+            : '% CA magasin',
+          headerTooltip: proposal?.revenueShareStart && proposal?.revenueShareEnd
+            ? `Part du CA calculée sur ${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)}, PAS sur la période d'analyse (Pareto) de cette proposition — deux fenêtres distinctes, voir le bandeau au-dessus.`
+            : undefined,
           field: 'revenueSharePct',
           type: 'numericColumn',
           filter: 'agNumberColumnFilter',
-          width: 130,
+          width: 160,
           valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(2) + ' %' : '—'),
         },
         { headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },

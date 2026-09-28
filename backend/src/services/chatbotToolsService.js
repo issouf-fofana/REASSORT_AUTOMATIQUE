@@ -228,6 +228,13 @@ async function getRevenue(rposShopId, { date, days, department, ean } = {}) {
     days: date ? null : (days || 1),
     ean: ean || null,
     department: department || null,
+    // periodStart/periodEnd (28/09/2026, spec "toujours afficher clairement la période d'analyse" —
+    // §1 et §6) : dateStart/dateEnd étaient déjà calculées ci-dessus mais jamais exposées dans le
+    // retour, forçant le LLM à reconstruire lui-même les dates depuis date/days — source d'erreur et
+    // de confusion entre deux CA calculés sur des fenêtres différentes sans que la réponse ne le
+    // dise. Bornes explicites en ISO, la seule source de vérité pour la période réellement utilisée.
+    periodStart: dateStart.toISOString(),
+    periodEnd: dateEnd.toISOString(),
     revenueExclTaxCfa: Math.round(lines.reduce((s, l) => s + l.revenueExclTax, 0)),
     revenueInclTaxCfa: lines.every((l) => l.revenueInclTax !== null) ? Math.round(lines.reduce((s, l) => s + (l.revenueInclTax || 0), 0)) : null,
     // Nombre de VENTES (tickets de caisse distincts) — comparable au "Nb de ventes" de RMaster.
@@ -457,8 +464,45 @@ async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = 6, depart
  * commandé...), donc son cumul ne repart jamais de 0% et ne représente plus le vrai classement
  * Pareto de l'ensemble des articles vendus par le magasin.
  */
-async function getParetoArticles(rposShopId, { thresholdPct = 80, department, days = 30 } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+// posId ajouté le 28/09/2026 (spec "une seule source de vérité pour les périodes") : quand `days`
+// n'est pas précisé par l'utilisateur, la période résolue est désormais EXACTEMENT la même que
+// celle utilisée pour générer la proposition de ce magasin (resolvePeriod + config.periodMode),
+// plutôt qu'un défaut de 30 jours glissants sur l'horloge système indépendant de tout réglage —
+// jusqu'ici le Pareto du chatbot pouvait porter sur une fenêtre totalement différente de celle
+// affichée dans la proposition, sans que ni l'un ni l'autre ne le signale (bug trouvé à l'audit du
+// 28/09/2026). `days` explicite (utilisateur : "Pareto sur 3 mois") reste toujours prioritaire.
+// thresholdPct par défaut = null : résolu plus bas sur config.paretoThreshold du magasin (même
+// valeur que la génération), jamais 80 arbitraire si le magasin a un seuil personnalisé différent.
+async function getParetoArticles(posId, rposShopId, { thresholdPct, department, days } = {}) {
+  const configService = require('./configService');
+  const periodService = require('./periodService');
+  const config = await configService.getConfig(rposShopId);
+  const effectiveThresholdPct = thresholdPct || Math.round((config.paretoThreshold || 0.8) * 100);
+
+  let dateStart;
+  let dateEnd = new Date();
+  let periodLabel;
+  if (days) {
+    dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    periodLabel = { mode: 'CUSTOM_DAYS', days };
+  } else if (posId) {
+    try {
+      const period = await periodService.resolvePeriod(posId, rposShopId, config);
+      dateStart = new Date(period.start);
+      dateEnd = new Date(period.end);
+      periodLabel = { mode: config.periodMode };
+    } catch (err) {
+      // Période non résolvable (aucune vente RPOS connue...) : repli sur 30 jours glissants plutôt
+      // que de faire échouer toute la question — le champ "days" dans la réponse signale alors ce
+      // repli au LLM, jamais présenté comme la vraie période configurée du magasin.
+      dateStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      periodLabel = { mode: 'FALLBACK_30_DAYS', days: 30, fallbackReason: err.message };
+    }
+  } else {
+    dateStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    periodLabel = { mode: 'FALLBACK_30_DAYS', days: 30 };
+  }
+  const thresholdPctResolved = effectiveThresholdPct;
 
   let eanFilter = null;
   if (department) {
@@ -471,10 +515,10 @@ async function getParetoArticles(rposShopId, { thresholdPct = 80, department, da
   }
 
   const lines = await prisma.salesLine.findMany({
-    where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart } },
+    where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart, lte: dateEnd } },
     select: { ean: true, label: true, revenueExclTax: true },
   });
-  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur les ${days} derniers jours${department ? ` pour le rayon ${department}` : ''}.` };
+  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période résolue${department ? ` pour le rayon ${department}` : ''}.` };
 
   const byEan = new Map();
   for (const line of lines) {
@@ -499,7 +543,7 @@ async function getParetoArticles(rposShopId, { thresholdPct = 80, department, da
       revenueSharePct: Math.round((art.revenue / totalRevenue) * 10000) / 100,
       cumulativePct: Math.round(cumulativePct * 100) / 100,
     });
-    if (cumulativePct >= thresholdPct) break;
+    if (cumulativePct >= thresholdPctResolved) break;
   }
 
   // Regroupement par rayon réel (demande du 19/09/2026 : "quand on demande les articles qui font
@@ -541,8 +585,14 @@ async function getParetoArticles(rposShopId, { thresholdPct = 80, department, da
 
   return {
     found: true,
-    thresholdPct,
-    days,
+    thresholdPct: thresholdPctResolved,
+    // periodStart/periodEnd (28/09/2026) : bornes réellement utilisées, jamais seulement "days" en
+    // interne — periodMode indique explicitement si c'est LA MÊME période que la proposition
+    // (config.periodMode du magasin) ou un repli/une demande explicite de l'utilisateur.
+    periodStart: dateStart.toISOString(),
+    periodEnd: dateEnd.toISOString(),
+    periodMode: periodLabel.mode,
+    days: periodLabel.days || null,
     department: department || null,
     totalArticlesWithSales: articles.length,
     articleCount: withinThreshold.length,

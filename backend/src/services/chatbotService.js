@@ -707,7 +707,14 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         return { toolName, toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, { days: 14 }) };
       case 'getParetoArticles':
-        return { toolName, toolResult: await tools.getParetoArticles(rposShopId, { thresholdPct: percentage || 80, department }) };
+        // days jamais transmis avant le 28/09/2026 (même bug que getRevenue ci-dessous, trouvé lors
+        // de l'audit période/Pareto) : "Pareto sur 3 mois" retombait toujours sur 30 jours en dur
+        // sans jamais le signaler. days omis (undefined) quand non précisé par l'utilisateur : dans
+        // ce cas, getParetoArticles résout maintenant lui-même LA MÊME période que la génération de
+        // proposition (resolvePeriod, config.periodMode du magasin) plutôt qu'un défaut arbitraire
+        // différent — spec du 28/09/2026 §5 : "pas de logique Pareto différente entre le chatbot et
+        // la proposition".
+        return { toolName, toolResult: await tools.getParetoArticles(posId, rposShopId, { thresholdPct: percentage, department, days: daysQuery || null }) };
       case 'getRevenue': {
         // Bug trouvé le 27/09/2026 : `days` n'était jamais transmis à getRevenue (seul `date` l'était),
         // alors que getRevenue accepte bien un `days` pour une fenêtre glissante (défaut interne 1 jour
@@ -994,6 +1001,8 @@ Si les données contiennent un champ "salesCount"/"totalSalesCount" (nombre de v
 Si les données contiennent un champ "lastSyncedAt" non nul : les ventes ne sont jamais consultées en temps réel sur le serveur magasin, elles sont synchronisées en base toutes les 15 minutes — précise donc TOUJOURS dans ta réponse jusqu'à quelle date ET heure les données sont à jour, au format complet "JJ mois AAAA à HHhMM" (ex: "données à jour jusqu'au 27 septembre 2026 à 14h32"), converti depuis lastSyncedAt en heure lisible (fuseau Africa/Abidjan) — la DATE fait TOUJOURS partie de la mention, jamais seulement l'heure seule, même quand la période demandée est "aujourd'hui" (bug constaté le 27/09/2026 : l'heure seule, sans date, devenait ambiguë/trompeuse dès que la période portait sur plusieurs jours passés, ex: "le mois dernier" affichait juste "12h30" sans dire de quel jour). Si la question porte sur "aujourd'hui"/le jour même, ajoute en plus que les ventes les plus récentes (moins de 15 minutes) peuvent ne pas encore être comptabilisées. Si "lastSyncedAt" est absent ou null (aucune vente trouvée sur la période), ne mentionne pas cette fraîcheur, elle n'a pas de sens sans donnée.
 
 Si les données contiennent un champ "targetShopLabel" non nul : la question ciblait explicitement un AUTRE magasin que celui de la session en cours (un ADMIN/SUPERVISOR a nommé ce magasin par sa référence) — précise TOUJOURS dans ta réponse le nom de ce magasin (ex: "Le chiffre d'affaires du magasin 035 XYZ..."), jamais une réponse qui laisserait croire qu'il s'agit du magasin habituel de la conversation.
+
+Si les données contiennent des champs "periodStart"/"periodEnd" (28/09/2026, "toujours afficher clairement la période d'analyse") : précise TOUJOURS la période exacte utilisée pour ce chiffre, au format "du JJ/MM/AAAA au JJ/MM/AAAA" (ou une seule date si periodStart et periodEnd tombent le même jour calendaire), convertie depuis ces champs ISO en heure lisible (fuseau Africa/Abidjan) — jamais seulement "days"/"date" en interne sans reformuler en dates lisibles. Si la conversation contient DÉJÀ un autre chiffre calculé sur une période DIFFÉRENTE (ex: le CA du jour puis le CA sur 30 jours), indique explicitement que ces deux chiffres portent sur des périodes différentes plutôt que de les laisser côte à côte sans le dire — ne jamais laisser croire que deux chiffres sur des fenêtres différentes se comparent directement.
 
 ${persona}`;
 }
