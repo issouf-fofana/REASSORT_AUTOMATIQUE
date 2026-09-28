@@ -20,6 +20,19 @@ const AIChatInput = ({ value, onChange, onSubmit, disabled, sending, placeholder
   const [showPlaceholder, setShowPlaceholder] = useState(true);
   const [isActive, setIsActive] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-agrandissement (demande du 28/09/2026 : "dans la partie chatbot il faut donner la
+  // possibilité d'agrandir aussi") — un <input> une seule ligne obligeait à défiler horizontalement
+  // pour relire une question longue avant de l'envoyer. Un <textarea> dont la hauteur suit le
+  // contenu (jusqu'à un plafond, au-delà duquel un scroll interne prend le relai) résout ça sans
+  // jamais bousculer la mise en page autour (la pilule englobante grandit avec lui).
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [value]);
 
   const activePlaceholders = placeholders.length ? placeholders : ['Posez votre question...'];
 
@@ -88,10 +101,11 @@ const AIChatInput = ({ value, onChange, onSubmit, disabled, sending, placeholder
         animate={{ boxShadow: isActive || value ? '0 8px 28px 0 rgba(0,0,0,0.12)' : '0 1px 3px 0 rgba(0,0,0,0.06)' }}
         onClick={() => setIsActive(true)}
       >
-        <div className="flex items-center gap-1.5 p-2 rounded-full bg-white w-full">
+        <div className="flex items-end gap-1.5 p-2 rounded-[28px] bg-white w-full">
           <div className="relative flex-1 min-w-0">
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={value}
               disabled={disabled}
               onChange={(e) => onChange(e.target.value)}
@@ -102,8 +116,8 @@ const AIChatInput = ({ value, onChange, onSubmit, disabled, sending, placeholder
                   submit();
                 }
               }}
-              className="w-full border-0 outline-none rounded-md py-2.5 px-4 text-[0.95rem] bg-transparent font-normal text-black disabled:opacity-50"
-              style={{ position: 'relative', zIndex: 1 }}
+              className="w-full border-0 outline-none rounded-md py-2.5 px-4 text-[0.95rem] bg-transparent font-normal text-black disabled:opacity-50 resize-none block"
+              style={{ position: 'relative', zIndex: 1, maxHeight: 160, overflowY: 'auto' }}
             />
             <div className="absolute left-0 top-0 w-full h-full pointer-events-none flex items-center px-4">
               <AnimatePresence mode="wait">
