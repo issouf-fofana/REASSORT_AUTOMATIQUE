@@ -566,7 +566,14 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // de suivi obligerait à retaper le code, ce qui n'est pas comment une conversation fonctionne
   // (bug trouvé le 15/09/2026 : "et quand il a été mis en promo ?" répondait "précisez le code EAN"
   // alors que l'article venait d'être identifié deux messages plus tôt).
-  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getSalesHistory', 'getStockMoveHistory']);
+  // getRevenue ajouté le 28/09/2026 (bug réel observé en conversation : "Quel est le chiffre
+  // d'affaires de cet article ?" juste après avoir consulté un EAN précis retombait sur le CA de
+  // TOUT le magasin au lieu de réutiliser cet EAN — getRevenue n'est PAS toujours scopé à un seul
+  // article comme les autres outils de ce set (il sert aussi de CA magasin sans EAN), mais quand la
+  // question dit explicitement "cet article" sans EAN, il doit réutiliser le dernier EAN de la
+  // conversation comme tous les autres outils ci-dessous, jamais retomber silencieusement sur un
+  // périmètre plus large que celui demandé.
+  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue']);
 
   // Filet de sécurité n°1 : un EAN explicite dans la question mais aucun mot-clé reconnu (ex: "tu
   // peux me dire tout sur cet article : 100446452 ?", formulation imprévue) — plutôt que de
@@ -612,8 +619,16 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
 
   if (!toolName) return { toolName: null, toolResult: null };
 
+  // getRevenue seul est ambigu par nature (CA magasin ENTIER par défaut, contrairement aux autres
+  // outils de ARTICLE_SCOPED_TOOLS qui portent TOUJOURS sur un seul article) : une question sans EAN
+  // ni référence explicite à un article ("le magasin a un CA de combien ?", posée fraîchement après
+  // avoir discuté d'un article) ne doit JAMAIS être silencieusement rétrécie au dernier EAN de la
+  // conversation — seule une phrase qui renvoie explicitement à "cet/cette article/produit" déclenche
+  // la réutilisation pour cet outil précis.
+  const REFERS_TO_ARTICLE_REGEX = /\b(cet|cette|ce|l')\s*(article|produit)\b/i;
   let ean = extractEan(question) || (llmParams && ARTICLE_SCOPED_TOOLS.has(toolName) ? llmParams.ean : null) || null;
-  if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && conversationHistory && conversationHistory.length) {
+  const canReuseEanForTool = toolName !== 'getRevenue' || REFERS_TO_ARTICLE_REGEX.test(question);
+  if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && canReuseEanForTool && conversationHistory && conversationHistory.length) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
       const pastEan = extractEan(conversationHistory[i].question);
       if (pastEan) { ean = pastEan; break; }
@@ -966,6 +981,16 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
           : '')
       : '';
     dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}`;
+    // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
+    // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
+    // une fois disponible") — un outil qui a matché la question mais répond found:false (article
+    // absent de la dernière proposition, période sans vente, rayon non précisé...) n'est PAS une
+    // simple absence de résultat à expliquer techniquement : shouldTrackFeatureRequest (plus bas)
+    // enregistre déjà automatiquement ce cas comme suggestion, donc la réponse doit le refléter
+    // honnêtement plutôt que de laisser une formulation vague ("les données ne contiennent pas...").
+    if (toolResult.found === false) {
+      dataSection += `\n\nIMPORTANT : cet outil n'a pas trouvé la donnée demandée (found: false, voir le message ci-dessus pour la raison précise). Dis-le clairement à l'utilisateur avec cette raison précise (jamais une formule vague type "les données fournies ne contiennent pas..."), PUIS ajoute que cette limite a été notée et sera examinée par l'équipe, qui pourra alerter l'utilisateur par email une fois disponible — ne dis jamais que la fonctionnalité existe déjà ou qu'elle sera disponible à une date précise que tu ne connais pas.`;
+    }
     // Question à deux intentions dans la même phrase (demande du 27/09/2026, bug signalé : "le CA de
     // cet article et son stock ?" ne répondait qu'au CA) — le second résultat est donné en texte
     // seulement, JAMAIS retourné comme toolResult au frontend (cf. commentaire de runToolForQuestion :
@@ -1126,7 +1151,17 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // assistant est mis à jour en base une fois ce suivi terminé (cf. routes/reassort/ai.js), jamais
   // achevé avant que la conversation n'ait déjà été rendue à l'utilisateur.
   const finalAnswer = fullText.trim();
-  const shouldTrackFeatureRequest = !effectiveToolResult && !reusedFromHistory;
+  // Bug trouvé le 28/09/2026 (conversation réelle) : shouldTrackFeatureRequest ne se déclenchait QUE
+  // si AUCUN outil n'avait matché la question (toolResult null) — un outil qui matche mais répond
+  // honnêtement found:false ("Article introuvable dans la dernière proposition", "les données
+  // fournies ne contiennent pas...") ne déclenchait jamais le suivi, alors que c'est EXACTEMENT le
+  // cas où l'utilisateur bute sur une vraie limite de données/fonctionnalité qui mériterait d'être
+  // notée (demande explicite : "si il n'a pas la donnée, qu'il le dise et prenne note"). Un outil
+  // qui a RÉELLEMENT répondu (found true, ou found absent pour les outils qui ne l'utilisent pas)
+  // ne déclenche toujours pas le suivi — seul un found:false explicite (ou l'absence totale d'outil)
+  // compte comme une lacune à faire remonter.
+  const toolFoundNothing = effectiveToolResult && typeof effectiveToolResult === 'object' && effectiveToolResult.found === false;
+  const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothing) && !reusedFromHistory;
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
