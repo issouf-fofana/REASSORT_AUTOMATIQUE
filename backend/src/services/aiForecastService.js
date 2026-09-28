@@ -812,6 +812,60 @@ async function getLatestAiForecast(proposalId) {
  * Le résultat n'est pas mis en cache : chaque clic relance un vrai appel, cohérent avec l'attente
  * d'une analyse "en temps réel" plutôt qu'un résultat pré-calculé.
  */
+/**
+ * Analyse STATIQUE d'un article (spec du 28/09/2026, §4 : "l'analyse initiale ne doit PAS appeler
+ * le LLM [...] doit être statique et calculée directement par le backend") — reformate en texte
+ * lisible les données déjà calculées par buildArticleSummary (période, CA, ventes, stock,
+ * couverture, Pareto, anomalies), sans aucun appel réseau ni LLM : réponse instantanée. Le LLM
+ * n'intervient qu'ENSUITE, si l'utilisateur pose une question de suivi (askFollowUpQuestion,
+ * inchangé) — cette fonction ne le remplace pas, elle précède son intervention.
+ * `periodStart`/`periodEnd`/`periodMode` (optionnels) : période d'analyse de la PROPOSITION dont
+ * cet article est issu (Proposal.analysisPeriodStart/End/Mode) — affichée telle quelle, jamais
+ * recalculée ici (une seule source de vérité pour la période, cf. periodService.js).
+ */
+function buildStaticArticleAnalysis(line, shopConfig, shopActivity, periodInfo) {
+  const summary = buildArticleSummary(line, shopConfig, shopActivity);
+
+  // Statut de couverture simple (2 états, cohérent avec computeQuantityToOrder : une commande de
+  // systemSuggestedQuantity > 0 couvre exactement le besoin visé par construction — le calcul ne
+  // propose jamais moins que nécessaire). Le statut à 4 niveaux (Suffisant/Partiellement suffisant/
+  // Insuffisant/Non déterminable) de la spec §3 est traité séparément (orderSufficiencyReasoning),
+  // pas dupliqué ici.
+  const coverage = summary.hasRecentOrder
+    ? (summary.quantityIfIgnoringRecentOrder !== null && summary.quantityIfIgnoringRecentOrder > summary.currentOrderedQuantity ? 'insuffisante' : 'suffisante')
+    : (summary.systemSuggestedQuantity > 0 ? 'à commander' : 'couverte sans commande');
+
+  return {
+    ean: summary.ean,
+    label: summary.label,
+    periodStart: periodInfo?.periodStart || null,
+    periodEnd: periodInfo?.periodEnd || null,
+    periodMode: periodInfo?.periodMode || null,
+    caHtOnPeriod: line.caHtOnPeriod ?? null,
+    revenueSharePct: summary.revenueSharePct,
+    cumulativePct: line.cumulativePct ?? null,
+    avgWeeklySales: summary.avgWeeklySales,
+    currentStock: summary.currentStock,
+    hadNegativeStock: summary.hadNegativeStock,
+    dlvStock: summary.dlvStock,
+    daysUntilStockout: summary.daysUntilStockout,
+    currentOrderedQuantity: summary.currentOrderedQuantity,
+    systemSuggestedQuantity: summary.systemSuggestedQuantity,
+    coverage,
+    seasonalityAdjusted: summary.seasonalityAdjusted,
+    seasonalityDeviationPct: summary.seasonalityDeviationPct,
+    trendCategory: summary.trendCategory,
+    trendChangePct: summary.trendChangePct,
+    dailyHistory: summary.dailyHistory,
+    anomalies: summary.anomalies,
+    // fromLLM: false marque explicitement ce résultat comme statique côté frontend/consommateur —
+    // jamais présenté comme "l'IA a analysé", pour ne pas laisser croire à un raisonnement qui n'a
+    // pas eu lieu (§35, anti-hallucination — vaut aussi pour l'absence de calcul, pas seulement pour
+    // un chiffre inventé).
+    fromLLM: false,
+  };
+}
+
 async function analyzeArticleRealtime({ shopReference, shopName, line, shopConfig, posId, shopId }) {
   let shopActivity = null;
   if (posId && shopId) {
@@ -942,4 +996,4 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   return { answer: fullText.trim(), providerUsed };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, listModelsForKey, buildArticleSummary, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage, DEFAULT_MODEL_BY_PROVIDER };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, listModelsForKey, buildArticleSummary, buildStaticArticleAnalysis, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage, DEFAULT_MODEL_BY_PROVIDER };

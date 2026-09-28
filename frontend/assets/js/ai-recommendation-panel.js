@@ -458,6 +458,138 @@
     return leftColumn + rightColumn;
   }
 
+  // Vue STATIQUE (spec du 28/09/2026, §4 : "l'analyse initiale ne doit PAS appeler le LLM [...]
+  // doit être statique et calculée directement par le backend") — affichée immédiatement à
+  // l'ouverture du panneau, à partir de GET /static-analyze-article (aucun appel LLM). Le LLM
+  // n'intervient qu'ensuite, si l'utilisateur clique explicitement sur "Demander l'analyse de l'IA"
+  // (runAiAnalysis, comportement inchangé) ou pose une question de suivi (askQuestionSectionHtml,
+  // qui reste disponible mais nécessite d'abord un résultat IA — géré par wireStaticViewEvents).
+  function fmtPeriodLabel(startIso, endIso) {
+    if (!startIso || !endIso) return null;
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    const fmt = function (d) { return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); };
+    return start.toDateString() === end.toDateString() ? fmt(start) : 'du ' + fmt(start) + ' au ' + fmt(end);
+  }
+
+  function coverageLabel(coverage) {
+    if (coverage === 'insuffisante') return { text: 'Insuffisante', cls: 'text-danger' };
+    if (coverage === 'suffisante') return { text: 'Suffisante', cls: 'text-success' };
+    if (coverage === 'à commander') return { text: 'À commander', cls: 'text-warning' };
+    return { text: 'Couverte sans commande', cls: 'text-success' };
+  }
+
+  function staticAnalysisHtml(d, item) {
+    const periodLabel = fmtPeriodLabel(d.periodStart, d.periodEnd);
+    const cov = coverageLabel(d.coverage);
+
+    const leftColumn =
+      '<div class="aip-reco-column">' +
+        '<div class="aip-reco-card">' +
+          '<div class="aip-reco-eyebrow"><iconify-icon icon="solar:calculator-minimalistic-bold"></iconify-icon>Analyse statique (sans IA)</div>' +
+          '<div class="aip-reco-headline">Le calcul du système propose <strong>' + Math.round(d.systemSuggestedQuantity) + ' unité(s)</strong> pour cet article.</div>' +
+          '<div class="aip-reco-quantity">' + Math.round(d.systemSuggestedQuantity) + '</div>' +
+          '<div class="aip-reco-quantity-unit">unités — calcul statistique</div>' +
+        '</div>' +
+        '<button type="button" class="btn btn-dark w-100 mt-3" id="aip-ask-ai-btn"><iconify-icon icon="solar:magic-stick-3-bold" class="align-middle me-1"></iconify-icon>Demander l\'analyse de l\'IA</button>' +
+        '<div class="aip-order-qty-card mt-3">' +
+          '<label for="aip-order-qty-input">Quantité à commander</label>' +
+          '<div class="input-group">' +
+            '<input type="number" min="0" step="1" class="form-control" id="aip-order-qty-input" value="' + Math.round(d.systemSuggestedQuantity) + '">' +
+            '<button type="button" class="btn btn-dark" id="aip-order-qty-save">Appliquer</button>' +
+          '</div>' +
+          '<div class="aip-order-qty-hint" id="aip-order-qty-hint">Vous pouvez commander moins ou plus selon votre jugement.</div>' +
+        '</div>' +
+      '</div>';
+
+    const rightColumn =
+      '<div class="aip-details-column">' +
+        '<div class="aip-detail-section">' +
+          '<h6>Chiffres clés' + (periodLabel ? ' <span class="text-muted small fw-normal">(période d\'analyse : ' + escapeHtml(periodLabel) + ')</span>' : '') + '</h6>' +
+          '<div class="row small g-2">' +
+            '<div class="col-6"><span class="text-muted">CA sur la période</span><br><strong>' + (d.caHtOnPeriod !== null && d.caHtOnPeriod !== undefined ? Math.round(d.caHtOnPeriod).toLocaleString('fr-FR') + ' CFA' : '—') + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Part du CA magasin</span><br><strong>' + (d.revenueSharePct !== null && d.revenueSharePct !== undefined ? d.revenueSharePct.toFixed(2) + ' %' : '—') + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Cumul Pareto</span><br><strong>' + (d.cumulativePct !== null && d.cumulativePct !== undefined ? d.cumulativePct.toFixed(1) + ' %' : '—') + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Vente moy./semaine</span><br><strong>' + d.avgWeeklySales + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Stock actuel</span><br><strong>' + d.currentStock + (d.hadNegativeStock ? ' <span class="text-danger">(stock non fiable)</span>' : '') + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Déjà commandé</span><br><strong>' + d.currentOrderedQuantity + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Rupture dans</span><br><strong>' + (d.daysUntilStockout !== null && d.daysUntilStockout !== undefined ? Math.round(d.daysUntilStockout) + ' j' : '—') + '</strong></div>' +
+            '<div class="col-6"><span class="text-muted">Couverture</span><br><strong class="' + cov.cls + '">' + cov.text + '</strong></div>' +
+          '</div>' +
+          (d.trendCategory ? '<div class="small text-muted mt-2">Tendance : ' + escapeHtml(d.trendCategory) + (d.trendChangePct !== null && d.trendChangePct !== undefined ? ' (' + (d.trendChangePct > 0 ? '+' : '') + d.trendChangePct.toFixed(1) + ' %)' : ')') + '</div>' : '') +
+          (d.seasonalityAdjusted && d.seasonalityDeviationPct !== null && d.seasonalityDeviationPct !== undefined ? '<div class="small text-muted mt-1">Écart vs l\'an dernier : ' + (d.seasonalityDeviationPct > 0 ? '+' : '') + d.seasonalityDeviationPct.toFixed(1) + ' %</div>' : '') +
+          (d.anomalies && d.anomalies.length ? '<div class="alert alert-warning small mt-2 mb-0"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> ' + d.anomalies.length + ' anomalie(s) détectée(s) sur cet article — vérifiez avant de valider.</div>' : '') +
+        '</div>' +
+        '<div class="aip-detail-section">' +
+          '<div class="d-flex align-items-center justify-content-between mb-2">' +
+            '<h6 class="mb-0">Évolution des ventes</h6>' +
+            '<div class="btn-group" id="aip-period-buttons">' + periodButtonsHtml(30) + '</div>' +
+          '</div>' +
+          '<div id="aip-sparkline-container"><p class="text-muted small">Chargement...</p></div>' +
+          '<div id="aip-stats-container" class="mt-3"></div>' +
+        '</div>' +
+        '<div class="aip-detail-section">' +
+          '<h6>Détail des ventes par jour</h6>' +
+          '<div id="aip-history-table-container"><p class="text-muted small">Chargement...</p></div>' +
+        '</div>' +
+      '</div>';
+
+    return leftColumn + rightColumn;
+  }
+
+  // Câble le bouton "Demander l'analyse de l'IA" (vue statique) + le champ quantité, réutilisés à
+  // l'identique de wireSimpleViewEvents ci-dessous pour la partie commune (sparkline, historique,
+  // quantité) — la section "poser une question" n'est câblée qu'une fois un résultat IA obtenu
+  // (currentAiResult non null), jamais depuis la vue statique seule.
+  function wireStaticViewEvents(item) {
+    const askAiBtn = document.getElementById('aip-ask-ai-btn');
+    if (askAiBtn) {
+      askAiBtn.addEventListener('click', function () {
+        document.getElementById('aip-simple-view').innerHTML = aiLoadingHtml();
+        runAiAnalysis(item);
+      });
+    }
+    wireCommonViewEvents(item);
+  }
+
+  // Partie commune aux deux vues (statique ET IA) : graphique/historique de ventes + champ quantité
+  // à commander. referenceQuantity = la quantité affichée dans le champ à l'ouverture (currentAiResult
+  // si un résultat IA existe déjà, sinon la quantité du calcul statique/classique) — sert uniquement
+  // à comparer l'écart si l'utilisateur modifie la valeur, jamais à imposer un chiffre.
+  function wireCommonViewEvents(item) {
+    const periodButtonsEl = document.getElementById('aip-period-buttons');
+    const referenceQuantity = currentAiResult ? currentAiResult.quantity : (item.classicQuantitySuggested ?? item.predictedQuantity);
+    if (periodButtonsEl) {
+      loadHistoryForPeriod(item, 30, referenceQuantity);
+      periodButtonsEl.querySelectorAll('.aip-period-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          periodButtonsEl.querySelectorAll('.aip-period-btn').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          loadHistoryForPeriod(item, parseInt(btn.dataset.days, 10), referenceQuantity);
+        });
+      });
+    }
+
+    const qtyInput = document.getElementById('aip-order-qty-input');
+    const qtyHint = document.getElementById('aip-order-qty-hint');
+    const qtySaveBtn = document.getElementById('aip-order-qty-save');
+    if (qtyInput && qtyHint && referenceQuantity !== null && referenceQuantity !== undefined) {
+      qtyInput.addEventListener('input', function () {
+        const val = parseInt(qtyInput.value, 10);
+        if (Number.isFinite(val) && val !== referenceQuantity) {
+          qtyHint.textContent = 'Écart de ' + (val > referenceQuantity ? '+' : '') + (val - referenceQuantity) + ' par rapport à la référence (' + referenceQuantity + ').';
+          qtyHint.classList.add('aip-qty-changed');
+        } else {
+          qtyHint.textContent = 'Vous pouvez commander moins ou plus selon votre jugement.';
+          qtyHint.classList.remove('aip-qty-changed');
+        }
+      });
+    }
+    if (qtySaveBtn) {
+      qtySaveBtn.addEventListener('click', function () { saveOrderQuantity(item, qtySaveBtn, qtyHint); });
+    }
+  }
+
   function wireSimpleViewEvents(item) {
     const whyBtn = document.getElementById('aip-why-btn');
     if (whyBtn) whyBtn.addEventListener('click', function () { showDetailView(item); });
@@ -471,43 +603,7 @@
 
     conversationHistory = [];
     wireAskQuestion(item);
-
-    // Graphique inclus directement dans la vue simple quand le raisonnement est déjà affiché
-    // (juste après un streaming, cf. aiReadyHtml) : chargé via le même appel API que la vue détail
-    // (pas via item.dailyHistory, jamais transmis par purchase-order.html) — sinon le graphique
-    // restait invisible sur cette page faute de données, régression constatée après l'ajout du
-    // raisonnement inline.
-    const periodButtonsEl = document.getElementById('aip-period-buttons');
-    if (periodButtonsEl) {
-      const quantityForImpact = currentAiResult ? currentAiResult.quantity : item.predictedQuantity;
-      loadHistoryForPeriod(item, 30, quantityForImpact);
-      periodButtonsEl.querySelectorAll('.aip-period-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          periodButtonsEl.querySelectorAll('.aip-period-btn').forEach(function (b) { b.classList.remove('active'); });
-          btn.classList.add('active');
-          loadHistoryForPeriod(item, parseInt(btn.dataset.days, 10), quantityForImpact);
-        });
-      });
-    }
-
-    const qtyInput = document.getElementById('aip-order-qty-input');
-    const qtyHint = document.getElementById('aip-order-qty-hint');
-    const qtySaveBtn = document.getElementById('aip-order-qty-save');
-    if (qtyInput && currentAiResult) {
-      qtyInput.addEventListener('input', function () {
-        const val = parseInt(qtyInput.value, 10);
-        if (Number.isFinite(val) && val !== currentAiResult.quantity) {
-          qtyHint.textContent = 'Écart de ' + (val > currentAiResult.quantity ? '+' : '') + (val - currentAiResult.quantity) + ' par rapport à la recommandation IA (' + currentAiResult.quantity + ').';
-          qtyHint.classList.add('aip-qty-changed');
-        } else {
-          qtyHint.textContent = 'L\'IA recommande ' + currentAiResult.quantity + ' — vous pouvez commander moins ou plus selon votre jugement.';
-          qtyHint.classList.remove('aip-qty-changed');
-        }
-      });
-    }
-    if (qtySaveBtn) {
-      qtySaveBtn.addEventListener('click', function () { saveOrderQuantity(item, qtySaveBtn, qtyHint); });
-    }
+    wireCommonViewEvents(item);
   }
 
   async function saveOrderQuantity(item, btn, hint) {
@@ -1107,8 +1203,30 @@
       box.innerHTML = aiReadyHtml(existing);
       wireSimpleViewEvents(item);
     } else {
-      document.getElementById('aip-simple-view').innerHTML = aiLoadingHtml();
-      runAiAnalysis(item);
+      // Analyse STATIQUE d'abord (spec du 28/09/2026, §4) : GET /static-analyze-article, aucun appel
+      // LLM, réponse instantanée — le LLM n'intervient qu'ensuite, sur clic explicite ("Demander
+      // l'analyse de l'IA", cf. wireStaticViewEvents) ou question de suivi. Un échec de cette route
+      // (article jamais dans une proposition, réseau...) retombe sur l'ancien comportement (appel IA
+      // direct) plutôt que de laisser un panneau vide.
+      loadStaticAnalysis(item);
     }
   };
+
+  async function loadStaticAnalysis(item) {
+    document.getElementById('aip-simple-view').innerHTML = aiLoadingHtml();
+    try {
+      const res = await window.reassortFetch('/reassort/proposal/' + item.proposalId + '/static-analyze-article?ean=' + encodeURIComponent(item.ean));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message);
+      const box = document.getElementById('aip-simple-view');
+      box.classList.add('aip-two-col');
+      document.getElementById('aip-detail-panel').classList.add('aip-wide');
+      box.innerHTML = staticAnalysisHtml(json.data, item);
+      wireStaticViewEvents(item);
+    } catch (err) {
+      // Repli sur l'ancien comportement (appel IA direct) : ne jamais laisser le panneau vide si
+      // l'analyse statique échoue pour une raison quelconque.
+      runAiAnalysis(item);
+    }
+  }
 })();

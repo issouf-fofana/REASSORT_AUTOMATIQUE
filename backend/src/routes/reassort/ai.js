@@ -167,6 +167,47 @@ router.post('/shop-activity/warm', async (req, res) => {
   shopActivityService.getShopActivityProfile(posId, shopId).catch(() => {}); // best-effort, jamais bloquant
 });
 
+// GET /api/reassort/proposal/:proposalId/static-analyze-article - analyse STATIQUE d'un article
+// (spec du 28/09/2026, §4 : "l'analyse initiale ne doit PAS appeler le LLM [...] instantanée").
+// Reformate les données déjà calculées à la génération (stock, ventes, CA, Pareto, couverture,
+// anomalies) sans aucun appel réseau ni LLM — GET (lecture pure) plutôt que POST comme les routes
+// IA voisines, puisqu'aucune donnée n'est créée ni consommée (pas de quota IA, pas d'appel externe).
+router.get('/proposal/:proposalId/static-analyze-article', async (req, res) => {
+  try {
+    const { ean } = req.query;
+    if (!ean) return res.status(400).json({ success: false, message: 'ean requis' });
+
+    const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+    if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+
+    const shopId = resolveShopId(req);
+    if (shopId && proposal.rposShopId !== shopId) {
+      return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
+    }
+
+    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+    if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans cette proposition' });
+    if (!(await assertLineInUserScope(req, res, line))) return;
+
+    let shopActivity = null;
+    try {
+      shopActivity = await shopActivityService.getShopActivityProfile(proposal.rposPosId, proposal.rposShopId);
+    } catch {
+      shopActivity = null;
+    }
+
+    const result = aiForecastService.buildStaticArticleAnalysis(
+      line,
+      { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
+      shopActivity,
+      { periodStart: proposal.analysisPeriodStart, periodEnd: proposal.analysisPeriodEnd, periodMode: proposal.analysisPeriodMode },
+    );
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/:proposalId/ai-analyze-article - analyse IA en direct d'un seul
 // article (page "IA & Prédictions") : appel LLM immédiat, sans persistance (AiForecastRun est pour
 // une génération complète, pas une analyse ponctuelle). Body: { ean }.
