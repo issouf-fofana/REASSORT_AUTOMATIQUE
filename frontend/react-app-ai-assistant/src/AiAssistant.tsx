@@ -94,6 +94,13 @@ function markdownLiteToHtml(text: string): string {
   return htmlParts.join('');
 }
 
+// Couleur d'accent bleue réservée à ces graphiques du chatbot (demande explicite du 28/09/2026,
+// après confirmation : le reste du site reste noir/blanc/gris strict, seuls ces graphiques en
+// sortent pour rester lisibles/agréables — la courbe toute noire précédente se distinguait mal des
+// points et du texte environnant).
+const CHART_LINE_COLOR = '#2563eb';
+const CHART_GRID_COLOR = '#e5e7eb';
+
 function buildLineChart(dailyHistory: { date: string; quantity: number }[]): string {
   const width = 560;
   const height = 160;
@@ -102,19 +109,36 @@ function buildLineChart(dailyHistory: { date: string; quantity: number }[]): str
   const max = Math.max(...values, 1);
   const stepX = (width - padding * 2) / Math.max(values.length - 1, 1);
 
-  const points = values
-    .map((v, i) => {
-      const x = padding + i * stepX;
-      const y = height - padding - (v / max) * (height - padding * 2);
-      return x + ',' + y;
-    })
-    .join(' ');
+  const coords = values.map((v, i) => ({
+    x: padding + i * stepX,
+    y: height - padding - (v / max) * (height - padding * 2),
+    v,
+    date: dailyHistory[i].date,
+  }));
 
-  const dots = values
-    .map((v, i) => {
-      const x = padding + i * stepX;
-      const y = height - padding - (v / max) * (height - padding * 2);
-      return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="#000000"></circle>';
+  const points = coords.map((c) => c.x + ',' + c.y).join(' ');
+
+  // Lignes de grille horizontales légères (0%, 50%, 100% de la hauteur utile) : repère visuel
+  // discret sans surcharger le graphique, cohérent avec des lignes fines déjà utilisées ailleurs.
+  const gridLines = [0, 0.5, 1]
+    .map((frac) => {
+      const y = padding + frac * (height - padding * 2);
+      return '<line x1="' + padding + '" y1="' + y + '" x2="' + (width - padding) + '" y2="' + y + '" stroke="' + CHART_GRID_COLOR + '" stroke-width="1"></line>';
+    })
+    .join('');
+
+  // <title> par point : tooltip natif du navigateur au survol (demande du 28/09/2026, "si je met le
+  // curseur ça fait rien") — un cercle de hover invisible mais plus large (r=10) facilite le
+  // ciblage à la souris, le point visible réel (r=3) reste discret par-dessus.
+  const dots = coords
+    .map((c) => {
+      const title = escapeHtml(c.date) + ' : ' + c.v.toLocaleString('fr-FR');
+      return (
+        '<g>' +
+        '<circle cx="' + c.x + '" cy="' + c.y + '" r="10" fill="transparent" style="cursor:pointer;"><title>' + title + '</title></circle>' +
+        '<circle cx="' + c.x + '" cy="' + c.y + '" r="3.5" fill="' + CHART_LINE_COLOR + '" style="pointer-events:none;"></circle>' +
+        '</g>'
+      );
     })
     .join('');
 
@@ -124,7 +148,8 @@ function buildLineChart(dailyHistory: { date: string; quantity: number }[]): str
   return (
     '<div class="aia-chart-wrap">' +
     '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:auto;overflow:visible;">' +
-    '<polyline points="' + points + '" fill="none" stroke="#000000" stroke-width="2"></polyline>' + dots +
+    gridLines +
+    '<polyline points="' + points + '" fill="none" stroke="' + CHART_LINE_COLOR + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline>' + dots +
     '</svg>' +
     '<div class="d-flex justify-content-between small text-muted mt-1"><span>' + escapeHtml(firstLabel) + '</span><span>' + escapeHtml(lastLabel) + '</span></div>' +
     '</div>'
