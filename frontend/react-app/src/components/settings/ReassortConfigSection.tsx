@@ -84,11 +84,21 @@ export function ReassortConfigSection() {
     setSuccess(null);
     setSaving(true);
 
+    // Un champ "select" n'est pas forcément un booléen déguisé (options 'true'/'false', ex:
+    // treatNegativeStockAsZero) : periodMode est AUSSI kind: 'select' mais ses options sont des
+    // valeurs énumérées (LAST_365_DAYS, CUSTOM...) — bug trouvé le 28/09/2026 (config bulk plantait
+    // en base avec periodMode: false) car ce cas traitait TOUT champ select comme un booléen sans
+    // vérifier que ses options étaient réellement 'true'/'false'.
+    const isBooleanSelect = (field: (typeof REASSORT_FIELDS)[number]) =>
+      field.kind === 'select' && (field.options || []).every((o) => o.value === 'true' || o.value === 'false');
+
     const payload: Record<string, unknown> = {};
     for (const field of REASSORT_FIELDS) {
       const raw = values[field.id];
-      if (field.kind === 'select') {
+      if (isBooleanSelect(field)) {
         payload[field.id] = raw === 'true';
+      } else if (field.kind === 'select') {
+        payload[field.id] = raw;
       } else if (PERCENT_STORED_AS_FRACTION.has(field.id)) {
         payload[field.id] = Number(raw) / 100;
       } else {
