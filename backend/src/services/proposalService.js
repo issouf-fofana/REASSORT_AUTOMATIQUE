@@ -283,6 +283,11 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
       cumulative_pct: cumulativePct * 100,
       daily_history: dailyHistory,
       weekday_factors: weekdayProfile.factors,
+      // CA HT réel de l'article sur TOUTE la période d'analyse (spec du 28/09/2026, §2 : "CA sur la
+      // période d'analyse" par article) — déjà calculé ci-dessus pour le tri/cumul Pareto, jamais
+      // transmis jusqu'ici. Ne pas confondre avec revenueSharePct (proposalService.js plus bas),
+      // calculé sur la fenêtre courte revenueShareStart/End, une période différente et plus courte.
+      ca_ht_on_period: art.caHt,
     });
     if (cumulativePct >= paretoThreshold) break;
   }
@@ -795,6 +800,7 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         quantityProposed,
         productId: product.id,
         cumulativePct: Number(art.cumulative_pct),
+        caHtOnPeriod: art.ca_ht_on_period !== undefined ? Number(art.ca_ht_on_period) : null,
         sellingPrice: Number(product.selling_price || 0),
         buyingPrice: Number(product.buying_price || 0),
         revenueSharePct,
@@ -1129,6 +1135,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           currentOrderedQuantity: p.currentOrderedQuantity,
           orderingUnit: p.orderingUnit,
           cumulativePct: p.cumulativePct,
+          caHtOnPeriod: p.caHtOnPeriod,
           excludedAsAlreadyOrdered: p.excludedAsAlreadyOrdered,
           platformOrderReference: p.platformOrderReference,
           platformOrderDate: p.platformOrderDate ? new Date(p.platformOrderDate) : null,

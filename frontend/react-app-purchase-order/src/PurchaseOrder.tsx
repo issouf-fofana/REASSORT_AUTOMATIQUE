@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
 import { DepartmentListView } from './DepartmentListView';
+import { ProposalHeader } from './ProposalHeader';
 import { GenerationFlow } from './GenerationFlow';
 import { ProductAnalyticsModal } from './ProductAnalyticsModal';
 import { ProposalTable, type ProposalTableHandle } from './ProposalTable';
@@ -543,6 +544,8 @@ export function PurchaseOrder() {
         }
         .reassort-mini-badge iconify-icon { font-size: .8rem; vertical-align: -1px; }
       `}</style>
+
+      {proposal && <ProposalHeader proposal={proposal} />}
 
       {showListView ? (
         <div>

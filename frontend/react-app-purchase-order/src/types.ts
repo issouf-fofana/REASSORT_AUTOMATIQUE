@@ -57,6 +57,19 @@ export interface ProposalLine {
   // calculé à la génération depuis le rattachement au fournisseur central RPOS.
   supplierIneligible?: boolean | null;
   currentSuppliers?: string | null;
+  // Déjà persistés côté backend depuis longtemps, jamais exposés au frontend avant le 28/09/2026
+  // (spec "informations détaillées dans une proposition de commande", §2) :
+  // - currentOrderedQuantity : quantité déjà commandée/en transit au moment du calcul (RPOS + cette
+  //   plateforme cumulés, cf. proposalService.js orderedQty) — nécessaire pour comprendre pourquoi
+  //   une quantité proposée n'est pas simplement "vente moyenne - stock".
+  // - cumulativePct : cumul Pareto de cet article sur la PÉRIODE D'ANALYSE (à ne jamais confondre
+  //   avec revenueSharePct, calculé sur la fenêtre courte revenueShareStart/End — deux dénominateurs
+  //   différents, cf. ProposalTable.tsx et DepartmentListView.tsx).
+  currentOrderedQuantity?: number | null;
+  cumulativePct?: number | null;
+  // CA HT réel de l'article sur TOUTE la période d'analyse (nouveau champ backend, ajouté avec le
+  // même correctif) — distinct de revenueSharePct (fenêtre courte), jamais à confondre.
+  caHtOnPeriod?: number | null;
 }
 
 // Commande RPOS déjà créée pour un rayon précis (demande du 26/09/2026 : validation indépendante
@@ -85,9 +98,13 @@ export interface Proposal {
   revenueShareEnd?: string | null;
   analysisPeriodStart?: string | null;
   analysisPeriodEnd?: string | null;
+  analysisPeriodMode?: string | null;
   coverageGapDays?: number | null;
   actualDataStart?: string | null;
   actualDataEnd?: string | null;
+  paretoThresholdUsed?: number | null;
+  rposShopReference?: string;
+  rposShopName?: string;
   lines: ProposalLine[];
   orders?: ProposalOrder[];
   skippedGenericArticle?: number;

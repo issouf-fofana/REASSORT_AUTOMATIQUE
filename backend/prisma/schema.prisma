@@ -874,6 +874,10 @@ model ProposalLine {
   currentOrderedQuantity Float? @map("current_ordered_quantity")
   orderingUnit           Float? @map("ordering_unit")
   cumulativePct          Float? @map("cumulative_pct")
+  // CA HT réel de l'article sur TOUTE la période d'analyse (spec du 28/09/2026, §2) — distinct de
+  // revenueSharePct (fenêtre courte revenueShareStart/End) : deux périodes différentes, jamais à
+  // confondre. Null pour les propositions générées avant l'ajout de ce champ.
+  caHtOnPeriod           Float? @map("ca_ht_on_period")
 
   // Si vrai, cet article a été exclu de cette proposition car déjà présent dans une commande de
   // cette plateforme non encore reçue (cf. ProposalOrder.receptionStatus). Contrairement à

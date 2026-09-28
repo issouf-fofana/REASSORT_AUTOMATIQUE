@@ -345,6 +345,20 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
+          // CA HT de l'article sur la période d'analyse (spec §2) — ajouté le 28/09/2026, jamais
+          // affiché avant (le backend ne le calculait même pas explicitement jusqu'à ce correctif).
+          // Distinct de la colonne "% CA" juste après, calculée sur une fenêtre plus courte.
+          headerName: proposal?.analysisPeriodStart && proposal?.analysisPeriodEnd
+            ? `CA (${fmtRevenueShareWindow(proposal.analysisPeriodStart, proposal.analysisPeriodEnd)})`
+            : 'CA (période)',
+          headerTooltip: "Chiffre d'affaires HT réel de l'article sur toute la période d'analyse (Pareto) de cette proposition.",
+          field: 'caHtOnPeriod',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 150,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? Math.round(p.value).toLocaleString('fr-FR') + ' CFA' : '—'),
+        },
+        {
           // En-tête + tooltip dynamiques (28/09/2026, spec "toujours afficher clairement la période
           // d'analyse") : revenueSharePct est calculé sur une fenêtre COURTE et DISTINCTE de la
           // période d'analyse/Pareto (revenueShareStart/End, souvent 1 seul jour par défaut) — déjà
@@ -363,7 +377,34 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           width: 160,
           valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(2) + ' %' : '—'),
         },
+        {
+          // Cumul Pareto (spec du 28/09/2026, §2 : "classe Pareto A/B/C ou équivalent") — déjà
+          // calculé et persisté (cumulativePct) mais jamais affiché avant ce fix. Pas de classe A/B/C
+          // au sens strict dans ce système (cf. audit : seuls les articles DANS le seuil configuré
+          // sont proposés, il n'y a jamais de "classe B/C" distincte) — le cumul lui-même, sur la
+          // même période d'analyse que le Pareto, est l'équivalent direct demandé.
+          headerName: 'Pareto (cumul)',
+          field: 'cumulativePct',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 140,
+          headerTooltip: "Cumul du chiffre d'affaires sur la période d'analyse (Pareto), pas la fenêtre courte du % CA à gauche.",
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(1) + ' %' : '—'),
+        },
         { headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },
+        {
+          // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
+          // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
+          // proposalService.js orderedQty) mais jamais affiché en colonne avant ce fix ; seul un
+          // badge apparaissait quand l'article était totalement exclu de la proposition pour cette
+          // raison (labelCellRenderer). Ici visible pour TOUT article, même partiellement couvert.
+          headerName: 'Déjà commandé',
+          field: 'currentOrderedQuantity',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 140,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
+        },
         {
           headerName: 'Qté proposée',
           type: 'numericColumn',
