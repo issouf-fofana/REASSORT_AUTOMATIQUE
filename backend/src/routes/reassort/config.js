@@ -590,6 +590,26 @@ router.get('/mail-signature', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/mail-signature/logo - sert l'image du logo actuel pour aperçu dans l'écran
+// Paramètres (demande du 28/09/2026 : "le logo ne change pas [...] je veux le logo en noir/blanc" —
+// la page n'affichait jamais qu'un simple texte "logo configuré", sans aucun aperçu visuel permettant
+// de vérifier QUEL logo est réellement utilisé). Jamais une URL publique/permanente utilisable
+// ailleurs : réservée à l'admin (requireAdmin), lit toujours la valeur EN BASE actuelle.
+router.get('/mail-signature/logo', requireAdmin, async (req, res) => {
+  try {
+    const [logoBase64, contentType] = await Promise.all([
+      systemConfig.getValue(systemConfig.KEYS.MAIL_LOGO_BASE64),
+      systemConfig.getValue(systemConfig.KEYS.MAIL_LOGO_CONTENT_TYPE),
+    ]);
+    if (!logoBase64) return res.status(404).json({ success: false, message: 'Aucun logo configuré' });
+    res.setHeader('Content-Type', contentType || 'image/png');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(Buffer.from(logoBase64, 'base64'));
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // PUT /api/reassort/mail-signature - met à jour le texte de signature (body: { signatureText }).
 router.put('/mail-signature', requireAdmin, async (req, res) => {
   try {

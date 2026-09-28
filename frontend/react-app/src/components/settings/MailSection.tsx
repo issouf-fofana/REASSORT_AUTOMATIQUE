@@ -302,6 +302,8 @@ function SignatureSection() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [logoVersion, setLogoVersion] = useState(0);
 
   async function load() {
     try {
@@ -316,6 +318,41 @@ function SignatureSection() {
   useEffect(() => {
     load();
   }, []);
+
+  // Aperçu visuel du logo actuellement configuré (demande du 28/09/2026 : "le logo ne change pas
+  // [...] je veux le logo en noir/blanc" — la page n'affichait jusqu'ici qu'un texte "logo
+  // configuré", sans jamais montrer QUEL logo, rendant impossible de vérifier visuellement un
+  // changement). La route est protégée (requireAdmin), donc pas de simple <img src="...">, qui ne
+  // transmettrait aucun token — l'image est récupérée en blob via fetch authentifié puis convertie
+  // en URL locale. Révoquée à chaque rechargement pour ne jamais accumuler d'URLs blob orphelines.
+  useEffect(() => {
+    if (!signature?.hasLogo) {
+      setLogoPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const token = window.reassortGetToken() || '';
+        const apiBase = (window.REASSORT_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:3001`) + '/api';
+        const res = await fetch(`${apiBase}/reassort/mail-signature/logo`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLogoPreviewUrl(objectUrl);
+      } catch {
+        // best-effort : un échec laisse simplement l'aperçu absent, le texte "logo configuré" reste
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [signature?.hasLogo, logoVersion]);
 
   async function handleSaveText() {
     setSaving(true);
@@ -355,6 +392,7 @@ function SignatureSection() {
       const json: { success: boolean; message?: string } = await res.json();
       if (!json.success) throw new Error(json.message);
       setSuccess('Logo mis à jour.');
+      setLogoVersion((v) => v + 1);
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -399,7 +437,19 @@ function SignatureSection() {
               </button>
             )}
           </div>
-          {signature.hasLogo && <div className="form-text text-success">✓ Un logo est actuellement configuré.</div>}
+          {signature.hasLogo && (
+            <div className="mt-2">
+              {logoPreviewUrl ? (
+                <img
+                  src={logoPreviewUrl}
+                  alt="Logo de signature email actuel"
+                  style={{ maxHeight: 80, maxWidth: 200, border: '1px solid #e5e5e5', padding: 8, background: '#ffffff' }}
+                />
+              ) : (
+                <div className="form-text text-success">Un logo est actuellement configuré (chargement de l'aperçu...).</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mb-3">
