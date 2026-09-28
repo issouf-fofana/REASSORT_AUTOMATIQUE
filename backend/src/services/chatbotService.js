@@ -989,7 +989,18 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // enregistre déjà automatiquement ce cas comme suggestion, donc la réponse doit le refléter
     // honnêtement plutôt que de laisser une formulation vague ("les données ne contiennent pas...").
     if (toolResult.found === false) {
-      dataSection += `\n\nIMPORTANT : cet outil n'a pas trouvé la donnée demandée (found: false, voir le message ci-dessus pour la raison précise). Dis-le clairement à l'utilisateur avec cette raison précise (jamais une formule vague type "les données fournies ne contiennent pas..."), PUIS ajoute que cette limite a été notée et sera examinée par l'équipe, qui pourra alerter l'utilisateur par email une fois disponible — ne dis jamais que la fonctionnalité existe déjà ou qu'elle sera disponible à une date précise que tu ne connais pas.`;
+      // Renforcé le 28/09/2026 (retour utilisateur sur la formulation exacte souhaitée) : la réponse
+      // doit dire explicitement que le système est encore en développement sur ce point précis (pas
+      // juste "je n'ai pas la donnée", qui laisse croire à une simple absence ponctuelle), ET demander
+      // à l'utilisateur les précisions qui manquent pour que la demande transmise à l'équipe soit
+      // exploitable (cohérent avec maybeTrackFeatureRequest, qui pose déjà une clarifyingQuestion
+      // quand le besoin est réel mais trop vague pour être enregistré tel quel).
+      dataSection += `\n\nIMPORTANT : cet outil n'a pas trouvé la donnée demandée (found: false, voir le message ci-dessus pour la raison précise). Dans ta réponse :
+1) Explique clairement CETTE raison précise (jamais une formule vague type "les données fournies ne contiennent pas...").
+2) Dis que cette fonctionnalité/donnée n'est pas encore disponible car le système est encore en phase de développement sur ce point.
+3) Si des précisions de l'utilisateur permettraient de mieux cerner son besoin (ex: quel article, quelle période, quel type d'information exactement), pose-lui UNE question précise pour les obtenir.
+4) Termine en indiquant que ce besoin a été noté et sera transmis à l'équipe pour ajout ou amélioration, qui pourra alerter l'utilisateur par email une fois disponible.
+Ne dis jamais que la fonctionnalité existe déjà ou qu'elle sera disponible à une date précise que tu ne connais pas.`;
     }
     // Question à deux intentions dans la même phrase (demande du 27/09/2026, bug signalé : "le CA de
     // cet article et son stock ?" ne répondait qu'au CA) — le second résultat est donné en texte
