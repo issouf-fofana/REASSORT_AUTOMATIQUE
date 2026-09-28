@@ -84,6 +84,8 @@ interface ModelsModalState {
   loading: boolean;
   error: string | null;
   models: AiModelOption[];
+  testingModel: string | null;
+  testResults: Record<string, { success: boolean; message: string }>;
 }
 
 function AiKeysCard() {
@@ -150,12 +152,36 @@ function AiKeysCard() {
   }
 
   async function handleOpenModels(k: AiKey) {
-    setModelsModal({ keyId: k.id, keyLabel: k.label, currentModel: k.model || k.effectiveModel || '', loading: true, error: null, models: [] });
+    const currentModel = k.model || k.effectiveModel || '';
+    setModelsModal({ keyId: k.id, keyLabel: k.label, currentModel, loading: true, error: null, models: [], testingModel: null, testResults: {} });
     try {
       const models = await apiFetch<AiModelOption[]>(`/reassort/ai/keys/${k.id}/models`);
-      setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, models } : prev));
+      // Le modèle actuellement utilisé remonte en tête de liste (demande du 28/09/2026 : l'ordre
+      // brut renvoyé par le fournisseur le noyait au milieu de dizaines d'entrées, invisible sans
+      // scroller) — le reste garde l'ordre d'origine.
+      const sorted = [...models].sort((a, b) => (a.id === currentModel ? -1 : b.id === currentModel ? 1 : 0));
+      setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, models: sorted } : prev));
     } catch (err) {
       setModelsModal((prev) => (prev && prev.keyId === k.id ? { ...prev, loading: false, error: (err as Error).message } : prev));
+    }
+  }
+
+  async function handleTestModel(modelId: string) {
+    if (!modelsModal) return;
+    setModelsModal((prev) => (prev ? { ...prev, testingModel: modelId } : prev));
+    try {
+      const data = await apiFetch<{ durationMs: number }>(`/reassort/ai/keys/${modelsModal.keyId}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId }),
+      });
+      setModelsModal((prev) =>
+        prev ? { ...prev, testingModel: null, testResults: { ...prev.testResults, [modelId]: { success: true, message: `OK — ${data.durationMs} ms` } } } : prev,
+      );
+    } catch (err) {
+      setModelsModal((prev) =>
+        prev ? { ...prev, testingModel: null, testResults: { ...prev.testResults, [modelId]: { success: false, message: (err as Error).message } } } : prev,
+      );
     }
   }
 
@@ -405,8 +431,9 @@ function AiKeysCard() {
                 </div>
                 <div className="modal-body">
                   <p className="text-muted small">
-                    Liste récupérée en direct depuis le fournisseur avec cette clé API. Cochez un modèle pour en
-                    faire le modèle utilisé par cette clé.
+                    Liste récupérée en direct depuis le fournisseur avec cette clé API (modèle actuellement utilisé
+                    en tête). Cochez un modèle pour en faire le modèle utilisé par cette clé, ou testez-le d'abord
+                    sans rien changer.
                   </p>
                   {modelsModal.loading && <div className="text-center text-muted py-3">Chargement...</div>}
                   {modelsModal.error && <div className="alert alert-danger">{modelsModal.error}</div>}
@@ -418,34 +445,60 @@ function AiKeysCard() {
                             <th style={{ width: 40 }}></th>
                             <th>Modèle</th>
                             <th>Libellé</th>
+                            <th></th>
                           </tr>
                         </thead>
                         <tbody>
                           {modelsModal.models.length === 0 ? (
                             <tr>
-                              <td colSpan={3} className="text-center text-muted py-3">Aucun modèle trouvé pour cette clé.</td>
+                              <td colSpan={4} className="text-center text-muted py-3">Aucun modèle trouvé pour cette clé.</td>
                             </tr>
                           ) : (
-                            modelsModal.models.map((m) => (
-                              <tr
-                                key={m.id}
-                                role="button"
-                                className={m.id === modelsModal.currentModel ? 'table-success' : undefined}
-                                onClick={() => !savingModel && m.id !== modelsModal.currentModel && handleSelectModel(m.id)}
-                              >
-                                <td>
-                                  <input
-                                    type="radio"
-                                    className="form-check-input"
-                                    checked={m.id === modelsModal.currentModel}
-                                    disabled={savingModel}
-                                    onChange={() => handleSelectModel(m.id)}
-                                  />
-                                </td>
-                                <td className="font-monospace small">{m.id}</td>
-                                <td className="text-muted small">{m.label || '—'}</td>
-                              </tr>
-                            ))
+                            modelsModal.models.map((m) => {
+                              const testResult = modelsModal.testResults[m.id];
+                              return (
+                                <tr key={m.id} className={m.id === modelsModal.currentModel ? 'table-success' : undefined}>
+                                  <td role="button" onClick={() => !savingModel && m.id !== modelsModal.currentModel && handleSelectModel(m.id)}>
+                                    <input
+                                      type="radio"
+                                      className="form-check-input"
+                                      checked={m.id === modelsModal.currentModel}
+                                      disabled={savingModel}
+                                      onChange={() => handleSelectModel(m.id)}
+                                    />
+                                  </td>
+                                  <td
+                                    className="font-monospace small"
+                                    role="button"
+                                    onClick={() => !savingModel && m.id !== modelsModal.currentModel && handleSelectModel(m.id)}
+                                  >
+                                    {m.id}
+                                  </td>
+                                  <td
+                                    className="text-muted small"
+                                    role="button"
+                                    onClick={() => !savingModel && m.id !== modelsModal.currentModel && handleSelectModel(m.id)}
+                                  >
+                                    {m.label || '—'}
+                                  </td>
+                                  <td className="text-end">
+                                    {testResult && (
+                                      <span className={`badge me-2 ${testResult.success ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}`} title={testResult.message}>
+                                        {testResult.success ? testResult.message : 'Échec'}
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-info"
+                                      disabled={modelsModal.testingModel === m.id}
+                                      onClick={() => handleTestModel(m.id)}
+                                    >
+                                      {modelsModal.testingModel === m.id ? 'Test...' : 'Tester'}
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>

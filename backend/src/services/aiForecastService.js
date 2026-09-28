@@ -587,7 +587,11 @@ function callWithFallback(prompt, context) {
  * sans toucher à une proposition ni à AiForecastRun — juste pour vérifier que la clé est valide et
  * que le fournisseur répond, avant de s'en servir sur une vraie analyse.
  */
-async function testProviderKey(keyId) {
+// `overrideModel` (demande du 28/09/2026 : "il dois me donner la possibilité de tester les modèles"
+// depuis la modale "Modèles") : teste un modèle précis SANS l'enregistrer comme modèle de la clé ni
+// toucher lastUsedAt/lastError — un essai sur un modèle qu'on n'a pas encore retenu ne doit jamais
+// fausser le statut affiché pour le modèle réellement en service.
+async function testProviderKey(keyId, overrideModel) {
   const key = await prisma.aiProviderKey.findUnique({ where: { id: keyId } });
   if (!key) throw new Error('Clé introuvable');
 
@@ -595,22 +599,27 @@ async function testProviderKey(keyId) {
   if (!caller) throw new Error(`Fournisseur "${key.provider}" non supporté`);
 
   const testPrompt = 'Réponds UNIQUEMENT avec ce tableau JSON, sans texte autour : [{"ean": "TEST", "quantity": 1, "reasoning": "ok"}]';
+  const modelToTest = overrideModel || key.model;
 
   try {
     const apiKey = crypto.decrypt(key.encryptedApiKey);
     const start = Date.now();
-    const result = await caller(apiKey, key.model, testPrompt);
+    const result = await caller(apiKey, modelToTest, testPrompt);
     const durationMs = Date.now() - start;
-    await prisma.aiProviderKey.update({
-      where: { id: keyId },
-      data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
-    });
+    if (!overrideModel) {
+      await prisma.aiProviderKey.update({
+        where: { id: keyId },
+        data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
+      });
+    }
     return { success: true, durationMs, sample: result };
   } catch (err) {
-    await prisma.aiProviderKey.update({
-      where: { id: keyId },
-      data: { lastError: err.message, lastErrorAt: new Date() },
-    }).catch(() => {});
+    if (!overrideModel) {
+      await prisma.aiProviderKey.update({
+        where: { id: keyId },
+        data: { lastError: err.message, lastErrorAt: new Date() },
+      }).catch(() => {});
+    }
     throw err;
   }
 }

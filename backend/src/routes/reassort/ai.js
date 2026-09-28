@@ -107,9 +107,11 @@ router.delete('/ai/keys/:id', requireAdmin, async (req, res) => {
 });
 
 // POST /api/reassort/ai/keys/:id/test - teste une clé isolément (prompt minimal), sans proposition
+// Body optionnel { model } : teste ce modèle précis sans l'enregistrer comme modèle de la clé
+// (demande du 28/09/2026, bouton "Tester" par ligne dans la modale "Modèles").
 router.post('/ai/keys/:id/test', requireAdmin, async (req, res) => {
   try {
-    const result = await aiForecastService.testProviderKey(req.params.id);
+    const result = await aiForecastService.testProviderKey(req.params.id, req.body?.model || undefined);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
