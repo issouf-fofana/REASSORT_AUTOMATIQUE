@@ -732,6 +732,10 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // l'utilisateur — jamais un magasin arbitraire, exposé à quelqu'un qui n'y a pas droit.
   const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock']);
   let effectiveShopId = rposShopId;
+  // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
+  // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
+  // CIBLÉ doit interroger SON serveur, jamais celui du magasin d'où la question a été posée.
+  let effectivePosId = posId;
   let targetShopLabel = null;
   if (TARGETABLE_SHOP_TOOLS.has(toolName) && user && (user.role === 'ADMIN' || user.role === 'SUPERVISOR')) {
     const targetReference = extractTargetShopReference(question);
@@ -740,6 +744,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       const targetShop = await prisma.shop.findFirst({ where: { reference: targetReference, rposShopId: { in: allowedShopIds } } });
       if (targetShop) {
         effectiveShopId = targetShop.rposShopId;
+        effectivePosId = targetShop.rposPosId;
         targetShopLabel = `${targetShop.reference} ${targetShop.name}`;
       }
     }
@@ -916,7 +921,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: daysQuery || 30, department }) };
       case 'getArticleStock': {
         if (!ean) return { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
-        const stockResult = await tools.getArticleStock(effectiveShopId, ean);
+        const stockResult = await tools.getArticleStock(effectiveShopId, ean, effectivePosId);
         return { toolName, toolResult: targetShopLabel ? { ...stockResult, targetShopLabel } : stockResult };
       }
       case 'getArticleStockAllShops': {
@@ -924,7 +929,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // Même repli que getRevenueAllShops : un compte à un seul magasin fixe retombe
         // silencieusement sur SON magasin seul plutôt que sur une erreur.
         if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
-          return { toolName: 'getArticleStock', toolResult: await tools.getArticleStock(rposShopId, ean) };
+          return { toolName: 'getArticleStock', toolResult: await tools.getArticleStock(rposShopId, ean, posId) };
         }
         const allowedShopIds = user.role === 'ADMIN'
           ? (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId)

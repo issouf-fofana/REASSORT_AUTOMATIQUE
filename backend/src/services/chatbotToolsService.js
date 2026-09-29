@@ -138,35 +138,69 @@ async function getStoreStock(rposShopId, { department } = {}) {
 }
 
 /** getArticleStock(ean) — détail d'un article précis. */
-async function getArticleStock(rposShopId, ean) {
+/**
+ * getArticleStock(rposShopId, ean, posId) — posId optionnel (29/09/2026) : quand l'article n'est
+ * pas dans la dernière proposition (très fréquent — pas forcément dans le Pareto retenu), un appel
+ * RPOS direct donne le VRAI stock actuel plutôt que de répondre "introuvable" alors que l'article
+ * existe bel et bien dans le magasin (bug réel signalé : "stock de cet article dans le magasin 110 ?"
+ * répondait "introuvable" alors que l'article est bien au catalogue RPOS de ce magasin, juste absent
+ * de sa dernière proposition). Sans posId (repli, anciens appelants), garde l'ancien comportement.
+ */
+async function getArticleStock(rposShopId, ean, posId) {
   const proposal = await getLatestProposal(rposShopId);
-  if (!proposal) return { found: false, message: 'Aucune proposition générée pour ce magasin.' };
+  const line = proposal
+    ? await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } })
+    : null;
 
-  const line = await prisma.proposalLine.findFirst({
-    where: { proposalId: proposal.id, ean },
-  });
-  // Cas très fréquent et normal (29/09/2026) : un article absent de la dernière proposition n'est
-  // PAS une lacune du système — il n'est simplement pas dans le Pareto retenu pour ce magasin, ou la
-  // proposition ne couvre pas tout le catalogue. isNormalNegative signale au prompt de ne jamais
-  // traiter ce cas comme "fonctionnalité en développement" à noter pour l'équipe (contrairement à
-  // "Aucune proposition générée", une vraie absence de données à signaler).
-  if (!line) return { found: false, message: `Article ${ean} introuvable dans la dernière proposition.`, isNormalNegative: true };
+  if (line) {
+    return {
+      found: true,
+      ean: line.ean,
+      label: line.label,
+      department: line.department,
+      sector: line.sector,
+      stock: line.stockAtGeneration,
+      avgWeeklySales: line.avgWeeklySales,
+      daysUntilStockout: line.daysUntilStockout,
+      quantitySuggested: line.quantitySuggested,
+      aiAdjusted: line.aiAdjusted,
+      aiReasoning: line.aiReasoning,
+      trendCategory: line.trendCategory,
+      anomalies: line.anomalies ? JSON.parse(line.anomalies) : [],
+      source: 'proposal',
+    };
+  }
 
-  return {
-    found: true,
-    ean: line.ean,
-    label: line.label,
-    department: line.department,
-    sector: line.sector,
-    stock: line.stockAtGeneration,
-    avgWeeklySales: line.avgWeeklySales,
-    daysUntilStockout: line.daysUntilStockout,
-    quantitySuggested: line.quantitySuggested,
-    aiAdjusted: line.aiAdjusted,
-    aiReasoning: line.aiReasoning,
-    trendCategory: line.trendCategory,
-    anomalies: line.anomalies ? JSON.parse(line.anomalies) : [],
-  };
+  // Repli RPOS direct : article absent de la dernière proposition (ou aucune proposition du tout),
+  // mais peut-être bien réel dans ce magasin — jamais conclure "introuvable" sans avoir vérifié RPOS
+  // quand posId est disponible.
+  if (posId) {
+    try {
+      const product = await rpos.getProductByEan(posId, rposShopId, ean);
+      if (product) {
+        return {
+          found: true,
+          ean: product.ean,
+          label: product.label_1 || null,
+          stock: toNum(product.stock),
+          source: 'rpos',
+          // Pas dans la dernière proposition : signalé explicitement pour que le LLM ne présente
+          // jamais ce stock RPOS brut comme "la quantité proposée à la commande" (deux notions
+          // différentes — ce stock est juste informatif ici, aucun calcul de réassort n'y est associé).
+          notInLatestProposal: true,
+        };
+      }
+    } catch {
+      // Échec réseau RPOS ponctuel : retombe sur le message "introuvable" ci-dessous plutôt que de
+      // faire planter la conversation pour cette seule tentative de repli.
+    }
+  }
+
+  // Cas très fréquent et normal (29/09/2026) : un article absent de la dernière proposition ET du
+  // catalogue RPOS accessible (ou posId indisponible) n'est PAS une lacune du système — isNormalNegative
+  // signale au prompt de ne jamais traiter ce cas comme "fonctionnalité en développement" à noter pour
+  // l'équipe (contrairement à un vrai found:false sans marqueur, une vraie absence à signaler).
+  return { found: false, message: `Article ${ean} introuvable dans la dernière proposition${posId ? ' ni dans le catalogue RPOS de ce magasin' : ''}.`, isNormalNegative: true };
 }
 
 /**
