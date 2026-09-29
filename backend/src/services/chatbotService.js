@@ -1061,7 +1061,16 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // simple absence de résultat à expliquer techniquement : shouldTrackFeatureRequest (plus bas)
     // enregistre déjà automatiquement ce cas comme suggestion, donc la réponse doit le refléter
     // honnêtement plutôt que de laisser une formulation vague ("les données ne contiennent pas...").
-    if (toolResult.found === false) {
+    if (toolResult.found === false && toolResult.lastKnownMoveDate !== undefined) {
+      // Cas ajouté le 29/09/2026 (getStockMoveHistory) : found:false MAIS avec une vraie info
+      // exploitable (lastKnownMoveDate/lastKnownMoveType, ou null si vraiment aucun historique nulle
+      // part) — ce n'est PAS une lacune fonctionnelle, c'est une réponse négative complète et honnête
+      // pour la fenêtre demandée. Ne JAMAIS dire "en phase de développement"/"noté pour l'équipe" ici,
+      // ça laisserait croire à tort qu'une fonctionnalité manque alors que la donnée a bien été
+      // cherchée et trouvée (ou vraiment absente de tout historique, ce que lastKnownMoveDate: null
+      // signale déjà).
+      dataSection += `\n\nAucun résultat sur la fenêtre demandée, mais le champ lastKnownMoveDate ci-dessus donne la date du dernier événement connu réellement recherché (ou null si aucun historique n'existe nulle part pour cet article) — utilise cette date directement dans ta réponse, ne dis JAMAIS "en phase de développement" ou "besoin noté pour l'équipe" ici : ce n'est pas un manque de fonctionnalité, juste une absence de données récentes sur la période précise demandée.`;
+    } else if (toolResult.found === false) {
       // Renforcé le 28/09/2026 (retour utilisateur sur la formulation exacte souhaitée) : la réponse
       // doit dire explicitement que le système est encore en développement sur ce point précis (pas
       // juste "je n'ai pas la donnée", qui laisse croire à une simple absence ponctuelle), ET demander
@@ -1246,8 +1255,14 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // qui a RÉELLEMENT répondu (found true, ou found absent pour les outils qui ne l'utilisent pas)
   // ne déclenche toujours pas le suivi — seul un found:false explicite (ou l'absence totale d'outil)
   // compte comme une lacune à faire remonter.
-  const toolFoundNothing = effectiveToolResult && typeof effectiveToolResult === 'object' && effectiveToolResult.found === false;
-  const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothing) && !reusedFromHistory;
+  // lastKnownMoveDate (29/09/2026, getStockMoveHistory) : un found:false qui porte quand même une
+  // vraie information exploitable ("rien sur la fenêtre demandée, mais voici la dernière donnée
+  // connue") n'est PAS une lacune fonctionnelle à faire remonter à l'équipe — c'est une réponse
+  // négative complète et honnête, pas un manque de données/outil. Ne compte jamais comme rejet à
+  // noter, contrairement à un found:false sans aucune piste (ex: "article introuvable").
+  const toolFoundNothingButUseless = effectiveToolResult && typeof effectiveToolResult === 'object'
+    && effectiveToolResult.found === false && effectiveToolResult.lastKnownMoveDate === undefined;
+  const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothingButUseless) && !reusedFromHistory;
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête

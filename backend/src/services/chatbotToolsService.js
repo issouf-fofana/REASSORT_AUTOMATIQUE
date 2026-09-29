@@ -972,7 +972,28 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
     posId, shopId, ean, dateStart.toISOString(), dateEnd.toISOString(),
   );
   if (!summary.totalMoves) {
-    return { found: false, message: `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours.` };
+    // Rien sur la fenêtre récente (souvent 14j par défaut) : chercher le tout dernier mouvement
+    // connu, sans limite de temps, pour donner une vraie date plutôt qu'un silence qui laisse croire
+    // à tort qu'aucune donnée n'existe DU TOUT pour cet article (bug réel signalé le 29/09/2026 : un
+    // article dont le dernier mouvement remontait à plus d'un mois répondait "en développement",
+    // trompeur — la donnée existe, elle est juste antérieure à la fenêtre par défaut).
+    const veryOldStart = new Date('2000-01-01').toISOString();
+    let lastKnownMove = null;
+    try {
+      const allMoves = await rpos.getStockMovesForProduct(posId, shopId, ean, veryOldStart, dateEnd.toISOString(), { limit: 1 });
+      lastKnownMove = allMoves[0] || null;
+    } catch {
+      // Repli best-effort : un échec ici ne doit jamais empêcher de répondre au moins la formule
+      // honnête "aucun mouvement récent", jamais planter toute la conversation pour ce seul détail.
+    }
+    return {
+      found: false,
+      message: lastKnownMove
+        ? `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours. Le dernier mouvement connu remonte au ${lastKnownMove.date.slice(0, 10)} (${lastKnownMove.typeLabel}).`
+        : `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours, ni dans l'historique disponible.`,
+      lastKnownMoveDate: lastKnownMove ? lastKnownMove.date : null,
+      lastKnownMoveType: lastKnownMove ? lastKnownMove.typeLabel : null,
+    };
   }
   return { found: true, days, ...summary };
 }
