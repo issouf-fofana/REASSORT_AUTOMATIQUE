@@ -71,11 +71,17 @@
     return container;
   }
 
-  window.reassortToast = function (message, type) {
+  // onClick optionnel (29/09/2026, demande explicite : "quand je clique il doit m'envoyer sur
+  // l'alerte") — navigue vers une page au clic sur le corps du toast, sans déclencher la navigation
+  // si l'utilisateur cliquait juste sur le bouton fermer. Auto-dismiss allongé pour un toast
+  // cliquable : une alerte qu'on veut pouvoir suivre mérite plus de temps à l'écran qu'un simple
+  // message de confirmation qui s'efface après lecture.
+  window.reassortToast = function (message, type, onClick) {
     type = ICONS[type] ? type : 'info';
     const container = ensureContainer();
     const toast = document.createElement('div');
     toast.className = 'reassort-toast reassort-toast-' + type;
+    if (onClick) toast.style.cursor = 'pointer';
     toast.innerHTML =
       '<span class="reassort-toast-icon">' + ICONS[type] + '</span>' +
       '<span></span>' +
@@ -87,8 +93,17 @@
       toast.classList.add('hide');
       setTimeout(function () { toast.remove(); }, 200);
     }
-    toast.querySelector('.reassort-toast-close').addEventListener('click', dismiss);
-    setTimeout(dismiss, AUTO_DISMISS_MS);
+    toast.querySelector('.reassort-toast-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      dismiss();
+    });
+    if (onClick) {
+      toast.addEventListener('click', function () {
+        onClick();
+        dismiss();
+      });
+    }
+    setTimeout(dismiss, onClick ? AUTO_DISMISS_MS * 2 : AUTO_DISMISS_MS);
   };
 
   /**

@@ -92,13 +92,32 @@
     }
   }
 
+  // Contexte audio partagé, créé une seule fois (29/09/2026, bug signalé : le son ne jouait jamais)
+  // — la plupart des navigateurs bloquent tout son tant qu'aucune interaction utilisateur n'a eu
+  // lieu sur la page ("autoplay policy"), et un AudioContext recréé à chaque appel reste "suspended"
+  // indéfiniment si créé AVANT cette interaction. On le crée dès le premier clic n'importe où sur la
+  // page (quasi certain d'arriver avant la première alerte réelle) et on le réutilise ensuite pour
+  // jouer réellement les bips, au lieu d'en créer un nouveau (et bloqué) à chaque alerte.
+  let sharedAudioCtx = null;
+  function unlockAudioContext() {
+    if (sharedAudioCtx) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    sharedAudioCtx = new AudioCtx();
+    // Certains navigateurs créent le contexte encore "suspended" même après une interaction —
+    // resume() explicite pour lever ce cas plutôt que de supposer qu'il est toujours "running".
+    if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(function () {});
+  }
+  document.addEventListener('click', unlockAudioContext, { once: true });
+  document.addEventListener('keydown', unlockAudioContext, { once: true });
+
   function playAlertSound() {
     // Bip généré via Web Audio API (pas de fichier audio à héberger/charger) — deux notes brèves,
     // suffisant pour attirer l'attention sans être une sonnerie agressive.
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      if (!sharedAudioCtx) return; // aucune interaction utilisateur encore eue sur cette page/session
+      if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(function () {});
+      const ctx = sharedAudioCtx;
       [880, 660].forEach(function (freq, i) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -111,8 +130,8 @@
         osc.stop(ctx.currentTime + i * 0.18 + 0.16);
       });
     } catch {
-      // Web Audio bloqué (politique navigateur avant toute interaction utilisateur, ou
-      // navigateur trop ancien) : le toast visuel reste affiché même sans le son.
+      // Web Audio bloqué (navigateur trop ancien, ou politique encore plus stricte) : le toast
+      // visuel reste affiché même sans le son.
     }
   }
 
@@ -133,7 +152,11 @@
         const message = newOnes.length === 1
           ? 'Nouveau constat critique : ' + newOnes[0].title
           : newOnes.length + ' nouveaux constats critiques détectés (Qualité & IA).';
-        window.reassortToast(message, 'error');
+        // Clic sur le toast (29/09/2026, demande explicite : "il doit m'envoyer sur l'alerte") ->
+        // page Qualité & IA, onglet Améliorations, filtré directement sur les critiques proposées.
+        window.reassortToast(message, 'error', function () {
+          window.location.href = '/ai-quality#tab-improvements';
+        });
       }
 
       items.forEach(function (it) { seen.add(it.id); });
