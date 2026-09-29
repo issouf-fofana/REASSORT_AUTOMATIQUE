@@ -561,20 +561,31 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
 
   // Part de CA de chaque article dans le CA total du magasin, sur une période de référence
   // configurable indépendante de la période d'analyse Pareto (ex: hier, même si le Pareto est
-  // calculé sur 30 jours). revenueShareEnd == period.end toujours (juste au-dessus) : la fenêtre
-  // de référence est donc systématiquement une sous-partie de la FIN de la période Pareto — déjà
-  // entièrement comprise dans `lines` tant que revenueShareDays <= periodDays (cas normal ; le
-  // seul cas où ça ne tiendrait pas serait une config de revenueSharePeriodDays absurdement plus
-  // longue que la période Pareto elle-même). On filtre donc `lines` en mémoire par date au lieu de
+  // calculé sur 30 jours). revenueShareEnd == la VEILLE de period.end (cf. commentaire ci-dessous) :
+  // la fenêtre de référence est donc une sous-partie de la période Pareto tant que celle-ci couvre
+  // au moins 2 jours (cas normal ; le seul cas où ça ne tiendrait pas serait une config de
+  // revenueSharePeriodDays absurdement plus longue que la période Pareto elle-même, ou une période
+  // Pareto d'un seul jour comme YESTERDAY). On filtre donc `lines` en mémoire par date au lieu de
   // refaire un second appel (RPOS ou base) qui redemanderait exactement les mêmes ventes.
   // La fenêtre de référence s'aligne sur des jours CALENDAIRES pleins (00:00 → 23:59:59), pas sur
   // une simple soustraction de millisecondes depuis period.end : sinon "1 jour" glissant depuis une
   // vente à 10:42 donnait une fenêtre à cheval sur deux jours (ex: 14/09 10:42 → 15/09 10:42) au
   // lieu du vrai "hier" 00:00-23:59 attendu par l'utilisateur (demande du 15/09/2026).
+  // Ancré sur la VEILLE du dernier jour de la période (pas ce dernier jour lui-même), demande du
+  // 29/09/2026 : le dernier jour de la période Pareto coïncide souvent avec le jour de la
+  // génération elle-même, donc un jour EN COURS/partiel (ex: proposition générée à 09h54 ne
+  // reflétant que les ventes jusqu'à 09h29 de CE jour) — un CA "du jour" figé à un instant donné
+  // était systématiquement sous-évalué par rapport au vrai total de la journée, et faisait croire à
+  // tort à une chute de CA. La veille est toujours une journée CALENDAIRE COMPLÈTE et terminée,
+  // jamais partielle, cohérent avec ce que "Ventes synchronisées" montre déjà pour le jour en cours.
   const revenueShareDays = config.revenueSharePeriodDays || 1;
   const periodEndDate = new Date(period.end);
-  const revenueShareEndDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate(), 23, 59, 59));
-  const revenueShareStartDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate() - (revenueShareDays - 1), 0, 0, 0));
+  // Pas de décalage supplémentaire si la période Pareto elle-même ne couvre qu'un seul jour (mode
+  // YESTERDAY, ou une période CUSTOM d'un jour) : period.end EST déjà "hier" dans ce cas, le décaler
+  // encore d'un jour donnerait à tort l'avant-veille.
+  const dayOffset = periodDays <= 1 ? 0 : 1;
+  const revenueShareEndDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate() - dayOffset, 23, 59, 59));
+  const revenueShareStartDay = new Date(Date.UTC(periodEndDate.getUTCFullYear(), periodEndDate.getUTCMonth(), periodEndDate.getUTCDate() - dayOffset - (revenueShareDays - 1), 0, 0, 0));
   const revenueShareEnd = revenueShareEndDay.toISOString().slice(0, 19);
   const revenueShareStart = revenueShareStartDay.toISOString().slice(0, 19);
 
@@ -582,7 +593,15 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   if (revenueShareDays !== periodDays) {
     if (revenueShareDays < periodDays) {
       const revenueShareStartMs = new Date(revenueShareStart).getTime();
-      revenueShareLines = lines.filter((l) => new Date(l.date).getTime() >= revenueShareStartMs);
+      const revenueShareEndMs = new Date(revenueShareEnd).getTime();
+      // Borne de fin explicite (29/09/2026, ajoutée avec le décalage vers la veille) : sans elle, ce
+      // filtre incluait aussi les ventes du dernier jour de la période Pareto (aujourd'hui, souvent
+      // partiel) en plus de la veille demandée — `lines` couvre toute la période Pareto, jusqu'à
+      // `period.end` inclus, jamais seulement jusqu'à `revenueShareEnd`.
+      revenueShareLines = lines.filter((l) => {
+        const t = new Date(l.date).getTime();
+        return t >= revenueShareStartMs && t <= revenueShareEndMs;
+      });
     } else {
       // Fenêtre de référence plus longue que la période Pareto elle-même : cas hors norme non
       // couvert par `lines`, on retombe alors sur un appel dédié comme avant.
