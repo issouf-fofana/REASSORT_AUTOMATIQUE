@@ -14,6 +14,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: 'Google Gemini',
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
+  nvidia: 'NVIDIA NIM',
 };
 
 interface AiKey {
@@ -369,6 +370,7 @@ function AiKeysCard() {
                       <option value="gemini">Google Gemini</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic (Claude)</option>
+                      <option value="nvidia">NVIDIA NIM</option>
                     </select>
                   </div>
                   <div className="mb-3">

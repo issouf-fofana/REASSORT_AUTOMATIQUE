@@ -28,7 +28,13 @@ const DEFAULT_MODEL_BY_PROVIDER = {
   gemini: 'gemini-3.6-flash',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-5-haiku-latest',
+  // NVIDIA NIM (ajouté le 29/09/2026) : API compatible OpenAI (même format requête/réponse), mais
+  // hébergée sur un domaine et un catalogue de modèles différents — jamais confondre avec OpenAI
+  // lui-même. openai/gpt-oss-20b testé et confirmé fonctionnel comme défaut léger/rapide.
+  nvidia: 'openai/gpt-oss-20b',
 };
+
+const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
 /**
  * Construit le résumé statistique envoyé au LLM pour un article : les mêmes indicateurs déjà
@@ -315,6 +321,35 @@ async function callOpenAi(apiKey, model, prompt, usageCtx) {
   return parseJsonArrayFromText(text);
 }
 
+/**
+ * NVIDIA NIM (ajouté le 29/09/2026) : API compatible OpenAI (même endpoint /chat/completions, même
+ * forme de requête/réponse), seuls le domaine et le catalogue de modèles diffèrent — réutilise donc
+ * le même parsing que callOpenAi/streamOpenAi, pas une implémentation dupliquée à maintenir en double.
+ */
+async function callNvidia(apiKey, model, prompt, usageCtx) {
+  const res = await fetchWithTimeout(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || DEFAULT_MODEL_BY_PROVIDER.nvidia,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`NVIDIA ${res.status}: ${errText}`);
+  }
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('Réponse NVIDIA vide ou inattendue');
+  recordAiUsage({
+    ...usageCtx, provider: 'nvidia', model: model || DEFAULT_MODEL_BY_PROVIDER.nvidia,
+    promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens,
+  });
+  return parseJsonArrayFromText(text);
+}
+
 async function callAnthropic(apiKey, model, prompt, usageCtx) {
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -339,7 +374,7 @@ async function callAnthropic(apiKey, model, prompt, usageCtx) {
   return parseJsonArrayFromText(text);
 }
 
-const CALLERS = { gemini: callGemini, openai: callOpenAi, anthropic: callAnthropic };
+const CALLERS = { gemini: callGemini, openai: callOpenAi, anthropic: callAnthropic, nvidia: callNvidia };
 
 /**
  * Lit un flux SSE (Server-Sent Events) ligne par ligne depuis chaque fournisseur LLM, et appelle
@@ -478,7 +513,32 @@ async function streamAnthropic(apiKey, model, prompt, onChunk, usageCtx) {
   return fullText;
 }
 
-const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: streamAnthropic };
+/** Variante streamée de callNvidia — même API compatible OpenAI, même parsing SSE que streamOpenAi. */
+async function streamNvidia(apiKey, model, prompt, onChunk, usageCtx) {
+  const res = await fetchWithTimeout(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || DEFAULT_MODEL_BY_PROVIDER.nvidia,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      stream: true,
+      stream_options: { include_usage: true },
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`NVIDIA ${res.status}: ${errText}`);
+  }
+  const { fullText, usage } = await readSseStream(
+    res, (event) => event.choices?.[0]?.delta?.content, onChunk,
+    (event) => (event.usage ? { promptTokens: event.usage.prompt_tokens, completionTokens: event.usage.completion_tokens } : null),
+  );
+  recordAiUsage({ ...usageCtx, provider: 'nvidia', model: model || DEFAULT_MODEL_BY_PROVIDER.nvidia, ...usage });
+  return fullText;
+}
+
+const STREAM_CALLERS = { gemini: streamGemini, openai: streamOpenAi, anthropic: streamAnthropic, nvidia: streamNvidia };
 
 /**
  * Variante streamée de callWithFallback, pour l'analyse en direct d'un seul article : appelle
@@ -672,6 +732,24 @@ async function listModelsForProvider(provider, apiKey) {
     }
     const data = await res.json();
     return (data.data || []).map((m) => ({ id: m.id, label: m.display_name || null }));
+  }
+  if (provider === 'nvidia') {
+    const res = await fetchWithTimeout(`${NVIDIA_BASE_URL}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`NVIDIA ${res.status}: ${errText}`);
+    }
+    const data = await res.json();
+    // Catalogue NVIDIA très large (embeddings, vision, garde-fous de sécurité, traduction...) : ne
+    // garde que les modèles de chat texte plausibles, même logique de filtrage que pour OpenAI —
+    // un modèle embedding/vision-only planterait silencieusement sur nos appels chat.completions.
+    return (data.data || [])
+      .filter((m) => !/embed|vision|guard|safety|translate|reward|clip|reason2|parse/i.test(m.id))
+      .map((m) => ({ id: m.id, label: null }))
+      .sort((a, b) => a.id.localeCompare(b.id));
   }
   throw new Error(`Fournisseur "${provider}" non supporté`);
 }
