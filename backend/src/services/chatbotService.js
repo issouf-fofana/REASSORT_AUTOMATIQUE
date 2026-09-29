@@ -724,13 +724,16 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // Un ADMIN/SUPERVISOR peut cibler UN AUTRE magasin que celui de la session en cours en le nommant
   // explicitement ("le magasin 035 a un CA de combien ?", cf. extractTargetShopReference) — jamais
   // pour un rôle mono-magasin (STORE/DIRECTOR/...), qui reste cloisonné à son unique magasin comme
-  // partout ailleurs. Uniquement pour getRevenue pour l'instant (seul cas demandé le 27/09/2026) ;
-  // extensible à d'autres outils mono-magasin si besoin. rposShopId de la session reste le défaut si
-  // la référence ne correspond à aucun magasin réel ou hors du périmètre autorisé de l'utilisateur —
-  // jamais un magasin arbitraire, exposé à quelqu'un qui n'y a pas droit.
+  // partout ailleurs. Étendu à getArticleStock le 29/09/2026 (bug réel : "quel est le stock de cet
+  // article dans le magasin 110 ?" répondait à tort "article introuvable" — le magasin ciblé n'était
+  // jamais lu, la question restait cantonnée au magasin de la session courante malgré la référence
+  // explicite). Extensible à d'autres outils mono-magasin au besoin. rposShopId de la session reste
+  // le défaut si la référence ne correspond à aucun magasin réel ou hors du périmètre autorisé de
+  // l'utilisateur — jamais un magasin arbitraire, exposé à quelqu'un qui n'y a pas droit.
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock']);
   let effectiveShopId = rposShopId;
   let targetShopLabel = null;
-  if (toolName === 'getRevenue' && user && (user.role === 'ADMIN' || user.role === 'SUPERVISOR')) {
+  if (TARGETABLE_SHOP_TOOLS.has(toolName) && user && (user.role === 'ADMIN' || user.role === 'SUPERVISOR')) {
     const targetReference = extractTargetShopReference(question);
     if (targetReference) {
       const allowedShopIds = await resolveAllowedShopIds(user);
@@ -911,10 +914,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // ventes sans jamais le signaler. Aligné sur les autres cases (getRevenueTrendAllShops,
         // getTopGisements, getRevenueAllShops) qui utilisaient déjà `daysQuery || <défaut>`.
         return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: daysQuery || 30, department }) };
-      case 'getArticleStock':
-        return ean
-          ? { toolName, toolResult: await tools.getArticleStock(rposShopId, ean) }
-          : { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
+      case 'getArticleStock': {
+        if (!ean) return { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
+        const stockResult = await tools.getArticleStock(effectiveShopId, ean);
+        return { toolName, toolResult: targetShopLabel ? { ...stockResult, targetShopLabel } : stockResult };
+      }
       case 'getArticleStockAllShops': {
         if (!ean) return { toolName, toolResult: { found: false, message: "Précisez le code EAN de l'article pour consulter son stock dans tous les magasins." } };
         // Même repli que getRevenueAllShops : un compte à un seul magasin fixe retombe
@@ -1061,15 +1065,15 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // simple absence de résultat à expliquer techniquement : shouldTrackFeatureRequest (plus bas)
     // enregistre déjà automatiquement ce cas comme suggestion, donc la réponse doit le refléter
     // honnêtement plutôt que de laisser une formulation vague ("les données ne contiennent pas...").
-    if (toolResult.found === false && toolResult.lastKnownMoveDate !== undefined) {
-      // Cas ajouté le 29/09/2026 (getStockMoveHistory) : found:false MAIS avec une vraie info
-      // exploitable (lastKnownMoveDate/lastKnownMoveType, ou null si vraiment aucun historique nulle
-      // part) — ce n'est PAS une lacune fonctionnelle, c'est une réponse négative complète et honnête
-      // pour la fenêtre demandée. Ne JAMAIS dire "en phase de développement"/"noté pour l'équipe" ici,
-      // ça laisserait croire à tort qu'une fonctionnalité manque alors que la donnée a bien été
-      // cherchée et trouvée (ou vraiment absente de tout historique, ce que lastKnownMoveDate: null
-      // signale déjà).
-      dataSection += `\n\nAucun résultat sur la fenêtre demandée, mais le champ lastKnownMoveDate ci-dessus donne la date du dernier événement connu réellement recherché (ou null si aucun historique n'existe nulle part pour cet article) — utilise cette date directement dans ta réponse, ne dis JAMAIS "en phase de développement" ou "besoin noté pour l'équipe" ici : ce n'est pas un manque de fonctionnalité, juste une absence de données récentes sur la période précise demandée.`;
+    if (toolResult.found === false && toolResult.isNormalNegative) {
+      // isNormalNegative (29/09/2026, généralisé depuis le cas getStockMoveHistory) : found:false
+      // mais ce n'est PAS une lacune fonctionnelle — une réponse négative complète et honnête
+      // (article simplement absent de la dernière proposition, aucun mouvement sur la fenêtre
+      // demandée...). Ne JAMAIS dire "en phase de développement"/"noté pour l'équipe" ici, ça
+      // laisserait croire à tort qu'une fonctionnalité manque alors que la donnée a bien été cherchée
+      // et que la réponse négative EST la réponse complète. Si un champ comme lastKnownMoveDate/Type
+      // est présent, l'utiliser directement dans la réponse (ex: date du dernier événement connu).
+      dataSection += `\n\nCe found:false est une réponse négative NORMALE et complète (voir le message ci-dessus), pas une lacune du système — ne dis JAMAIS "en phase de développement" ou "besoin noté pour l'équipe" ici. Explique simplement et clairement la raison donnée dans le message, et utilise tout champ complémentaire fourni (ex: dernière date connue) pour enrichir ta réponse si pertinent.`;
     } else if (toolResult.found === false) {
       // Renforcé le 28/09/2026 (retour utilisateur sur la formulation exacte souhaitée) : la réponse
       // doit dire explicitement que le système est encore en développement sur ce point précis (pas
@@ -1255,13 +1259,13 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // qui a RÉELLEMENT répondu (found true, ou found absent pour les outils qui ne l'utilisent pas)
   // ne déclenche toujours pas le suivi — seul un found:false explicite (ou l'absence totale d'outil)
   // compte comme une lacune à faire remonter.
-  // lastKnownMoveDate (29/09/2026, getStockMoveHistory) : un found:false qui porte quand même une
-  // vraie information exploitable ("rien sur la fenêtre demandée, mais voici la dernière donnée
-  // connue") n'est PAS une lacune fonctionnelle à faire remonter à l'équipe — c'est une réponse
-  // négative complète et honnête, pas un manque de données/outil. Ne compte jamais comme rejet à
-  // noter, contrairement à un found:false sans aucune piste (ex: "article introuvable").
+  // isNormalNegative (29/09/2026, généralisé depuis getStockMoveHistory) : un found:false marqué
+  // ainsi est une réponse négative complète et honnête (ex: "article absent de la dernière
+  // proposition", "rien sur la fenêtre demandée mais voici la dernière donnée connue") — PAS une
+  // lacune fonctionnelle à faire remonter à l'équipe. Ne compte jamais comme rejet à noter,
+  // contrairement à un found:false sans marqueur (ex: "aucune proposition générée pour ce magasin").
   const toolFoundNothingButUseless = effectiveToolResult && typeof effectiveToolResult === 'object'
-    && effectiveToolResult.found === false && effectiveToolResult.lastKnownMoveDate === undefined;
+    && effectiveToolResult.found === false && !effectiveToolResult.isNormalNegative;
   const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothingButUseless) && !reusedFromHistory;
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son

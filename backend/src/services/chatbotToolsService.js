@@ -145,7 +145,12 @@ async function getArticleStock(rposShopId, ean) {
   const line = await prisma.proposalLine.findFirst({
     where: { proposalId: proposal.id, ean },
   });
-  if (!line) return { found: false, message: `Article ${ean} introuvable dans la dernière proposition.` };
+  // Cas très fréquent et normal (29/09/2026) : un article absent de la dernière proposition n'est
+  // PAS une lacune du système — il n'est simplement pas dans le Pareto retenu pour ce magasin, ou la
+  // proposition ne couvre pas tout le catalogue. isNormalNegative signale au prompt de ne jamais
+  // traiter ce cas comme "fonctionnalité en développement" à noter pour l'équipe (contrairement à
+  // "Aucune proposition générée", une vraie absence de données à signaler).
+  if (!line) return { found: false, message: `Article ${ean} introuvable dans la dernière proposition.`, isNormalNegative: true };
 
   return {
     found: true,
@@ -993,6 +998,9 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
         : `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours, ni dans l'historique disponible.`,
       lastKnownMoveDate: lastKnownMove ? lastKnownMove.date : null,
       lastKnownMoveType: lastKnownMove ? lastKnownMove.typeLabel : null,
+      // isNormalNegative (29/09/2026, généralisé depuis lastKnownMoveDate) : ce found:false porte une
+      // réponse complète et honnête, jamais une lacune fonctionnelle — voir buildChatbotPrompt.
+      isNormalNegative: true,
     };
   }
   return { found: true, days, ...summary };
