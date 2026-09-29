@@ -64,11 +64,93 @@
     }
   }
 
+  // Alerte active pour les nouveaux constats CRITIQUES (demande du 29/09/2026 : "si erreur vient,
+  // que ça soit une alerte qui s'affiche avec un son, pas juste enregistré silencieusement") —
+  // distinct de loadStaleImprovements ci-dessus (qui ne relance QUE les constats déjà anciens,
+  // jamais au moment de leur création). Un son + toast dès qu'un NOUVEAU constat CRITICAL/PROPOSED
+  // apparaît, jamais répété pour un constat déjà vu par ce navigateur (localStorage, par ID).
+  const SEEN_KEY = 'reassort_seen_critical_improvement_ids';
+  const POLL_INTERVAL_MS = 120000; // 2 minutes : assez réactif sans spammer le backend
+
+  function getSeenIds() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'));
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveSeenIds(ids) {
+    try {
+      // Borné à 500 IDs les plus récents : évite une croissance illimitée de localStorage sur un
+      // compte resté ouvert des mois, jamais un vrai risque de perdre une alerte encore active
+      // (un constat déjà résolu/ignoré ne redeviendra jamais "nouveau").
+      localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(ids).slice(-500)));
+    } catch {
+      // Quota localStorage dépassé ou navigation privée : tant pis, un même constat pourra
+      // re-sonner à la prochaine visite plutôt que de faire planter toute la page pour ça.
+    }
+  }
+
+  function playAlertSound() {
+    // Bip généré via Web Audio API (pas de fichier audio à héberger/charger) — deux notes brèves,
+    // suffisant pour attirer l'attention sans être une sonnerie agressive.
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      [880, 660].forEach(function (freq, i) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.15);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(ctx.currentTime + i * 0.18);
+        osc.stop(ctx.currentTime + i * 0.18 + 0.16);
+      });
+    } catch {
+      // Web Audio bloqué (politique navigateur avant toute interaction utilisateur, ou
+      // navigateur trop ancien) : le toast visuel reste affiché même sans le son.
+    }
+  }
+
+  async function checkNewCriticalImprovements() {
+    try {
+      const res = await window.reassortFetch('/reassort/improvements?status=PROPOSED&priority=CRITICAL');
+      const json = await res.json();
+      if (!json.success) return;
+      const items = json.data || [];
+      const seen = getSeenIds();
+      const newOnes = items.filter(function (it) { return !seen.has(it.id); });
+
+      if (newOnes.length && window.reassortToast) {
+        playAlertSound();
+        // Un seul toast récapitulatif même si plusieurs constats arrivent d'un coup (ex: le chien
+        // de garde tourne une fois par nuit et peut détecter plusieurs magasins en même temps) —
+        // jamais un toast par constat, qui empilerait des popups à la suite au réveil de l'admin.
+        const message = newOnes.length === 1
+          ? 'Nouveau constat critique : ' + newOnes[0].title
+          : newOnes.length + ' nouveaux constats critiques détectés (Qualité & IA).';
+        window.reassortToast(message, 'error');
+      }
+
+      items.forEach(function (it) { seen.add(it.id); });
+      saveSeenIds(seen);
+    } catch (err) {
+      // Silencieux : une alerte qui échoue à se vérifier ne doit jamais bloquer la page — au pire,
+      // elle sera retentée au prochain intervalle de sondage.
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     const user = window.reassortGetUser && window.reassortGetUser();
     if (!user || user.role !== 'ADMIN') return;
     // layout.js injecte la topbar de façon synchrone avant DOMContentLoaded (cf. son propre
     // commentaire), donc #page-header-notifications-dropdown existe déjà à ce stade.
     loadStaleImprovements();
+    checkNewCriticalImprovements();
+    setInterval(checkNewCriticalImprovements, POLL_INTERVAL_MS);
   });
 })();
