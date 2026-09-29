@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api/client';
+import { Pagination } from './ui/Pagination';
+
+const PAGE_SIZE = 10;
 
 interface Correction {
   id: string;
@@ -90,6 +93,7 @@ export function CorrectionsTab() {
   const [domain, setDomain] = useState('');
   const [source, setSource] = useState('');
   const [summary, setSummary] = useState('');
+  const [page, setPage] = useState(1);
   const [detailBody, setDetailBody] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -110,8 +114,15 @@ export function CorrectionsTab() {
 
   useEffect(() => {
     loadList();
+    setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [domain, source]);
+
+  const pageCount = rows ? Math.max(1, Math.ceil(rows.length / PAGE_SIZE)) : 1;
+  const pagedRows = useMemo(() => {
+    if (!rows) return null;
+    return rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  }, [rows, page]);
 
   async function openDetail(id: string) {
     setDetailOpen(true);
@@ -167,7 +178,7 @@ export function CorrectionsTab() {
         {error && <div className="alert alert-danger">{error}</div>}
         {!rows && !error && <div className="text-center text-muted py-4">Chargement...</div>}
         {rows && rows.length === 0 && <div className="text-center text-muted py-4">Aucune correction journalisée pour ce filtre.</div>}
-        {rows?.map((rec) => {
+        {pagedRows?.map((rec) => {
           const srcClass = rec.source === 'AI_AUTO' ? 'src-AI_AUTO' : 'src-DEV_FIX';
           return (
             <div className="card mb-2" style={{ cursor: 'pointer' }} key={rec.id} onClick={() => openDetail(rec.id)}>
@@ -194,6 +205,7 @@ export function CorrectionsTab() {
           );
         })}
       </div>
+      <Pagination page={page} pageCount={pageCount} onChange={setPage} />
 
       {detailOpen && (
         <>

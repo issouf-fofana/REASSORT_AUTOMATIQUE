@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api/client';
+import { Pagination } from './ui/Pagination';
+
+const PAGE_SIZE = 10;
 
 interface ImprovementEvent {
   action: string;
@@ -251,6 +254,7 @@ export function ImprovementsTab() {
   const [sort, setSort] = useState('priority');
   const [summary, setSummary] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [page, setPage] = useState(1);
 
   const [detailBody, setDetailBody] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -281,8 +285,16 @@ export function ImprovementsTab() {
 
   useEffect(() => {
     loadList();
+    setPage(1); // un changement de filtre repart toujours de la première page, jamais une page
+    // devenue vide/incohérente si le nouveau résultat a moins de pages que l'ancien.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, priorityFilter, sort]);
+
+  const pageCount = rows ? Math.max(1, Math.ceil(rows.length / PAGE_SIZE)) : 1;
+  const pagedRows = useMemo(() => {
+    if (!rows) return null;
+    return rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  }, [rows, page]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -423,10 +435,11 @@ export function ImprovementsTab() {
         {rows && rows.length === 0 && (
           <div className="alert alert-light border">Aucune recommandation pour ce filtre. Lancez "Analyser maintenant".</div>
         )}
-        {rows?.map((imp) => (
+        {pagedRows?.map((imp) => (
           <ImprovementCard key={imp.id} imp={imp} onAction={handleAction} onEdit={handleEdit} onDetail={handleDetail} />
         ))}
       </div>
+      <Pagination page={page} pageCount={pageCount} onChange={setPage} />
 
       {detailOpen && (
         <>
