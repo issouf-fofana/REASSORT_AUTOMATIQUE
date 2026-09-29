@@ -60,7 +60,14 @@ function labelCellRenderer(params: any) {
   }
 
   if (l.orderSufficiencyReasoning) {
-    html += `<br><span class="badge ${l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'} mt-1 os-badge reassort-mini-badge" style="cursor:pointer;" data-reasoning="${l.orderSufficiencyReasoning.replace(/"/g, '&quot;')}">${l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante'}</span>`;
+    // Référence + date de la commande en cours (29/09/2026, demande explicite : "il faut afficher le
+    // numéro de cette commande et la date... comme les autres qui sont déjà dans une commande en
+    // cours") — affichée uniquement ici, jamais dupliquée avec le badge "Déjà commandé" ci-dessus
+    // (excludedAsAlreadyOrderedRpos), qui ne concerne que les articles TOTALEMENT exclus.
+    const orderRefSuffix = !l.excludedAsAlreadyOrderedRpos && l.rposOrderReference
+      ? ` (réf. ${l.rposOrderReference}${l.rposOrderDate ? ` du ${new Date(l.rposOrderDate).toLocaleDateString('fr-FR')}` : ''}${l.rposOrderCount && l.rposOrderCount > 1 ? ` + ${l.rposOrderCount - 1} autre(s)` : ''})`
+      : '';
+    html += `<br><span class="badge ${l.orderSufficient === false ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'} mt-1 os-badge reassort-mini-badge" style="cursor:pointer;" data-reasoning="${l.orderSufficiencyReasoning.replace(/"/g, '&quot;')}">${l.orderSufficient === false ? '<iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Commande insuffisante' : '<iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commande suffisante'}${orderRefSuffix}</span>`;
   }
 
   wrap.innerHTML = html;

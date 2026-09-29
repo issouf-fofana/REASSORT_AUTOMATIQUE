@@ -920,11 +920,17 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
         // (badge "Déjà commandé"), pour indiquer au magasin où retrouver cette commande dans RPOS.
         platformOrderReference: excludedAsAlreadyOrdered ? (platformOrderInfoByEan.get(ean)?.reference || null) : null,
         platformOrderDate: excludedAsAlreadyOrdered ? (platformOrderInfoByEan.get(ean)?.date || null) : null,
-        rposOrderReference: excludedAsAlreadyOrderedRpos ? recentRposOrder.mostRecentReference : null,
-        rposOrderDate: excludedAsAlreadyOrderedRpos ? recentRposOrder.mostRecentDate : null,
-        rposOrderCount: excludedAsAlreadyOrderedRpos ? recentRposOrder.orderCount : null,
-        rposOrderStatus: excludedAsAlreadyOrderedRpos ? (recentRposOrder.mostRecentStatus ?? null) : null,
-        rposOrders: excludedAsAlreadyOrderedRpos ? recentRposOrder.orders : null,
+        // Exposés dès qu'une commande récente existe (rposOrderedQty > 0), pas seulement quand
+        // l'article est TOTALEMENT exclu (29/09/2026, demande explicite : "il faut afficher le
+        // numéro de cette commande et la date... comme les autres qui sont déjà dans une commande en
+        // cours") — un article "commande insuffisante" (badge orderSufficiencyReasoning, complément
+        // encore proposé) a lui aussi une commande en cours dont la référence était jusqu'ici
+        // silencieusement masquée, alors que recentRposOrder est déjà calculé pour TOUS les cas.
+        rposOrderReference: rposOrderedQty > 0 ? recentRposOrder.mostRecentReference : null,
+        rposOrderDate: rposOrderedQty > 0 ? recentRposOrder.mostRecentDate : null,
+        rposOrderCount: rposOrderedQty > 0 ? recentRposOrder.orderCount : null,
+        rposOrderStatus: rposOrderedQty > 0 ? (recentRposOrder.mostRecentStatus ?? null) : null,
+        rposOrders: rposOrderedQty > 0 ? recentRposOrder.orders : null,
         quantityIfUnblocked,
         // Anomalie de commande (backend/amelioration.md, 18/09/2026) : présent uniquement si
         // quantityProposed s'écarte significativement de l'historique des quantités validées pour
