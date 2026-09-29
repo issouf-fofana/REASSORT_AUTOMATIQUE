@@ -178,6 +178,10 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-FR');
 }
 
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 function DeptListContext({ proposal }: { proposal: Proposal }) {
   if (!proposal.analysisPeriodStart || !proposal.analysisPeriodEnd) return null;
   const start = new Date(proposal.analysisPeriodStart);
@@ -201,7 +205,9 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
       <strong>Période d'analyse configurée (Pareto) :</strong> {periodLabel} &nbsp;•&nbsp;{' '}
       <strong>CA magasin sur une période DIFFÉRENTE{revenuePeriodLabel} :</strong> {revenueLabel}{' '}
       <span className="text-muted">
-        — sert uniquement à calculer le % CA de chaque article, pas à représenter le CA sur la période d'analyse ci-dessus
+        — sert uniquement à calculer le % CA de chaque article, pas à représenter le CA sur la période d'analyse ci-dessus.
+        Chiffre figé au moment de la génération ({fmtDateTime(proposal.generatedAt)}) — les ventes reçues depuis ne sont
+        pas reflétées ici tant qu'une nouvelle proposition n'est pas générée.
       </span>
       {showCoverageWarning && (
         <div className="alert alert-warning small mt-2 mb-0">
