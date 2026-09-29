@@ -56,6 +56,11 @@ export function PurchaseOrder() {
   const supplierCheckTokenRef = useRef(0);
 
   const [excludedModal, setExcludedModal] = useState<{ label: string; items: ExcludedItem[] | null; error: string | null } | null>(null);
+  // Modal générique "liste d'articles + fournisseur" (29/09/2026) : les listes de commandabilité
+  // fournisseur (synthèse §3 et alerte non-rattachés legacy) s'affichaient directement dans la page,
+  // rendant l'écran chargé même quand tout va bien — demande explicite de les masquer derrière un
+  // clic, comme les autres listes de détail (excludedModal ci-dessus, déjà sur ce même principe).
+  const [supplierListModal, setSupplierListModal] = useState<{ title: string; items: { ean: string; label: string | null; currentSuppliers: string | null | undefined }[] } | null>(null);
   const [sufficiencyModal, setSufficiencyModal] = useState<string | null>(null);
   const [analyticsArticle, setAnalyticsArticle] = useState<{ ean: string; productId: string; label: string } | null>(null);
   const [weeklyPlanHistoryOpen, setWeeklyPlanHistoryOpen] = useState(false);
@@ -740,76 +745,54 @@ export function PurchaseOrder() {
                     son ajout) : dans ce cas, l'alerte legacy ci-dessous (supplierIneligible, issue de
                     l'appel /supplier-check) reste le seul repli disponible. */}
                 {eligibilitySummary.total > 0 && detailLines.some((l) => l.supplierIneligible !== null && l.supplierIneligible !== undefined) && (
-                  <div className={`alert small mb-3 ${eligibilitySummary.nonCommandableCount > 0 ? 'alert-warning' : 'alert-light border'}`}>
-                    <p className="mb-1">
+                  <div className={`alert small mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2 ${eligibilitySummary.nonCommandableCount > 0 ? 'alert-warning' : 'alert-light border'}`}>
+                    <div>
                       <strong>{eligibilitySummary.total} article(s) dans la proposition de ce rayon</strong>
-                    </p>
-                    <p className="mb-1">
-                      <iconify-icon icon="solar:check-circle-bold" className="text-success align-middle me-1"></iconify-icon>
-                      {eligibilitySummary.commandableCount} article(s) commandable(s) — quantité totale {eligibilitySummary.commandableQty.toLocaleString('fr-FR')}
-                    </p>
+                      {' — '}
+                      <iconify-icon icon="solar:check-circle-bold" className="text-success align-middle"></iconify-icon>{' '}
+                      {eligibilitySummary.commandableCount} commandable(s)
+                      {eligibilitySummary.nonCommandableCount > 0 && (
+                        <>
+                          {' · '}
+                          <iconify-icon icon="solar:close-circle-bold" className="text-danger align-middle"></iconify-icon>{' '}
+                          {eligibilitySummary.nonCommandableCount} non commandable(s)
+                        </>
+                      )}
+                    </div>
                     {eligibilitySummary.nonCommandableCount > 0 && (
-                      <p className="mb-2">
-                        <iconify-icon icon="solar:close-circle-bold" className="text-danger align-middle me-1"></iconify-icon>
-                        {eligibilitySummary.nonCommandableCount} article(s) non commandable(s) — quantité totale {eligibilitySummary.nonCommandableQty.toLocaleString('fr-FR')}
-                      </p>
-                    )}
-                    <p className="mb-0 text-muted">
-                      Les {eligibilitySummary.commandableCount} article(s) commandable(s) sont rattachés au fournisseur central et pourront être intégrés à la commande.
-                    </p>
-                    {eligibilitySummary.nonCommandableCount > 0 && (
-                      <div className="table-responsive mt-2" style={{ maxHeight: 220, overflowY: 'auto' }}>
-                        <table className="table table-sm mb-0">
-                          <thead>
-                            <tr>
-                              <th>Article</th>
-                              <th>EAN</th>
-                              <th>Fournisseur actuel</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {eligibilitySummary.nonCommandableLines.map((item) => (
-                              <tr key={item.id}>
-                                <td>{item.label || '—'}</td>
-                                <td>{item.ean}</td>
-                                <td>{item.currentSuppliers || 'aucun'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-dark flex-shrink-0"
+                        onClick={() =>
+                          setSupplierListModal({
+                            title: `${eligibilitySummary.nonCommandableCount} article(s) non commandable(s) (non rattachés au fournisseur central)`,
+                            items: eligibilitySummary.nonCommandableLines.map((item) => ({ ean: item.ean, label: item.label, currentSuppliers: item.currentSuppliers })),
+                          })
+                        }
+                      >
+                        Voir la liste
+                      </button>
                     )}
                   </div>
                 )}
                 {!!supplierIneligible?.length && (
-                  <div className="alert alert-warning small mb-3">
-                    <p className="mb-2">
-                      <strong>
-                        <iconify-icon icon="solar:danger-triangle-bold" className="align-middle me-1"></iconify-icon>
-                        {supplierIneligible.length} article(s) non rattaché(s) au fournisseur central
-                      </strong>{' '}
-                      — risque qu'ils manquent à l'envoi réel de la commande :
-                    </p>
-                    <div className="table-responsive" style={{ maxHeight: 220, overflowY: 'auto' }}>
-                      <table className="table table-sm mb-0">
-                        <thead>
-                          <tr>
-                            <th>Article</th>
-                            <th>EAN</th>
-                            <th>Fournisseur actuel</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {supplierIneligible.map((item) => (
-                            <tr key={item.ean}>
-                              <td>{item.label || '—'}</td>
-                              <td>{item.ean}</td>
-                              <td>{item.currentSuppliers}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  <div className="alert alert-warning small mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                      <iconify-icon icon="solar:danger-triangle-bold" className="align-middle me-1"></iconify-icon>
+                      <strong>{supplierIneligible.length} article(s) non rattaché(s) au fournisseur central</strong> — risque qu'ils manquent à l'envoi réel de la commande.
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-dark flex-shrink-0"
+                      onClick={() =>
+                        setSupplierListModal({
+                          title: `${supplierIneligible.length} article(s) non rattaché(s) au fournisseur central`,
+                          items: supplierIneligible.map((item) => ({ ean: item.ean, label: item.label, currentSuppliers: item.currentSuppliers })),
+                        })
+                      }
+                    >
+                      Voir la liste
+                    </button>
                   </div>
                 )}
                 <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
@@ -876,6 +859,48 @@ export function PurchaseOrder() {
                               <td>{it.ean}</td>
                               <td>{it.label || '—'}</td>
                               <td className="text-end">{it.revenueSharePct !== null && it.revenueSharePct !== undefined ? it.revenueSharePct.toFixed(2) + ' %' : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
+      )}
+
+      {supplierListModal && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
+            <div className="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" role="document">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">{supplierListModal.title}</h5>
+                  <button type="button" className="btn-close" onClick={() => setSupplierListModal(null)}></button>
+                </div>
+                <div className="modal-body">
+                  {supplierListModal.items.length === 0 ? (
+                    <p className="text-muted text-center py-4">Aucun article dans cette catégorie.</p>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="table table-sm table-hover">
+                        <thead>
+                          <tr>
+                            <th>Article</th>
+                            <th>EAN</th>
+                            <th>Fournisseur actuel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {supplierListModal.items.map((item) => (
+                            <tr key={item.ean}>
+                              <td>{item.label || '—'}</td>
+                              <td>{item.ean}</td>
+                              <td>{item.currentSuppliers || 'aucun'}</td>
                             </tr>
                           ))}
                         </tbody>
