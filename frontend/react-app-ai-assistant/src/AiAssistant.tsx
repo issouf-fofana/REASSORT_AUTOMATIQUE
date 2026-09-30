@@ -756,7 +756,16 @@ export function AiAssistant() {
                     <p className="text-muted small">Sélectionnez un magasin (en haut de page) pour commencer.</p>
                   ) : (
                     <>
-                      <div className="aia-hero-input mx-auto mb-3">
+                      {suggestedQuestions.length > 0 && (
+                        <div className="d-flex flex-wrap justify-content-center gap-2 mx-auto mb-3" style={{ maxWidth: 720 }}>
+                          {suggestedQuestions.slice(0, 7).map((q, i) => (
+                            <button key={i} type="button" className="aia-hero-pill" onClick={() => sendQuestion(q)}>
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="aia-hero-input mx-auto">
                         <AIChatInput
                           value={input}
                           onChange={setInput}
@@ -770,15 +779,6 @@ export function AiAssistant() {
                           }
                         />
                       </div>
-                      {suggestedQuestions.length > 0 && (
-                        <div className="d-flex flex-wrap justify-content-center gap-2 mx-auto" style={{ maxWidth: 720 }}>
-                          {suggestedQuestions.slice(0, 7).map((q, i) => (
-                            <button key={i} type="button" className="aia-hero-pill" onClick={() => sendQuestion(q)}>
-                              {q}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </>
                   )}
                 </div>
