@@ -15,6 +15,11 @@ declare global {
     reassortConfirm: (message: string, options?: { danger?: boolean; okLabel?: string; cancelLabel?: string }) => Promise<boolean>;
     reassortToast: (message: string, type?: 'success' | 'error' | 'info') => void;
     reassortMakeShopPickerSearchable?: (select: HTMLSelectElement) => void;
+    // Sélecteur de magasin global de la topbar (assets/js/global-shop-selector.js), partagé entre
+    // toutes les pages migrées — remplace tout <select> local pour un compte ADMIN/SUPERVISOR.
+    reassortGetActiveShop?: () => { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null;
+    reassortSetActiveShop?: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void;
+    reassortOnActiveShopChange?: (cb: (shop: unknown) => void) => void;
   }
 }
 

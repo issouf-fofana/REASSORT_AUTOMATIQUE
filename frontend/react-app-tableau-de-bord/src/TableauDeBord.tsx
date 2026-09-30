@@ -4,7 +4,7 @@ import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
 import { OrdersStatusDonut } from './OrdersStatusDonut';
 import { TodayProposalsCard } from './TodayProposalsCard';
-import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, Shop, StockoutRate, SupplierOrder } from './types';
+import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
 // sur Proposition de commande (reassort-badge-soft-warning/-danger) — dupliquées ici car chaque
@@ -32,9 +32,11 @@ export function TableauDeBord() {
   // magasin ci-dessous.
   const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
 
-  const shopSelectRef = useRef<HTMLSelectElement>(null);
-  const [shops, setShops] = useState<Shop[]>([]);
-  const [shopsError, setShopsError] = useState<string | null>(null);
+  // Magasin sélectionné : pour un compte ADMIN/SUPERVISOR, repris du sélecteur GLOBAL de la topbar
+  // (window.reassortGetActiveShop/reassortOnActiveShopChange, cf. global-shop-selector.js) — plus de
+  // <select> local dupliqué sur cette page (demande du 30/09/2026 : "j'ai déjà un qui fonctionne en
+  // haut"), même pattern que PurchaseOrder.tsx.
+  const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string } | null>(null);
   const [selectedShopId, setSelectedShopId] = useState('');
 
   const [proposalCount, setProposalCount] = useState('—');
@@ -46,8 +48,6 @@ export function TableauDeBord() {
   const [forecastAccuracy, setForecastAccuracy] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Quantité prévue vs réellement vendue' });
   const [orders, setOrders] = useState<SupplierOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
-
-  const selectedShop = isSingleShop ? null : shops.find((s) => s.id === selectedShopId) || null;
 
   function shopQueryParam(): string {
     const id = isSingleShop ? user?.rposShopId || '' : selectedShopId;
@@ -140,48 +140,29 @@ export function TableauDeBord() {
   }
 
   useEffect(() => {
-    (async () => {
-      if (!isSingleShop) {
-        try {
-          const data = await apiFetch<Shop[]>('/reassort/shops');
-          setShops(data);
-        } catch (err) {
-          setShopsError(err instanceof Error ? err.message : String(err));
-        }
-      } else {
-        loadDashboard();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (isSingleShop || shops.length === 0) return;
-    const select = shopSelectRef.current;
-    if (!select) return;
-
-    function handleChange() {
-      setSelectedShopId(select!.value);
+    if (isSingleShop) {
+      loadDashboard();
+      return;
     }
-    select.addEventListener('change', handleChange);
-    if (window.reassortMakeShopPickerSearchable) {
-      window.reassortMakeShopPickerSearchable(select);
+    function syncToActiveShop(shop: unknown) {
+      const activeShop = shop as { id: string; posId?: string } | null;
+      setSelectedShop(activeShop);
+      setSelectedShopId(activeShop ? activeShop.id : '');
     }
-    if (select.value) setSelectedShopId(select.value);
-
-    return () => select.removeEventListener('change', handleChange);
+    if (!window.reassortGetActiveShop || !window.reassortOnActiveShopChange) return;
+    syncToActiveShop(window.reassortGetActiveShop());
+    window.reassortOnActiveShopChange(syncToActiveShop);
+    // reassortOnActiveShopChange n'a pas de désinscription (voir global-shop-selector.js) : accepté
+    // ici comme sur les autres pages migrées (PurchaseOrder.tsx), la page vit tout le cycle de vie
+    // de l'onglet donc l'abonnement ne s'accumule pas au-delà d'un montage par session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSingleShop, shops]);
+  }, [isSingleShop]);
 
   useEffect(() => {
     if (!isSingleShop && !selectedShopId) return;
     loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShopId]);
-
-  const byPos: Record<string, Shop[]> = {};
-  shops.forEach((s) => (byPos[s.posId] ||= []).push(s));
-  const sortedPosIds = Object.keys(byPos).sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
 
   return (
     <div>
@@ -235,34 +216,6 @@ export function TableauDeBord() {
         <AllShopsView />
       ) : (
         <>
-      {!isSingleShop && (
-        <div className="row mb-3">
-          <div className="col-md-4">
-            <label className="form-label">Magasin</label>
-            <select className="form-select" ref={shopSelectRef} defaultValue="">
-              {shopsError ? (
-                <option value="">Erreur: {shopsError}</option>
-              ) : shops.length === 0 ? (
-                <option value="">Chargement...</option>
-              ) : (
-                sortedPosIds.map((posId) => (
-                  <optgroup label={byPos[posId][0]?.posLabel || posId} key={posId}>
-                    {byPos[posId]
-                      .slice()
-                      .sort((a, b) => (a.reference || '').localeCompare(b.reference || ''))
-                      .map((s) => (
-                        <option value={s.id} key={s.id}>
-                          {s.reference} - {s.name}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))
-              )}
-            </select>
-          </div>
-        </div>
-      )}
-
       <div className="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-1">
         <div className="col">
           <div className="card kpi-card h-100 mb-0">
