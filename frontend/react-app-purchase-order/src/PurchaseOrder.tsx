@@ -5,9 +5,10 @@ import { ProposalHeader } from './ProposalHeader';
 import { GenerationFlow } from './GenerationFlow';
 import { ProductAnalyticsModal } from './ProductAnalyticsModal';
 import { ProposalTable, type ProposalTableHandle } from './ProposalTable';
+import { ArticleDetailModal } from './ArticleDetailModal';
 import { ValidationFlow } from './ValidationFlow';
 import { WeeklyPlanHistoryModal } from './WeeklyPlanHistoryModal';
-import type { Proposal, ProposalHistoryItem, Shop } from './types';
+import type { Proposal, ProposalHistoryItem, ProposalLine, Shop } from './types';
 
 interface ExcludedItem {
   ean: string;
@@ -61,7 +62,10 @@ export function PurchaseOrder() {
   // rendant l'écran chargé même quand tout va bien — demande explicite de les masquer derrière un
   // clic, comme les autres listes de détail (excludedModal ci-dessus, déjà sur ce même principe).
   const [supplierListModal, setSupplierListModal] = useState<{ title: string; items: { ean: string; label: string | null; currentSuppliers: string | null | undefined }[] } | null>(null);
-  const [sufficiencyModal, setSufficiencyModal] = useState<string | null>(null);
+  // Panneau de détail d'une ligne (30/09/2026) : remplace l'ancienne sufficiencyModal (texte brut de
+  // orderSufficiencyReasoning seul) — réunit désormais toutes les infos autrefois en badges empilés
+  // dans le tableau (commande en cours, anomalie, suffisance, saisonnalité, stock).
+  const [articleDetail, setArticleDetail] = useState<ProposalLine | null>(null);
   const [analyticsArticle, setAnalyticsArticle] = useState<{ ean: string; productId: string; label: string } | null>(null);
   const [weeklyPlanHistoryOpen, setWeeklyPlanHistoryOpen] = useState(false);
   const proposalTableRef = useRef<ProposalTableHandle>(null);
@@ -562,6 +566,15 @@ export function PurchaseOrder() {
           color: #3a3f44 !important;
           border-color: #dcdfe3 !important;
         }
+        /* Palette adoucie (demande du 30/09/2026, "trop de couleur") : remplace les oranges/rouges
+           Bootstrap standards (bg-warning-subtle/bg-danger-subtle) par des teintes beige/brun-gris
+           désaturées, cohérentes avec le noir/blanc/gris strict du reste du projet — garde le sens
+           (attention/problème) sans être agressif visuellement. */
+        .reassort-badge-soft-warning { background-color: #F3F1EA !important; color: #6B5B2E !important; }
+        .reassort-badge-soft-danger  { background-color: #F5EDEC !important; color: #7A4A45 !important; }
+        /* Icône d'alerte discrète dans les cellules simplifiées (Article/Vente moy./Stock actuel,
+           demande du 30/09/2026) : même teinte que les badges ci-dessus, mais sans fond ni bordure. */
+        .reassort-alert-soft { color: #8A7A4A; }
       `}</style>
 
       {proposal && <ProposalHeader proposal={proposal} />}
@@ -836,7 +849,7 @@ export function PurchaseOrder() {
                   readOnly={viewingPastGeneration}
                   onOpenAnalytics={setAnalyticsArticle}
                   onTotalChange={setOrderTotal}
-                  onOpenSufficiency={setSufficiencyModal}
+                  onOpenArticleDetail={setArticleDetail}
                 />
               </div>
             </div>
@@ -929,21 +942,14 @@ export function PurchaseOrder() {
         </>
       )}
 
-      {sufficiencyModal !== null && (
-        <>
-          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
-            <div className="modal-dialog modal-dialog-centered" role="document">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">Suffisance de la commande</h5>
-                  <button type="button" className="btn-close" onClick={() => setSufficiencyModal(null)}></button>
-                </div>
-                <div className="modal-body">{sufficiencyModal}</div>
-              </div>
-            </div>
-          </div>
-          <div className="modal-backdrop fade show"></div>
-        </>
+      {articleDetail && (
+        <ArticleDetailModal
+          line={articleDetail}
+          readOnly={viewingPastGeneration}
+          onClose={() => setArticleDetail(null)}
+          onUnblock={(l, quantity) => proposalTableRef.current?.unblockLine(l, quantity)}
+          onOpenAnalytics={setAnalyticsArticle}
+        />
       )}
 
       {analyticsArticle && (
