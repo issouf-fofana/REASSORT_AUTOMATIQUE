@@ -114,9 +114,8 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
           </div>
           <div className="col-6 col-md-3">
             <div className="text-muted">Période d'analyse</div>
-            <div className="fw-semibold">
+            <div className="fw-semibold" title={periodModeLabel || undefined}>
               {periodLabel || '—'}
-              {periodModeLabel && <span className="text-muted fw-normal"> ({periodModeLabel})</span>}
             </div>
           </div>
           {dataAvailability?.found && dataAvailability.oldestDate && dataAvailability.newestDate && (
