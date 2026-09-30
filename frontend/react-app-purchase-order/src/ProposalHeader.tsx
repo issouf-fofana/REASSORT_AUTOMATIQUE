@@ -77,13 +77,9 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
     };
   }, [proposal.lines]);
 
-  // Numéro lisible (spec §2) : composé de la date de génération + référence magasin, jamais stocké
-  // séparément — aucune migration nécessaire, calculé à l'affichage à partir de champs déjà
-  // persistés. Séparateur " / " plutôt que "-" (30/09/2026, signalé peu lisible) : AAAA-MM-JJ a déjà
-  // des tirets, "...-414" se lisait comme un 4e segment de date au lieu d'une référence magasin.
-  const proposalNumber = proposal.rposShopReference
-    ? `${new Date(proposal.generatedAt).toISOString().slice(0, 10)} / ${proposal.rposShopReference}`
-    : proposal.id.slice(0, 8);
+  // Numéro lisible (spec §2) : juste la date de génération — la référence magasin est déjà affichée
+  // séparément dans la carte "Magasin" ci-dessous, inutile de la répéter ici (retiré le 30/09/2026).
+  const proposalNumber = new Date(proposal.generatedAt).toISOString().slice(0, 10);
 
   const periodLabel = proposal.analysisPeriodStart && proposal.analysisPeriodEnd
     ? `${fmtDate(proposal.analysisPeriodStart)} → ${fmtDate(proposal.analysisPeriodEnd)}`
