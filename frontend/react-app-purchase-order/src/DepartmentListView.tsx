@@ -199,29 +199,30 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
   }
 
   const showCoverageWarning = !!(proposal.coverageGapDays && proposal.coverageGapDays > 1 && proposal.actualDataStart);
+  const actualStart = proposal.actualDataStart ? fmtDate(proposal.actualDataStart) : null;
+  const actualEnd = proposal.actualDataEnd || proposal.analysisPeriodEnd ? fmtDate(proposal.actualDataEnd || proposal.analysisPeriodEnd!) : null;
 
   return (
-    <div className="alert alert-light border small mb-3">
-      <strong>Analyse :</strong> {periodLabel} &nbsp;•&nbsp;{' '}
-      <strong>CA magasin{revenuePeriodLabel} :</strong> {revenueLabel}{' '}
+    <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
       <span
-        className="text-muted"
-        title={`Chiffre figé au moment de la génération (${fmtDateTime(proposal.generatedAt)}). Sert uniquement à calculer le % CA de chaque article, sur une fenêtre de référence indépendante de la période d'analyse.`}
+        className="badge bg-light text-dark border reassort-mini-badge"
+        title={`Période sur laquelle le classement Pareto et les quantités proposées ont été calculés.`}
       >
-        <iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon>
+        <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Analyse : {periodLabel}
       </span>
-      {showCoverageWarning && (
-        <div className="alert alert-warning small mt-2 mb-0">
-          <strong>
-            <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données incomplètes :
-          </strong>{' '}
-          cette génération demandait des ventes depuis le {fmtDate(proposal.analysisPeriodStart!)}, mais les données
-          réellement disponibles ne remontent qu'au <strong>{fmtDate(proposal.actualDataStart!)}</strong> (jusqu'au{' '}
-          {fmtDate(proposal.actualDataEnd || proposal.analysisPeriodEnd!)}) — soit {proposal.coverageGapDays} jour(s)
-          manquant(s). Le calcul (Pareto, quantités proposées) porte donc sur une période plus courte que celle
-          affichée ci-dessus. Lancez un backfill (Paramètres &gt; Fichiers de ventes) pour combler ce manque avant de
-          vous fier pleinement à cette proposition.
-        </div>
+      <span
+        className="badge bg-light text-dark border reassort-mini-badge"
+        title={`Chiffre figé au moment de la génération (${fmtDateTime(proposal.generatedAt)}), sur une fenêtre de référence indépendante de la période d'analyse — sert uniquement à calculer le % CA de chaque article.`}
+      >
+        <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon> CA magasin{revenuePeriodLabel} : {revenueLabel}
+      </span>
+      {showCoverageWarning && actualStart && actualEnd && (
+        <span
+          className="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle reassort-mini-badge"
+          title={`Cette génération demandait des ventes depuis le ${fmtDate(proposal.analysisPeriodStart!)}, mais les données réellement disponibles ne remontent qu'au ${actualStart} — soit ${proposal.coverageGapDays} jour(s) manquant(s). Lancez un backfill (Paramètres > Fichiers de ventes) pour combler ce manque.`}
+        >
+          <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données utilisées : {actualStart} → {actualEnd}
+        </span>
       )}
     </div>
   );
