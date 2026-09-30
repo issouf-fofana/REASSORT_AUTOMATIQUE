@@ -311,24 +311,24 @@ export function TableauDeBord() {
 
       </div>
 
+      {/* "Magasins avec une proposition aujourd'hui" à côté du graphique de conformité (demande du
+          30/09/2026) — plus utile en premier coup d'œil qu'un donut de répartition, ADMIN uniquement. */}
       <div className="row g-3 mb-3">
         <div className="col-lg-7">
           <ConformityTrendChart shopQueryParam={shopQueryParam()} />
         </div>
+        {!isSingleShop && (
+          <div className="col-lg-5">
+            <TodayProposalsCard />
+          </div>
+        )}
+      </div>
+
+      <div className="row g-3 mb-3">
         <div className="col-lg-5">
           <OrdersStatusDonut orders={orders} />
         </div>
       </div>
-
-      {/* Vue multi-magasins (30/09/2026, ADMIN uniquement) : indépendante du magasin sélectionné
-          ci-dessus, pour voir d'un coup d'œil quels magasins ont une proposition prête aujourd'hui. */}
-      {!isSingleShop && (
-        <div className="row g-3 mb-3">
-          <div className="col-12">
-            <TodayProposalsCard />
-          </div>
-        </div>
-      )}
 
       <div className="row">
         <div className="col-12">
