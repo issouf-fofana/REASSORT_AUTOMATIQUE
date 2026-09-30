@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
 import { ConformityTrendChart } from './ConformityTrendChart';
 import { OrdersStatusDonut } from './OrdersStatusDonut';
+import { TodayProposalsCard } from './TodayProposalsCard';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, Shop, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
@@ -335,6 +336,16 @@ export function TableauDeBord() {
           <OrdersStatusDonut orders={orders} />
         </div>
       </div>
+
+      {/* Vue multi-magasins (30/09/2026, ADMIN uniquement) : indépendante du magasin sélectionné
+          ci-dessus, pour voir d'un coup d'œil quels magasins ont une proposition prête aujourd'hui. */}
+      {!isSingleShop && (
+        <div className="row g-3 mb-3">
+          <div className="col-12">
+            <TodayProposalsCard />
+          </div>
+        </div>
+      )}
 
       <div className="row">
         <div className="col-12">

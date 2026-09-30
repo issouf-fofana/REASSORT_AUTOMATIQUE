@@ -9,6 +9,7 @@ const rpos = require('../../services/rposClient');
 const {
   getConformityRate,
   getWeeklyConformityRate,
+  getTodayProposalShops,
   getStockoutRate,
   getOverstockRate,
   getForecastAccuracy,
@@ -318,6 +319,18 @@ router.get('/ai-decision-log', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('AI decision log error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/admin/today-proposals - magasins ayant une proposition générée aujourd'hui
+// (ADMIN uniquement, Tableau de bord vue multi-magasins, 30/09/2026).
+router.get('/admin/today-proposals', requireAdmin, async (req, res) => {
+  try {
+    const result = await getTodayProposalShops();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Today proposal shops error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

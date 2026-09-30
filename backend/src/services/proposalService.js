@@ -2206,6 +2206,40 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
 }
 
 /**
+ * Liste des magasins ayant au moins une proposition GÉNÉRÉE (en attente de validation) aujourd'hui
+ * — Tableau de bord, vue multi-magasins (30/09/2026), pour un admin/superviseur qui veut voir d'un
+ * coup d'œil quels magasins ont une proposition prête à traiter, sans ouvrir chaque magasin un par
+ * un. "Aujourd'hui" = jour calendaire courant (UTC), cohérent avec le reste du projet qui n'utilise
+ * pas de lib de dates.
+ */
+async function getTodayProposalShops() {
+  const todayStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const proposals = await prisma.proposal.findMany({
+    where: { status: 'GENERATED', generatedAt: { gte: todayStart } },
+    select: {
+      id: true,
+      rposShopId: true,
+      rposShopReference: true,
+      rposShopName: true,
+      generatedAt: true,
+      linesTotal: true,
+    },
+    orderBy: { generatedAt: 'desc' },
+  });
+
+  // Une seule ligne par magasin (la génération la plus récente du jour), au cas où un magasin
+  // aurait été régénéré plusieurs fois aujourd'hui — proposals déjà triées par generatedAt desc.
+  const seen = new Set();
+  const result = [];
+  for (const p of proposals) {
+    if (seen.has(p.rposShopId)) continue;
+    seen.add(p.rposShopId);
+    result.push(p);
+  }
+  return result;
+}
+
+/**
  * Taux de rupture : proportion des articles proposés qui étaient déjà en rupture (stock épuisé
  * au rythme de vente actuel) au moment de la génération de la proposition, sur les propositions
  * validées. Sert à mesurer si le réassort automatique intervient suffisamment tôt (cf. readme §17).
@@ -2750,6 +2784,7 @@ module.exports = {
   getProposalStatus,
   getConformityRate,
   getWeeklyConformityRate,
+  getTodayProposalShops,
   getStockoutRate,
   getOverstockRate,
   getAdminDashboard,
