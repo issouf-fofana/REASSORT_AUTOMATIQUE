@@ -26,15 +26,32 @@ const SEVERITY_BADGE: Record<string, string> = {
   INFO: 'reassort-badge-soft-info',
 };
 
-function StatusCard({ label, value, sub, isAlert }: { label: string; value: string; sub: string; isAlert: boolean }) {
+function StatusCard({
+  label,
+  value,
+  sub,
+  isAlert,
+  icon,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  isAlert: boolean;
+  icon: string;
+}) {
   return (
     <div className="col">
       <div className={`card kpi-card h-100 mb-0${isAlert ? ' kpi-card-alert' : ''}`}>
-        <div className="card-body">
-          <p className="kpi-label">{label}</p>
-          <h3 className="kpi-value">{value}</h3>
-          <p className="text-muted small mb-0" style={{ color: '#8C99B5' }}>{sub}</p>
+        <div className="card-body d-flex align-items-start gap-2">
+          <div className="kpi-icon">
+            <iconify-icon icon={icon}></iconify-icon>
+          </div>
+          <div>
+            <p className="kpi-label">{label}</p>
+            <h3 className="kpi-value">{value}</h3>
+          </div>
         </div>
+        <div className="kpi-footer">{sub}</div>
       </div>
     </div>
   );
@@ -65,8 +82,11 @@ export function AllShopsView() {
   return (
     <div>
       <style>{`
-        .kpi-card-alert { background: #B0453F !important; }
-        .kpi-card-alert .kpi-icon { background: #fff !important; }
+        /* Alerte discrète (30/09/2026, "il faut faire un bon style") : reste sur le fond marine
+           standard des cartes KPI, un liseré + une pastille ambre signalent l'alerte au lieu d'un
+           rouge plein qui casse la palette du reste de l'écran. */
+        .kpi-card-alert { border: 1px solid #F5A623; }
+        .kpi-card-alert .kpi-value { color: #F5A623; }
         .metric-row { display: flex; flex-wrap: wrap; }
         .metric-row-item { flex: 1 1 180px; padding: 1rem 1.2rem 1rem 0; border-right: 1px solid rgba(255,255,255,.12); }
         .metric-row-item:last-child { border-right: none; }
@@ -95,18 +115,21 @@ export function AllShopsView() {
         <>
           <div className="row row-cols-1 row-cols-md-3 g-3 mb-3">
             <StatusCard
+              icon="solar:danger-triangle-bold-duotone"
               label="Rupture globale"
               value={pct(data.globalStockoutRate)}
               sub="articles déjà en rupture à la génération"
               isAlert={data.globalStockoutRate !== null && stockoutAlertThreshold !== undefined && data.globalStockoutRate > stockoutAlertThreshold}
             />
             <StatusCard
+              icon="solar:box-bold-duotone"
               label="Surstock global"
               value={pct(data.globalOverstockRate)}
               sub="quantité validée bien au-delà du besoin théorique"
               isAlert={data.globalOverstockRate !== null && data.globalOverstockRate > 0.1}
             />
             <StatusCard
+              icon="solar:double-check-bold-duotone"
               label="Conformité globale"
               value={pct(data.globalConformityRate)}
               sub="propositions validées sans modification"
