@@ -43,7 +43,7 @@ function StatusCard({
     <div className="col">
       <div className={`card kpi-card h-100 mb-0${isAlert ? ' kpi-card-alert' : ''}`}>
         <div className="card-body d-flex align-items-start gap-2">
-          <div className="kpi-icon">
+          <div className={`kpi-icon${isAlert ? '' : ' kpi-icon-neutral'}`}>
             <iconify-icon icon={icon}></iconify-icon>
           </div>
           <div>
@@ -82,16 +82,20 @@ export function AllShopsView() {
   return (
     <div>
       <style>{`
-        /* Alerte discrète (30/09/2026, "il faut faire un bon style") : reste sur le fond marine
-           standard des cartes KPI, un liseré + une pastille ambre signalent l'alerte au lieu d'un
-           rouge plein qui casse la palette du reste de l'écran. */
+        /* Icône neutre par défaut (30/09/2026, "pas pro" : toutes les icônes ressortaient en ambre
+           même hors alerte, faisant croire à un problème généralisé) — seule une carte réellement
+           EN ALERTE (isAlert) prend l'accent ambre ; les autres restent sur un badge bleu-gris neutre. */
+        .kpi-icon.kpi-icon-neutral { background: rgba(255,255,255,.12) !important; }
+        .kpi-icon.kpi-icon-neutral iconify-icon { color: #C7D0E0 !important; }
         .kpi-card-alert { border: 1px solid #F5A623; }
-        .kpi-card-alert .kpi-value { color: #F5A623; }
+        .kpi-card-alert .kpi-value { color: #FBC46D; }
         .metric-row { display: flex; flex-wrap: wrap; }
         .metric-row-item { flex: 1 1 180px; padding: 1rem 1.2rem 1rem 0; border-right: 1px solid rgba(255,255,255,.12); }
         .metric-row-item:last-child { border-right: none; }
         .metric-value { font-size: 1.4rem; font-weight: 700; line-height: 1.15; margin: 0; color: #fff; }
-        .metric-value.is-bad { color: #F5A623; }
+        /* Valeur en alerte : fond ambre clair + texte marine plutôt qu'ambre plein sur marine (peu
+           lisible en gras, signalé le 30/09/2026) — même logique que .reassort-badge-soft-warning. */
+        .metric-value.is-bad { display: inline-block; background: #FDF1DD; color: #8A5A00; padding: .1rem .5rem; border-radius: 6px; }
         @media (max-width: 767px) { .metric-row-item { border-right: none; border-bottom: 1px solid rgba(255,255,255,.12); } }
       `}</style>
 
@@ -162,7 +166,9 @@ export function AllShopsView() {
                 <div className="metric-row-item">
                   <p className="kpi-label">Biais / WAPE</p>
                   <p className="metric-value">{num(data.globalForecastBias, 1)}</p>
-                  <p className="text-muted small mb-0" style={{ color: '#8C99B5' }}>{pct(data.globalForecastWAPE)} WAPE</p>
+                  <p className="text-muted small mb-0" style={{ color: '#8C99B5' }}>
+                    {data.globalForecastWAPE !== null ? `${pct(data.globalForecastWAPE)} WAPE` : 'WAPE non mesurable'}
+                  </p>
                 </div>
                 <div className="metric-row-item">
                   <p className="kpi-label">Confiance IA</p>
