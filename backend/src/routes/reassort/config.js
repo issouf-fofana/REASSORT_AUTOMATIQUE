@@ -93,7 +93,7 @@ router.put('/config', requireAdmin, async (req, res) => {
     const {
       paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
-      autoOrderEnabled, autoOrderValidateAfterCreate,
+      autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
     } = req.body;
     const data = {};
     if (paretoThreshold !== undefined) data.paretoThreshold = paretoThreshold;
@@ -122,6 +122,9 @@ router.put('/config', requireAdmin, async (req, res) => {
     // après validation de l'approche sur le magasin pilote 050).
     if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
     if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
+    // Génération automatique nocturne (30/09/2026) : réglage disponible ici par magasin, et aussi
+    // sur PUT /config/bulk pour l'appliquer à plusieurs/tous les magasins sélectionnés en même temps.
+    if (nightlyGenerationEnabled !== undefined) data.nightlyGenerationEnabled = nightlyGenerationEnabled;
 
     const config = await upsertConfig(shopId, data, req.user.email);
     res.json({ success: true, data: config });
@@ -145,7 +148,7 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     const {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
-      autoOrderEnabled, autoOrderValidateAfterCreate,
+      autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
       return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
@@ -175,6 +178,7 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     if (ignoreRposStockInCalculation !== undefined) data.ignoreRposStockInCalculation = ignoreRposStockInCalculation;
     if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
     if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
+    if (nightlyGenerationEnabled !== undefined) data.nightlyGenerationEnabled = nightlyGenerationEnabled;
 
     const results = [];
     for (const shopId of shopIds) {
