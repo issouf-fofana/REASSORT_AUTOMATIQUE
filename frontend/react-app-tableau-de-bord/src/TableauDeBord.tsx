@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
 import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
+import { ScoreCirclesCard } from './ScoreCirclesCard';
 import { TodayProposalsCard } from './TodayProposalsCard';
+import { TopArticlesCard } from './TopArticlesCard';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
@@ -322,6 +324,17 @@ export function TableauDeBord() {
             <TodayProposalsCard />
           </div>
         )}
+      </div>
+
+      {/* Cercles de score + top articles (30/09/2026, maquette "GoodFood") — esprit "Your Rating +
+          Most Ordered Food", avec de vraies données du magasin (aucune valeur inventée). */}
+      <div className="row g-3 mb-4">
+        <div className="col-lg-4">
+          <ScoreCirclesCard conformity={conformity.text} stockout={stockout.text} overstock={overstock.text} />
+        </div>
+        <div className="col-lg-8">
+          <TopArticlesCard shopQueryParam={shopQueryParam()} />
+        </div>
       </div>
 
       <div className="row">

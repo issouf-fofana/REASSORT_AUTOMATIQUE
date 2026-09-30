@@ -20,6 +20,7 @@ const {
 const { getConfig } = require('../../services/configService');
 const productInsightCache = require('../../services/productInsightCacheService');
 const productAnalyticsService = require('../../services/productAnalyticsService');
+const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
@@ -204,6 +205,28 @@ router.get('/predictions/history', async (req, res) => {
         actualDays: dailyHistory.length,
       },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/top-articles?days=30 - top 5 articles par CA réel sur les ventes (Tableau de
+// bord, 30/09/2026) — réutilise getParetoArticles (chatbotToolsService.js), déjà utilisée par le
+// chatbot pour classer les articles par CA réel (SalesLine.revenueExclTax), jamais dupliquée ici.
+// Volontairement PAS la proposition en attente (GET /reassort/proposal/pending) : elle ne liste que
+// les articles à réapprovisionner ce jour-là, pas un vrai "top ventes" du magasin. days=30 fixe
+// (pas la période complète configurée du magasin, potentiellement 1 an) : ce widget est un simple
+// aperçu, pas une analyse Pareto complète.
+router.get('/top-articles', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const result = await getParetoArticles(posId, shopId, { days: 30 });
+    if (!result.found) return res.json({ success: true, data: { found: false, lines: [] } });
+    res.json({ success: true, data: { found: true, lines: result.lines.slice(0, 5) } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

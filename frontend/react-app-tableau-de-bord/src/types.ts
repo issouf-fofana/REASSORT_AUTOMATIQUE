@@ -50,6 +50,14 @@ export interface WeeklyConformityPoint {
   totalLines: number;
 }
 
+// Top articles par CA réel (30/09/2026, Tableau de bord) — GET /reassort/top-articles.
+export interface TopArticle {
+  ean: string;
+  label: string;
+  revenue: number;
+  revenueSharePct: number;
+}
+
 // Vue "Tous les magasins" (fusion de l'ancienne page Vue globale, 30/09/2026).
 export interface PerShopRow {
   rposShopReference?: string;
