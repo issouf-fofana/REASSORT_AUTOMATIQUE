@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
 import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
-import { OrdersStatusDonut } from './OrdersStatusDonut';
 import { TodayProposalsCard } from './TodayProposalsCard';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
@@ -178,9 +177,9 @@ export function TableauDeBord() {
         .kpi-label { font-size: .78rem; color: #C7D0E0; margin: 0; }
         .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid rgba(255,255,255,.14); color: #8C99B5; }
         .kpi-footer a { color: #F5A623; font-weight: 600; }
-        /* Cartes "graphique" (ConformityTrendChart/OrdersStatusDonut) : fond clair, pour rester
-           lisibles avec ApexCharts (qui rend son propre texte, pas simple à recolorer entièrement en
-           blanc) — distinction visuelle assumée avec les cartes KPI marine ci-dessus. */
+        /* Cartes "graphique" (ConformityTrendChart) : fond clair, pour rester lisibles avec
+           ApexCharts (qui rend son propre texte, pas simple à recolorer entièrement en blanc) —
+           distinction visuelle assumée avec les cartes KPI marine ci-dessus. */
         .kpi-card.kpi-card-chart { background: #fff; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
         .kpi-card.kpi-card-chart:hover { transform: none; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
         /* Badges de statut de commande, palette adoucie (dupliquée depuis Proposition de commande,
@@ -216,7 +215,7 @@ export function TableauDeBord() {
         <AllShopsView />
       ) : (
         <>
-      <div className="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-1">
+      <div className="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-4">
         <div className="col">
           <div className="card kpi-card h-100 mb-0">
             <div className="card-body d-flex align-items-start gap-2">
@@ -312,8 +311,9 @@ export function TableauDeBord() {
       </div>
 
       {/* "Magasins avec une proposition aujourd'hui" à côté du graphique de conformité (demande du
-          30/09/2026) — plus utile en premier coup d'œil qu'un donut de répartition, ADMIN uniquement. */}
-      <div className="row g-3 mb-3">
+          30/09/2026), ADMIN uniquement — donut "Répartition des commandes par statut" retiré du
+          Tableau de bord (30/09/2026, jugé peu utile ici). */}
+      <div className="row g-3 mb-4">
         <div className="col-lg-7">
           <ConformityTrendChart shopQueryParam={shopQueryParam()} />
         </div>
@@ -322,12 +322,6 @@ export function TableauDeBord() {
             <TodayProposalsCard />
           </div>
         )}
-      </div>
-
-      <div className="row g-3 mb-3">
-        <div className="col-lg-5">
-          <OrdersStatusDonut orders={orders} />
-        </div>
       </div>
 
       <div className="row">
