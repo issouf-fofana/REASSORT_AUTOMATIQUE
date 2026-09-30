@@ -202,12 +202,13 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
 
   return (
     <div className="alert alert-light border small mb-3">
-      <strong>Période d'analyse configurée (Pareto) :</strong> {periodLabel} &nbsp;•&nbsp;{' '}
-      <strong>CA magasin sur une période DIFFÉRENTE{revenuePeriodLabel} :</strong> {revenueLabel}{' '}
-      <span className="text-muted">
-        — sert uniquement à calculer le % CA de chaque article, pas à représenter le CA sur la période d'analyse ci-dessus.
-        Chiffre figé au moment de la génération ({fmtDateTime(proposal.generatedAt)}) — les ventes reçues depuis ne sont
-        pas reflétées ici tant qu'une nouvelle proposition n'est pas générée.
+      <strong>Analyse :</strong> {periodLabel} &nbsp;•&nbsp;{' '}
+      <strong>CA magasin{revenuePeriodLabel} :</strong> {revenueLabel}{' '}
+      <span
+        className="text-muted"
+        title={`Chiffre figé au moment de la génération (${fmtDateTime(proposal.generatedAt)}). Sert uniquement à calculer le % CA de chaque article, sur une fenêtre de référence indépendante de la période d'analyse.`}
+      >
+        <iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon>
       </span>
       {showCoverageWarning && (
         <div className="alert alert-warning small mt-2 mb-0">
