@@ -609,6 +609,15 @@ export function PurchaseOrder() {
         /* Icône d'alerte discrète dans les cellules simplifiées (Article/Vente moy./Stock actuel,
            demande du 30/09/2026) : même teinte que les badges ci-dessus, mais sans fond ni bordure. */
         .reassort-alert-soft { color: #8A7A4A; }
+        /* Rend visible que l'icône d'alerte dans la cellule Article est cliquable (ouvre le panneau
+           de détail), demande du 30/09/2026 : "on ne sait pas si on peut cliquer". */
+        .article-detail-btn {
+          width: 22px; height: 22px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          transition: background-color .15s ease;
+        }
+        .article-detail-btn:hover, .article-detail-btn:focus { background-color: rgba(27, 42, 74, .1); }
+        .article-detail-btn iconify-icon { font-size: 1rem; }
       `}</style>
 
       {proposal && <ProposalHeader proposal={proposal} />}

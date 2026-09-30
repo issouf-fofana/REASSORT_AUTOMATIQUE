@@ -82,7 +82,10 @@ function labelCellRenderer(params: any) {
   html += `<button type="button" class="btn btn-sm btn-link p-0 pa-open-btn flex-shrink-0" data-ean="${l.ean}" data-product-id="${l.productId}" title="Voir l'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>`;
   const alert = articleAlertIcon(l);
   if (alert) {
-    html += `<iconify-icon icon="${alert.icon}" class="${alert.cls} flex-shrink-0" title="${alert.title}"></iconify-icon>`;
+    // Bouton cliquable (pas juste une icône statique, demande du 30/09/2026 : "on ne sait pas si on
+    // peut cliquer") — ouvre directement le panneau de détail, sans devoir cliquer ailleurs sur la
+    // ligne. .article-detail-btn intercepté par onRowClicked/onCellClicked ci-dessous.
+    html += `<button type="button" class="btn btn-sm btn-link p-0 article-detail-btn flex-shrink-0 ${alert.cls}" title="${alert.title} — cliquer pour voir le détail"><iconify-icon icon="${alert.icon}"></iconify-icon></button>`;
   }
   wrap.innerHTML = html;
   return wrap;
