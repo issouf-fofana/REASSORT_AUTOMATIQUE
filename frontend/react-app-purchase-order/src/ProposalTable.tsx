@@ -10,6 +10,14 @@ export interface ProposalTableHandle {
   unblockLine: (l: ProposalLine, quantity: number) => void;
 }
 
+// Ordre/largeur des colonnes choisi par l'utilisateur (demande du 30/09/2026) : préférence
+// d'affichage globale, pas liée à un magasin ou une proposition précise, donc une seule clé
+// partagée. Les colId explicites ajoutés sur les colonnes sans `field` (voir columnDefs) sont
+// nécessaires pour que l'état sauvegardé reste valide d'une session à l'autre (sans colId stable,
+// ag-grid génère des identifiants positionnels qui changent si l'ordre des colonnes déclarées change
+// dans le code).
+const COLUMN_STATE_STORAGE_KEY = 'reassort_proposal_table_column_state';
+
 // Libellé court "hier" / "29/08-28/09" pour la fenêtre de calcul du % CA (revenueShareStart/End) —
 // cohérent avec DeptListContext (DepartmentListView.tsx), même format de date.
 function fmtRevenueShareWindow(startIso: string, endIso: string): string {
@@ -340,7 +348,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           cellRenderer: checkCellRenderer(getLineState, updateOrderTotal),
           valueGetter: (p: any) => (getLineState(p.data).excluded ? 'Non' : 'Oui'),
         },
-        { headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 60, sortable: false, filter: false },
+        { colId: 'rowIndex', headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 60, sortable: false, filter: false },
         { headerName: 'EAN', field: 'ean', width: 130, filter: 'agTextColumnFilter' },
         { headerName: 'Article', field: 'label', flex: 2, minWidth: 260, filter: 'agTextColumnFilter', cellRenderer: labelCellRenderer },
         {
@@ -355,15 +363,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         { headerName: 'Stock actuel', field: 'stockAtGeneration', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 140, cellRenderer: stockCellRenderer },
         { headerName: 'Rupture dans', field: 'daysUntilStockout', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, cellRenderer: stockoutCellRenderer },
         {
-          headerName: 'Commandable',
-          field: 'supplierIneligible',
-          width: 150,
-          sortable: true,
-          filter: false,
-          cellRenderer: supplierEligibilityCellRenderer,
-          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
-        },
-        {
+          colId: 'lastPurchase',
           headerName: 'Dernier achat',
           width: 170,
           sortable: false,
@@ -375,6 +375,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
+          colId: 'lastSale',
           headerName: 'Dernière vente',
           width: 170,
           sortable: false,
@@ -432,38 +433,11 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           headerTooltip: "Cumul du chiffre d'affaires sur la période d'analyse (Pareto), pas la fenêtre courte du % CA à gauche.",
           valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(1) + ' %' : '—'),
         },
-        { headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },
+        { colId: 'ai', headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },
         {
-          // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
-          // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
-          // proposalService.js orderedQty) mais jamais affiché en colonne avant ce fix ; seul un
-          // badge apparaissait quand l'article était totalement exclu de la proposition pour cette
-          // raison (labelCellRenderer). Ici visible pour TOUT article, même partiellement couvert.
-          headerName: 'Déjà commandé',
-          field: 'currentOrderedQuantity',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 140,
-          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
-        },
-        {
-          // Référence + date de la commande RPOS déjà en cours, en colonne dédiée (demande du
-          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Article/Déjà commandé, pas à
-          // sa place : voir d'un coup d'œil si une commande est déjà passée sans ouvrir de détail.
-          headerName: 'Réf. commande',
-          width: 170,
-          filter: 'agTextColumnFilter',
-          valueGetter: (p: any) => (p.data as ProposalLine).rposOrderReference || '',
-          cellRenderer: (p: any) => {
-            const l = p.data as ProposalLine;
-            if (!l.rposOrderReference) return '<span class="text-muted">—</span>';
-            const dateStr = l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '';
-            return `${l.rposOrderReference}${dateStr ? ` (${dateStr})` : ''}`;
-          },
-        },
-        {
-          // Stock déjà retiré du calcul car basculé en DLV, en colonne dédiée (demande du
-          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Stock actuel.
+          // En DLV (colonne dédiée, demande du 30/09/2026) — en plus du badge déjà affiché dans la
+          // cellule Stock actuel. Groupée ici avec Casse/perte (autre info "stock/mouvements"), avant
+          // le bloc "commande" ci-dessous.
           headerName: 'En DLV',
           field: 'dlvStock',
           type: 'numericColumn',
@@ -482,6 +456,47 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           width: 110,
           headerTooltip: 'Quantité perdue en casse, péremption ou vol constatée sur la période analysée (mouvements RPOS isScrap).',
           valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
+        },
+        // Bloc "commande" regroupé (demande du 30/09/2026) : tout ce qui concerne la commande en
+        // cours/à passer, côte à côte plutôt qu'éparpillé dans le tableau — Déjà commandé, Réf.
+        // commande, Commandable, Couverture, Qté proposée, Valeur commande.
+        {
+          // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
+          // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
+          // proposalService.js orderedQty) mais jamais affiché en colonne avant ce fix ; seul un
+          // badge apparaissait quand l'article était totalement exclu de la proposition pour cette
+          // raison (labelCellRenderer). Ici visible pour TOUT article, même partiellement couvert.
+          headerName: 'Déjà commandé',
+          field: 'currentOrderedQuantity',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 140,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
+        },
+        {
+          // Référence + date de la commande RPOS déjà en cours, en colonne dédiée (demande du
+          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Article/Déjà commandé, pas à
+          // sa place : voir d'un coup d'œil si une commande est déjà passée sans ouvrir de détail.
+          colId: 'orderReference',
+          headerName: 'Réf. commande',
+          width: 170,
+          filter: 'agTextColumnFilter',
+          valueGetter: (p: any) => (p.data as ProposalLine).rposOrderReference || '',
+          cellRenderer: (p: any) => {
+            const l = p.data as ProposalLine;
+            if (!l.rposOrderReference) return '<span class="text-muted">—</span>';
+            const dateStr = l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '';
+            return `${l.rposOrderReference}${dateStr ? ` (${dateStr})` : ''}`;
+          },
+        },
+        {
+          headerName: 'Commandable',
+          field: 'supplierIneligible',
+          width: 150,
+          sortable: true,
+          filter: false,
+          cellRenderer: supplierEligibilityCellRenderer,
+          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
         },
         {
           // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé une seule fois à la
@@ -511,6 +526,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
+          colId: 'quantityProposed',
           headerName: 'Qté proposée',
           type: 'numericColumn',
           width: 170,
@@ -520,6 +536,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           valueGetter: (p: any) => getLineState(p.data).quantity,
         },
         {
+          colId: 'orderValue',
           headerName: 'Valeur commande',
           type: 'numericColumn',
           width: 150,
@@ -584,6 +601,16 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
       // reproduit sur l'ancienne page HTML, qui recharge entièrement le DOM à chaque navigation et
       // ne mesure donc jamais un conteneur encore en transition (bug constaté le 24/09/2026).
       onGridReady: () => {
+        // Restaure l'ordre/largeur des colonnes choisi par l'utilisateur lors d'une session
+        // précédente (demande du 30/09/2026 : "si j'ai modifié l'ordre une fois, il faut pouvoir la
+        // sauvegarder, ne pas réinitialiser quand je sors") — stocké en localStorage, partagé entre
+        // tous les magasins/propositions (c'est une préférence d'affichage, pas une donnée métier).
+        try {
+          const saved = localStorage.getItem(COLUMN_STATE_STORAGE_KEY);
+          if (saved) gridApiRef.current?.applyColumnState({ state: JSON.parse(saved), applyOrder: true });
+        } catch {
+          // localStorage indisponible ou JSON corrompu : la grille garde simplement l'ordre par défaut.
+        }
         // AG Grid mesure son propre conteneur via un ResizeObserver interne, mais si la sidebar ou
         // la topbar continuent d'animer/se stabiliser juste après ce montage (navigation SPA), sa
         // première mesure peut être prise sur une largeur transitoire sans qu'un nouveau resize ne
@@ -625,7 +652,20 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         topScrollRef.current.scrollLeft = e.left;
         syncingScrollRef.current = false;
       },
+      // Sauvegarde l'ordre/largeur des colonnes à chaque changement manuel de l'utilisateur (glisser
+      // une colonne, redimensionner) — persistant tant qu'il n'a pas été explicitement réinitialisé.
+      onColumnMoved: (e: any) => { if (e.finished) saveColumnState(); },
+      onColumnResized: (e: any) => { if (e.finished) saveColumnState(); },
     });
+    function saveColumnState() {
+      try {
+        const state = gridApiRef.current?.getColumnState();
+        if (state) localStorage.setItem(COLUMN_STATE_STORAGE_KEY, JSON.stringify(state));
+      } catch {
+        // localStorage indisponible (navigation privée, quota atteint...) : l'ordre choisi ne
+        // survivra pas à cette session, mais la grille reste pleinement utilisable.
+      }
+    }
     if (toolbarRef.current) {
       // reassortAgGridToolbar AJOUTE ses boutons sans jamais vider le conteneur au préalable (voir
       // ag-grid-toolbar.js) — filet de sécurité en plus du useMemo sur `lines` côté PurchaseOrder.tsx
