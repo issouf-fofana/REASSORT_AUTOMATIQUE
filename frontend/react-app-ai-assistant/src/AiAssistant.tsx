@@ -614,6 +614,28 @@ export function AiAssistant() {
         .aia-table th { font-weight: 600; color: #666666; font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; border-bottom-width: 2px; }
         .aia-empty-hint { color: #999999; text-align: center; padding: 2rem 1rem; }
 
+        /* Écran d'accueil (demande du 30/09/2026, maquette fournie) : halo lumineux marine/ambre
+           discret en fond, gros titre centré, champ de saisie flottant + pills de suggestion —
+           palette du Tableau de bord/Proposition de commande, jamais le noir/violet de la maquette
+           d'origine (hors charte du reste du site). */
+        .aia-hero { position: relative; padding: 3.5rem 1rem 2.5rem; overflow: hidden; }
+        .aia-hero-glow {
+          position: absolute; top: -120px; left: 50%; transform: translateX(-50%);
+          width: 640px; height: 320px; border-radius: 50%;
+          background: radial-gradient(ellipse at center, rgba(27,42,74,.14) 0%, rgba(245,166,35,.08) 45%, transparent 75%);
+          pointer-events: none;
+        }
+        .aia-hero-content { position: relative; z-index: 1; }
+        .aia-hero-title { font-size: 2rem; font-weight: 700; color: #1B2A4A; margin-bottom: .5rem; letter-spacing: -.01em; }
+        .aia-hero-subtitle { color: #5B6B85; font-size: 1rem; max-width: 480px; margin-left: auto; margin-right: auto; }
+        .aia-hero-input { max-width: 640px; }
+        .aia-hero-pill {
+          background-color: #EDF1F7; border: 1px solid #D6DEEA; border-radius: 999px;
+          color: #1B2A4A; font-size: .85rem; font-weight: 500; padding: .5rem 1.1rem;
+          transition: background-color .15s ease, border-color .15s ease;
+        }
+        .aia-hero-pill:hover { background-color: #F5A623; border-color: #F5A623; color: #1B2A4A; }
+
         /* La bulle flottante de l'Assistant IA (widget global, cf. ai-assistant-widget.js) est fixe
            en bas-droite (56px + 24px de marge, z-index 1050) sur TOUTES les pages du site — elle
            chevauchait le bouton d'envoi de cette barre, elle-même étirée jusqu'au bord droit de la
@@ -714,36 +736,49 @@ export function AiAssistant() {
           <div id="aia-chat-window" ref={chatWindowRef}>
             {conversationError && <div className="text-danger small p-3">Erreur : {conversationError}</div>}
             {turns.length === 0 && !conversationError && (
-              // Écran d'accueil personnalisé (demande du 27/09/2026, capture de référence à
-              // l'appui) : salue l'utilisateur connecté par son nom (reassort_user, jamais deviné ni
-              // laissé vide) plutôt que le simple texte d'instruction générique d'avant. Les
-              // suggestions de questions déjà chargées (cf. plus bas) servent aussi d'actions
-              // rapides ici, pas une liste dupliquée à maintenir séparément.
-              <div className="aia-welcome text-center py-5">
-                <div className="aia-welcome-title h4 fw-bold mb-1">
-                  {userName ? `Bonjour ${userName}` : 'Bonjour'}
+              // Écran d'accueil (demande du 30/09/2026, maquette fournie) : gros titre centré, halo
+              // lumineux discret en fond, champ de saisie flottant, suggestions en pills — dans la
+              // palette marine/ambre déjà en place sur Tableau de bord/Proposition de commande
+              // (jamais le noir/violet de la maquette de référence, hors charte du reste du site).
+              <div className="aia-hero text-center">
+                <div className="aia-hero-glow" aria-hidden="true"></div>
+                <div className="aia-hero-content">
+                  <div className="aia-hero-title">
+                    {userName ? `Bonjour ${userName}` : 'Assistant IA Réassort'}
+                  </div>
+                  <p className="aia-hero-subtitle mb-4">
+                    Posez une question sur les ventes, le stock, les ruptures ou la précision de l'IA — juste en tapant ci-dessous.
+                  </p>
+                  {!shopReady ? (
+                    <p className="text-muted small">Sélectionnez un magasin (en haut de page) pour commencer.</p>
+                  ) : (
+                    <>
+                      <div className="aia-hero-input mx-auto mb-3">
+                        <AIChatInput
+                          value={input}
+                          onChange={setInput}
+                          onSubmit={() => (abortControllerRef.current ? stopGeneration() : sendQuestion())}
+                          disabled={!shopReady}
+                          sending={sending}
+                          placeholders={
+                            suggestedQuestions.length
+                              ? suggestedQuestions
+                              : ["Ex : quels articles risquent d'être en rupture ?"]
+                          }
+                        />
+                      </div>
+                      {suggestedQuestions.length > 0 && (
+                        <div className="d-flex flex-wrap justify-content-center gap-2 mx-auto" style={{ maxWidth: 720 }}>
+                          {suggestedQuestions.slice(0, 7).map((q, i) => (
+                            <button key={i} type="button" className="aia-hero-pill" onClick={() => sendQuestion(q)}>
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                <p className="text-muted mb-4">
-                  Je suis l'Assistant IA Réassort. Comment puis-je vous aider aujourd'hui ?
-                </p>
-                {!shopReady ? (
-                  <p className="text-muted small">Sélectionnez un magasin (en haut de page) pour commencer.</p>
-                ) : (
-                  suggestedQuestions.length > 0 && (
-                    <div className="d-flex flex-wrap justify-content-center gap-2" style={{ maxWidth: 640, margin: '0 auto' }}>
-                      {suggestedQuestions.slice(0, 6).map((q, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          className="btn btn-sm aia-suggestion-btn"
-                          onClick={() => sendQuestion(q)}
-                        >
-                          {q}
-                        </button>
-                      ))}
-                    </div>
-                  )
-                )}
               </div>
             )}
             {turns.map((turn, i) => (
@@ -777,6 +812,10 @@ export function AiAssistant() {
             ))}
           </div>
 
+          {/* Barre de saisie du bas masquée sur l'écran d'accueil (turns vide) : le nouveau champ
+              flottant ci-dessus (aia-hero-input) la remplace tant qu'aucune question n'a été posée —
+              évite deux champs de saisie visibles en même temps. */}
+          {(turns.length > 0 || conversationError) && (
           <div className="aia-input-bar">
             <div className="d-flex justify-content-between align-items-center mb-1">
               <span className="small text-muted">Suggestions de questions</span>
@@ -819,6 +858,7 @@ export function AiAssistant() {
               Assistant IA Réassort — peut faire des erreurs, vérifiez les informations importantes.
             </div>
           </div>
+          )}
         </div>
       </div>
 
