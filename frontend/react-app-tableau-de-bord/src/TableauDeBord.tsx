@@ -176,7 +176,7 @@ export function TableauDeBord() {
         .kpi-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; margin: .35rem 0 0; color: #fff; }
         .kpi-label { font-size: .78rem; color: #C7D0E0; margin: 0; }
         .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid rgba(255,255,255,.14); color: #8C99B5; }
-        .kpi-footer a { color: #F5A623; font-weight: 600; }
+        .kpi-footer a { color: #F5A623 !important; font-weight: 600; }
         /* Cartes "graphique" (ConformityTrendChart) : fond clair, pour rester lisibles avec
            ApexCharts (qui rend son propre texte, pas simple à recolorer entièrement en blanc) —
            distinction visuelle assumée avec les cartes KPI marine ci-dessus. */
