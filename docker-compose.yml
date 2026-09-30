@@ -32,7 +32,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@127.0.0.1:5433/${POSTGRES_DB:-stock_auto_reappro}?schema=public
+      # connection_limit/pool_timeout : cf. dokploy.yaml (même correctif pour rester cohérent avec
+      # l'environnement de production).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@127.0.0.1:5433/${POSTGRES_DB:-stock_auto_reappro}?schema=public&connection_limit=20&pool_timeout=30
       PORT: 3001
     depends_on:
       postgres:

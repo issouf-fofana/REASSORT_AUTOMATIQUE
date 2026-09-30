@@ -42,7 +42,13 @@ services:
     ports:
       - "3001:3001"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public
+      # connection_limit/pool_timeout ajoutés le 30/09/2026 : erreur réelle observée en prod
+      # ("Failed to convert rust String into napi string" sur prisma.salesLine.findMany) survenant
+      # uniquement quand une génération de proposition tournait EN MÊME TEMPS qu'un gros backfill de
+      # ventes sur un autre magasin — le pool de connexions Prisma par défaut (~nombre de CPU du
+      # conteneur, souvent très bas) sature sous cette charge concurrente, et le driver natif Rust
+      # remonte alors ce message d'erreur trompeur au lieu d'un vrai timeout de pool explicite.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_auto_reappro}?schema=public&connection_limit=20&pool_timeout=30
       NODE_ENV: production
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET}
