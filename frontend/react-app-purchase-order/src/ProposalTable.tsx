@@ -58,10 +58,10 @@ function checkCellRenderer(getLineState: (l: ProposalLine) => LineState, onChang
 
 function articleAlertIcon(l: ProposalLine): { icon: string; cls: string; title: string } | null {
   if (l.excludedAsAlreadyOrderedRpos) {
-    return { icon: 'solar:lock-keyhole-bold-duotone', cls: 'text-muted', title: 'Commande RPOS en cours — cliquez sur la ligne pour débloquer si besoin' };
+    return { icon: 'solar:lock-keyhole-bold-duotone', cls: 'text-primary', title: 'Commande RPOS en cours — cliquez sur la ligne pour débloquer si besoin' };
   }
   if (l.excludedAsAlreadyOrdered) {
-    return { icon: 'solar:box-bold-duotone', cls: 'text-muted', title: 'Déjà commandé sur cette plateforme' };
+    return { icon: 'solar:box-bold-duotone', cls: 'text-primary', title: 'Déjà commandé sur cette plateforme' };
   }
   if (l.orderAnomaly) {
     return { icon: 'solar:danger-triangle-bold-duotone', cls: 'reassort-alert-soft', title: l.orderAnomaly.direction === 'HIGH' ? 'Quantité inhabituellement élevée' : 'Quantité inhabituellement faible' };

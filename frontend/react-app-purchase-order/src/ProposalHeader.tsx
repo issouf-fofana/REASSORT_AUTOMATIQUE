@@ -79,9 +79,10 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
 
   // Numéro lisible (spec §2) : composé de la date de génération + référence magasin, jamais stocké
   // séparément — aucune migration nécessaire, calculé à l'affichage à partir de champs déjà
-  // persistés. Format demandé explicitement : AAAA-MM-JJ-<référence magasin>.
+  // persistés. Séparateur " / " plutôt que "-" (30/09/2026, signalé peu lisible) : AAAA-MM-JJ a déjà
+  // des tirets, "...-414" se lisait comme un 4e segment de date au lieu d'une référence magasin.
   const proposalNumber = proposal.rposShopReference
-    ? `${new Date(proposal.generatedAt).toISOString().slice(0, 10)}-${proposal.rposShopReference}`
+    ? `${new Date(proposal.generatedAt).toISOString().slice(0, 10)} / ${proposal.rposShopReference}`
     : proposal.id.slice(0, 8);
 
   const periodLabel = proposal.analysisPeriodStart && proposal.analysisPeriodEnd
