@@ -9,6 +9,8 @@ const rpos = require('../../services/rposClient');
 const {
   generateProposal,
   generateAndSaveProposal,
+  analyzeSales,
+  generateFromAnalysis,
   getPendingProposal,
   startProposalValidation,
   validateProposalDepartment,
@@ -16,6 +18,7 @@ const {
   attachOrderAnomaliesToLines,
   checkSupplierEligibility,
 } = require('../../services/proposalService');
+const { saveSalesAnalysis, getSalesAnalysis, loadSalesAnalysisForGeneration } = require('../../services/salesAnalysisService');
 const { getWeeklyPlanHistory, findWeeklyPlanForDate } = require('../../services/weeklyPlanService');
 const { getConfig } = require('../../services/configService');
 const { resolvePeriod } = require('../../services/periodService');
@@ -202,7 +205,7 @@ router.post('/proposal/generate', async (req, res) => {
     const periodOverride = req.body.periodOverride || undefined;
 
     const run = await prisma.proposalGenerationRun.create({
-      data: { rposShopId: shopId, status: 'RUNNING', step: 'SALES' },
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'SALES', runType: 'GENERATE' },
     });
 
     res.status(202).json({ success: true, data: { runId: run.id } });
@@ -260,8 +263,11 @@ router.get('/proposal/generate/active', async (req, res) => {
     const shopId = resolveShopId(req);
     if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
 
+    // runType filtre par défaut sur GENERATE (comportement historique de cette route) : une analyse
+    // en cours (?type=ANALYZE) ne doit jamais être confondue avec une génération complète en cours.
+    const runType = req.query.type === 'ANALYZE' ? 'ANALYZE' : 'GENERATE';
     const run = await prisma.proposalGenerationRun.findFirst({
-      where: { rposShopId: shopId, status: 'RUNNING' },
+      where: { rposShopId: shopId, status: 'RUNNING', runType },
       orderBy: { createdAt: 'desc' },
     });
     res.json({ success: true, data: run ? { runId: run.id } : null });
@@ -305,6 +311,159 @@ router.get('/proposal/generate/:runId/status', async (req, res) => {
       },
     });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/proposal/analyze - déclenche SEULEMENT la phase lente (analyse des ventes :
+// Pareto, saisonnalité, CA de référence), sans jamais créer de Proposal. Sauvegarde le résultat
+// dans SalesAnalysis (une seule analyse par magasin, remplace la précédente) pour permettre
+// ensuite plusieurs générations rapides via /proposal/generate-from-analysis (demande du
+// 30/09/2026 : sur LAST_365_DAYS cette étape peut prendre plusieurs minutes, inutile de la refaire
+// à chaque génération).
+router.post('/proposal/analyze', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    const shopReference = req.user.rposShopReference || req.body.shopReference;
+    if (!shopReference) {
+      return res.status(400).json({ success: false, message: 'Référence du magasin requise (shopReference)' });
+    }
+
+    const periodOverride = req.body.periodOverride || undefined;
+
+    const run = await prisma.proposalGenerationRun.create({
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'SALES', runType: 'ANALYZE' },
+    });
+
+    res.status(202).json({ success: true, data: { runId: run.id } });
+
+    (async () => {
+      try {
+        const onProgress = async (p) => {
+          await prisma.proposalGenerationRun.update({
+            where: { id: run.id },
+            data: {
+              step: p.step,
+              ...(p.articlesTotal !== undefined ? { articlesTotal: p.articlesTotal } : {}),
+              ...(p.articlesProcessed !== undefined ? { articlesProcessed: p.articlesProcessed } : {}),
+            },
+          }).catch(() => {});
+        };
+
+        const analysis = await analyzeSales(posId, shopId, shopReference, periodOverride, onProgress);
+        await saveSalesAnalysis(posId, shopId, shopReference, analysis);
+
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', completedAt: new Date() },
+        });
+      } catch (error) {
+        console.error('Sales analysis error:', error);
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
+  } catch (error) {
+    console.error('Proposal analyze start error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal/analyze/status - métadonnées légères de l'analyse déjà sauvegardée
+// pour ce magasin (date, période, nombre d'articles), sans le payload complet. Null si aucune
+// analyse n'a encore été lancée pour ce magasin.
+router.get('/proposal/analyze/status', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+
+    const analysis = await getSalesAnalysis(shopId);
+    res.json({ success: true, data: analysis });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/proposal/generate-from-analysis - génère une proposition à partir de
+// l'analyse déjà sauvegardée pour ce magasin (rapide : ne recharge jamais les ventes). Permet de
+// lancer plusieurs générations différentes (ex: avec des `limit` différents) à partir de la même
+// analyse sans la refaire.
+router.post('/proposal/generate-from-analysis', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    const shopReference = req.user.rposShopReference || req.body.shopReference;
+    const shopName = req.user.rposShopName || req.body.shopName;
+    if (!shopReference || !shopName) {
+      return res.status(400).json({ success: false, message: 'Référence et nom du magasin requis (shopReference, shopName)' });
+    }
+
+    const existingAnalysis = await getSalesAnalysis(shopId);
+    if (!existingAnalysis) {
+      return res.status(400).json({ success: false, message: 'Aucune analyse disponible pour ce magasin — lancez une analyse au préalable.' });
+    }
+
+    const limit = req.body.limit ? parseInt(req.body.limit, 10) : undefined;
+
+    const run = await prisma.proposalGenerationRun.create({
+      // step démarre directement à PARETO : la phase SALES a déjà été faite par l'analyse sauvegardée.
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'PARETO', runType: 'GENERATE' },
+    });
+
+    res.status(202).json({ success: true, data: { runId: run.id } });
+
+    (async () => {
+      try {
+        const onProgress = async (p) => {
+          await prisma.proposalGenerationRun.update({
+            where: { id: run.id },
+            data: {
+              step: p.step,
+              ...(p.articlesTotal !== undefined ? { articlesTotal: p.articlesTotal } : {}),
+              ...(p.articlesProcessed !== undefined ? { articlesProcessed: p.articlesProcessed } : {}),
+              ...(p.lastArticleEan !== undefined ? { lastArticleEan: p.lastArticleEan } : {}),
+              ...(p.lastArticleLabel !== undefined ? { lastArticleLabel: p.lastArticleLabel } : {}),
+              ...(p.aiUnavailable !== undefined ? { aiUnavailable: p.aiUnavailable } : {}),
+              ...(p.aiArticlesAdjusted !== undefined ? { aiArticlesAdjusted: p.aiArticlesAdjusted } : {}),
+              ...(p.aiErrorMessage !== undefined ? { aiErrorMessage: p.aiErrorMessage } : {}),
+            },
+          }).catch(() => {});
+        };
+
+        const analysis = await loadSalesAnalysisForGeneration(shopId);
+        if (!analysis) throw new Error('Aucune analyse disponible pour ce magasin — lancez une analyse au préalable.');
+
+        const result = await generateFromAnalysis(analysis, { posId, shopId, limit, onProgress });
+        const { proposal, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, onProgress }, result);
+        if (!weeklyPlanAttached) {
+          console.warn(`[proposal/generate-from-analysis] ALERTE ${shopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+        }
+
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', proposalId: proposal.id, completedAt: new Date() },
+        });
+      } catch (error) {
+        console.error('Proposal generate-from-analysis error:', error);
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
+  } catch (error) {
+    console.error('Proposal generate-from-analysis start error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

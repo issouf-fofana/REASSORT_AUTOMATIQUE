@@ -443,8 +443,12 @@ function computeCoverageStatus({ avgWeeklySales, stock, orderedQty, quantityProp
 }
 
 /**
- * Génère la proposition de commande pour un magasin : calcule le Pareto sur les ventes de la
- * période configurée, puis croise avec l'état courant du stock RPOS (API, en temps réel).
+ * Phase 1 (lente) : calcule le Pareto sur les ventes de la période configurée, applique la
+ * saisonnalité et le CA de référence — TOUT ce qui dépend de charger les ventes elles-mêmes.
+ * Séparée de la phase 2 (generateFromAnalysis, ci-dessous) pour permettre de lancer cette analyse
+ * une seule fois puis de générer plusieurs propositions à partir de son résultat sans la refaire
+ * (demande du 30/09/2026 : sur LAST_365_DAYS un magasin à fort volume peut prendre plusieurs
+ * minutes rien que pour cette étape).
  *
  * Source des ventes : d'abord un fichier d'export local (rapide, zéro appel réseau vers RPOS)
  * si un fichier couvrant la période est disponible pour ce magasin ; sinon repli automatique sur
@@ -453,11 +457,11 @@ function computeCoverageStatus({ avgWeeklySales, stock, orderedQty, quantityProp
  * @param {string} posId - identifiant du serveur RPOS hébergeant ce magasin (ex: "pos1")
  * @param {string} shopId - uuid du magasin RPOS
  * @param {string} [shopReference] - code magasin (ex: "050"), nécessaire pour chercher les fichiers locaux
- * @param {number} [limit] - limite le nombre d'articles traités (pour tests rapides)
+ * @returns {Promise<object>} SalesAnalysisResult sérialisable (voir salesAnalysisService.js), consommé par generateFromAnalysis
  */
-async function generateProposal(posId, shopId, limit, shopReference, periodOverride, onProgress) {
+async function analyzeSales(posId, shopId, shopReference, periodOverride, onProgress) {
   const reportProgress = onProgress || (() => {});
-  console.log(`[proposalService] Génération démarrée : posId=${posId} shopId=${shopId} shopReference=${shopReference || '-'} limit=${limit || 'aucune'}`);
+  console.log(`[proposalService] Analyse des ventes démarrée : posId=${posId} shopId=${shopId} shopReference=${shopReference || '-'}`);
 
   const baseConfig = await getConfig(shopId);
   // Un override ponctuel de période (choisi au moment de la génération manuelle) ne modifie
@@ -507,9 +511,9 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
   console.log(`[proposalService] Pareto : ${priorityArticles.length}/${totalArticlesWithSales} article(s) prioritaire(s) (seuil ${config.paretoThreshold * 100}%)`);
   reportProgress({ step: 'PARETO' });
 
+  // `limit` (si demandé) est appliqué en phase 2 (generateFromAnalysis), pas ici : une même analyse
+  // doit pouvoir servir à plusieurs générations avec des `limit` différents sans être refaite.
   let articles = priorityArticles;
-  if (limit) articles = articles.slice(0, limit);
-  reportProgress({ step: 'QUANTITIES', articlesTotal: articles.length, articlesProcessed: 0 });
 
   // Saisonnalité (readme §8) : compare la période d'analyse actuelle à la même période N années
   // en arrière, et ajuste la vente moyenne prévue si l'écart dépasse le seuil configuré, pour ne
@@ -651,6 +655,50 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
     revenueByEan.set(ean, (revenueByEan.get(ean) || 0) + caHt);
     paretoRevenueTotal += caHt;
   }
+
+  return {
+    articles,
+    totalArticlesWithSales,
+    config,
+    period,
+    periodDays,
+    actualDataStart, actualDataEnd, coverageGapDays,
+    revenueShareStart, revenueShareEnd,
+    shopTotalRevenue, shopTotalRevenueInclTax,
+    revenueByEanEntries: Array.from(revenueByEan.entries()),
+    paretoRevenueTotal,
+    salesSource,
+    analyzedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Phase 2 (rapide) : croise les articles déjà analysés (Pareto/saisonnalité/CA, cf. analyzeSales
+ * ci-dessus) avec l'état courant du stock RPOS (API, en temps réel) pour produire les quantités à
+ * commander. Ne recharge JAMAIS les ventes — `analysis` doit provenir d'un appel à analyzeSales
+ * (frais ou rechargé depuis SalesAnalysis en base via salesAnalysisService.loadSalesAnalysisForGeneration).
+ *
+ * @param {object} analysis - résultat de analyzeSales (frais ou rechargé depuis la base)
+ * @param {object} params
+ * @param {string} params.posId
+ * @param {string} params.shopId
+ * @param {number} [params.limit] - limite le nombre d'articles traités (pour tests rapides, ou générations partielles répétées sur la même analyse)
+ * @param {Function} [params.onProgress]
+ */
+async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress }) {
+  const reportProgress = onProgress || (() => {});
+  const {
+    totalArticlesWithSales, config, period, periodDays,
+    actualDataStart, actualDataEnd, coverageGapDays,
+    revenueShareStart, revenueShareEnd,
+    shopTotalRevenue, shopTotalRevenueInclTax,
+    paretoRevenueTotal,
+  } = analysis;
+  const revenueByEan = new Map(analysis.revenueByEanEntries);
+
+  let articles = analysis.articles;
+  if (limit) articles = articles.slice(0, limit);
+  reportProgress({ step: 'QUANTITIES', articlesTotal: articles.length, articlesProcessed: 0 });
 
   // Mode "sans réseau Prosuma" (config.ignoreRposStockInCalculation) : tous les appels RPOS
   // ci-dessous (transit plateforme, préchauffe produit) échoueraient forcément hors réseau — on les
@@ -1012,14 +1060,30 @@ async function generateProposal(posId, shopId, limit, shopReference, periodOverr
       paretoThreshold: config.paretoThreshold,
       safetyStockRatio: config.safetyStockRatio,
       receptionLeadTimeDays: config.receptionLeadTimeDays,
-      salesSource,
-      revenueSharePeriodDays: revenueShareDays,
+      salesSource: analysis.salesSource,
+      revenueSharePeriodDays: config.revenueSharePeriodDays || 1,
       revenueShareStart,
       revenueShareEnd,
       shopTotalRevenue,
       shopTotalRevenueInclTax,
     },
   };
+}
+
+/**
+ * Wrapper de compatibilité : enchaîne analyzeSales puis generateFromAnalysis, exactement le
+ * comportement historique de generateProposal avant son découpage en deux phases (30/09/2026).
+ * Signature strictement inchangée — aucun appelant existant (dailyReplenishmentReviewJob.js,
+ * route GET /proposal) n'a besoin d'être modifié.
+ *
+ * @param {string} posId - identifiant du serveur RPOS hébergeant ce magasin (ex: "pos1")
+ * @param {string} shopId - uuid du magasin RPOS
+ * @param {number} [limit] - limite le nombre d'articles traités (pour tests rapides)
+ * @param {string} [shopReference] - code magasin (ex: "050"), nécessaire pour chercher les fichiers locaux
+ */
+async function generateProposal(posId, shopId, limit, shopReference, periodOverride, onProgress) {
+  const analysis = await analyzeSales(posId, shopId, shopReference, periodOverride, onProgress);
+  return generateFromAnalysis(analysis, { posId, shopId, limit, onProgress });
 }
 
 /**
@@ -2605,6 +2669,8 @@ async function getAiDecisionLog(shopId, { ean, action, from, to, limit = 200 } =
 
 module.exports = {
   generateProposal,
+  analyzeSales,
+  generateFromAnalysis,
   computeQuantityToOrder,
   buildOrderSufficiencyReasoning,
   computeCoverageStatus,

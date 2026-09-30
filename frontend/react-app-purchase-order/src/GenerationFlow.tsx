@@ -24,6 +24,15 @@ interface PeriodPreview {
   coverageWarning?: { message: string };
 }
 
+interface SalesAnalysisStatus {
+  analyzedAt: string;
+  periodStart: string;
+  periodEnd: string;
+  periodMode: string;
+  totalArticlesWithSales: number;
+  salesSource: string;
+}
+
 const STEP_ORDER: GenStep[] = ['SALES', 'PARETO', 'QUANTITIES', 'AI_ADJUSTMENT', 'DONE'];
 const STEP_LABELS: Record<GenStep, string> = {
   SALES: 'Analyse des ventes du magasin',
@@ -81,6 +90,22 @@ export function GenerationFlow({
   const [bannerVisible, setBannerVisible] = useState(false);
   const pollTokenRef = useRef(0);
 
+  // Analyse des ventes sauvegardée (demande du 30/09/2026) : permet de générer plusieurs
+  // propositions à partir de la même analyse sans refaire le calcul de ventes à chaque fois.
+  const [analysisStatus, setAnalysisStatus] = useState<SalesAnalysisStatus | null>(null);
+  // true quand le run en cours (progressOpen) est une analyse seule (SALES->PARETO->DONE, pas de
+  // QUANTITIES/AI_ADJUSTMENT) ou une génération à partir d'une analyse existante (saute SALES).
+  const [runKind, setRunKind] = useState<'FULL' | 'ANALYZE_ONLY' | 'FROM_ANALYSIS'>('FULL');
+
+  async function refreshAnalysisStatus() {
+    try {
+      const data = await apiFetch<SalesAnalysisStatus | null>(`/reassort/proposal/analyze/status?${shopQueryParam}`);
+      setAnalysisStatus(data);
+    } catch {
+      // silencieux : au pire le bandeau "analyse disponible" ne s'affiche pas
+    }
+  }
+
   async function refreshPeriodPreview() {
     setPeriodPreviewError(null);
     if (periodMode === 'CUSTOM' && (!customStart || !customEnd)) {
@@ -115,9 +140,10 @@ export function GenerationFlow({
     setConfirmOpen(true);
   }
 
-  async function watchRun(id: string) {
+  async function watchRun(id: string, kind: 'FULL' | 'ANALYZE_ONLY' | 'FROM_ANALYSIS' = 'FULL') {
     const token = ++pollTokenRef.current;
     setRunId(id);
+    setRunKind(kind);
     setBannerVisible(true);
     const POLL_INTERVAL_MS = 800;
     try {
@@ -129,7 +155,13 @@ export function GenerationFlow({
         if (s.status === 'DONE') {
           setBannerVisible(false);
           setRunId(null);
-          await onDone();
+          if (kind === 'ANALYZE_ONLY') {
+            // Aucune Proposal créée par une analyse seule : rien à recharger côté commande, juste
+            // rafraîchir le bandeau "Analyse du DD/MM disponible".
+            await refreshAnalysisStatus();
+          } else {
+            await onDone();
+          }
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
@@ -160,14 +192,51 @@ export function GenerationFlow({
     }
   }
 
+  async function launchAnalyzeOnly() {
+    setStatus(null);
+    setProgressOpen(true);
+    try {
+      const data = await apiFetch<{ runId: string }>(`/reassort/proposal/analyze?${shopQueryParam}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopReference }),
+      });
+      watchRun(data.runId, 'ANALYZE_ONLY');
+    } catch (err) {
+      setStatus({ status: 'ERROR', step: 'SALES', errorMessage: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function launchGenerateFromAnalysis() {
+    setStatus(null);
+    setProgressOpen(true);
+    try {
+      const data = await apiFetch<{ runId: string }>(`/reassort/proposal/generate-from-analysis?${shopQueryParam}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopReference, shopName }),
+      });
+      watchRun(data.runId, 'FROM_ANALYSIS');
+    } catch (err) {
+      setStatus({ status: 'ERROR', step: 'PARETO', errorMessage: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   useEffect(() => {
     if (!shopId) return;
+    refreshAnalysisStatus();
     (async () => {
       try {
         const data = await apiFetch<{ runId: string } | null>(`/reassort/proposal/generate/active?${shopQueryParam}`);
-        if (data?.runId) watchRun(data.runId);
+        if (data?.runId) watchRun(data.runId, 'FULL');
       } catch {
         // silencieux : au pire l'utilisateur ne voit pas la bannière et devra relancer manuellement
+      }
+      try {
+        const data = await apiFetch<{ runId: string } | null>(`/reassort/proposal/generate/active?${shopQueryParam}&type=ANALYZE`);
+        if (data?.runId) watchRun(data.runId, 'ANALYZE_ONLY');
+      } catch {
+        // silencieux
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,12 +257,16 @@ export function GenerationFlow({
     return 'pending';
   }
 
-  const showAiStep = status?.step === 'AI_ADJUSTMENT' || (status && STEP_ORDER.indexOf(status.step) > STEP_ORDER.indexOf('QUANTITIES'));
+  const showAiStep =
+    runKind !== 'ANALYZE_ONLY' && (status?.step === 'AI_ADJUSTMENT' || (status && STEP_ORDER.indexOf(status.step) > STEP_ORDER.indexOf('QUANTITIES')));
+  const showQuantitiesStep = runKind !== 'ANALYZE_ONLY';
+  const showSalesStep = runKind !== 'FROM_ANALYSIS';
 
   function progressText(): string {
     if (!status) return 'Démarrage...';
     if (status.status === 'ERROR') return `Échec de la génération. ${status.errorMessage || 'Erreur inconnue'}`;
     if (status.status === 'DONE') {
+      if (runKind === 'ANALYZE_ONLY') return 'Analyse des ventes terminée. Vous pouvez maintenant générer une proposition à partir de cette analyse.';
       const lineCount = status.proposal?.lines?.length || 0;
       let text = `Génération terminée avec succès. ${lineCount ? lineCount + ' article(s) proposé(s).' : 'Aucun article à proposer pour le moment.'}`;
       if (status.aiUnavailable) {
@@ -247,6 +320,23 @@ export function GenerationFlow({
       <button className="btn btn-sm btn-outline-warning" disabled={!!runId} onClick={() => openConfirm(true)}>
         <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Forcer une nouvelle génération
       </button>
+      <button className="btn btn-sm btn-outline-secondary" disabled={!!runId} onClick={launchAnalyzeOnly}>
+        <iconify-icon icon="solar:chart-2-bold-duotone" className="align-middle"></iconify-icon> Lancer une nouvelle analyse
+      </button>
+
+      {analysisStatus && (
+        <div className="alert alert-secondary d-flex justify-content-between align-items-center mt-2 mb-0 small w-100">
+          <span>
+            <iconify-icon icon="solar:chart-2-bold-duotone" className="me-1"></iconify-icon>
+            Analyse du {new Date(analysisStatus.analyzedAt).toLocaleString('fr-FR')} disponible ({analysisStatus.totalArticlesWithSales} article(s)
+            avec ventes, période du {new Date(analysisStatus.periodStart).toLocaleDateString('fr-FR')} au{' '}
+            {new Date(analysisStatus.periodEnd).toLocaleDateString('fr-FR')}).
+          </span>
+          <button type="button" className="btn btn-sm btn-outline-dark" disabled={!!runId} onClick={launchGenerateFromAnalysis}>
+            Générer à partir de cette analyse
+          </button>
+        </div>
+      )}
 
       {bannerVisible && (
         <div className="alert alert-info d-flex justify-content-between align-items-center mt-2 mb-0 small w-100">
@@ -357,14 +447,16 @@ export function GenerationFlow({
             <div className="modal-dialog modal-dialog-centered" role="document">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title">Génération de la proposition</h5>
+                  <h5 className="modal-title">
+                    {runKind === 'ANALYZE_ONLY' ? 'Analyse des ventes' : runKind === 'FROM_ANALYSIS' ? 'Génération à partir de l\'analyse' : 'Génération de la proposition'}
+                  </h5>
                   <button type="button" className="btn-close" onClick={() => setProgressOpen(false)}></button>
                 </div>
                 <div className="modal-body">
                   <ul className="list-group list-group-flush mb-3">
-                    <StepRow label={STEP_LABELS.SALES} state={stepState('SALES')} />
+                    {showSalesStep && <StepRow label={STEP_LABELS.SALES} state={stepState('SALES')} />}
                     <StepRow label={STEP_LABELS.PARETO} state={stepState('PARETO')} />
-                    <StepRow label={STEP_LABELS.QUANTITIES} state={stepState('QUANTITIES')} />
+                    {showQuantitiesStep && <StepRow label={STEP_LABELS.QUANTITIES} state={stepState('QUANTITIES')} />}
                     {showAiStep && <StepRow label={STEP_LABELS.AI_ADJUSTMENT} state={stepState('AI_ADJUSTMENT')} />}
                     <StepRow label={STEP_LABELS.DONE} state={stepState('DONE')} />
                   </ul>

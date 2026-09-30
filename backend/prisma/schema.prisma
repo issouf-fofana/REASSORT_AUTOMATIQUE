@@ -381,6 +381,12 @@ model ProposalGenerationRun {
 
   rposShopId String @map("rpos_shop_id")
 
+  // ANALYZE (uniquement la phase lente d'analyse des ventes, ne crée jamais de Proposal) vs
+  // GENERATE (génération complète, avec ou sans réutilisation d'une analyse déjà sauvegardée) —
+  // permet au frontend de suivre les deux types de run indépendamment (ex: une analyse en cours
+  // ne doit pas être confondue avec une génération en cours pour le même magasin).
+  runType String @default("GENERATE") @map("run_type")
+
   status String @default("RUNNING") // RUNNING -> DONE -> ERROR
   // Étape en cours, alignée sur les 3 étapes déjà affichées côté UI : SALES (analyse des ventes,
   // avant que le nombre total d'articles à traiter soit connu) -> PARETO (classement) ->
@@ -410,6 +416,44 @@ model ProposalGenerationRun {
 
   @@index([rposShopId, createdAt])
   @@map("proposal_generation_run")
+}
+
+// Analyse des ventes déjà calculée (Pareto, saisonnalité, CA de référence), sauvegardée séparément
+// de la génération de proposition elle-même (demande du 30/09/2026) : sur les périodes longues
+// (LAST_365_DAYS), charger les ventes et calculer le Pareto peut prendre plusieurs minutes — sans
+// cette table, chaque génération de proposition devait obligatoirement refaire ce calcul long,
+// même pour simplement régénérer avec un paramètre différent. Une seule ligne par magasin
+// (rposShopId unique) : une nouvelle analyse remplace toujours la précédente, jamais d'historique,
+// jamais d'expiration automatique (l'utilisateur juge lui-même si une analyse reste pertinente).
+model SalesAnalysis {
+  id String @id @default(cuid())
+
+  rposShopId        String @unique @map("rpos_shop_id")
+  rposShopReference String @map("rpos_shop_reference")
+  rposPosId         String @map("rpos_pos_id")
+
+  // Tout ce dont generateFromAnalysis (proposalService.js) a besoin pour produire une proposition
+  // SANS jamais recharger les ventes : articles Pareto (avec ajustement saisonnalité déjà appliqué),
+  // config résolue au moment de l'analyse, CA de référence, revenueByEan (sérialisé en tableau de
+  // paires [ean, ca], une Map ne survivant pas à JSON.stringify). Volontairement en Json plutôt
+  // qu'éclaté en colonnes : sa forme interne suit celle de computeParetoFromLines et n'a pas
+  // vocation à être filtrée/triée en SQL.
+  payload Json @map("payload")
+
+  // Dupliqué hors du JSON uniquement pour un affichage rapide (bandeau "Analyse du DD/MM
+  // disponible") sans désérialiser tout le payload à chaque chargement de la page.
+  periodStart            DateTime  @map("period_start")
+  periodEnd              DateTime  @map("period_end")
+  periodMode             String    @map("period_mode")
+  actualDataStart        DateTime? @map("actual_data_start")
+  actualDataEnd          DateTime? @map("actual_data_end")
+  totalArticlesWithSales Int       @map("total_articles_with_sales")
+  salesSource            String    @map("sales_source")
+
+  analyzedAt DateTime @default(now()) @map("analyzed_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("sales_analyses")
 }
 
 // =============================================
