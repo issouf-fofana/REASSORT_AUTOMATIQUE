@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from './api/client';
-import type { AdminDashboardData } from './types';
+import { Pagination } from './Pagination';
+import type { AdminDashboardData, PerShopRow } from './types';
+
+const PAGE_SIZE = 10;
 
 // Vue "Tous les magasins" (fusion de l'ancienne page Vue globale /admin-dashboard, 30/09/2026) —
 // même endpoint et même contenu que l'ancien AdminDashboard.tsx (react-app-dashboard/), adapté à la
@@ -61,6 +64,7 @@ export function AllShopsView() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +72,7 @@ export function AllShopsView() {
     try {
       const d = await apiFetch<AdminDashboardData>('/reassort/admin/dashboard');
       setData(d);
+      setPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -78,6 +83,15 @@ export function AllShopsView() {
   useEffect(() => { load(); }, [load]);
 
   const stockoutAlertThreshold = data?.stockoutAlertThreshold;
+
+  // Magasins avec de l'activité réelle (propositions en attente ou validées) en premier, plutôt que
+  // l'ordre brut renvoyé par le backend — sur 53 magasins, la plupart n'ont rien de récent et
+  // noyaient les lignes utiles en fin de tableau interminable (signalé le 30/09/2026).
+  const sortedPerShop: PerShopRow[] = data
+    ? [...data.perShop].sort((a, b) => (b.pendingProposals + b.validatedProposals) - (a.pendingProposals + a.validatedProposals))
+    : [];
+  const pageCount = Math.max(1, Math.ceil(sortedPerShop.length / PAGE_SIZE));
+  const pagedPerShop = sortedPerShop.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div>
@@ -206,6 +220,10 @@ export function AllShopsView() {
           <div className="card kpi-card-chart">
             <div className="card-header bg-transparent">
               <h5 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 600, fontSize: '.95rem' }}>Performance par magasin</h5>
+              <p className="text-muted small mb-0 mt-1">
+                Un magasin par ligne : propositions en attente/validées, taux de conformité/rejet/rupture/surstock et précision des
+                prévisions (MAE), calculés sur ses propositions validées. Les magasins avec de l'activité récente apparaissent en premier.
+              </p>
             </div>
             <div className="card-body p-0">
               <div className="table-responsive">
@@ -225,10 +243,10 @@ export function AllShopsView() {
                     </tr>
                   </thead>
                   <tbody>
-                    {!data.perShop.length ? (
+                    {!sortedPerShop.length ? (
                       <tr><td colSpan={10} className="text-center text-muted py-4">Aucun magasin avec un compte actif pour le moment.</td></tr>
                     ) : (
-                      data.perShop.map((s, i) => {
+                      pagedPerShop.map((s, i) => {
                         const isStockoutAlert = s.stockoutRate !== null && stockoutAlertThreshold !== undefined && s.stockoutRate > stockoutAlertThreshold;
                         return (
                           <tr key={i}>
@@ -249,6 +267,7 @@ export function AllShopsView() {
                   </tbody>
                 </table>
               </div>
+              <Pagination page={page} pageCount={pageCount} onChange={setPage} />
             </div>
           </div>
         </>
