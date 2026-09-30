@@ -9,16 +9,6 @@ RUN npm ci
 COPY react-app/ .
 RUN npm run build
 
-# Stage de build du Dashboard admin migré vers React (page pilote suivante après Paramètres) —
-# projet Vite séparé (frontend/react-app-dashboard/) plutôt que multi-page dans react-app/, pour ne
-# jamais risquer de casser le build de Paramètres en modifiant une config partagée.
-FROM node:20-alpine AS dashboard-builder
-WORKDIR /app
-COPY react-app-dashboard/package*.json ./
-RUN npm ci
-COPY react-app-dashboard/ .
-RUN npm run build
-
 # Stage de build de la page Ventes synchronisées migrée vers React (troisième page migrée, projet
 # Vite séparé même raison que ci-dessus).
 FROM node:20-alpine AS sales-history-builder
@@ -164,10 +154,6 @@ RUN rm -f /usr/share/nginx/html/nginx.conf
 # Résultat du build React (page Paramètres), servi sous /settings-app/ par une règle nginx dédiée
 # (voir nginx.conf) — jamais mélangé avec les pages HTML classiques du COPY . ci-dessus.
 COPY --from=react-builder /app/dist /usr/share/nginx/html/settings-app
-
-# Résultat du build React (Dashboard admin), servi sous /dashboard-app/ par une règle nginx dédiée
-# (voir nginx.conf).
-COPY --from=dashboard-builder /app/dist /usr/share/nginx/html/dashboard-app
 
 # Résultat du build React (Ventes synchronisées), servi sous /sales-history-app/ par une règle
 # nginx dédiée (voir nginx.conf).

@@ -453,7 +453,7 @@ window.PROJECT_GUIDE_CONTENT = [
           {
             why: 'Savoir objectivement, sur l\'historique réel, si les corrections humaines sur les propositions de l\'IA étaient justifiées ou non — la base pour juger si l\'IA pourrait un jour se passer de validation humaine.',
             what: 'Sur les commandes où un humain a modifié la quantité proposée par l\'IA, compare a posteriori (une fois les ventes réelles connues) qui avait raison : l\'IA ou la correction humaine. Un score de confiance global s\'affiche sur la Vue Globale.',
-            pages: [{ href: '/admin-dashboard', label: 'Vue globale' }, { href: '/ai-quality#tab-autonomy', label: 'Qualité & IA > Préparation à l\'autonomie' }],
+            pages: [{ href: '/', label: 'Tableau de bord > Tous les magasins' }, { href: '/ai-quality#tab-autonomy', label: 'Qualité & IA > Préparation à l\'autonomie' }],
           },
         ],
       },
@@ -686,7 +686,7 @@ window.PROJECT_GUIDE_CONTENT = [
           {
             why: 'Mesurer objectivement la performance du réassort : les propositions sont-elles suivies telles quelles, y a-t-il des ruptures ou du surstock, les prévisions sont-elles précises ?',
             what: 'Calcule le taux de conformité (commandes validées sans modification), le taux de rupture, le taux de surstock, et la précision des prévisions — utilisés notamment pour juger quand un magasin ou un article pourrait passer en validation automatique.',
-            pages: [{ href: '/admin-dashboard', label: 'Vue globale' }],
+            pages: [{ href: '/', label: 'Tableau de bord > Tous les magasins' }],
           },
         ],
       },
@@ -699,7 +699,7 @@ window.PROJECT_GUIDE_CONTENT = [
           {
             why: 'Avoir une vue d\'ensemble de tous les magasins en un seul endroit, plutôt que de devoir consulter chaque magasin séparément.',
             what: 'Regroupe les indicateurs clés (rupture, surstock, conformité, précision IA, confiance IA) sur l\'ensemble des magasins.',
-            pages: [{ href: '/admin-dashboard', label: 'Vue globale' }],
+            pages: [{ href: '/', label: 'Tableau de bord > Tous les magasins' }],
           },
         ],
       },

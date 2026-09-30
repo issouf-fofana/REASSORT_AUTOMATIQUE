@@ -83,10 +83,6 @@
     if (user && user.role === 'ADMIN' && usersMenuItem) {
       usersMenuItem.style.display = '';
     }
-    const adminDashboardMenuItem = document.getElementById('menu-item-admin-dashboard');
-    if (user && user.role === 'ADMIN' && adminDashboardMenuItem) {
-      adminDashboardMenuItem.style.display = '';
-    }
     // Sous-liens Paramètres réservés ADMIN (mêmes onglets que settings.html masque pour un compte
     // STORE/SUPERVISOR — cf. initShopPicker) : révélés ici pour rester coordonné, jamais en dur.
     // Idem pour les pages admin du debug global (Améliorations IA, Journal d'audit : API 403

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
+import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
 import { OrdersStatusDonut } from './OrdersStatusDonut';
 import { TodayProposalsCard } from './TodayProposalsCard';
@@ -25,6 +26,11 @@ function pct(rate: number | null): string {
 export function TableauDeBord() {
   const [user] = useState(() => window.reassortGetUser());
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
+
+  // Onglets "Ce magasin" / "Tous les magasins" (fusion de l'ancienne page Vue globale, 30/09/2026) —
+  // seulement pertinent pour un compte non magasin-unique, même condition que le sélecteur de
+  // magasin ci-dessous.
+  const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
 
   const shopSelectRef = useRef<HTMLSelectElement>(null);
   const [shops, setShops] = useState<Shop[]>([]);
@@ -203,8 +209,32 @@ export function TableauDeBord() {
         .reassort-badge-soft-danger { background-color: #F5EDEC !important; color: #7A4A45 !important; }
         .reassort-badge-soft-info { background-color: #E9EEF6 !important; color: #2E4870 !important; }
         .reassort-badge-soft-success { background-color: #E9F3EC !important; color: #2E5B3F !important; }
+        .reassort-btn-navy-outline { background-color: transparent; border: 1px solid #1B2A4A; color: #1B2A4A; }
+        .reassort-btn-navy-outline:hover, .reassort-btn-navy-outline:focus { background-color: #1B2A4A; color: #fff; }
+        /* Onglets "Ce magasin" / "Tous les magasins" (fusion de Vue globale, 30/09/2026). */
+        .reassort-tabs .nav-link { color: #5B6B85; font-weight: 600; border: none; border-bottom: 2px solid transparent; }
+        .reassort-tabs .nav-link.active { color: #1B2A4A; border-bottom-color: #F5A623; background: transparent; }
       `}</style>
 
+      {!isSingleShop && (
+        <ul className="nav reassort-tabs mb-3">
+          <li className="nav-item">
+            <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
+              Ce magasin
+            </button>
+          </li>
+          <li className="nav-item">
+            <button type="button" className={`nav-link${activeTab === 'all' ? ' active' : ''}`} onClick={() => setActiveTab('all')}>
+              Tous les magasins
+            </button>
+          </li>
+        </ul>
+      )}
+
+      {activeTab === 'all' && !isSingleShop ? (
+        <AllShopsView />
+      ) : (
+        <>
       {!isSingleShop && (
         <div className="row mb-3">
           <div className="col-md-4">
@@ -411,6 +441,8 @@ export function TableauDeBord() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
