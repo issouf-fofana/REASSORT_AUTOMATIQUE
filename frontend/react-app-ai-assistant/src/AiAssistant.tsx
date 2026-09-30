@@ -618,7 +618,10 @@ export function AiAssistant() {
            discret en fond, gros titre centré, champ de saisie flottant + pills de suggestion —
            palette du Tableau de bord/Proposition de commande, jamais le noir/violet de la maquette
            d'origine (hors charte du reste du site). */
-        .aia-hero { position: relative; padding: 3.5rem 1rem 2.5rem; overflow: hidden; }
+        /* Centré verticalement dans #aia-chat-window (demande du 30/09/2026, "trop haut") — comme la
+           maquette de référence, où le bloc d'accueil est au milieu de l'écran, pas collé en haut. */
+        #aia-chat-window:has(.aia-hero) { display: flex; align-items: center; justify-content: center; }
+        .aia-hero { position: relative; padding: 2rem 1rem; overflow: hidden; width: 100%; }
         .aia-hero-glow {
           position: absolute; top: -120px; left: 50%; transform: translateX(-50%);
           width: 640px; height: 320px; border-radius: 50%;
