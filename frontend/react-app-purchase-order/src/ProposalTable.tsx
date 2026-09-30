@@ -183,6 +183,13 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const gridApiRef = useRef<any>(null);
   const lineStateRef = useRef<Map<string, LineState>>(new Map());
   const pendingFilterModelRef = useRef<Record<string, unknown> | null>(null);
+  // Scrollbar horizontale dupliquée en haut du tableau (demande du 30/09/2026) : avec beaucoup de
+  // colonnes, la scrollbar native ag-grid en bas du tableau est trop fine/difficile à attraper sans
+  // faire défiler toute la page pour la voir. syncingScrollRef évite une boucle infinie entre les
+  // deux barres (chacune déclenche un scroll sur l'autre).
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const topScrollInnerRef = useRef<HTMLDivElement>(null);
+  const syncingScrollRef = useRef(false);
 
   function getLineState(l: ProposalLine): LineState {
     if (!lineStateRef.current.has(l.id)) {
@@ -413,6 +420,43 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
         },
         {
+          // Référence + date de la commande RPOS déjà en cours, en colonne dédiée (demande du
+          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Article/Déjà commandé, pas à
+          // sa place : voir d'un coup d'œil si une commande est déjà passée sans ouvrir de détail.
+          headerName: 'Réf. commande',
+          width: 170,
+          filter: 'agTextColumnFilter',
+          valueGetter: (p: any) => (p.data as ProposalLine).rposOrderReference || '',
+          cellRenderer: (p: any) => {
+            const l = p.data as ProposalLine;
+            if (!l.rposOrderReference) return '<span class="text-muted">—</span>';
+            const dateStr = l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '';
+            return `${l.rposOrderReference}${dateStr ? ` (${dateStr})` : ''}`;
+          },
+        },
+        {
+          // Stock déjà retiré du calcul car basculé en DLV, en colonne dédiée (demande du
+          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Stock actuel.
+          headerName: 'En DLV',
+          field: 'dlvStock',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 100,
+          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
+        },
+        {
+          // Quantité perdue en casse/péremption/vol sur la période d'analyse (demande du
+          // 30/09/2026) — calculée pour tous les articles côté backend (stockMoveAnalysisService),
+          // pas seulement ceux déjà signalés en anomalie.
+          headerName: 'Casse/perte',
+          field: 'scrapQuantity',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 110,
+          headerTooltip: 'Quantité perdue en casse, péremption ou vol constatée sur la période analysée (mouvements RPOS isScrap).',
+          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
+        },
+        {
           // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé une seule fois à la
           // génération (proposalService.computeCoverageStatus) — même champ que celui affiché dans le
           // panneau d'analyse statique par article, jamais une seconde logique.
@@ -524,6 +568,38 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         requestAnimationFrame(() => {
           setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
         });
+        // Synchronise la largeur du faux contenu de la barre du haut sur la largeur scrollable
+        // réelle du tableau (le viewport horizontal natif ag-grid, .ag-body-horizontal-scroll-*).
+        // Recalculée à chaque resize/changement de colonnes visibles, pas seulement au montage.
+        const syncTopScrollWidth = () => {
+          const nativeContainer = gridDivRef.current?.querySelector('.ag-body-horizontal-scroll-container') as HTMLElement | null;
+          if (nativeContainer && topScrollInnerRef.current) {
+            topScrollInnerRef.current.style.width = nativeContainer.style.width || `${nativeContainer.scrollWidth}px`;
+          }
+        };
+        requestAnimationFrame(syncTopScrollWidth);
+        window.addEventListener('resize', syncTopScrollWidth);
+        gridApiRef.current?.addEventListener('columnVisible', syncTopScrollWidth);
+        gridApiRef.current?.addEventListener('gridSizeChanged', syncTopScrollWidth);
+
+        // Répercute le scroll de la barre du haut sur le viewport natif ag-grid (pas d'API publique
+        // pour positionner le scroll horizontal en pixels — on manipule directement le DOM natif,
+        // comme onBodyScroll ci-dessous le fait dans l'autre sens).
+        const nativeViewport = gridDivRef.current?.querySelector('.ag-body-horizontal-scroll-viewport') as HTMLElement | null;
+        topScrollRef.current?.addEventListener('scroll', () => {
+          if (syncingScrollRef.current || !nativeViewport || !topScrollRef.current) return;
+          syncingScrollRef.current = true;
+          nativeViewport.scrollLeft = topScrollRef.current.scrollLeft;
+          syncingScrollRef.current = false;
+        });
+      },
+      onBodyScroll: (e: any) => {
+        // Répercute le scroll natif ag-grid (souris/trackpad/scrollbar du bas) sur la barre du haut,
+        // sans déclencher en retour son propre handler 'scroll' (cf. syncingScrollRef ci-dessous).
+        if (syncingScrollRef.current || !topScrollRef.current) return;
+        syncingScrollRef.current = true;
+        topScrollRef.current.scrollLeft = e.left;
+        syncingScrollRef.current = false;
       },
     });
     if (toolbarRef.current) {
@@ -639,6 +715,9 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   return (
     <div>
       <div ref={toolbarRef} className="d-flex gap-2 mb-2"></div>
+      <div ref={topScrollRef} className="reassort-grid-top-scroll">
+        <div ref={topScrollInnerRef}></div>
+      </div>
       <div ref={gridDivRef} id="reassort-grid"></div>
     </div>
   );

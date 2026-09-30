@@ -863,6 +863,22 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     // affiche encore un reliquat.
     const recentRposOrder = await getRecentUndeliveredOrderedQuantityCached(posId, shopId, product.id, config.recentOrderMaxAgeDays, ignoreRposStock);
     const rposOrderedQty = recentRposOrder.quantity;
+
+    // Casse/perte sur la période d'analyse (demande du 30/09/2026) : calculée pour CHAQUE article,
+    // pas seulement ceux détectés en anomalie plus bas dans generateAndSaveProposal — pour que
+    // l'utilisateur puisse juger d'un coup d'œil si une baisse de stock vient de la casse plutôt que
+    // de la vente réelle. Sautée en mode ignoreRposStock (même traitement que les autres appels RPOS
+    // de cette fonction) ; best-effort, une casse manquée reste bien moins grave qu'une génération
+    // entière bloquée pour ça.
+    let scrapQuantity = null;
+    if (!ignoreRposStock) {
+      try {
+        const stockMoveSummary = await stockMoveAnalysis.getStockMoveSummary(posId, shopId, ean, period.start, period.end);
+        scrapQuantity = stockMoveSummary.scrapQuantity > 0 ? stockMoveSummary.scrapQuantity : null;
+      } catch (err) {
+        console.error(`[proposalService] Calcul de la casse échoué pour ${ean} (shop=${shopId}) : ${err.message}`);
+      }
+    }
     const orderedQty = Math.max(rposOrderedQty, quantityInTransit);
     const orderingUnit = Number(product.ordering_unit || 1);
     const avgWeeklySales = Number(art.avg_weekly_quantity);
@@ -958,6 +974,7 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
         // du stock RPOS brut de cet article a été exclue du calcul) — badge informatif côté UI,
         // cf. commentaire sur dlvStockByEan plus haut.
         dlvStock: dlvStock > 0 ? dlvStock : null,
+        scrapQuantity,
         department,
         sector,
         seasonalityAdjusted: !!art.seasonality_adjusted,
@@ -1121,32 +1138,21 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     p.trendChangePct = trend.changePct;
   }
 
-  // Casse/perte récurrente (§30-31, ajout du 16/09/2026, à partir de /api/stock_move/ RPOS) : une
-  // baisse de stock n'est pas toujours de la demande client — un article en SALES_DROP/stock
-  // incohérent peut en réalité perdre du stock par casse/péremption/vol, ce qui fausserait la
-  // quantité proposée si on l'attribuait à tort à une baisse de la demande. Un appel RPOS
-  // supplémentaire PAR ARTICLE serait trop coûteux sur une génération de plusieurs centaines
-  // d'articles (le reste de la détection d'anomalies est volontairement sans appel réseau) — donc
-  // limité aux quelques articles DÉJÀ signalés en anomalie, où le coût est marginal et l'utilité
-  // maximale (décision validée le 16/09/2026). Best-effort : un échec RPOS ne bloque jamais la
-  // génération, l'article garde simplement son anomalie d'origine sans enrichissement.
-  const anomalousProposals = result.proposals.filter((p) => p.anomalies && p.anomalies.length > 0);
-  if (anomalousProposals.length) {
-    const STOCK_MOVE_CONCURRENCY = 5;
-    await mapWithConcurrency(anomalousProposals, STOCK_MOVE_CONCURRENCY, async (p) => {
-      try {
-        const summary = await stockMoveAnalysis.getStockMoveSummary(posId, shopId, p.ean, result.stats.periodStart, result.stats.periodEnd);
-        if (summary.scrapQuantity > 0) {
-          p.anomalies.push({
-            type: 'SCRAP_LOSS',
-            changePct: null,
-            message: `${summary.scrapQuantity} unité(s) perdues en casse sur la période analysée — une partie de la baisse de stock ne vient pas de la demande client.`,
-          });
-        }
-      } catch (err) {
-        console.warn(`[proposalService] Lecture des mouvements de stock RPOS échouée pour ${p.ean} (${shopId}), anomalie non enrichie: ${err.message}`);
-      }
-    });
+  // Casse/perte récurrente (§30-31, ajout du 16/09/2026) : une baisse de stock n'est pas toujours de
+  // la demande client — un article en SALES_DROP/stock incohérent peut en réalité perdre du stock
+  // par casse/péremption/vol, ce qui fausserait la quantité proposée si on l'attribuait à tort à une
+  // baisse de la demande. p.scrapQuantity est désormais calculé pour TOUS les articles dans
+  // processArticle ci-dessus (demande du 30/09/2026, pour l'afficher en colonne dédiée) — on le
+  // relit ici au lieu de refaire un second appel RPOS redondant, uniquement pour enrichir le
+  // message des articles DÉJÀ signalés en anomalie.
+  for (const p of result.proposals) {
+    if (p.anomalies && p.anomalies.length > 0 && p.scrapQuantity > 0) {
+      p.anomalies.push({
+        type: 'SCRAP_LOSS',
+        changePct: null,
+        message: `${p.scrapQuantity} unité(s) perdues en casse sur la période analysée — une partie de la baisse de stock ne vient pas de la demande client.`,
+      });
+    }
   }
 
   // Score de confiance (§20, étape 6) calculé ICI, avant l'ajustement IA ci-dessous, pour pouvoir
@@ -1299,6 +1305,7 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           hadNegativeStock: p.hadNegativeStock,
           actualStock: p.actualStock,
           dlvStock: p.dlvStock,
+          scrapQuantity: p.scrapQuantity,
           department: p.department,
           sector: p.sector,
           forecastMethod: p.forecastMethod,

@@ -891,6 +891,12 @@ model ProposalLine {
   // était basculée sur un EAN DLV distinct — null si aucune DLV active pour cet article.
   dlvStock Float? @map("dlv_stock")
 
+  // Quantité perdue en casse/péremption/vol sur la période d'analyse (RPOS stock_move,
+  // isScrap=true), calculée pour CHAQUE article de la proposition — pas seulement ceux détectés en
+  // anomalie (demande du 30/09/2026, cf. stockMoveAnalysisService.getStockMoveSummary) — pour juger
+  // d'un coup d'œil si une baisse de stock vient de la casse plutôt que de la vente réelle.
+  scrapQuantity Float? @map("scrap_quantity")
+
   // Rayon (2e niveau de la hiérarchie department RPOS, ex: "LIQUIDES", "SAC A LA VENTE"), utilisé
   // pour créer une commande fournisseur distincte par rayon à la validation (readme §11).
   department String? @map("department")

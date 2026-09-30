@@ -34,6 +34,7 @@ export interface ProposalLine {
   hadNegativeStock?: boolean;
   actualStock?: number | null;
   dlvStock?: number | null;
+  scrapQuantity?: number | null;
   daysUntilStockout: number | null;
   excludedAsAlreadyOrdered?: boolean;
   quantityInTransit?: number;

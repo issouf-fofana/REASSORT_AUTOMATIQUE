@@ -535,6 +535,12 @@ export function PurchaseOrder() {
         .ag-cell { padding-left: 0.5rem; padding-right: 0.5rem; display: flex; align-items: center; }
         .ag-cell-wrapper { width: 100%; }
         #reassort-grid { width: 100%; }
+        /* Scrollbar horizontale dupliquée en haut du tableau (demande du 30/09/2026) : avec
+           beaucoup de colonnes, la scrollbar native ag-grid tout en bas est trop fine/difficile à
+           attraper sans faire défiler la page entière pour la voir. Synchronisée en JS avec le
+           scroll natif du tableau, cf. ProposalTable.tsx onGridReady/onBodyScroll. */
+        .reassort-grid-top-scroll { overflow-x: auto; overflow-y: hidden; height: 14px; margin-bottom: 2px; }
+        .reassort-grid-top-scroll > div { height: 1px; }
         /* Badges compacts pour le tableau de proposition (demande du 24/09/2026, "trop gros, style
            plus pro") : les badges Bootstrap standards (icône + texte, padding par défaut) empilés
            dans une cellule autoHeight (Article/Vente moy./Stock) gonflaient chaque ligne bien au-delà
