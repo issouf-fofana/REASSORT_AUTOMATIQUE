@@ -2145,6 +2145,66 @@ async function getConformityRate(shopId) {
   };
 }
 
+// Début (lundi 00:00 UTC) de la semaine ISO contenant `date` — pas de lib de dates dans ce projet,
+// même approche "calcul manuel" que le reste du code (cf. periodService.js).
+function weekStartOf(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay(); // 0 = dimanche
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+  return d;
+}
+
+/**
+ * Taux de conformité semaine par semaine (30/09/2026, Tableau de bord) — même logique et mêmes
+ * filtres que getConformityRate ci-dessus, mais regroupés par semaine de validation (proposal.
+ * validatedAt) sur une fenêtre glissante, pour visualiser une tendance plutôt qu'un chiffre unique.
+ * Une semaine sans proposition validée reste présente dans le résultat avec rate: null (jamais
+ * silencieusement absente), pour ne pas donner l'illusion d'un trou continu dans le graphique.
+ */
+async function getWeeklyConformityRate(shopId, weeks = 10) {
+  const now = new Date();
+  const windowStart = weekStartOf(new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000));
+
+  const allLines = await prisma.proposalLine.findMany({
+    where: {
+      proposal: { rposShopId: shopId, status: 'VALIDATED', validatedAt: { gte: windowStart } },
+    },
+    select: {
+      excludedOutOfScope: true,
+      wasExcluded: true,
+      quantityValidated: true,
+      quantitySuggested: true,
+      proposal: { select: { validatedAt: true } },
+    },
+  });
+
+  const buckets = new Map(); // weekStart ISO -> { total, unchanged }
+  for (const l of allLines) {
+    if (l.excludedOutOfScope || !l.proposal.validatedAt) continue;
+    const key = weekStartOf(new Date(l.proposal.validatedAt)).toISOString().slice(0, 10);
+    if (!buckets.has(key)) buckets.set(key, { total: 0, unchanged: 0 });
+    const b = buckets.get(key);
+    b.total += 1;
+    if (!l.wasExcluded && l.quantityValidated === l.quantitySuggested) b.unchanged += 1;
+  }
+
+  const result = [];
+  const cursor = new Date(windowStart);
+  const thisWeek = weekStartOf(now);
+  while (cursor <= thisWeek) {
+    const key = cursor.toISOString().slice(0, 10);
+    const b = buckets.get(key);
+    result.push({
+      weekStart: key,
+      rate: b && b.total > 0 ? b.unchanged / b.total : null,
+      totalLines: b ? b.total : 0,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return result;
+}
+
 /**
  * Taux de rupture : proportion des articles proposés qui étaient déjà en rupture (stock épuisé
  * au rythme de vente actuel) au moment de la génération de la proposition, sur les propositions
@@ -2689,6 +2749,7 @@ module.exports = {
   runAutoOrder,
   getProposalStatus,
   getConformityRate,
+  getWeeklyConformityRate,
   getStockoutRate,
   getOverstockRate,
   getAdminDashboard,

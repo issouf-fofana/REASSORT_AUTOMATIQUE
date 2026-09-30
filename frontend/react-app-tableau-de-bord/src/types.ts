@@ -43,3 +43,9 @@ export interface SupplierOrder {
   date: string;
   status_display: string;
 }
+
+export interface WeeklyConformityPoint {
+  weekStart: string;
+  rate: number | null;
+  totalLines: number;
+}

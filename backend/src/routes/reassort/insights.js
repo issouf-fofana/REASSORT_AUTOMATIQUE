@@ -8,6 +8,7 @@ const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const {
   getConformityRate,
+  getWeeklyConformityRate,
   getStockoutRate,
   getOverstockRate,
   getForecastAccuracy,
@@ -215,6 +216,24 @@ router.get('/conformity', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const result = await getConformityRate(shopId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/conformity/weekly?weeks=10 - taux de conformité semaine par semaine (Tableau
+// de bord, graphique de tendance, 30/09/2026) — même définition que /conformity ci-dessus, juste
+// regroupé par semaine de validation au lieu d'un agrégat unique.
+router.get('/conformity/weekly', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const weeksRaw = parseInt(req.query.weeks, 10);
+    const weeks = Number.isFinite(weeksRaw) ? Math.min(26, Math.max(4, weeksRaw)) : 10;
+    const result = await getWeeklyConformityRate(shopId, weeks);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

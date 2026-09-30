@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from './api/client';
+import { ConformityTrendChart } from './ConformityTrendChart';
+import { OrdersStatusDonut } from './OrdersStatusDonut';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, Shop, StockoutRate, SupplierOrder } from './types';
 
+// Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
+// sur Proposition de commande (reassort-badge-soft-warning/-danger) — dupliquées ici car chaque
+// app React a son propre bundle CSS, pas de partage direct entre elles.
 const STATUS_BADGE: Record<string, string> = {
-  'en préparation': 'bg-secondary-subtle text-secondary',
-  'en attente de livraison': 'bg-warning-subtle text-warning',
-  'livrée partiellement': 'bg-info-subtle text-info',
-  'finalisée et partielle': 'bg-info-subtle text-info',
-  complète: 'bg-success-subtle text-success',
-  annulée: 'bg-danger-subtle text-danger',
+  'en préparation': 'reassort-badge-neutral',
+  'en attente de livraison': 'reassort-badge-soft-warning',
+  'livrée partiellement': 'reassort-badge-soft-info',
+  'finalisée et partielle': 'reassort-badge-soft-info',
+  complète: 'reassort-badge-soft-success',
+  annulée: 'reassort-badge-soft-danger',
+  supprimée: 'reassort-badge-soft-danger',
 };
 
 function pct(rate: number | null): string {
@@ -173,14 +179,29 @@ export function TableauDeBord() {
   return (
     <div>
       <style>{`
-        .kpi-card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-        .kpi-card .card-body { padding: 1rem 1.1rem .75rem; }
-        .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .kpi-icon iconify-icon { font-size: 22px; }
-        .kpi-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; margin: .35rem 0 0; }
-        .kpi-label { font-size: .78rem; color: var(--bs-secondary-color, #6c757d); margin: 0; }
-        .kpi-footer { padding: .5rem 1.1rem; font-size: .72rem; border-top: 1px solid var(--bs-border-color-translucent, rgba(0,0,0,.06)); color: var(--bs-secondary-color, #6c757d); }
-        .kpi-footer a { color: inherit; font-weight: 600; }
+        /* Palette marine/ambre (demande du 30/09/2026), cohérente avec l'écran Proposition de
+           commande — cartes KPI sur fond marine, icône sur badge ambre, valeur en blanc. */
+        .kpi-card { border: none; border-radius: 14px; background: #1B2A4A; box-shadow: 0 4px 14px rgba(27, 42, 74, .12); transition: box-shadow .2s ease, transform .2s ease; }
+        .kpi-card:hover { box-shadow: 0 8px 22px rgba(27, 42, 74, .2); transform: translateY(-2px); }
+        .kpi-card .card-body { padding: 1.1rem 1.2rem .85rem; }
+        .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #F5A623 !important; }
+        .kpi-icon iconify-icon { font-size: 20px; color: #1B2A4A !important; }
+        .kpi-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; margin: .35rem 0 0; color: #fff; }
+        .kpi-label { font-size: .78rem; color: #C7D0E0; margin: 0; }
+        .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid rgba(255,255,255,.14); color: #8C99B5; }
+        .kpi-footer a { color: #F5A623; font-weight: 600; }
+        /* Cartes "graphique" (ConformityTrendChart/OrdersStatusDonut) : fond clair, pour rester
+           lisibles avec ApexCharts (qui rend son propre texte, pas simple à recolorer entièrement en
+           blanc) — distinction visuelle assumée avec les cartes KPI marine ci-dessus. */
+        .kpi-card.kpi-card-chart { background: #fff; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
+        .kpi-card.kpi-card-chart:hover { transform: none; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
+        /* Badges de statut de commande, palette adoucie (dupliquée depuis Proposition de commande,
+           chaque app React a son propre bundle CSS). */
+        .reassort-badge-neutral { background-color: #EDF1F7 !important; color: #1B2A4A !important; }
+        .reassort-badge-soft-warning { background-color: #FDF1DD !important; color: #8A5A00 !important; }
+        .reassort-badge-soft-danger { background-color: #F5EDEC !important; color: #7A4A45 !important; }
+        .reassort-badge-soft-info { background-color: #E9EEF6 !important; color: #2E4870 !important; }
+        .reassort-badge-soft-success { background-color: #E9F3EC !important; color: #2E5B3F !important; }
       `}</style>
 
       {!isSingleShop && (
@@ -304,6 +325,15 @@ export function TableauDeBord() {
           </div>
         </div>
 
+      </div>
+
+      <div className="row g-3 mb-3">
+        <div className="col-lg-7">
+          <ConformityTrendChart shopQueryParam={shopQueryParam()} />
+        </div>
+        <div className="col-lg-5">
+          <OrdersStatusDonut orders={orders} />
+        </div>
       </div>
 
       <div className="row">
