@@ -53,8 +53,16 @@ async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, d
     if (fileLines) return { lines: fileLines, source: 'file' };
   }
 
+  // select explicite (pas juste findMany() sans select) : sur les périodes longues (LAST_365_DAYS),
+  // un magasin à fort volume peut dépasser le million de lignes — le driver Rust/N-API de Prisma
+  // remonte alors "Failed to convert rust String into napi string" de façon intermittente pendant
+  // la sérialisation du résultat (bug connu au-delà d'un certain volume de texte cumulé). Ne
+  // récupérer que les champs réellement utilisés par mappedDbLines ci-dessous réduit nettement le
+  // volume sérialisé (id/rposPosId/rposShopId/syncedAt/receiptId répétés inutilement sur chaque
+  // ligne ne servent à rien ici).
   const dbLines = await prisma.salesLine.findMany({
     where: { rposShopId: shopId, date: { gte: new Date(dateStart), lt: new Date(dateEnd) } },
+    select: { ean: true, label: true, date: true, quantity: true, revenueExclTax: true, revenueInclTax: true },
   });
 
   if (dbLines.length === 0) {
