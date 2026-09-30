@@ -502,39 +502,51 @@ export function PurchaseOrder() {
     <div>
       <style>{`
         .reassort-unblock-btn { font-size: .72rem; padding: .15rem .5rem; line-height: 1.3; }
+        /* Cartes secteurs : style "carte KPI" marine + orange demandé le 30/09/2026 (maquette
+           fournie), limité à CET écran — le reste de l'application garde son noir/blanc/gris strict.
+           RemainderTile (carte "Reste du CA magasin", info secondaire/liste d'exclusions) reste
+           neutre via --tile-neutral, pour ne pas mettre au même niveau visuel une vraie carte KPI et
+           une liste de raisons d'exclusion. */
         .reassort-dept-tile {
-          border: 1px solid #ececec;
-          border-radius: 12px;
-          box-shadow: 0 1px 2px rgba(20, 20, 20, .04);
-          transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
+          --tile-navy: #1B2A4A;
+          --tile-amber: #F5A623;
+          border: none;
+          border-radius: 14px;
+          background: var(--tile-neutral, var(--tile-navy));
+          box-shadow: 0 4px 14px rgba(27, 42, 74, .12);
+          transition: box-shadow .2s ease, transform .2s ease;
           overflow: hidden;
           position: relative;
         }
-        .reassort-dept-tile::before {
-          content: '';
-          position: absolute;
-          top: 0; left: 0; right: 0;
-          height: 3px;
-          background: var(--tile-accent, #444444);
-        }
-        .reassort-dept-tile:hover { box-shadow: 0 6px 18px rgba(20, 20, 20, .08); border-color: #dcdfe3; transform: translateY(-1px); }
-        .reassort-dept-tile .card-body { padding: .9rem 1.05rem; }
+        .reassort-dept-tile:hover { box-shadow: 0 8px 22px rgba(27, 42, 74, .2); transform: translateY(-2px); }
+        .reassort-dept-tile .card-body { padding: 1.1rem 1.2rem; }
         .reassort-dept-tile .tile-icon {
-          width: 28px; height: 28px; border-radius: 8px;
+          width: 34px; height: 34px; border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
-          background: color-mix(in srgb, var(--tile-accent, #444444) 12%, white);
-          color: var(--tile-accent, #444444);
-          font-size: .9rem;
-          margin-bottom: .5rem;
+          background: var(--tile-amber);
+          color: var(--tile-navy);
+          font-size: 1.05rem;
+          margin-bottom: .65rem;
         }
-        .reassort-dept-tile .card-title { font-size: .85rem; font-weight: 700; letter-spacing: .01em; color: #17181a; }
-        .reassort-dept-tile .tile-count { color: #9198a1; font-size: .72rem; margin-bottom: .4rem; }
-        .reassort-dept-tile .tile-pct { font-size: 1.4rem; font-weight: 700; line-height: 1.1; color: #17181a; letter-spacing: -.02em; }
-        .reassort-dept-tile .tile-pct .fs-14 { font-size: .7rem !important; }
-        .reassort-dept-tile .tile-progress { height: 4px; border-radius: 999px; background-color: #f1f2f4; overflow: hidden; margin: .5rem 0 .6rem; }
-        .reassort-dept-tile .tile-progress-fill { height: 100%; background-color: var(--tile-accent, #444444); border-radius: 999px; transition: width .35s ease; }
-        .reassort-dept-tile .tile-revenue { font-weight: 600; color: #2c2d30; font-size: .78rem; padding-top: .5rem; border-top: 1px solid #f2f3f4; }
-        .reassort-dept-tile .tile-proposed { color: #b1b6bc; font-size: .72rem; margin-top: .1rem; }
+        .reassort-dept-tile .card-title { font-size: .82rem; font-weight: 600; letter-spacing: .01em; color: #C7D0E0; }
+        .reassort-dept-tile .tile-count { color: #8C99B5; font-size: .72rem; margin-bottom: .4rem; }
+        .reassort-dept-tile .tile-pct { font-size: 1.9rem; font-weight: 700; line-height: 1.1; color: #fff; letter-spacing: -.02em; }
+        .reassort-dept-tile .tile-pct .fs-14 { font-size: .72rem !important; color: #C7D0E0 !important; }
+        .reassort-dept-tile .tile-progress { height: 5px; border-radius: 999px; background-color: rgba(255,255,255,.12); overflow: hidden; margin: .6rem 0 .7rem; }
+        .reassort-dept-tile .tile-progress-fill { height: 100%; background-color: var(--tile-amber); border-radius: 999px; transition: width .35s ease; }
+        .reassort-dept-tile .tile-revenue { font-weight: 600; color: #fff; font-size: .78rem; padding-top: .55rem; border-top: 1px solid rgba(255,255,255,.14); }
+        .reassort-dept-tile .tile-proposed { color: #8C99B5; font-size: .72rem; margin-top: .1rem; }
+        /* Variante neutre (RemainderTile) : fond clair, texte sombre, jamais la carte KPI marine. */
+        .reassort-dept-tile.reassort-dept-tile-neutral { --tile-neutral: #EEF1F6; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .card-title,
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-pct { color: #33415C; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-count,
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-pct .fs-14 { color: #7C879C !important; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-progress { background-color: #dfe4ec; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-progress-fill { background-color: #97A3BC; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-revenue { color: #33415C; border-top-color: #dfe4ec; }
+        .reassort-dept-tile.reassort-dept-tile-neutral .tile-icon { background: #dfe4ec; color: #5B6B85; }
+        .reassort-dept-tile.reassort-dept-tile-neutral ul a { color: #33415C; }
         .ag-header-cell-text { text-transform: uppercase; letter-spacing: 0.02em; }
         .ag-cell { padding-left: 0.5rem; padding-right: 0.5rem; display: flex; align-items: center; }
         .ag-cell-wrapper { width: 100%; }
@@ -562,10 +574,32 @@ export function PurchaseOrder() {
            redéfinit .text-dark via --bs-headings-color, qui vaut un gris quasi blanc en mode sombre
            — rendait ces badges illisibles (texte blanc sur fond clair, signalé le 30/09/2026). */
         .reassort-info-badge {
-          background-color: #f1f2f4 !important;
-          color: #3a3f44 !important;
-          border-color: #dcdfe3 !important;
+          background-color: #EDF1F7 !important;
+          color: #1B2A4A !important;
+          border-color: #D6DEEA !important;
         }
+        /* Badge d'avertissement (couverture de données incomplète) dans la même palette marine/ambre
+           que les cartes secteurs de cet écran (demande du 30/09/2026), au lieu du warning Bootstrap
+           standard. */
+        .reassort-warning-badge {
+          background-color: #FDF1DD !important;
+          color: #8A5A00 !important;
+          border-color: #F5A623 !important;
+        }
+        /* Boutons d'action dans la palette marine/ambre de cet écran (demande du 30/09/2026). */
+        .reassort-btn-navy {
+          background-color: #1B2A4A; border-color: #1B2A4A; color: #fff;
+        }
+        .reassort-btn-navy:hover, .reassort-btn-navy:focus { background-color: #14203a; border-color: #14203a; color: #fff; }
+        .reassort-btn-navy:disabled { background-color: #1B2A4A; border-color: #1B2A4A; opacity: .5; }
+        .reassort-btn-navy-outline {
+          background-color: transparent; border: 1px solid #1B2A4A; color: #1B2A4A;
+        }
+        .reassort-btn-navy-outline:hover, .reassort-btn-navy-outline:focus { background-color: #1B2A4A; color: #fff; }
+        .reassort-btn-amber-outline {
+          background-color: transparent; border: 1px solid #F5A623; color: #8A5A00;
+        }
+        .reassort-btn-amber-outline:hover, .reassort-btn-amber-outline:focus { background-color: #F5A623; color: #1B2A4A; }
         /* Palette adoucie (demande du 30/09/2026, "trop de couleur") : remplace les oranges/rouges
            Bootstrap standards (bg-warning-subtle/bg-danger-subtle) par des teintes beige/brun-gris
            désaturées, cohérentes avec le noir/blanc/gris strict du reste du projet — garde le sens

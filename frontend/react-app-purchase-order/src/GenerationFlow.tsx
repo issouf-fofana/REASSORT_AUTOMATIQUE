@@ -314,13 +314,13 @@ export function GenerationFlow({
 
   return (
     <>
-      <button className="btn btn-sm btn-outline-primary" disabled={!!runId} onClick={() => openConfirm(false)}>
+      <button className="btn btn-sm reassort-btn-navy" disabled={!!runId} onClick={() => openConfirm(false)}>
         <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Générer une nouvelle proposition
       </button>
-      <button className="btn btn-sm btn-outline-warning" disabled={!!runId} onClick={() => openConfirm(true)}>
+      <button className="btn btn-sm reassort-btn-amber-outline" disabled={!!runId} onClick={() => openConfirm(true)}>
         <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Forcer une nouvelle génération
       </button>
-      <button className="btn btn-sm btn-outline-secondary" disabled={!!runId} onClick={launchAnalyzeOnly}>
+      <button className="btn btn-sm reassort-btn-navy-outline" disabled={!!runId} onClick={launchAnalyzeOnly}>
         <iconify-icon icon="solar:chart-2-bold-duotone" className="align-middle"></iconify-icon> Lancer une nouvelle analyse
       </button>
 
@@ -332,7 +332,7 @@ export function GenerationFlow({
             avec ventes, période du {new Date(analysisStatus.periodStart).toLocaleDateString('fr-FR')} au{' '}
             {new Date(analysisStatus.periodEnd).toLocaleDateString('fr-FR')}).
           </span>
-          <button type="button" className="btn btn-sm btn-outline-dark" disabled={!!runId} onClick={launchGenerateFromAnalysis}>
+          <button type="button" className="btn btn-sm reassort-btn-navy-outline" disabled={!!runId} onClick={launchGenerateFromAnalysis}>
             Générer à partir de cette analyse
           </button>
         </div>

@@ -19,13 +19,6 @@ function groupLines(lines: ProposalLine[], keyFn: (l: ProposalLine) => string): 
   return Array.from(byKey.entries()).sort((a, b) => b[1].revenuePct - a[1].revenuePct);
 }
 
-function accentColorFor(pct: number): string {
-  if (pct >= 40) return '#3a3f47';
-  if (pct >= 15) return '#6b7178';
-  if (pct >= 5) return '#9ba1a8';
-  return '#c9ccd1';
-}
-
 // Icône décorative par secteur/rayon : purement esthétique (aucune logique métier), une
 // correspondance mot-clé raisonnable suffit — un rayon non reconnu retombe sur une icône neutre.
 const SECTOR_ICON_BY_KEYWORD: [string, string][] = [
@@ -68,7 +61,6 @@ function DeptTile({
       <a
         href={href}
         className="card text-decoration-none h-100 reassort-dept-tile"
-        style={{ '--tile-accent': accentColorFor(d.revenuePct) } as React.CSSProperties}
         onClick={(e) => {
           // Empêche un vrai rechargement de page (perdrait tout l'état React déjà chargé — proposal,
           // shops, etc.) au profit d'une navigation SPA via history.pushState, exactement comme les
@@ -135,7 +127,7 @@ function RemainderTile({
 
   return (
     <div className="col-md-4 col-lg-3">
-      <div className="card h-100 reassort-dept-tile" style={{ '--tile-accent': '#c9ccd1', borderStyle: 'dashed', opacity: 0.92 } as React.CSSProperties}>
+      <div className="card h-100 reassort-dept-tile reassort-dept-tile-neutral">
         <div className="card-body">
           <div className="tile-icon">
             <iconify-icon icon="solar:pie-chart-2-bold-duotone"></iconify-icon>
@@ -218,7 +210,7 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
       </span>
       {showCoverageWarning && actualStart && actualEnd && (
         <span
-          className="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle reassort-mini-badge"
+          className="badge border reassort-mini-badge reassort-warning-badge"
           title={`Cette génération demandait des ventes depuis le ${fmtDate(proposal.analysisPeriodStart!)}, mais les données réellement disponibles ne remontent qu'au ${actualStart} — soit ${proposal.coverageGapDays} jour(s) manquant(s). Lancez un backfill (Paramètres > Fichiers de ventes) pour combler ce manque.`}
         >
           <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données utilisées : {actualStart} → {actualEnd}
