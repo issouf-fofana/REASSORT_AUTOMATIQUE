@@ -205,13 +205,13 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
   return (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
       <span
-        className="badge bg-light text-dark border reassort-mini-badge"
+        className="badge border reassort-mini-badge reassort-info-badge"
         title={`Période sur laquelle le classement Pareto et les quantités proposées ont été calculés.`}
       >
         <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Analyse : {periodLabel}
       </span>
       <span
-        className="badge bg-light text-dark border reassort-mini-badge"
+        className="badge border reassort-mini-badge reassort-info-badge"
         title={`Chiffre figé au moment de la génération (${fmtDateTime(proposal.generatedAt)}), sur une fenêtre de référence indépendante de la période d'analyse — sert uniquement à calculer le % CA de chaque article.`}
       >
         <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon> CA magasin{revenuePeriodLabel} : {revenueLabel}

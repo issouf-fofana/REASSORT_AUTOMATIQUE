@@ -554,6 +554,14 @@ export function PurchaseOrder() {
           border-radius: 999px;
         }
         .reassort-mini-badge iconify-icon { font-size: .8rem; vertical-align: -1px; }
+        /* Couleur de texte fixée explicitement (pas .text-dark/.bg-light Bootstrap) : ce thème
+           redéfinit .text-dark via --bs-headings-color, qui vaut un gris quasi blanc en mode sombre
+           — rendait ces badges illisibles (texte blanc sur fond clair, signalé le 30/09/2026). */
+        .reassort-info-badge {
+          background-color: #f1f2f4 !important;
+          color: #3a3f44 !important;
+          border-color: #dcdfe3 !important;
+        }
       `}</style>
 
       {proposal && <ProposalHeader proposal={proposal} />}
