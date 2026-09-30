@@ -66,13 +66,29 @@ async function runNightlyProposalGeneration() {
     select: { rposShopId: true, reference: true, name: true, rposPosId: true },
   });
 
-  console.log(`[nightlyProposalJob] Génération pour ${shops.length} magasin(s) (${SHOP_CONCURRENCY} en parallèle)...`);
+  // Filtre sur ReassortConfig.nightlyGenerationEnabled (30/09/2026 : choisir magasin par magasin
+  // plutôt que de régénérer systématiquement TOUS les magasins chaque nuit). Un magasin sans ligne
+  // ReassortConfig (jamais configuré manuellement) doit rester inclus — nightlyGenerationEnabled
+  // vaut true par défaut (configService.DEFAULTS) — donc on exclut explicitement seulement ceux dont
+  // la config EXISTE et vaut false, jamais l'inverse (une simple jointure "true" exclurait à tort
+  // tous les magasins sans ligne ReassortConfig, changeant le comportement de magasins jamais réglés).
+  const disabledConfigs = await prisma.reassortConfig.findMany({
+    where: { nightlyGenerationEnabled: false },
+    select: { rposShopId: true },
+  });
+  const disabledShopIds = new Set(disabledConfigs.map((c) => c.rposShopId));
+  const activeShops = shops.filter((s) => !disabledShopIds.has(s.rposShopId));
+  if (disabledShopIds.size > 0) {
+    console.log(`[nightlyProposalJob] ${disabledShopIds.size} magasin(s) exclu(s) de la génération nocturne (génération nocturne désactivée dans Paramètres > Réassort).`);
+  }
+
+  console.log(`[nightlyProposalJob] Génération pour ${activeShops.length} magasin(s) (${SHOP_CONCURRENCY} en parallèle)...`);
 
   // Résumé par magasin (demande du 26/09/2026) : accumulé au fil de la boucle pour construire UN
   // SEUL récap admin en fin de job (cf. notifyAdminsOfNightlySummary), plutôt qu'une copie de chaque
   // email individuel par magasin comme auparavant. mapWithConcurrency renvoie déjà les retours de
   // chaque handler (cf. utils/concurrency.js), donc un simple `return` par itération suffit.
-  const summaries = await mapWithConcurrency(shops, SHOP_CONCURRENCY, async (shop) => {
+  const summaries = await mapWithConcurrency(activeShops, SHOP_CONCURRENCY, async (shop) => {
     let ineligibleCount = 0;
     try {
       const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({

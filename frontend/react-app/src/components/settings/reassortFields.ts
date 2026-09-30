@@ -44,6 +44,23 @@ export const LONG_PERIOD_MODES = new Set(['LAST_90_DAYS', 'LAST_120_DAYS', 'LAST
 
 export const REASSORT_FIELDS: ReassortField[] = [
   {
+    id: 'nightlyGenerationEnabled',
+    kind: 'select',
+    label: 'Génération automatique nocturne',
+    options: [
+      { value: 'true', label: 'Activée (par défaut)' },
+      { value: 'false', label: 'Désactivée pour ce magasin' },
+    ],
+    helpHtml:
+      "<strong>À quoi ça sert :</strong> chaque nuit, une tâche planifiée régénère automatiquement la proposition " +
+      "de tous les magasins actifs, pour qu'elle soit déjà prête le matin. Cette option permet d'exclure UN " +
+      'magasin précis de cette génération automatique, sans toucher aux autres.<br>' +
+      '<strong>Désactivée :</strong> ce magasin ne sera plus régénéré tout seul la nuit — il faudra lancer une ' +
+      'génération manuellement depuis la page Proposition de commande.<br>' +
+      "<strong>Activée (par défaut) :</strong> comportement inchangé, ce magasin continue d'être régénéré chaque " +
+      'nuit comme avant.',
+  },
+  {
     id: 'paretoThreshold',
     kind: 'number',
     label: 'Seuil Pareto (analyse 20/80)',

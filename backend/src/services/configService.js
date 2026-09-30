@@ -38,6 +38,9 @@ const DEFAULTS = {
   // Mode Auto (23/09/2026) : off par défaut, n'affecte aucun magasin sans activation explicite.
   autoOrderEnabled: false,
   autoOrderValidateAfterCreate: false,
+  // Génération automatique nocturne (30/09/2026) : true par défaut, pour ne changer le comportement
+  // d'aucun magasin existant — avant ce champ, tous les magasins étaient traités sans filtre.
+  nightlyGenerationEnabled: true,
 };
 
 /** Récupère la config d'un magasin, ou les valeurs par défaut si aucune n'a été personnalisée. */

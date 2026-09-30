@@ -363,6 +363,13 @@ model ReassortConfig {
   // laisser un humain vérifier la commande sur RPOS avant qu'elle parte réellement à l'entrepôt.
   autoOrderValidateAfterCreate Boolean @default(false) @map("auto_order_validate_after_create")
 
+  // Si vrai (par défaut), ce magasin fait partie de la génération automatique nocturne
+  // (nightlyProposalJob.js) — demande du 30/09/2026 : pouvoir choisir magasin par magasin plutôt que
+  // de régénérer systématiquement TOUS les magasins chaque nuit. Vrai par défaut pour ne changer le
+  // comportement d'aucun magasin existant (avant ce champ, tous les magasins étaient traités sans
+  // filtre) ; à désactiver explicitement pour un magasin qu'on ne veut plus voir régénéré tout seul.
+  nightlyGenerationEnabled Boolean @default(true) @map("nightly_generation_enabled")
+
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by")
 

@@ -11,6 +11,7 @@ const PERCENT_STORED_AS_FRACTION = new Set(['paretoThreshold', 'safetyStockRatio
 type ConfigValues = Record<string, string | number | boolean>;
 
 const DEFAULT_VALUES: ConfigValues = {
+  nightlyGenerationEnabled: 'true',
   paretoThreshold: 80,
   safetyStockRatio: 50,
   // Doit rester identique à configService.js DEFAULTS.periodMode côté backend (changé à
