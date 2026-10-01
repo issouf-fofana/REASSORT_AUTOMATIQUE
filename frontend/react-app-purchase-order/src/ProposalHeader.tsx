@@ -87,65 +87,87 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
   const periodModeLabel = proposal.analysisPeriodMode ? PERIOD_MODE_LABEL[proposal.analysisPeriodMode] || proposal.analysisPeriodMode : null;
 
   return (
-    <div className="card mb-3">
-      <div className="card-body py-3">
-        <div className="row g-3 small">
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Numéro de proposition</div>
-            <div className="fw-semibold font-monospace">{proposalNumber}</div>
+    <div className="ph-card mb-3">
+      <style>{`
+        .ph-card { background: #ffffff; border: 1px solid #e9ecf2; border-radius: 14px; box-shadow: 0 1px 3px rgba(27,42,74,.05); overflow: hidden; }
+        .ph-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem 1.3rem; background: #1B2A4A; color: #ffffff; }
+        .ph-identity { display: flex; align-items: center; gap: .9rem; min-width: 0; }
+        .ph-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,.12); color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+        .ph-number { font-weight: 700; font-size: .98rem; }
+        .ph-shop { color: #C7D0E0; font-size: .8rem; }
+        .ph-status { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .35rem .8rem; border-radius: 999px; white-space: nowrap; background: rgba(245,166,35,.18); color: #F5A623; }
+        .ph-status.validated { background: rgba(34,197,94,.18); color: #86efac; }
+        .ph-metrics { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: .9rem 1.3rem; }
+        .ph-metric { min-width: 100px; }
+        .ph-metric-label { display: flex; align-items: center; gap: .35rem; color: #8a93a8; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
+        .ph-metric-label iconify-icon { font-size: .85rem; }
+        .ph-metric-value { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
+        .ph-metric-value.success { color: #047857; }
+        .ph-metric-value.danger { color: #b91c1c; }
+      `}</style>
+      <div className="ph-top">
+        <div className="ph-identity">
+          <div className="ph-icon">
+            <iconify-icon icon="solar:document-text-bold-duotone"></iconify-icon>
           </div>
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Créée le</div>
-            <div className="fw-semibold">{fmtDateTime(proposal.generatedAt)}</div>
-          </div>
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Magasin</div>
-            <div className="fw-semibold">
+          <div className="min-width-0">
+            <div className="ph-number">Proposition {proposalNumber}</div>
+            <div className="ph-shop" title={fmtDateTime(proposal.generatedAt)}>
               {proposal.rposShopReference || '—'}
               {proposal.rposShopName ? ` — ${proposal.rposShopName}` : ''}
             </div>
           </div>
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Statut</div>
-            <div className="fw-semibold">{STATUS_LABEL[proposal.status] || proposal.status}</div>
-          </div>
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Période d'analyse</div>
-            <div className="fw-semibold" title={periodModeLabel || undefined}>
-              {periodLabel || '—'}
-            </div>
-          </div>
-          {dataAvailability?.found && dataAvailability.oldestDate && dataAvailability.newestDate && (
-            <div className="col-6 col-md-3">
-              <div className="text-muted">Données disponibles</div>
-              <div className="fw-semibold" title="Étendue complète de l'historique de ventes synchronisé pour ce magasin, indépendamment de la période d'analyse ci-dessus.">
-                {fmtDate(dataAvailability.oldestDate)} → {fmtDate(dataAvailability.newestDate)}
-              </div>
-            </div>
-          )}
-          <div className="col-6 col-md-3">
-            <div className="text-muted">Nombre total d'articles</div>
-            <div className="fw-semibold">{summary.total}</div>
-          </div>
-          {summary.hasEligibilityData && (
-            <>
-              <div className="col-6 col-md-3">
-                <div className="text-muted">Articles commandables</div>
-                <div className="fw-semibold text-success">
-                  <iconify-icon icon="solar:check-circle-bold" className="align-middle me-1"></iconify-icon>
-                  {summary.commandableCount}
-                </div>
-              </div>
-              <div className="col-6 col-md-3">
-                <div className="text-muted">Articles non commandables</div>
-                <div className={`fw-semibold ${summary.nonCommandableCount > 0 ? 'text-danger' : 'text-muted'}`}>
-                  <iconify-icon icon="solar:close-circle-bold" className="align-middle me-1"></iconify-icon>
-                  {summary.nonCommandableCount}
-                </div>
-              </div>
-            </>
-          )}
         </div>
+        <span className={`ph-status${proposal.status === 'VALIDATED' ? ' validated' : ''}`}>
+          {STATUS_LABEL[proposal.status] || proposal.status}
+        </span>
+      </div>
+      <div className="ph-metrics">
+        <div className="ph-metric">
+          <div className="ph-metric-label">
+            <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Analyse
+          </div>
+          <div className="ph-metric-value" title={periodModeLabel || undefined}>
+            {periodLabel || '—'}
+          </div>
+        </div>
+        {dataAvailability?.found && dataAvailability.oldestDate && dataAvailability.newestDate && (
+          <div className="ph-metric">
+            <div className="ph-metric-label">
+              <iconify-icon icon="solar:database-bold-duotone"></iconify-icon> Données dispo.
+            </div>
+            <div
+              className="ph-metric-value"
+              title="Étendue complète de l'historique de ventes synchronisé pour ce magasin, indépendamment de la période d'analyse."
+            >
+              {fmtDate(dataAvailability.oldestDate)} → {fmtDate(dataAvailability.newestDate)}
+            </div>
+          </div>
+        )}
+        <div className="ph-metric">
+          <div className="ph-metric-label">
+            <iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Articles
+          </div>
+          <div className="ph-metric-value">{summary.total}</div>
+        </div>
+        {summary.hasEligibilityData && (
+          <>
+            <div className="ph-metric">
+              <div className="ph-metric-label">
+                <iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commandables
+              </div>
+              <div className="ph-metric-value success">{summary.commandableCount}</div>
+            </div>
+            <div className="ph-metric">
+              <div className="ph-metric-label">
+                <iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon> Non commandables
+              </div>
+              <div className={`ph-metric-value${summary.nonCommandableCount > 0 ? ' danger' : ''}`}>
+                {summary.nonCommandableCount}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

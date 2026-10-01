@@ -16,7 +16,12 @@ export interface ProposalTableHandle {
 // nécessaires pour que l'état sauvegardé reste valide d'une session à l'autre (sans colId stable,
 // ag-grid génère des identifiants positionnels qui changent si l'ordre des colonnes déclarées change
 // dans le code).
-const COLUMN_STATE_STORAGE_KEY = 'reassort_proposal_table_column_state';
+// Version incrémentée le 01/10/2026 (v2) : l'ajout de la colonne "actions" et le masquage de
+// colonnes secondaires par défaut changent la structure des colonnes — un état sauvegardé par un
+// utilisateur AVANT ce changement replaçait "actions" tout au fond du tableau (ag-grid ajoute une
+// colonne inconnue de l'état sauvegardé à la fin), invisible à côté d'"Article" comme voulu.
+// Invalider l'ancien état une fois suffit à repartir sur l'ordre par défaut du code ci-dessous.
+const COLUMN_STATE_STORAGE_KEY = 'reassort_proposal_table_column_state_v2';
 
 // Libellé court "hier" / "29/08-28/09" pour la fenêtre de calcul du % CA (revenueShareStart/End) —
 // cohérent avec DeptListContext (DepartmentListView.tsx), même format de date.
@@ -76,16 +81,28 @@ function articleAlertIcon(l: ProposalLine): { icon: string; cls: string; title: 
 
 function labelCellRenderer(params: any) {
   const l = params.data as ProposalLine;
+  const span = document.createElement('span');
+  span.className = 'text-truncate';
+  span.style.fontSize = '.86rem';
+  span.textContent = l.label;
+  return span;
+}
+
+// Colonne "Actions" dédiée (01/10/2026, demande explicite : "crée une colonne pour ça" — ces
+// boutons collés après le nom de l'article compressaient le texte et le forçaient à se tronquer
+// plus tôt) — regroupe le bouton graphique (toujours présent) et le bouton d'alerte (si applicable).
+function actionsCellRenderer(params: any) {
+  const l = params.data as ProposalLine;
   const wrap = document.createElement('div');
   wrap.className = 'd-flex align-items-center gap-1';
-  let html = `<span class="text-truncate" style="font-size:.86rem;">${l.label}</span>`;
-  html += `<button type="button" class="btn btn-sm btn-link p-0 pa-open-btn flex-shrink-0" data-ean="${l.ean}" data-product-id="${l.productId}" title="Voir l'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon></button>`;
+  let html = `<button type="button" class="btn btn-sm btn-link p-0 pa-open-btn flex-shrink-0" data-ean="${l.ean}" data-product-id="${l.productId}" title="Voir l'évolution de cet article"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Graphique</button>`;
   const alert = articleAlertIcon(l);
   if (alert) {
     // Bouton cliquable (pas juste une icône statique, demande du 30/09/2026 : "on ne sait pas si on
     // peut cliquer") — ouvre directement le panneau de détail, sans devoir cliquer ailleurs sur la
-    // ligne. .article-detail-btn intercepté par onRowClicked/onCellClicked ci-dessous.
-    html += `<button type="button" class="btn btn-sm btn-link p-0 article-detail-btn flex-shrink-0 ${alert.cls}" title="${alert.title} — cliquer pour voir le détail"><iconify-icon icon="${alert.icon}"></iconify-icon></button>`;
+    // ligne. .article-detail-btn intercepté par onRowClicked/onCellClicked ci-dessous. Libellé texte
+    // ajouté le 01/10/2026 (demande explicite, "avec un texte affiché").
+    html += `<button type="button" class="btn btn-sm btn-link p-0 article-detail-btn flex-shrink-0 ${alert.cls}" title="${alert.title} — cliquer pour voir le détail"><iconify-icon icon="${alert.icon}"></iconify-icon> Alerte</button>`;
   }
   wrap.innerHTML = html;
   return wrap;
@@ -353,7 +370,16 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         },
         { colId: 'rowIndex', headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 60, sortable: false, filter: false },
         { headerName: 'EAN', field: 'ean', width: 130, filter: 'agTextColumnFilter' },
-        { headerName: 'Article', field: 'label', flex: 2, minWidth: 260, filter: 'agTextColumnFilter', cellRenderer: labelCellRenderer },
+        { headerName: 'Article', field: 'label', flex: 2, minWidth: 220, filter: 'agTextColumnFilter', cellRenderer: labelCellRenderer },
+        {
+          colId: 'actions',
+          headerName: 'Actions',
+          width: 190,
+          sortable: false,
+          filter: false,
+          cellRenderer: actionsCellRenderer,
+          valueGetter: () => '',
+        },
         {
           headerName: 'Prix vente',
           field: 'sellingPrice',

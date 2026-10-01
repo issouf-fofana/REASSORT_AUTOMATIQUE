@@ -582,6 +582,12 @@ export function PurchaseOrder() {
           padding: .18rem .5rem !important;
           line-height: 1.3;
           border-radius: 999px;
+          display: inline-flex !important;
+          align-items: center;
+          gap: .3rem;
+          flex: 0 0 auto;
+          max-width: 100%;
+          white-space: normal;
         }
         .reassort-mini-badge iconify-icon { font-size: .8rem; vertical-align: -1px; }
         /* Couleur de texte fixée explicitement (pas .text-dark/.bg-light Bootstrap) : ce thème
@@ -623,15 +629,42 @@ export function PurchaseOrder() {
         /* Icône d'alerte discrète dans les cellules simplifiées (Article/Vente moy./Stock actuel,
            demande du 30/09/2026) : même teinte que les badges ci-dessus, mais sans fond ni bordure. */
         .reassort-alert-soft { color: #8A7A4A; }
-        /* Rend visible que l'icône d'alerte dans la cellule Article est cliquable (ouvre le panneau
-           de détail), demande du 30/09/2026 : "on ne sait pas si on peut cliquer". */
+        /* Rend visible que l'icône d'alerte/graphique dans la cellule Article est cliquable — un
+           simple hover sur une icône nue restait invisible tant que la souris n'était pas dessus
+           (demande du 01/10/2026, 2e retour : "toujours pas visible, fait un bouton normal"). Vrai
+           bouton avec fond et bordure visibles EN PERMANENCE, pas seulement au survol, comme
+           n'importe quel bouton de l'application. */
+        .pa-open-btn,
         .article-detail-btn {
-          width: 22px; height: 22px; border-radius: 50%;
-          display: inline-flex; align-items: center; justify-content: center;
-          transition: background-color .15s ease;
+          height: 26px; border-radius: 6px;
+          display: inline-flex; align-items: center; justify-content: center; gap: .3rem;
+          padding: 0 .5rem !important;
+          font-size: .72rem; font-weight: 600; white-space: nowrap;
+          transition: background-color .15s ease, border-color .15s ease;
+          cursor: pointer;
         }
-        .article-detail-btn:hover, .article-detail-btn:focus { background-color: rgba(27, 42, 74, .1); }
-        .article-detail-btn iconify-icon { font-size: 1rem; }
+        .pa-open-btn {
+          background-color: #1B2A4A;
+          border: 1px solid #1B2A4A;
+          color: #ffffff;
+        }
+        .pa-open-btn:hover, .pa-open-btn:focus {
+          background-color: #14203a;
+          border-color: #14203a;
+          color: #ffffff;
+        }
+        .article-detail-btn {
+          background-color: #F5A623;
+          border: 1px solid #F5A623;
+          color: #1B2A4A;
+        }
+        .article-detail-btn:hover, .article-detail-btn:focus {
+          background-color: #dd950f;
+          border-color: #dd950f;
+          color: #1B2A4A;
+        }
+        .article-detail-btn iconify-icon,
+        .pa-open-btn iconify-icon { font-size: .9rem; }
         /* Modals de cet écran (ArticleDetailModal, ProductAnalyticsModal, WeeklyPlanHistoryModal,
            etc.) restylées en marine/ambre (demande du 01/10/2026) pour rester cohérentes avec les
            cartes de secteurs/rayons — purement visuel, markup Bootstrap inchangé. */

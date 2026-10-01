@@ -255,7 +255,7 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
           className="badge border reassort-mini-badge reassort-warning-badge"
           title={`Cette génération demandait des ventes depuis le ${fmtDate(proposal.analysisPeriodStart!)}, mais les données réellement disponibles ne remontent qu'au ${actualStart} — soit ${proposal.coverageGapDays} jour(s) manquant(s). Lancez un backfill (Paramètres > Fichiers de ventes) pour combler ce manque.`}
         >
-          <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données utilisées : {actualStart} → {actualEnd}
+          <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Données dispo. : {actualStart} → {actualEnd}
         </span>
       )}
     </div>

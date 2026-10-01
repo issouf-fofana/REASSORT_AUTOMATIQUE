@@ -165,7 +165,7 @@ a:not(.sidebar *),
 }
 @media (min-width: 768px) {
      .sidebar {
-          max-width: 290px !important;
+          max-width: 300px !important;
      }
 }
 /* .content a une marge fixe de 260px (volt.css) pour laisser la place à la sidebar — sans l'ajuster
@@ -179,7 +179,7 @@ a:not(.sidebar *),
    centré" en mode notch, un vide à gauche large comme l'ancienne sidebar. */
 @media (min-width: 992px) {
      body:not(.nav-collapsed) .content {
-          margin-left: 290px !important;
+          margin-left: 300px !important;
      }
 }
 /* display:flex ajouté le 27/09/2026 : sidebar.html pose déjà d-flex align-items-center en dur sur
@@ -208,6 +208,11 @@ a:not(.sidebar *),
      display: block;
      min-width: 0;
      flex: 1 1 auto;
+     /* Légèrement réduit (01/10/2026, "il y a des texte long qui deborde") : la sidebar élargie à
+        300px ci-dessus laisse déjà plus de place, et ce point de police plus petit supprime la
+        troncature/ellipse qui apparaissait encore sur les libellés les plus longs (ex: "Proposition
+        de commande", "Ventes synchronisées") sans toucher à la taille des icônes. */
+     font-size: .92rem;
 }
 
 .sidebar .nav-item .nav-link:hover {
