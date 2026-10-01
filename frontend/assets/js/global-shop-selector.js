@@ -85,6 +85,37 @@
   // renderButton en interne). Bug découvert le 15/09/2026 : "le filtre magasin ne s'affiche pas".
   window.reassortRenderShopSelector = renderButton;
 
+  // Migration silencieuse (01/10/2026) : avant le correctif du posId manquant (shop-picker.js,
+  // syncToGlobalShop ci-dessous et ai-assistant.js ne le sauvegardaient jamais), un magasin déjà
+  // choisi AVANT ce correctif reste persisté sans posId dans localStorage sur le navigateur de
+  // l'utilisateur — resolvePosId (backend/src/middleware/auth.js) exige ce paramètre explicitement
+  // pour ADMIN/SUPERVISOR, donc /reassort/orders (et toute route posId-dépendante) continuait à
+  // échouer en 400 "Aucun magasin assigné à ce compte" malgré le correctif, tant que l'utilisateur
+  // ne re-sélectionnait pas explicitement un magasin. Complète automatiquement le posId manquant au
+  // premier chargement de page, sans action de l'utilisateur.
+  let posIdMigrationInFlight = false;
+  async function migratePosIdIfMissing() {
+    const shop = getActiveShop();
+    if (!shop || shop.posId || posIdMigrationInFlight) return;
+    const user = window.reassortGetUser && window.reassortGetUser();
+    if (!user || (window.reassortIsSingleShopRole && window.reassortIsSingleShopRole(user.role))) return;
+    if (!window.reassortFetch) return;
+    posIdMigrationInFlight = true;
+    try {
+      const res = await window.reassortFetch('/reassort/shops');
+      const json = await res.json();
+      if (!json.success) return;
+      const matched = (json.data || []).find(function (s) { return s.id === shop.id; });
+      if (matched && matched.posId) setActiveShop(Object.assign({}, shop, { posId: matched.posId }));
+    } catch (err) {
+      // Échec réseau : le magasin reste sans posId pour cette session, comme avant ce correctif —
+      // jamais bloquant pour la page, les pages posId-dépendantes afficheront juste leur erreur
+      // habituelle (déjà le cas avant ce correctif).
+    } finally {
+      posIdMigrationInFlight = false;
+    }
+  }
+
   function renderButton() {
     // querySelectorAll, PAS getElementById (bug trouvé le 28/09/2026 : "je suis en mode sidebar
     // magasin 110, je passe en mode notch magasin 120, je reviens en sidebar je suis toujours sur
@@ -131,6 +162,7 @@
     // bloquant : renderButton() a déjà affiché "Choisir un magasin" pendant que la requête tourne,
     // setActiveShop() (dans initDefaultShopIfNeeded) rappellera renderButton() une fois résolue.
     if (!shop) initDefaultShopIfNeeded();
+    else migratePosIdIfMissing();
   }
 
   // Construit un <select> masqué compatible avec window.reassortMakeShopPickerSearchable
