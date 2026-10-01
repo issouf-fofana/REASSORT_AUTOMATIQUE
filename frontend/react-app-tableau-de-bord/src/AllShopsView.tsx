@@ -96,21 +96,23 @@ export function AllShopsView() {
   return (
     <div>
       <style>{`
-        /* Icône neutre par défaut (30/09/2026, "pas pro" : toutes les icônes ressortaient en ambre
-           même hors alerte, faisant croire à un problème généralisé) — seule une carte réellement
-           EN ALERTE (isAlert) prend l'accent ambre ; les autres restent sur un badge bleu-gris neutre. */
-        .kpi-icon.kpi-icon-neutral { background: rgba(255,255,255,.12) !important; }
-        .kpi-icon.kpi-icon-neutral iconify-icon { color: #C7D0E0 !important; }
-        .kpi-card-alert { border: 1px solid #F5A623; }
-        .kpi-card-alert .kpi-value { color: #FBC46D; }
+        /* Cartes claires avec bordure (01/10/2026, "trop fort" en fond marine plein — revenu au
+           style blanc/bordure cohérent avec le reste du site). Icône neutre par défaut (30/09/2026,
+           "pas pro" : toutes les icônes ressortaient en ambre même hors alerte) — seule une carte
+           réellement EN ALERTE (isAlert) prend l'accent ambre ; les autres restent sur un badge
+           bleu-gris neutre. */
+        .kpi-icon.kpi-icon-neutral { background: #EDF1F7 !important; }
+        .kpi-icon.kpi-icon-neutral iconify-icon { color: #5B6B85 !important; }
+        .kpi-card-alert { border-color: #F5A623; }
+        .kpi-card-alert .kpi-value { color: #8A5A00; }
         .metric-row { display: flex; flex-wrap: wrap; }
-        .metric-row-item { flex: 1 1 180px; padding: 1rem 1.2rem 1rem 0; border-right: 1px solid rgba(255,255,255,.12); }
+        .metric-row-item { flex: 1 1 180px; padding: 1rem 1.2rem 1rem 0; border-right: 1px solid #EDF1F7; }
         .metric-row-item:last-child { border-right: none; }
-        .metric-value { font-size: 1.4rem; font-weight: 700; line-height: 1.15; margin: 0; color: #fff; }
-        /* Valeur en alerte : fond ambre clair + texte marine plutôt qu'ambre plein sur marine (peu
-           lisible en gras, signalé le 30/09/2026) — même logique que .reassort-badge-soft-warning. */
+        .metric-value { font-size: 1.4rem; font-weight: 700; line-height: 1.15; margin: 0; color: #1B2A4A; }
+        /* Valeur en alerte : fond ambre clair + texte marine (même logique que
+           .reassort-badge-soft-warning). */
         .metric-value.is-bad { display: inline-block; background: #FDF1DD; color: #8A5A00; padding: .1rem .5rem; border-radius: 6px; }
-        @media (max-width: 767px) { .metric-row-item { border-right: none; border-bottom: 1px solid rgba(255,255,255,.12); } }
+        @media (max-width: 767px) { .metric-row-item { border-right: none; border-bottom: 1px solid #EDF1F7; } }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-center mb-3">
@@ -157,7 +159,7 @@ export function AllShopsView() {
 
           <div className="card kpi-card mb-3">
             <div className="card-body">
-              <h5 className="mb-3" style={{ color: '#fff', fontWeight: 600, fontSize: '.95rem' }}>Précision des prévisions IA</h5>
+              <h5 className="mb-3" style={{ color: '#1B2A4A', fontWeight: 600, fontSize: '.95rem' }}>Précision des prévisions IA</h5>
               <div className="metric-row">
                 <div className="metric-row-item">
                   <p className="kpi-label">Taux d'acceptation</p>
@@ -180,7 +182,7 @@ export function AllShopsView() {
                 <div className="metric-row-item">
                   <p className="kpi-label">Biais / WAPE</p>
                   <p className="metric-value">{num(data.globalForecastBias, 1)}</p>
-                  <p className="text-muted small mb-0" style={{ color: '#8C99B5' }}>
+                  <p className="text-muted small mb-0" style={{ color: '#8a93a8' }}>
                     {data.globalForecastWAPE !== null ? `${pct(data.globalForecastWAPE)} WAPE` : 'WAPE non mesurable'}
                   </p>
                 </div>

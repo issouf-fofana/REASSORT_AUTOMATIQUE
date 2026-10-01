@@ -167,22 +167,19 @@ export function TableauDeBord() {
   return (
     <div>
       <style>{`
-        /* Palette marine/ambre (demande du 30/09/2026), cohérente avec l'écran Proposition de
-           commande — cartes KPI sur fond marine, icône sur badge ambre, valeur en blanc. */
-        .kpi-card { border: none; border-radius: 14px; background: #1B2A4A; box-shadow: 0 4px 14px rgba(27, 42, 74, .12); transition: box-shadow .2s ease, transform .2s ease; }
-        .kpi-card:hover { box-shadow: 0 8px 22px rgba(27, 42, 74, .2); transform: translateY(-2px); }
+        /* Cartes KPI blanches avec bordure + hover (01/10/2026, "trop fort" en fond marine plein —
+           revenu au même esprit que les cartes de secteurs/rayons sur Proposition de commande). */
+        .kpi-card { border: 1px solid #e9ecf2; border-radius: 14px; background: #ffffff; box-shadow: 0 1px 3px rgba(27, 42, 74, .05); transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease; }
+        .kpi-card:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; transform: translateY(-1px); }
         .kpi-card .card-body { padding: 1.1rem 1.2rem .85rem; }
-        .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #F5A623 !important; }
+        .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #EDF1F7 !important; }
         .kpi-icon iconify-icon { font-size: 20px; color: #1B2A4A !important; }
-        .kpi-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; margin: .35rem 0 0; color: #fff; }
-        .kpi-label { font-size: .78rem; color: #C7D0E0; margin: 0; }
-        .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid rgba(255,255,255,.14); color: #8C99B5; }
-        .kpi-footer a { color: #F5A623 !important; font-weight: 600; }
-        /* Cartes "graphique" (ConformityTrendChart) : fond clair, pour rester lisibles avec
-           ApexCharts (qui rend son propre texte, pas simple à recolorer entièrement en blanc) —
-           distinction visuelle assumée avec les cartes KPI marine ci-dessus. */
-        .kpi-card.kpi-card-chart { background: #fff; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
-        .kpi-card.kpi-card-chart:hover { transform: none; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
+        .kpi-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; margin: .35rem 0 0; color: #1B2A4A; }
+        .kpi-label { font-size: .78rem; color: #5B6B85; margin: 0; }
+        .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid #EDF1F7; color: #8a93a8; }
+        .kpi-footer a { color: #1B2A4A !important; font-weight: 600; }
+        .kpi-card.kpi-card-chart { background: #fff; }
+        .kpi-card.kpi-card-chart:hover { transform: none; }
         /* Badges de statut de commande, palette adoucie (dupliquée depuis Proposition de commande,
            chaque app React a son propre bundle CSS). */
         .reassort-badge-neutral { background-color: #EDF1F7 !important; color: #1B2A4A !important; }

@@ -16,7 +16,7 @@
   const style = document.createElement('style');
   style.textContent = `
     #reassort-loading-overlay {
-      position: fixed; inset: 0; background-color: #1a1d29; z-index: 9999;
+      position: fixed; inset: 0; background-color: #1B2A4A; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
       transition: opacity .25s ease;
     }

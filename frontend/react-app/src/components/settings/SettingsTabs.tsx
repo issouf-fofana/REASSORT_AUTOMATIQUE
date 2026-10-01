@@ -59,7 +59,15 @@ export function SettingsTabs() {
 
   return (
     <div>
-      <div className="mb-6">
+      <style>{`
+        /* NotchTabBar (partagée avec Qualité & IA/Guide du projet) en zinc-950 par défaut —
+           surchargée ici en marine/ambre (01/10/2026, "applique le style aussi"). */
+        .settings-tabs-wrap .reassort-tabs-root { background-color: #EDF1F7; }
+        .settings-tabs-wrap .reassort-tabs-root [role="tab"].text-zinc-500 { color: #5B6B85; }
+        .settings-tabs-wrap .reassort-tabs-root [role="tab"]:hover.text-zinc-500 { color: #1B2A4A; }
+        .settings-tabs-wrap .reassort-tabs-root .bg-zinc-950 { background-color: #1B2A4A !important; }
+      `}</style>
+      <div className="mb-6 settings-tabs-wrap">
         <NotchTabBar
           tabs={TABS}
           activeId={activeTab}
