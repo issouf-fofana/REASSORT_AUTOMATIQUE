@@ -174,36 +174,41 @@ export function ProjectGuide() {
            possible par le passage global de html/body/.content à overflow:visible/clip plutôt que
            hidden (cf. theme-override.css, demande du 24/09/2026 "la topbar doit rester figée aussi"
            généralisée à tout le site), donc plus besoin d'un contournement propre à cette page. */
-        .pg-toc { position: sticky; top: calc(64px + 1.25rem); width: 100%; max-height: calc(100vh - 64px - 2.5rem); overflow-y: auto; border-left: 1px solid #e5e5e5; padding-left: 1rem; }
-        .pg-toc-group-title { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #9a9a9a; margin: 1.1rem 0 .5rem; }
+        .pg-toc { position: sticky; top: calc(64px + 1.25rem); width: 100%; max-height: calc(100vh - 64px - 2.5rem); overflow-y: auto; border-left: 1px solid #e9ecf2; padding-left: 1rem; }
+        .pg-toc-group-title { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #8a93a8; margin: 1.1rem 0 .5rem; }
         .pg-toc-group-title:first-child { margin-top: 0; }
-        .pg-toc a { display: block; padding: .4rem .7rem; font-size: .85rem; color: #444444; text-decoration: none; border-left: 2px solid transparent; margin-left: -1px; border-radius: 0 6px 6px 0; transition: background-color .15s ease, color .15s ease, border-color .15s ease, padding-left .15s ease; }
-        .pg-toc a:hover { background-color: #f5f5f5; color: #000000; padding-left: .9rem; }
-        .pg-toc a.active { border-left-color: #000000; color: #000000; font-weight: 600; background-color: #f5f5f5; }
+        .pg-toc a { display: block; padding: .4rem .7rem; font-size: .85rem; color: #44516B; text-decoration: none; border-left: 2px solid transparent; margin-left: -1px; border-radius: 0 6px 6px 0; transition: background-color .15s ease, color .15s ease, border-color .15s ease, padding-left .15s ease; }
+        .pg-toc a:hover { background-color: #EDF1F7; color: #1B2A4A; padding-left: .9rem; }
+        .pg-toc a.active { border-left-color: #F5A623; color: #1B2A4A; font-weight: 600; background-color: #EDF1F7; }
         .pg-section { scroll-margin-top: 1rem; padding-top: .5rem; margin-bottom: 2.5rem; opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
         .pg-section.pg-visible { opacity: 1; transform: translateY(0); }
         @media (prefers-reduced-motion: reduce) { .pg-section { opacity: 1; transform: none; transition: none; } }
-        .pg-section-header { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; padding-bottom: .6rem; border-bottom: 1px solid #f0f0f0; }
-        .pg-section-header iconify-icon { font-size: 1.3rem; color: #000000; }
-        .pg-section-title { font-size: 1.2rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+        .pg-section-header { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; padding-bottom: .6rem; border-bottom: 1px solid #e9ecf2; }
+        .pg-section-header iconify-icon { font-size: 1.3rem; color: #1B2A4A; }
+        .pg-section-title { font-size: 1.2rem; font-weight: 700; margin: 0; letter-spacing: -.01em; color: #1B2A4A; }
         .pg-status-badge { font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: .25rem .6rem; border-radius: 999px; border: 1px solid transparent; margin-left: auto; }
         .pg-status-done { background-color: #ECFDF5; color: #047857; border-color: #A7F3D0; }
-        .pg-status-partial { background-color: #FFFBEB; color: #B45309; border-color: #FDE68A; }
-        .pg-status-planned { background-color: #F3F4F6; color: #6B7280; border-color: #E5E7EB; }
-        .pg-card { background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: .6rem; box-shadow: 0 1px 3px rgba(0,0,0,.05); padding: 1.25rem 1.5rem; margin-bottom: 1rem; transition: box-shadow .2s ease, border-color .2s ease; }
-        .pg-card:hover { border-color: #d1d5db; box-shadow: 0 3px 10px rgba(0,0,0,.07); }
-        .pg-card-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #9a9a9a; margin-bottom: .5rem; }
+        .pg-status-partial { background-color: #FDF1DD; color: #8A5A00; border-color: #F7DFA6; }
+        .pg-status-planned { background-color: #EDF1F7; color: #5B6B85; border-color: #DCE3F0; }
+        .pg-card { background-color: #ffffff; border: 1px solid #e9ecf2; border-radius: .75rem; box-shadow: 0 1px 3px rgba(27,42,74,.05); padding: 1.25rem 1.5rem; margin-bottom: 1rem; transition: box-shadow .2s ease, border-color .2s ease; }
+        .pg-card:hover { border-color: #c7d2e8; box-shadow: 0 6px 16px rgba(27,42,74,.08); }
+        .pg-card-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #8a93a8; margin-bottom: .5rem; }
         .pg-card p:last-child { margin-bottom: 0; }
-        .pg-tech-note { font-size: .8rem; color: #6c757d; background-color: #fafafa; border-radius: .5rem; border-left: 3px solid #d1d5db; padding: .65rem .9rem; margin-top: .75rem; }
-        .pg-page-links a { display: inline-flex; align-items: center; gap: .3rem; font-size: .83rem; font-weight: 500; border: 1px solid #d1d5db; border-radius: 999px; padding: .35rem .85rem; margin: .15rem .35rem .15rem 0; text-decoration: none; color: #111111; transition: background-color .15s ease, border-color .15s ease, transform .15s ease; }
-        .pg-page-links a:hover { background-color: #000000; color: #ffffff; border-color: #000000; transform: translateY(-1px); }
+        .pg-tech-note { font-size: .8rem; color: #5B6B85; background-color: #F7F9FC; border-radius: .5rem; border-left: 3px solid #F5A623; padding: .65rem .9rem; margin-top: .75rem; }
+        .pg-page-links a { display: inline-flex; align-items: center; gap: .3rem; font-size: .83rem; font-weight: 500; border: 1px solid #DCE3F0; border-radius: 999px; padding: .35rem .85rem; margin: .15rem .35rem .15rem 0; text-decoration: none; color: #1B2A4A; transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s ease; }
+        .pg-page-links a:hover { background-color: #1B2A4A; color: #ffffff; border-color: #1B2A4A; transform: translateY(-1px); }
         .pg-header { margin-bottom: 1.75rem; }
-        .pg-header-eyebrow { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #9a9a9a; margin-bottom: .4rem; }
-        .pg-header-title { font-size: 1.7rem; font-weight: 700; margin: 0 0 .4rem; letter-spacing: -.01em; }
-        .pg-header-sub { color: #6c757d; font-size: .9rem; margin: 0; max-width: 720px; }
+        .pg-header-eyebrow { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #8a93a8; margin-bottom: .4rem; }
+        .pg-header-title { font-size: 1.7rem; font-weight: 700; margin: 0 0 .4rem; letter-spacing: -.01em; color: #1B2A4A; }
+        .pg-header-sub { color: #5B6B85; font-size: .9rem; margin: 0; max-width: 720px; }
         /* NotchTabBar (Tailwind, cf. components/ui/NotchTabBar.tsx) gère son propre style de pilule
-           animée — .pg-tabs ne fait plus que le positionnement sticky au défilement. */
+           animée en zinc par défaut (partagé avec Paramètres) — surchargé ici en marine/ambre pour
+           rester cohérent avec la palette du Guide du projet sans modifier le composant partagé. */
         .pg-tabs { padding: .75rem 0; margin-bottom: 1.25rem; position: sticky; top: 0; z-index: 10; background-color: #f5f5f5; }
+        .pg-tabs .reassort-tabs-root { background-color: #EDF1F7; }
+        .pg-tabs .reassort-tabs-root [role="tab"].text-zinc-500 { color: #5B6B85; }
+        .pg-tabs .reassort-tabs-root [role="tab"]:hover.text-zinc-500 { color: #1B2A4A; }
+        .pg-tabs .reassort-tabs-root .bg-zinc-950 { background-color: #1B2A4A !important; }
         @media (max-width: 991px) {
           .pg-toc { position: static; width: auto; max-height: none; margin-bottom: 2rem; border-left: none; padding-left: 0; }
         }

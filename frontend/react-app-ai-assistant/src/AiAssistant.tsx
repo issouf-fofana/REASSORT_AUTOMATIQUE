@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+import { Copy, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiFetch } from './api/client';
 import { AIChatInput } from './components/ui/ai-chat-input';
 
@@ -52,10 +55,16 @@ interface ToolResult {
 interface Turn {
   question: string;
   answerHtml: string;
+  // Texte brut (avant conversion markdown → HTML), pour le bouton "Copier" — copier answerHtml
+  // collerait des balises HTML dans le presse-papiers de l'utilisateur.
+  answerText?: string;
   streaming?: boolean;
   streamText?: string;
   error?: string;
   interrupted?: boolean;
+  // Purement visuel pour l'instant (30/09/2026) : aucune persistance backend, juste l'état du
+  // bouton like/dislike affiché sous la réponse.
+  feedback?: 'up' | 'down' | null;
 }
 
 function escapeHtml(str: string): string {
@@ -64,34 +73,16 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
-function applyInlineMarkdown(str: string): string {
-  return str.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
-}
-
-function markdownLiteToHtml(text: string): string {
+// Remplace l'ancien parseur maison (markdownLiteToHtml, gras/italique/listes à puces seulement) par
+// `marked` (30/09/2026, demande "bien formaté comme les autres sites") : titres, listes numérotées,
+// tableaux, blocs de code, tout le markdown standard. `breaks: true` conserve le même comportement
+// que l'ancien parseur pour un simple retour à la ligne (pas besoin d'un double saut de ligne pour
+// que l'IA structure sa réponse). DOMPurify sanitise le HTML produit avant dangerouslySetInnerHTML —
+// le texte vient d'une IA, jamais garanti inoffensif.
+marked.setOptions({ breaks: true });
+function renderMarkdown(text: string): string {
   if (!text) return '';
-  const escaped = escapeHtml(text);
-  const lines = escaped.split('\n');
-  const htmlParts: string[] = [];
-  let listBuffer: string[] = [];
-  function flushList() {
-    if (listBuffer.length) {
-      htmlParts.push('<ul class="aia-md-list">' + listBuffer.map((item) => '<li>' + item + '</li>').join('') + '</ul>');
-      listBuffer = [];
-    }
-  }
-  lines.forEach((rawLine) => {
-    const line = rawLine.trim();
-    const bulletMatch = line.match(/^[-*]\s+(.*)/);
-    if (bulletMatch) {
-      listBuffer.push(applyInlineMarkdown(bulletMatch[1]));
-      return;
-    }
-    flushList();
-    if (line) htmlParts.push('<p>' + applyInlineMarkdown(line) + '</p>');
-  });
-  flushList();
-  return htmlParts.join('');
+  return DOMPurify.sanitize(marked.parse(text, { async: false }));
 }
 
 // Couleur d'accent bleue réservée à ces graphiques du chatbot (demande explicite du 28/09/2026,
@@ -274,6 +265,19 @@ export function AiAssistant() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const chatWindowRef = useRef<HTMLDivElement>(null);
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
+  // Actions sous une réponse (30/09/2026) : copiedIndex affiche "Copié" temporairement sur le bon
+  // tour ; feedback (like/dislike) est purement visuel pour l'instant, cf. Turn.feedback.
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  function toggleFeedback(turnIndex: number, value: 'up' | 'down') {
+    setTurns((prev) => {
+      const next = [...prev];
+      const current = next[turnIndex];
+      if (!current) return prev;
+      next[turnIndex] = { ...current, feedback: current.feedback === value ? null : value };
+      return next;
+    });
+  }
 
   const currentShopId = useCallback(() => {
     const user = window.reassortGetUser();
@@ -342,7 +346,8 @@ export function AiAssistant() {
         }
         newTurns.push({
           question: userMsg ? userMsg.content : '',
-          answerHtml: assistantMsg ? markdownLiteToHtml(assistantMsg.content) + visualHtml : '',
+          answerHtml: assistantMsg ? renderMarkdown(assistantMsg.content) + visualHtml : '',
+          answerText: assistantMsg?.content,
         });
       }
       setTurns(newTurns);
@@ -434,12 +439,14 @@ export function AiAssistant() {
       if (finalResult) {
         next[turnIndex] = {
           question: q,
-          answerHtml: markdownLiteToHtml(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult, !!finalResult.wantsVisual),
+          answerHtml: renderMarkdown(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult, !!finalResult.wantsVisual),
+          answerText: finalResult.answer,
         };
       } else if (lastErr?.name === 'AbortError') {
         next[turnIndex] = {
           question: q,
-          answerHtml: markdownLiteToHtml(streamedAnswer),
+          answerHtml: renderMarkdown(streamedAnswer),
+          answerText: streamedAnswer,
           interrupted: true,
         };
       } else {
@@ -492,10 +499,10 @@ export function AiAssistant() {
       if (!lastAssistant) return;
       setTurns((prev) => {
         if (turnIndex >= prev.length || prev[turnIndex].question !== question) return prev;
-        const newHtml = markdownLiteToHtml(lastAssistant.content);
+        const newHtml = renderMarkdown(lastAssistant.content);
         if (prev[turnIndex].answerHtml.includes(newHtml) || newHtml.length <= prev[turnIndex].answerHtml.length) return prev;
         const next = [...prev];
-        next[turnIndex] = { ...next[turnIndex], answerHtml: newHtml };
+        next[turnIndex] = { ...next[turnIndex], answerHtml: newHtml, answerText: lastAssistant.content };
         return next;
       });
     } catch {
@@ -580,6 +587,98 @@ export function AiAssistant() {
         .aia-md-list li:last-child { margin-bottom: 0; }
         .aia-stream-cursor { display: inline-block; animation: aia-blink 1s step-end infinite; }
         @keyframes aia-blink { 50% { opacity: 0; } }
+        .aia-stream-live::after {
+          content: '▍';
+          display: inline-block;
+          margin-left: 2px;
+          animation: aia-blink 1s step-end infinite;
+        }
+        .aia-answer h1, .aia-answer h2, .aia-answer h3 {
+          font-weight: 600;
+          color: #1B2A4A;
+          margin: 1rem 0 .5rem;
+          line-height: 1.3;
+        }
+        .aia-answer h1:first-child, .aia-answer h2:first-child, .aia-answer h3:first-child { margin-top: 0; }
+        .aia-answer h1 { font-size: 1.15rem; }
+        .aia-answer h2 { font-size: 1.05rem; }
+        .aia-answer h3 { font-size: .98rem; }
+        .aia-answer ul, .aia-answer ol { margin: .25rem 0 .75rem; padding-left: 1.4rem; }
+        .aia-answer ul:last-child, .aia-answer ol:last-child { margin-bottom: 0; }
+        .aia-answer li { margin-bottom: .4rem; }
+        .aia-answer li:last-child { margin-bottom: 0; }
+        .aia-answer code {
+          background: #F1F3F5;
+          color: #1B2A4A;
+          padding: .1rem .35rem;
+          border-radius: 4px;
+          font-size: .85em;
+        }
+        .aia-answer pre {
+          background: #1B2A4A;
+          color: #F5F7FA;
+          padding: .85rem 1rem;
+          border-radius: 6px;
+          overflow-x: auto;
+          margin: .5rem 0 .75rem;
+        }
+        .aia-answer pre code {
+          background: transparent;
+          color: inherit;
+          padding: 0;
+          font-size: .82rem;
+        }
+        .aia-answer table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: .85rem;
+          margin: .5rem 0 .75rem;
+        }
+        .aia-answer th, .aia-answer td {
+          padding: .45rem .6rem;
+          border-bottom: 1px solid #eeeeee;
+          text-align: left;
+        }
+        .aia-answer th {
+          font-weight: 600;
+          color: #1B2A4A;
+          font-size: .75rem;
+          text-transform: uppercase;
+          letter-spacing: .02em;
+          border-bottom: 2px solid #1B2A4A;
+        }
+        .aia-answer blockquote {
+          margin: .5rem 0 .75rem;
+          padding: .25rem 1rem;
+          border-left: 3px solid #F5A623;
+          color: #5B6B85;
+        }
+        .aia-answer-actions {
+          display: flex;
+          align-items: center;
+          gap: .4rem;
+          margin-top: .75rem;
+        }
+        .aia-answer-action-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: .3rem;
+          background: transparent;
+          border: none;
+          color: #9aa4b2;
+          font-size: .78rem;
+          padding: .3rem .5rem;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: background-color .15s ease, color .15s ease;
+        }
+        .aia-answer-action-btn:hover {
+          background-color: #F1F3F5;
+          color: #1B2A4A;
+        }
+        .aia-answer-action-btn.active {
+          color: #F5A623;
+        }
         /* "L'assistant réfléchit..." (demande du 28/09/2026 : "quand j'ai posé une question il doit
            faire un truc qui montre que ça charge") — tant que le premier morceau de texte n'est pas
            encore arrivé (résolution de l'outil de données + latence avant le 1er chunk LLM, qui peut
@@ -790,10 +889,12 @@ export function AiAssistant() {
                 <div className="aia-answer">
                   {turn.streaming ? (
                     turn.streamText ? (
-                      <>
-                        {turn.streamText}
-                        <span className="aia-stream-cursor">▍</span>
-                      </>
+                      // Rendu markdown déjà pendant le streaming (demande du 30/09/2026 : "bien
+                      // formaté comme les autres sites") — le curseur clignotant vient en CSS
+                      // (::after sur .aia-stream-live) plutôt qu'un <span> séparé, pour ne jamais
+                      // casser une balise HTML tronquée en milieu de flux (ex: un <strong> ouvert
+                      // par marked sur un morceau de texte pas encore complet).
+                      <span className="aia-stream-live" dangerouslySetInnerHTML={{ __html: renderMarkdown(turn.streamText) }} />
                     ) : (
                       <span className="aia-thinking">
                         L'assistant réfléchit
@@ -808,6 +909,38 @@ export function AiAssistant() {
                     <>
                       <span dangerouslySetInnerHTML={{ __html: turn.answerHtml }} />
                       {turn.interrupted && <div className="text-muted small mt-1">(réponse interrompue)</div>}
+                      <div className="aia-answer-actions">
+                        <button
+                          type="button"
+                          className="aia-answer-action-btn"
+                          title="Copier la réponse"
+                          onClick={() => {
+                            if (!turn.answerText) return;
+                            navigator.clipboard.writeText(turn.answerText);
+                            setCopiedIndex(i);
+                            window.setTimeout(() => setCopiedIndex((cur) => (cur === i ? null : cur)), 1500);
+                          }}
+                        >
+                          <Copy size={14} />
+                          {copiedIndex === i ? 'Copié' : 'Copier'}
+                        </button>
+                        <button
+                          type="button"
+                          className={`aia-answer-action-btn${turn.feedback === 'up' ? ' active' : ''}`}
+                          title="Réponse utile"
+                          onClick={() => toggleFeedback(i, 'up')}
+                        >
+                          <ThumbsUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`aia-answer-action-btn${turn.feedback === 'down' ? ' active' : ''}`}
+                          title="Réponse pas utile"
+                          onClick={() => toggleFeedback(i, 'down')}
+                        >
+                          <ThumbsDown size={14} />
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>

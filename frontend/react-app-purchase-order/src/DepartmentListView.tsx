@@ -56,48 +56,72 @@ function DeptTile({
   order?: ProposalOrder | null;
 }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
+  const statusMeta = !order
+    ? null
+    : order.status === 'DONE'
+      ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Validé' }
+      : order.status === 'FAILED'
+        ? { cls: 'status-failed', icon: 'solar:close-circle-bold', label: 'Échec' }
+        : { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'En attente' };
   return (
-    <div className="col-md-4 col-lg-3">
-      <a
-        href={href}
-        className="card text-decoration-none h-100 reassort-dept-tile"
-        onClick={(e) => {
-          // Empêche un vrai rechargement de page (perdrait tout l'état React déjà chargé — proposal,
-          // shops, etc.) au profit d'une navigation SPA via history.pushState, exactement comme les
-          // flèches "retour" du composant parent — oublié ici lors de la première écriture de ce
-          // composant, ce qui faisait sembler les tuiles totalement inertes (24/09/2026).
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // laisse ouvrir dans un nouvel onglet si demandé
-          e.preventDefault();
-          onNavigate(href);
-        }}
-      >
-        <div className="card-body">
-          <div className="tile-icon">
-            <iconify-icon icon={sectorIcon(name)}></iconify-icon>
+    <a
+      href={href}
+      className="reassort-dept-row text-decoration-none d-block"
+      onClick={(e) => {
+        // Empêche un vrai rechargement de page (perdrait tout l'état React déjà chargé — proposal,
+        // shops, etc.) au profit d'une navigation SPA via history.pushState, exactement comme les
+        // flèches "retour" du composant parent — oublié ici lors de la première écriture de ce
+        // composant, ce qui faisait sembler les tuiles totalement inertes (24/09/2026).
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // laisse ouvrir dans un nouvel onglet si demandé
+        e.preventDefault();
+        onNavigate(href);
+      }}
+    >
+      <div className="card-body">
+        <div className="row-top">
+          <div className="row-identity">
+            <div className="tile-icon">
+              <iconify-icon icon={sectorIcon(name)}></iconify-icon>
+            </div>
+            <div>
+              <h5 className="card-title">{name}</h5>
+              <div className="tile-count">{d.count} article(s)</div>
+            </div>
           </div>
-          <div className="d-flex align-items-start justify-content-between gap-1">
-            <h5 className="card-title mb-1">{name}</h5>
-            {order && (
-              <span
-                className={`badge ${order.status === 'DONE' ? 'bg-success' : order.status === 'FAILED' ? 'bg-danger' : 'bg-secondary'}`}
-                title={order.rposOrderReference ? `Commande ${order.rposOrderReference}` : undefined}
-              >
-                <iconify-icon icon="solar:check-circle-bold" className="align-middle me-1"></iconify-icon>Validé
-              </span>
-            )}
-          </div>
-          <div className="tile-count">{d.count} article(s)</div>
-          <div className="tile-pct">
-            {d.revenuePct.toFixed(1)}
-            <span className="fs-14 fw-normal text-muted"> % CA</span>
-          </div>
-          <div className="tile-progress">
-            <div className="tile-progress-fill" style={{ width: `${pctClamped}%` }}></div>
-          </div>
-          <div className="tile-revenue">{d.value.toLocaleString('fr-FR')} CFA proposé</div>
+          {statusMeta && (
+            <span className={`row-status-badge ${statusMeta.cls}`} title={order?.rposOrderReference ? `Commande ${order.rposOrderReference}` : undefined}>
+              <iconify-icon icon={statusMeta.icon}></iconify-icon> {statusMeta.label}
+            </span>
+          )}
         </div>
-      </a>
-    </div>
+        <div className="row-metrics">
+          <div className="row-metric">
+            <div className="row-metric-label">
+              <iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Articles
+            </div>
+            <div className="row-metric-value">{d.count}</div>
+          </div>
+          <div className="row-metric">
+            <div className="row-metric-label">
+              <iconify-icon icon="solar:pie-chart-bold-duotone"></iconify-icon> % CA
+            </div>
+            <div className="row-metric-value">{d.revenuePct.toFixed(1)}%</div>
+          </div>
+          <div className="row-metric">
+            <div className="row-metric-label">
+              <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon> Proposé
+            </div>
+            <div className="row-metric-value">{d.value.toLocaleString('fr-FR')} CFA</div>
+          </div>
+          <div className="row-progress-wrap">
+            <div className="row-metric-label">Part du CA secteur</div>
+            <div className="tile-progress">
+              <div className="tile-progress-fill" style={{ width: `${pctClamped}%` }}></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a>
   );
 }
 
@@ -126,41 +150,59 @@ function RemainderTile({
   ).filter(([, , count]) => !!count);
 
   return (
-    <div className="col-md-4 col-lg-3">
-      <div className="card h-100 reassort-dept-tile reassort-dept-tile-neutral">
-        <div className="card-body">
-          <div className="tile-icon">
-            <iconify-icon icon="solar:pie-chart-2-bold-duotone"></iconify-icon>
+    <div className="reassort-dept-row reassort-dept-row-neutral">
+      <div className="card-body">
+        <div className="row-top">
+          <div className="row-identity">
+            <div className="tile-icon">
+              <iconify-icon icon="solar:pie-chart-2-bold-duotone"></iconify-icon>
+            </div>
+            <div>
+              <h5 className="card-title">Reste du CA magasin</h5>
+              <div className="tile-count">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>
+            </div>
           </div>
-          <h5 className="card-title mb-1 text-muted">Reste du CA magasin</h5>
-          <div className="tile-count">Non proposé ici (hors Pareto, stock négatif, déjà commandé, générique, etc.)</div>
-          <div className="tile-pct text-secondary">
-            {remainderPct.toFixed(1)}
-            <span className="fs-14 fw-normal text-muted"> % CA</span>
-          </div>
-          <div className="tile-progress">
-            <div className="tile-progress-fill" style={{ width: `${remainderPctClamped}%` }}></div>
-          </div>
-          {remainderValue !== null && <div className="tile-revenue">{remainderValue.toLocaleString('fr-FR')} CFA</div>}
-          {items.length > 0 && (
-            <ul className="text-muted small mb-0 ps-3 mt-1" style={{ position: 'relative', zIndex: 5 }}>
-              {items.map(([reason, label, count]) => (
-                <li key={reason} style={{ pointerEvents: 'auto' }}>
-                  <a
-                    href="#"
-                    style={{ position: 'relative', zIndex: 10, cursor: 'pointer', pointerEvents: 'auto', textDecoration: 'underline' }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onOpenExcluded(reason, label);
-                    }}
-                  >
-                    {label} : {count}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
+        <div className="row-metrics">
+          <div className="row-metric">
+            <div className="row-metric-label">
+              <iconify-icon icon="solar:pie-chart-bold-duotone"></iconify-icon> % CA
+            </div>
+            <div className="row-metric-value">{remainderPct.toFixed(1)}%</div>
+          </div>
+          {remainderValue !== null && (
+            <div className="row-metric">
+              <div className="row-metric-label">
+                <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon> Montant
+              </div>
+              <div className="row-metric-value">{remainderValue.toLocaleString('fr-FR')} CFA</div>
+            </div>
+          )}
+          <div className="row-progress-wrap">
+            <div className="row-metric-label">Part du CA secteur</div>
+            <div className="tile-progress">
+              <div className="tile-progress-fill" style={{ width: `${remainderPctClamped}%` }}></div>
+            </div>
+          </div>
+        </div>
+        {items.length > 0 && (
+          <ul className="text-muted small mb-0 ps-3 mt-3">
+            {items.map(([reason, label, count]) => (
+              <li key={reason}>
+                <a
+                  href="#"
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onOpenExcluded(reason, label);
+                  }}
+                >
+                  {label} : {count}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -264,7 +306,7 @@ export function DepartmentListView({
   return (
     <div>
       <DeptListContext proposal={proposal!} />
-      <div className="row g-3">
+      <div className="reassort-dept-grid">
         {tiles.map(([name, d, href]) => (
           <DeptTile
             name={name}

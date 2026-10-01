@@ -502,51 +502,65 @@ export function PurchaseOrder() {
     <div>
       <style>{`
         .reassort-unblock-btn { font-size: .72rem; padding: .15rem .5rem; line-height: 1.3; }
-        /* Cartes secteurs : style "carte KPI" marine + orange demandé le 30/09/2026 (maquette
-           fournie), limité à CET écran — le reste de l'application garde son noir/blanc/gris strict.
+        /* Cartes secteurs : liste verticale style "agent dashboard" (maquette fournie le 01/10/2026),
+           limité à CET écran — le reste de l'application garde son noir/blanc/gris strict.
            RemainderTile (carte "Reste du CA magasin", info secondaire/liste d'exclusions) reste
-           neutre via --tile-neutral, pour ne pas mettre au même niveau visuel une vraie carte KPI et
-           une liste de raisons d'exclusion. */
-        .reassort-dept-tile {
-          --tile-navy: #1B2A4A;
-          --tile-amber: #F5A623;
-          border: none;
+           neutre via .reassort-dept-row-neutral, pour ne pas mettre au même niveau visuel une vraie
+           carte KPI et une liste de raisons d'exclusion. */
+        /* Grille 3 colonnes (demande du 01/10/2026 : "aligné" puis "trop large, trop d'espace vide"
+           en 2 colonnes) — réduit progressivement à 2 puis 1 colonne sur petits écrans pour ne
+           jamais compresser les métriques internes de la carte. */
+        .reassort-dept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
+        @media (max-width: 1399px) { .reassort-dept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 767px) { .reassort-dept-grid { grid-template-columns: 1fr; } }
+        .reassort-dept-row {
+          --row-navy: #1B2A4A;
+          --row-amber: #F5A623;
+          display: block;
+          border: 1px solid #e9ecf2;
           border-radius: 14px;
-          background: var(--tile-neutral, var(--tile-navy));
-          box-shadow: 0 4px 14px rgba(27, 42, 74, .12);
-          transition: box-shadow .2s ease, transform .2s ease;
+          background: #ffffff;
+          box-shadow: 0 1px 3px rgba(27, 42, 74, .05);
+          transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
           overflow: hidden;
-          position: relative;
+          height: 100%;
         }
-        .reassort-dept-tile:hover { box-shadow: 0 8px 22px rgba(27, 42, 74, .2); transform: translateY(-2px); }
-        .reassort-dept-tile .card-body { padding: 1.1rem 1.2rem; }
-        .reassort-dept-tile .tile-icon {
-          width: 34px; height: 34px; border-radius: 10px;
+        .reassort-dept-row:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; transform: translateY(-1px); }
+        .reassort-dept-row .card-body { padding: 1.1rem 1.3rem; }
+        .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: .9rem; }
+        .row-identity { display: flex; align-items: flex-start; gap: .85rem; min-width: 0; }
+        .reassort-dept-row .tile-icon {
+          width: 38px; height: 38px; border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
-          background: var(--tile-amber);
-          color: var(--tile-navy);
-          font-size: 1.05rem;
-          margin-bottom: .65rem;
+          background: var(--row-navy);
+          color: var(--row-amber);
+          font-size: 1.1rem;
+          flex-shrink: 0;
         }
-        .reassort-dept-tile .card-title { font-size: .82rem; font-weight: 600; letter-spacing: .01em; color: #C7D0E0; }
-        .reassort-dept-tile .tile-count { color: #8C99B5; font-size: .72rem; margin-bottom: .4rem; }
-        .reassort-dept-tile .tile-pct { font-size: 1.9rem; font-weight: 700; line-height: 1.1; color: #fff; letter-spacing: -.02em; }
-        .reassort-dept-tile .tile-pct .fs-14 { font-size: .72rem !important; color: #C7D0E0 !important; }
-        .reassort-dept-tile .tile-progress { height: 5px; border-radius: 999px; background-color: rgba(255,255,255,.12); overflow: hidden; margin: .6rem 0 .7rem; }
-        .reassort-dept-tile .tile-progress-fill { height: 100%; background-color: var(--tile-amber); border-radius: 999px; transition: width .35s ease; }
-        .reassort-dept-tile .tile-revenue { font-weight: 600; color: #fff; font-size: .78rem; padding-top: .55rem; border-top: 1px solid rgba(255,255,255,.14); }
-        .reassort-dept-tile .tile-proposed { color: #8C99B5; font-size: .72rem; margin-top: .1rem; }
-        /* Variante neutre (RemainderTile) : fond clair, texte sombre, jamais la carte KPI marine. */
-        .reassort-dept-tile.reassort-dept-tile-neutral { --tile-neutral: #EEF1F6; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .card-title,
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-pct { color: #33415C; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-count,
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-pct .fs-14 { color: #7C879C !important; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-progress { background-color: #dfe4ec; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-progress-fill { background-color: #97A3BC; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-revenue { color: #33415C; border-top-color: #dfe4ec; }
-        .reassort-dept-tile.reassort-dept-tile-neutral .tile-icon { background: #dfe4ec; color: #5B6B85; }
-        .reassort-dept-tile.reassort-dept-tile-neutral ul a { color: #33415C; }
+        .reassort-dept-row .card-title { font-size: .95rem; font-weight: 600; letter-spacing: -.005em; color: #1B2A4A; margin-bottom: .2rem; }
+        .reassort-dept-row .tile-count { color: #5B6B85; font-size: .78rem; margin-bottom: 0; }
+        .row-metrics { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: center; }
+        .row-metric { min-width: 70px; }
+        .row-metric-label { display: flex; align-items: center; gap: .35rem; color: #8a93a8; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
+        .row-metric-label iconify-icon { font-size: .85rem; }
+        .row-metric-value { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
+        .row-progress-wrap { flex: 1 1 100%; min-width: 140px; }
+        .tile-progress { height: 6px; border-radius: 999px; background-color: #EDF1F7; overflow: hidden; margin-top: .4rem; }
+        .tile-progress-fill { height: 100%; background-color: var(--row-amber); border-radius: 999px; transition: width .35s ease; }
+        .row-status-badge {
+          font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+          padding: .35rem .7rem; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
+          display: inline-flex; align-items: center; gap: .3rem;
+        }
+        .row-status-badge.status-done { background: #ECFDF5; color: #047857; }
+        .row-status-badge.status-failed { background: #F5EDEC; color: #7A4A45; }
+        .row-status-badge.status-pending { background: #EDF1F7; color: #5B6B85; }
+        /* Variante neutre (RemainderTile) : icône et accents gris plutôt que marine/ambre. */
+        .reassort-dept-row-neutral .tile-icon { background: #EEF1F6; color: #5B6B85; }
+        .reassort-dept-row-neutral .card-title { color: #5B6B85; }
+        .reassort-dept-row-neutral .tile-progress-fill { background-color: #97A3BC; }
+        .reassort-dept-row-neutral .row-metric-value { color: #33415C; }
+        .reassort-dept-row-neutral ul a { color: #33415C; }
         .ag-header-cell-text { text-transform: uppercase; letter-spacing: 0.02em; }
         .ag-cell { padding-left: 0.5rem; padding-right: 0.5rem; display: flex; align-items: center; }
         .ag-cell-wrapper { width: 100%; }
@@ -618,12 +632,45 @@ export function PurchaseOrder() {
         }
         .article-detail-btn:hover, .article-detail-btn:focus { background-color: rgba(27, 42, 74, .1); }
         .article-detail-btn iconify-icon { font-size: 1rem; }
+        /* Modals de cet écran (ArticleDetailModal, ProductAnalyticsModal, WeeklyPlanHistoryModal,
+           etc.) restylées en marine/ambre (demande du 01/10/2026) pour rester cohérentes avec les
+           cartes de secteurs/rayons — purement visuel, markup Bootstrap inchangé. */
+        .modal-content { border: none; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 48px rgba(27, 42, 74, .22); }
+        .modal-header { background: #1B2A4A; border-bottom: none; padding: 1.15rem 1.5rem; }
+        .modal-header .modal-title { color: #ffffff; font-weight: 600; font-size: 1.02rem; }
+        .modal-header .modal-title iconify-icon { color: #F5A623 !important; }
+        .modal-header .btn-close { filter: invert(1) grayscale(1) brightness(1.8); opacity: .85; }
+        .modal-header .btn-close:hover { opacity: 1; }
+        .modal-body { padding: 1.4rem 1.5rem; }
+        .modal-body .nav-tabs { border-bottom: 1px solid #e9ecf2; }
+        .modal-body .nav-tabs .nav-link { color: #5B6B85; font-size: .88rem; font-weight: 500; border: none; border-bottom: 2px solid transparent; }
+        .modal-body .nav-tabs .nav-link:hover { color: #1B2A4A; border-color: #DCE3F0; }
+        .modal-body .nav-tabs .nav-link.active { color: #1B2A4A; font-weight: 600; border-color: #F5A623; background: transparent; }
+        .modal-body .alert-light { background-color: #F7F9FC; border-color: #e9ecf2; color: #33415C; }
+        .modal-body .alert-info { background-color: #EDF1F7; border-color: #DCE3F0; color: #1B2A4A; }
+        .modal-body .alert-success { background-color: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+        .modal-body .alert-warning { background-color: #FDF1DD; border-color: #F7DFA6; color: #8A5A00; }
+        .modal-body .btn-warning { background-color: #F5A623; border-color: #F5A623; color: #1B2A4A; font-weight: 600; }
+        .modal-body .btn-warning:hover { background-color: #e0951a; border-color: #e0951a; }
+        .modal-body .btn-outline-primary { color: #1B2A4A; border-color: #1B2A4A; }
+        .modal-body .btn-outline-primary:hover { background-color: #1B2A4A; border-color: #1B2A4A; }
+        /* Transition de vue (demande du 01/10/2026 : "pas brusque" au clic secteur → rayons →
+           tableau d'articles) : fondu + léger glissement vertical, rejoué à chaque navigation via la
+           prop key sur .reassort-view-transition (force un remount React). */
+        .reassort-view-transition { animation: reassort-view-in .28s ease; }
+        @keyframes reassort-view-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .reassort-view-transition { animation: none; }
+        }
       `}</style>
 
       {proposal && <ProposalHeader proposal={proposal} />}
 
       {showListView ? (
-        <div>
+        <div className="reassort-view-transition" key={`list-${selectedSector || ''}`}>
           <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <div>
               <div className="d-flex align-items-center gap-2">
@@ -717,7 +764,7 @@ export function PurchaseOrder() {
           <DepartmentListView proposal={proposal} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
         </div>
       ) : (
-        <div className="row">
+        <div className="row reassort-view-transition" key={`detail-${selectedSector || ''}-${selectedDepartment || ''}`}>
           <div className="col-xl-12">
             <div className="card">
               <div className="d-flex card-header justify-content-between align-items-center">

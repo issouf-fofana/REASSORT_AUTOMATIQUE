@@ -366,142 +366,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         { headerName: 'Stock actuel', field: 'stockAtGeneration', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 140, cellRenderer: stockCellRenderer },
         { headerName: 'Rupture dans', field: 'daysUntilStockout', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, cellRenderer: stockoutCellRenderer },
         {
-          colId: 'lastPurchase',
-          headerName: 'Dernier achat',
-          width: 170,
-          sortable: false,
-          filter: false,
-          cellRenderer: lastPurchaseCellRenderer,
-          valueGetter: (p: any) => {
-            const el = document.querySelector(`.last-purchase-result[data-product-id="${p.data.productId}"]`);
-            return el ? el.textContent : '';
-          },
-        },
-        {
-          colId: 'lastSale',
-          headerName: 'Dernière vente',
-          width: 170,
-          sortable: false,
-          filter: false,
-          cellRenderer: lastSaleCellRenderer,
-          valueGetter: (p: any) => {
-            const el = document.querySelector(`.last-sale-result[data-product-id="${p.data.productId}"]`);
-            return el ? el.textContent : '';
-          },
-        },
-        {
-          // CA HT de l'article sur la période d'analyse (spec §2) — ajouté le 28/09/2026, jamais
-          // affiché avant (le backend ne le calculait même pas explicitement jusqu'à ce correctif).
-          // Distinct de la colonne "% CA" juste après, calculée sur une fenêtre plus courte.
-          headerName: proposal?.analysisPeriodStart && proposal?.analysisPeriodEnd
-            ? `CA (${fmtRevenueShareWindow(proposal.analysisPeriodStart, proposal.analysisPeriodEnd)})`
-            : 'CA (période)',
-          headerTooltip: "Chiffre d'affaires HT réel de l'article sur toute la période d'analyse (Pareto) de cette proposition.",
-          field: 'caHtOnPeriod',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 150,
-          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? Math.round(p.value).toLocaleString('fr-FR') + ' CFA' : '—'),
-        },
-        {
-          // En-tête + tooltip dynamiques (28/09/2026, spec "toujours afficher clairement la période
-          // d'analyse") : revenueSharePct est calculé sur une fenêtre COURTE et DISTINCTE de la
-          // période d'analyse/Pareto (revenueShareStart/End, souvent 1 seul jour par défaut) — déjà
-          // expliqué dans le bandeau au-dessus de la liste des rayons (DeptListContext), mais ce
-          // contexte se perd une fois qu'on défile dans le tableau détaillé d'un rayon. Le nom de
-          // colonne et l'infobulle rappellent maintenant la vraie fenêtre à cet endroit précis.
-          headerName: proposal?.revenueShareStart && proposal?.revenueShareEnd
-            ? `% CA (${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)})`
-            : '% CA magasin',
-          headerTooltip: proposal?.revenueShareStart && proposal?.revenueShareEnd
-            ? `Part du CA calculée sur ${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)}, PAS sur la période d'analyse (Pareto) de cette proposition — deux fenêtres distinctes, voir le bandeau au-dessus.`
-            : undefined,
-          field: 'revenueSharePct',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 160,
-          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(2) + ' %' : '—'),
-        },
-        {
-          // Cumul Pareto (spec du 28/09/2026, §2 : "classe Pareto A/B/C ou équivalent") — déjà
-          // calculé et persisté (cumulativePct) mais jamais affiché avant ce fix. Pas de classe A/B/C
-          // au sens strict dans ce système (cf. audit : seuls les articles DANS le seuil configuré
-          // sont proposés, il n'y a jamais de "classe B/C" distincte) — le cumul lui-même, sur la
-          // même période d'analyse que le Pareto, est l'équivalent direct demandé.
-          headerName: 'Pareto (cumul)',
-          field: 'cumulativePct',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 140,
-          headerTooltip: "Cumul du chiffre d'affaires sur la période d'analyse (Pareto), pas la fenêtre courte du % CA à gauche.",
-          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(1) + ' %' : '—'),
-        },
-        { colId: 'ai', headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },
-        {
-          // En DLV (colonne dédiée, demande du 30/09/2026) — en plus du badge déjà affiché dans la
-          // cellule Stock actuel. Groupée ici avec Casse/perte (autre info "stock/mouvements"), avant
-          // le bloc "commande" ci-dessous.
-          headerName: 'En DLV',
-          field: 'dlvStock',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 100,
-          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
-        },
-        {
-          // Quantité perdue en casse/péremption/vol sur la période d'analyse (demande du
-          // 30/09/2026) — calculée pour tous les articles côté backend (stockMoveAnalysisService),
-          // pas seulement ceux déjà signalés en anomalie.
-          headerName: 'Casse/perte',
-          field: 'scrapQuantity',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 110,
-          headerTooltip: 'Quantité perdue en casse, péremption ou vol constatée sur la période analysée (mouvements RPOS isScrap).',
-          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
-        },
-        // Bloc "commande" regroupé (demande du 30/09/2026) : tout ce qui concerne la commande en
-        // cours/à passer, côte à côte plutôt qu'éparpillé dans le tableau — Déjà commandé, Réf.
-        // commande, Commandable, Couverture, Qté proposée, Valeur commande.
-        {
-          // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
-          // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
-          // proposalService.js orderedQty) mais jamais affiché en colonne avant ce fix ; seul un
-          // badge apparaissait quand l'article était totalement exclu de la proposition pour cette
-          // raison (labelCellRenderer). Ici visible pour TOUT article, même partiellement couvert.
-          headerName: 'Déjà commandé',
-          field: 'currentOrderedQuantity',
-          type: 'numericColumn',
-          filter: 'agNumberColumnFilter',
-          width: 140,
-          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
-        },
-        {
-          // Référence + date de la commande RPOS déjà en cours, en colonne dédiée (demande du
-          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Article/Déjà commandé, pas à
-          // sa place : voir d'un coup d'œil si une commande est déjà passée sans ouvrir de détail.
-          colId: 'orderReference',
-          headerName: 'Réf. commande',
-          width: 170,
-          filter: 'agTextColumnFilter',
-          valueGetter: (p: any) => (p.data as ProposalLine).rposOrderReference || '',
-          cellRenderer: (p: any) => {
-            const l = p.data as ProposalLine;
-            if (!l.rposOrderReference) return '<span class="text-muted">—</span>';
-            const dateStr = l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '';
-            return `${l.rposOrderReference}${dateStr ? ` (${dateStr})` : ''}`;
-          },
-        },
-        {
-          headerName: 'Commandable',
-          field: 'supplierIneligible',
-          width: 150,
-          sortable: true,
-          filter: false,
-          cellRenderer: supplierEligibilityCellRenderer,
-          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
-        },
-        {
           // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé une seule fois à la
           // génération (proposalService.computeCoverageStatus) — même champ que celui affiché dans le
           // panneau d'analyse statique par article, jamais une seconde logique.
@@ -529,6 +393,15 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
+          headerName: 'Commandable',
+          field: 'supplierIneligible',
+          width: 150,
+          sortable: true,
+          filter: false,
+          cellRenderer: supplierEligibilityCellRenderer,
+          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
+        },
+        {
           colId: 'quantityProposed',
           headerName: 'Qté proposée',
           type: 'numericColumn',
@@ -549,6 +422,143 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           valueGetter: (p: any) => {
             const st = getLineState(p.data);
             return p.data.sellingPrice ? p.data.sellingPrice * st.quantity : 0;
+          },
+        },
+        { colId: 'ai', headerName: 'IA', width: 130, sortable: false, filter: false, cellRenderer: aiCellRenderer, valueGetter: () => '' },
+        // Colonnes secondaires (masquées par défaut le 01/10/2026 : trop de scroll horizontal pour
+        // des infos déjà résumées ailleurs — badge d'alerte sur la colonne Article, bandeau de
+        // contexte au-dessus de la liste des rayons) — restent accessibles via le bouton "Colonnes"
+        // (reassortAgGridToolbar) et via la colonne Article qui pointe déjà vers ArticleDetailModal.
+        {
+          colId: 'lastPurchase',
+          headerName: 'Dernier achat',
+          width: 170,
+          hide: true,
+          sortable: false,
+          filter: false,
+          cellRenderer: lastPurchaseCellRenderer,
+          valueGetter: (p: any) => {
+            const el = document.querySelector(`.last-purchase-result[data-product-id="${p.data.productId}"]`);
+            return el ? el.textContent : '';
+          },
+        },
+        {
+          colId: 'lastSale',
+          headerName: 'Dernière vente',
+          width: 170,
+          hide: true,
+          sortable: false,
+          filter: false,
+          cellRenderer: lastSaleCellRenderer,
+          valueGetter: (p: any) => {
+            const el = document.querySelector(`.last-sale-result[data-product-id="${p.data.productId}"]`);
+            return el ? el.textContent : '';
+          },
+        },
+        {
+          // CA HT de l'article sur la période d'analyse (spec §2) — ajouté le 28/09/2026, jamais
+          // affiché avant (le backend ne le calculait même pas explicitement jusqu'à ce correctif).
+          // Distinct de la colonne "% CA" juste après, calculée sur une fenêtre plus courte.
+          headerName: proposal?.analysisPeriodStart && proposal?.analysisPeriodEnd
+            ? `CA (${fmtRevenueShareWindow(proposal.analysisPeriodStart, proposal.analysisPeriodEnd)})`
+            : 'CA (période)',
+          headerTooltip: "Chiffre d'affaires HT réel de l'article sur toute la période d'analyse (Pareto) de cette proposition.",
+          field: 'caHtOnPeriod',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 150,
+          hide: true,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? Math.round(p.value).toLocaleString('fr-FR') + ' CFA' : '—'),
+        },
+        {
+          // En-tête + tooltip dynamiques (28/09/2026, spec "toujours afficher clairement la période
+          // d'analyse") : revenueSharePct est calculé sur une fenêtre COURTE et DISTINCTE de la
+          // période d'analyse/Pareto (revenueShareStart/End, souvent 1 seul jour par défaut) — déjà
+          // expliqué dans le bandeau au-dessus de la liste des rayons (DeptListContext), mais ce
+          // contexte se perd une fois qu'on défile dans le tableau détaillé d'un rayon. Le nom de
+          // colonne et l'infobulle rappellent maintenant la vraie fenêtre à cet endroit précis.
+          headerName: proposal?.revenueShareStart && proposal?.revenueShareEnd
+            ? `% CA (${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)})`
+            : '% CA magasin',
+          headerTooltip: proposal?.revenueShareStart && proposal?.revenueShareEnd
+            ? `Part du CA calculée sur ${fmtRevenueShareWindow(proposal.revenueShareStart, proposal.revenueShareEnd)}, PAS sur la période d'analyse (Pareto) de cette proposition — deux fenêtres distinctes, voir le bandeau au-dessus.`
+            : undefined,
+          field: 'revenueSharePct',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 160,
+          hide: true,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(2) + ' %' : '—'),
+        },
+        {
+          // Cumul Pareto (spec du 28/09/2026, §2 : "classe Pareto A/B/C ou équivalent") — déjà
+          // calculé et persisté (cumulativePct) mais jamais affiché avant ce fix. Pas de classe A/B/C
+          // au sens strict dans ce système (cf. audit : seuls les articles DANS le seuil configuré
+          // sont proposés, il n'y a jamais de "classe B/C" distincte) — le cumul lui-même, sur la
+          // même période d'analyse que le Pareto, est l'équivalent direct demandé.
+          headerName: 'Pareto (cumul)',
+          field: 'cumulativePct',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 140,
+          hide: true,
+          headerTooltip: "Cumul du chiffre d'affaires sur la période d'analyse (Pareto), pas la fenêtre courte du % CA à gauche.",
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined ? p.value.toFixed(1) + ' %' : '—'),
+        },
+        {
+          // En DLV (colonne dédiée, demande du 30/09/2026) — en plus du badge déjà affiché dans la
+          // cellule Stock actuel. Groupée ici avec Casse/perte (autre info "stock/mouvements"), avant
+          // le bloc "commande" ci-dessous.
+          headerName: 'En DLV',
+          field: 'dlvStock',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 100,
+          hide: true,
+          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
+        },
+        {
+          // Quantité perdue en casse/péremption/vol sur la période d'analyse (demande du
+          // 30/09/2026) — calculée pour tous les articles côté backend (stockMoveAnalysisService),
+          // pas seulement ceux déjà signalés en anomalie.
+          headerName: 'Casse/perte',
+          field: 'scrapQuantity',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 110,
+          hide: true,
+          headerTooltip: 'Quantité perdue en casse, péremption ou vol constatée sur la période analysée (mouvements RPOS isScrap).',
+          valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
+        },
+        {
+          // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
+          // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
+          // proposalService.js orderedQty) mais jamais affiché en colonne avant ce fix ; seul un
+          // badge apparaissait quand l'article était totalement exclu de la proposition pour cette
+          // raison (labelCellRenderer). Ici visible pour TOUT article, même partiellement couvert.
+          headerName: 'Déjà commandé',
+          field: 'currentOrderedQuantity',
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          width: 140,
+          hide: true,
+          valueFormatter: (p: any) => (p.value !== null && p.value !== undefined && p.value > 0 ? p.value.toLocaleString('fr-FR') : '—'),
+        },
+        {
+          // Référence + date de la commande RPOS déjà en cours, en colonne dédiée (demande du
+          // 30/09/2026) — en plus du badge déjà affiché dans la cellule Article/Déjà commandé, pas à
+          // sa place : voir d'un coup d'œil si une commande est déjà passée sans ouvrir de détail.
+          colId: 'orderReference',
+          headerName: 'Réf. commande',
+          width: 170,
+          hide: true,
+          filter: 'agTextColumnFilter',
+          valueGetter: (p: any) => (p.data as ProposalLine).rposOrderReference || '',
+          cellRenderer: (p: any) => {
+            const l = p.data as ProposalLine;
+            if (!l.rposOrderReference) return '<span class="text-muted">—</span>';
+            const dateStr = l.rposOrderDate ? new Date(l.rposOrderDate).toLocaleDateString('fr-FR') : '';
+            return `${l.rposOrderReference}${dateStr ? ` (${dateStr})` : ''}`;
           },
         },
       ],

@@ -196,6 +196,15 @@ export function ReassortConfigSection() {
                 Plusieurs magasins sélectionnés : les valeurs saisies ci-dessous seront appliquées à tous les
                 magasins cochés, sans afficher leur configuration actuelle (qui peut différer d'un magasin à
                 l'autre).
+                <br />
+                <strong>
+                  Les champs ci-dessous repartent donc toujours de leur valeur par défaut, même après un
+                  enregistrement réussi
+                </strong>{' '}
+                — par exemple « Génération automatique nocturne » réaffichera « Activée » au rechargement même
+                si vous venez d'enregistrer « Désactivée » pour ces magasins : l'enregistrement a bien eu lieu
+                (message de confirmation affiché), seul cet écran ne reflète jamais l'état réel en mode
+                multi-magasins. Repassez en sélection d'UN SEUL magasin pour vérifier sa configuration actuelle.
               </div>
             )}
             {error && <div className="alert alert-danger">{error}</div>}
