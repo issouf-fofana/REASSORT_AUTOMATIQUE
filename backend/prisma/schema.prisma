@@ -1874,3 +1874,47 @@ model FeatureRequestNote {
   @@index([requestId, createdAt])
   @@map("feature_request_notes")
 }
+
+// =============================================
+// GUIDE D'UTILISATION (mode d'emploi par page, avec captures d'écran)
+// =============================================
+// Distinct de "Guide du projet" (project-guide-content.js, technique/dev, hardcodé) et de "Mon
+// accès" (platform-guide/capability-guide, calculé depuis les permissions du compte) — ce guide
+// explique comment UTILISER chaque page au quotidien (Tableau de bord, Assistant IA, Proposition de
+// commande...), visible en lecture par tout rôle authentifié, édité (texte + captures) par un ADMIN
+// uniquement depuis l'interface. id = slug stable (ex: "dashboard", "ai-assistant"), pas un cuid,
+// pour pouvoir le référencer depuis le frontend sans aller-retour de recherche par titre.
+model UserGuideSection {
+  id String @id
+
+  title     String
+  content   String? @db.Text
+  updatedBy String? @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  images UserGuideImage[]
+
+  @@map("user_guide_sections")
+}
+
+// Stockée en base (base64), pas sur disque : même pattern que le logo du site
+// (backend/src/routes/publicAssets.js) — évite un volume Docker partagé supplémentaire entre
+// conteneurs/replicas pour un volume d'images qui reste modeste (captures d'écran de l'app, pas des
+// photos haute résolution).
+model UserGuideImage {
+  id String @id @default(cuid())
+
+  sectionId String           @map("section_id")
+  section   UserGuideSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  contentType String @map("content_type") // image/png, image/jpeg
+  dataBase64  String @map("data_base64") @db.Text
+  caption     String?
+  order       Int     @default(0)
+  uploadedBy  String? @map("uploaded_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([sectionId, order])
+  @@map("user_guide_images")
+}

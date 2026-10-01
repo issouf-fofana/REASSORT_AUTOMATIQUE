@@ -72,6 +72,15 @@ RUN npm ci
 COPY react-app-project-guide/ .
 RUN npm run build
 
+# Stage de build du Guide d'utilisation (mode d'emploi par page, texte + captures éditables par un
+# ADMIN, 01/10/2026) — distinct de Guide du projet (technique/dev, hardcodé) ci-dessus.
+FROM node:20-alpine AS user-guide-builder
+WORKDIR /app
+COPY react-app-user-guide/package*.json ./
+RUN npm ci
+COPY react-app-user-guide/ .
+RUN npm run build
+
 # Stage de build de la page Historique des commandes migrée vers React (dixième page migrée,
 # projet Vite séparé même raison que ci-dessus).
 FROM node:20-alpine AS purchase-list-builder
@@ -182,6 +191,10 @@ COPY --from=users-builder /app/dist /usr/share/nginx/html/users-app
 # Résultat du build React (Guide du projet), servi sous /project-guide-app/ par une règle nginx
 # dédiée (voir nginx.conf).
 COPY --from=project-guide-builder /app/dist /usr/share/nginx/html/project-guide-app
+
+# Résultat du build React (Guide d'utilisation), servi sous /user-guide-app/ par une règle nginx
+# dédiée (voir nginx.conf).
+COPY --from=user-guide-builder /app/dist /usr/share/nginx/html/user-guide-app
 
 # Résultat du build React (Historique des commandes), servi sous /purchase-list-app/ par une règle
 # nginx dédiée (voir nginx.conf).

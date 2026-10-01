@@ -13,6 +13,7 @@
 //  insights.js  (10 routes) — plans hebdo, predictions, statistiques
 //  config.js    (8 routes)  — config magasin/systeme, fichiers, sante des jobs
 //  ai.js        (25 routes) — cles IA, analyse article, chatbot, audit, improvements
+//  user-guide.js (7 routes) — guide d'utilisation par page (texte + captures), édition ADMIN
 //
 // Regle : toute nouvelle route /api/reassort/* va dans le sous-routeur de son
 // domaine, jamais ici.
@@ -33,5 +34,6 @@ router.use(require('./proposals'));
 router.use(require('./insights'));
 router.use(require('./config'));
 router.use(require('./ai'));
+router.use(require('./user-guide'));
 
 module.exports = router;

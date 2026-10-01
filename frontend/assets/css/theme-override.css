@@ -221,8 +221,13 @@ a:not(.sidebar *),
 }
 .sidebar .nav-item.active > .nav-link {
      background-color: #F5A623 !important;
-     color: #1B2A4A !important;
+     color: #ffffff !important;
      font-weight: 600;
+}
+.sidebar .nav-item.active > .nav-link .sidebar-icon,
+.sidebar .nav-item.active > .nav-link svg {
+     color: #ffffff !important;
+     fill: #ffffff !important;
 }
 
 /* Sidebar par sections (demande du 14/09/2026, pliage ajouté le 16/09/2026) : intitulés de section

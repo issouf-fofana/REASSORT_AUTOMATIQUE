@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Guide du projet | Réassort Automatique</title>
+    <title>Guide d'utilisation | Réassort Automatique</title>
 
     <!-- Chemins ABSOLUS (pas relatifs à /project-guide-app/) : ces fichiers sont servis à la racine
          du site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
@@ -28,7 +28,7 @@
     <script src="/assets/js/reassort-auth.js"></script>
     <script src="/assets/js/shop-picker.js"></script>
   </head>
-  <body data-page-title="Guide du projet">
+  <body data-page-title="Guide d'utilisation">
     <script src="/assets/js/loading-overlay.js"></script>
 
     <!-- ÉTAT 1 (par défaut) : sidebar/topbar Volt classiques, comme les 14 autres pages du site.
@@ -36,7 +36,6 @@
          bascule et l'injection sont gérées par layout-collapsible.js. -->
     <div id="layout-sidebar-slot"></div>
     <div id="notch-nav-slot" style="display:none;"></div>
-    <div id="pg-progress-bar"></div>
     <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
 
     <main class="content">
@@ -55,10 +54,6 @@
     <script src="/assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
     <script src="/assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
     <script src="/assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
-    <!-- Contenu statique du guide (gros objet de données, réutilisé tel quel plutôt que recopié en
-         TypeScript — risque d'erreur de recopie pour aucun bénéfice, ce contenu n'est jamais
-         manipulé par le composant React, seulement lu et rendu). -->
-    <script src="/assets/js/project-guide-content.js"></script>
     <script src="/assets/js/notifications-bell.js"></script>
     <script src="/assets/js/ai-assistant-widget.js"></script>
 

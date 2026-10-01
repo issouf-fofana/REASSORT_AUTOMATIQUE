@@ -61,11 +61,17 @@ export function SettingsTabs() {
     <div>
       <style>{`
         /* NotchTabBar (partagée avec Qualité & IA/Guide du projet) en zinc-950 par défaut —
-           surchargée ici en marine/ambre (01/10/2026, "applique le style aussi"). */
-        .settings-tabs-wrap .reassort-tabs-root { background-color: #EDF1F7; }
-        .settings-tabs-wrap .reassort-tabs-root [role="tab"].text-zinc-500 { color: #5B6B85; }
-        .settings-tabs-wrap .reassort-tabs-root [role="tab"]:hover.text-zinc-500 { color: #1B2A4A; }
-        .settings-tabs-wrap .reassort-tabs-root .bg-zinc-950 { background-color: #1B2A4A !important; }
+           surchargée ici en ambre/marine (01/10/2026) pour matcher le style de l'onglet actif de
+           la sidebar (fond ambre #F5A623, texte/icône marine), signalé différent sur capture.
+           Le composant ne porte PAS de classe "reassort-tabs-root" (vérifié dans le DOM rendu) :
+           les anciens sélecteurs ci-dessous ne matchaient donc jamais rien, d'où le pill resté
+           noir malgré ce bloc — ciblage corrigé sur la vraie structure (bg-zinc-100 + bg-zinc-950). */
+        .settings-tabs-wrap .bg-zinc-100 { background-color: #EDF1F7; }
+        .settings-tabs-wrap [role="tab"].text-zinc-500 { color: #5B6B85; }
+        .settings-tabs-wrap [role="tab"]:hover.text-zinc-500 { color: #1B2A4A; }
+        .settings-tabs-wrap .bg-zinc-950 { background-color: #F5A623 !important; }
+        .settings-tabs-wrap [role="tab"][aria-selected="true"] { color: #1B2A4A !important; }
+        .settings-tabs-wrap [role="tab"][aria-selected="true"] svg { color: #1B2A4A !important; }
       `}</style>
       <div className="mb-6 settings-tabs-wrap">
         <NotchTabBar
