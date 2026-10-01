@@ -43,10 +43,10 @@ function AnomalyCard({ a, onAction }: { a: OrderAnomaly; onAction: (id: string, 
         {a.contextNote && <div className="oa-note">Note : {a.contextNote}</div>}
         {a.status === 'PENDING' && (
           <div className="mt-3">
-            <button type="button" className="btn btn-sm btn-outline-dark me-2" onClick={() => onAction(a.id, 'ACKNOWLEDGED')}>
+            <button type="button" className="btn btn-sm oa-btn-outline me-2" onClick={() => onAction(a.id, 'ACKNOWLEDGED')}>
               Accepter
             </button>
-            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => onAction(a.id, 'DISMISSED')}>
+            <button type="button" className="btn btn-sm oa-btn-outline" onClick={() => onAction(a.id, 'DISMISSED')}>
               Ignorer
             </button>
           </div>
@@ -109,46 +109,55 @@ export function OrderAnomalies() {
   return (
     <div>
       <style>{`
+        /* Recoloré en marine/ambre (01/10/2026, "applique le style aussi") — HIGH/LOW gardent des
+           teintes sémantiques distinctes (ambre/rouge doux) pour rester lisibles comme deux
+           directions d'anomalie différentes, jamais confondues avec le reste de la palette. */
         .oa-intro {
-          background: #fafafa; border: 1px solid #ececec; border-radius: 12px;
-          padding: 1.1rem 1.35rem; margin-bottom: 1.5rem; font-size: .87rem; color: #444444; line-height: 1.6;
+          background: #F7F9FC; border: 1px solid #e9ecf2; border-radius: 12px;
+          padding: 1.1rem 1.35rem; margin-bottom: 1.5rem; font-size: .87rem; color: #44516B; line-height: 1.6;
         }
-        .oa-intro strong { color: #000000; }
+        .oa-intro strong { color: #1B2A4A; }
 
         .oa-toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
         .oa-toolbar select { max-width: 220px; }
-        .oa-toolbar-count { color: #9198a1; font-size: .82rem; margin-left: auto; }
+        .oa-toolbar-count { color: #8a93a8; font-size: .82rem; margin-left: auto; font-weight: 600; }
 
         .oa-card {
           display: flex; gap: 1rem;
-          background: #ffffff; border: 1px solid #ececec; border-radius: 14px;
+          background: #ffffff; border: 1px solid #e9ecf2; border-radius: 14px;
           padding: 1.15rem 1.35rem; margin-bottom: 1rem;
-          box-shadow: 0 1px 2px rgba(20, 20, 20, .03);
+          box-shadow: 0 1px 3px rgba(27, 42, 74, .05);
           transition: box-shadow .2s ease, border-color .2s ease;
         }
-        .oa-card:hover { box-shadow: 0 4px 16px rgba(20, 20, 20, .06); border-color: #e2e4e7; }
+        .oa-card:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; }
         .oa-card-icon {
           width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
           display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
         }
-        .oa-card-icon-HIGH { background: #fdf0e3; color: #d68910; }
-        .oa-card-icon-LOW { background: #fdecea; color: #c0392b; }
+        .oa-card-icon-HIGH { background: #FDF1DD; color: #8A5A00; }
+        .oa-card-icon-LOW { background: #F5EDEC; color: #7A4A45; }
         .oa-card-body { min-width: 0; flex: 1; }
 
         .oa-direction-badge { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: .25rem .65rem; border-radius: 999px; }
-        .oa-direction-HIGH { background: #fdf0e3; color: #b9770e; }
-        .oa-direction-LOW { background: #fdecea; color: #c0392b; }
-        .oa-status-badge { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: #6c757d; background: #f1f2f4; padding: .25rem .65rem; border-radius: 999px; }
-        .oa-date { font-size: .78rem; color: #9198a1; }
+        .oa-direction-HIGH { background: #FDF1DD; color: #8A5A00; }
+        .oa-direction-LOW { background: #F5EDEC; color: #7A4A45; }
+        .oa-status-badge { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: #5B6B85; background: #EDF1F7; padding: .25rem .65rem; border-radius: 999px; }
+        .oa-date { font-size: .78rem; color: #8a93a8; }
 
-        .oa-article { font-weight: 700; font-size: .95rem; color: #17181a; margin-top: .5rem; }
-        .oa-ean { color: #9198a1; font-size: .82rem; font-weight: 400; }
-        .oa-shop { font-size: .82rem; color: #6c757d; margin-top: .2rem; }
-        .oa-figures { font-size: .88rem; color: #2c2d30; margin-top: .6rem; }
-        .oa-note { font-size: .82rem; color: #6c757d; font-style: italic; margin-top: .6rem; }
+        .oa-article { font-weight: 700; font-size: .95rem; color: #1B2A4A; margin-top: .5rem; }
+        .oa-ean { color: #8a93a8; font-size: .82rem; font-weight: 400; }
+        .oa-shop { font-size: .82rem; color: #5B6B85; margin-top: .2rem; }
+        .oa-figures { font-size: .88rem; color: #33415C; margin-top: .6rem; }
+        .oa-note { font-size: .82rem; color: #5B6B85; font-style: italic; margin-top: .6rem; }
+        .oa-btn-outline { background: transparent; border: 1px solid #DCE3F0; color: #1B2A4A; }
+        .oa-btn-outline:hover { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+        .oa-nav-tabs { border-bottom: 1px solid #e9ecf2; }
+        .oa-nav-tabs .nav-link { color: #5B6B85; border: none; border-bottom: 2px solid transparent; font-weight: 500; }
+        .oa-nav-tabs .nav-link:hover { color: #1B2A4A; border-color: #DCE3F0; }
+        .oa-nav-tabs .nav-link.active { color: #1B2A4A; font-weight: 600; border-color: #F5A623; background: transparent; }
       `}</style>
 
-      <ul className="nav nav-tabs mb-4">
+      <ul className="nav nav-tabs oa-nav-tabs mb-4">
         <li className="nav-item">
           <button type="button" className={`nav-link ${activeTab === 'anomalies' ? 'active' : ''}`} onClick={() => setActiveTab('anomalies')}>
             Anomalies de quantité
@@ -191,7 +200,7 @@ export function OrderAnomalies() {
         <div className="text-center text-muted py-4">Chargement...</div>
       ) : rows.length === 0 ? (
         <div className="text-center text-muted py-5">
-          <iconify-icon icon="solar:check-circle-bold-duotone" style={{ fontSize: '2rem', color: '#c9ccd1' }}></iconify-icon>
+          <iconify-icon icon="solar:check-circle-bold-duotone" style={{ fontSize: '2rem', color: '#C7D0E0' }}></iconify-icon>
           <div className="mt-2">Aucune anomalie pour ce filtre.</div>
         </div>
       ) : (
@@ -223,10 +232,10 @@ export function OrderAnomalies() {
                   {noteError && <div className="alert alert-danger mt-2">{noteError}</div>}
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setPendingAction(null)}>
+                  <button type="button" className="btn oa-btn-outline" onClick={() => setPendingAction(null)}>
                     Annuler
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={confirmNote}>
+                  <button type="button" className="btn" style={{ background: '#1B2A4A', borderColor: '#1B2A4A', color: '#fff' }} onClick={confirmNote}>
                     Confirmer
                   </button>
                 </div>

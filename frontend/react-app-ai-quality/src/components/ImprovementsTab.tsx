@@ -45,11 +45,15 @@ interface Improvement {
   events?: ImprovementEvent[];
 }
 
+// Recoloré en palette marine/ambre (01/10/2026, "applique le nouveau style") — remplace les
+// couleurs Bootstrap par défaut (bg-danger/bg-warning/bg-info/bg-secondary), avec un ordre explicite
+// pour le groupement par priorité juste en dessous.
+const PRIORITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 const PRIORITY: Record<string, { label: string; badge: string }> = {
-  CRITICAL: { label: 'Critique', badge: 'bg-danger' },
-  HIGH: { label: 'Élevée', badge: 'bg-warning text-dark' },
-  MEDIUM: { label: 'Moyenne', badge: 'bg-info' },
-  LOW: { label: 'Faible', badge: 'bg-secondary' },
+  CRITICAL: { label: 'Critique', badge: 'iq-badge-danger' },
+  HIGH: { label: 'Élevée', badge: 'iq-badge-amber' },
+  MEDIUM: { label: 'Moyenne', badge: 'iq-badge-navy' },
+  LOW: { label: 'Faible', badge: 'iq-badge-neutral' },
 };
 const STATUS_LABEL: Record<string, string> = {
   PROPOSED: 'Proposée',
@@ -87,31 +91,36 @@ const NOTE_CONFIG: Record<string, { title: string; label: string; required: bool
 function actionsForStatus(status: string): { act: string; label: string; cls: string }[] {
   if (status === 'PROPOSED') {
     return [
-      { act: 'IN_PROGRESS', label: 'En cours', cls: 'btn-outline-primary' },
-      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'btn-success' },
-      { act: 'DISMISSED', label: 'Ignorer', cls: 'btn-outline-secondary' },
+      { act: 'IN_PROGRESS', label: 'En cours', cls: 'iq-btn-outline' },
+      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'iq-btn-success' },
+      { act: 'DISMISSED', label: 'Ignorer', cls: 'iq-btn-outline' },
     ];
   }
   if (status === 'IN_PROGRESS') {
     return [
-      { act: 'TO_VERIFY', label: 'À vérifier', cls: 'btn-outline-primary' },
-      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'btn-success' },
-      { act: 'DISMISSED', label: 'Ignorer', cls: 'btn-outline-secondary' },
+      { act: 'TO_VERIFY', label: 'À vérifier', cls: 'iq-btn-outline' },
+      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'iq-btn-success' },
+      { act: 'DISMISSED', label: 'Ignorer', cls: 'iq-btn-outline' },
     ];
   }
   if (status === 'TO_VERIFY') {
     return [
-      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'btn-success' },
-      { act: 'DISMISSED', label: 'Ignorer', cls: 'btn-outline-secondary' },
-      { act: 'IN_PROGRESS', label: 'Reprendre', cls: 'btn-outline-primary' },
+      { act: 'APPLIED', label: 'Marquer appliqué', cls: 'iq-btn-success' },
+      { act: 'DISMISSED', label: 'Ignorer', cls: 'iq-btn-outline' },
+      { act: 'IN_PROGRESS', label: 'Reprendre', cls: 'iq-btn-outline' },
     ];
   }
   if (status === 'APPLIED') {
-    return [{ act: 'IN_PROGRESS', label: 'Rouvrir', cls: 'btn-outline-primary' }];
+    return [{ act: 'IN_PROGRESS', label: 'Rouvrir', cls: 'iq-btn-outline' }];
   }
-  return [{ act: 'IN_PROGRESS', label: 'Rouvrir', cls: 'btn-outline-primary' }];
+  return [{ act: 'IN_PROGRESS', label: 'Rouvrir', cls: 'iq-btn-outline' }];
 }
 
+// Carte compactée (01/10/2026, "cartes plus compactes et scannables") : le détail complet (erreur
+// exacte, recommandation dev, métrique, provider IA, échec d'enrichissement) n'est plus affiché en
+// permanence sur chaque carte — déplacé dans le modal "Détails" déjà existant (detailHtml ci-dessous)
+// pour qu'une liste de 10+ recommandations reste scannable d'un coup d'œil (titre + résumé court +
+// badges + actions), au lieu d'empiler plusieurs paragraphes/alertes par carte.
 function ImprovementCard({
   imp,
   onAction,
@@ -125,58 +134,36 @@ function ImprovementCard({
 }) {
   const p = prio(imp);
   const canEdit = ['PROPOSED', 'IN_PROGRESS', 'TO_VERIFY'].includes(imp.status);
+  const hasExtra = !!(imp.errorMessage || imp.devRecommendation || (imp.metricName && imp.metricBefore != null) || imp.aiError);
   return (
-    <div className="card mb-3">
-      <div className="card-body">
-        <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <span className={`badge ${p.badge}`}>Priorité {p.label}</span>
-          <span className="badge bg-secondary">{STATUS_LABEL[imp.status] || imp.status}</span>
-          {imp.aiConfidence != null && <span className="badge bg-light text-dark border">Confiance IA {imp.aiConfidence}%</span>}
-          <span className="small text-muted ms-auto">{fmtDate(imp.createdAt)}</span>
-        </div>
-        <h5 className="card-title mb-1">{imp.title}</h5>
-        <div className="small imp-detail">{imp.detail}</div>
-        {imp.errorMessage && (
-          <div className="alert alert-danger small mt-2 mb-0">
-            <strong>Erreur exacte constatée :</strong>
-            <br />
-            <code className="imp-detail">{imp.errorMessage}</code>
-          </div>
-        )}
-        {imp.devRecommendation && (
-          <div className="alert alert-light border small mt-2 mb-0">
-            <strong>Recommandation dev :</strong>
-            <br />
-            <span className="imp-detail">{imp.devRecommendation}</span>
-          </div>
-        )}
-        {imp.metricName != null && imp.metricBefore != null && (
-          <div className="small text-muted mt-1">
-            Métrique <code>{imp.metricName}</code> : {Math.round(imp.metricBefore * 100) / 100} →{' '}
-            {imp.metricAfter == null ? '…' : Math.round(imp.metricAfter * 100) / 100}
-          </div>
-        )}
-        {imp.providerUsed && <div className="small text-muted mt-1">Enrichi par IA ({imp.providerUsed})</div>}
-        {imp.aiError && (
-          <div className="alert alert-warning small mt-2 mb-0">
-            <strong>Enrichissement IA échoué :</strong> {imp.aiError} — recommandation déterministe conservée.
-          </div>
-        )}
-        <div className="mt-2 d-flex flex-wrap gap-2">
-          {actionsForStatus(imp.status).map((a) => (
-            <button key={a.act} type="button" className={`btn btn-sm ${a.cls}`} onClick={() => onAction(a.act, imp.id)}>
-              {a.label}
-            </button>
-          ))}
-          {canEdit && (
-            <button type="button" className="btn btn-sm btn-outline-dark" onClick={() => onEdit(imp.id)}>
-              Modifier
-            </button>
-          )}
-          <button type="button" className="btn btn-sm btn-outline-dark" onClick={() => onDetail(imp.id)}>
-            Détails
+    <div className="iq-card">
+      <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <span className={`iq-badge ${p.badge}`}>{p.label}</span>
+        <span className={`iq-badge iq-badge-status-${imp.status}`}>{STATUS_LABEL[imp.status] || imp.status}</span>
+        {imp.aiConfidence != null && <span className="iq-badge iq-badge-ghost">IA {imp.aiConfidence}%</span>}
+        <span className="small text-muted ms-auto">{fmtDate(imp.createdAt)}</span>
+      </div>
+      <h5 className="iq-card-title">{imp.title}</h5>
+      <div className="small iq-card-summary imp-detail">{imp.detail}</div>
+      {hasExtra && (
+        <button type="button" className="btn btn-link btn-sm p-0 mt-1" onClick={() => onDetail(imp.id)}>
+          Voir le détail complet →
+        </button>
+      )}
+      <div className="mt-2 d-flex flex-wrap gap-2">
+        {actionsForStatus(imp.status).map((a) => (
+          <button key={a.act} type="button" className={`btn btn-sm ${a.cls}`} onClick={() => onAction(a.act, imp.id)}>
+            {a.label}
           </button>
-        </div>
+        ))}
+        {canEdit && (
+          <button type="button" className="btn btn-sm iq-btn-outline" onClick={() => onEdit(imp.id)}>
+            Modifier
+          </button>
+        )}
+        <button type="button" className="btn btn-sm iq-btn-outline" onClick={() => onDetail(imp.id)}>
+          Détails
+        </button>
       </div>
     </div>
   );
@@ -223,11 +210,19 @@ function detailHtml(d: Improvement): string {
   const p = prio(d);
   return (
     '<h5>' + esc(d.title) + '</h5>' +
-    '<p><span class="badge ' + p.badge + '">Priorité ' + p.label + '</span> ' +
-    '<span class="badge bg-secondary">' + (STATUS_LABEL[d.status] || d.status) + '</span></p>' +
+    '<p><span class="iq-badge ' + p.badge + '">' + p.label + '</span> ' +
+    '<span class="iq-badge iq-badge-status-' + d.status + '">' + (STATUS_LABEL[d.status] || d.status) + '</span></p>' +
     '<h6 class="mt-3">Problème détecté</h6><p class="small imp-detail">' + esc(d.detail) + '</p>' +
     (d.errorMessage ? '<h6>Erreur exacte</h6><p><code class="imp-detail">' + esc(d.errorMessage) + '</code></p>' : '') +
     (d.devRecommendation ? '<h6>Recommandation dev</h6><p class="small imp-detail">' + esc(d.devRecommendation) + '</p>' : '') +
+    (d.metricName != null && d.metricBefore != null
+      ? '<h6>Métrique</h6><p class="small"><code>' + esc(d.metricName) + '</code> : ' + Math.round(d.metricBefore * 100) / 100 + ' → ' +
+        (d.metricAfter == null ? '…' : Math.round(d.metricAfter * 100) / 100) + '</p>'
+      : '') +
+    (d.providerUsed ? '<p class="small text-muted">Enrichi par IA (' + esc(d.providerUsed) + ')</p>' : '') +
+    (d.aiError
+      ? '<div class="alert alert-warning small"><strong>Enrichissement IA échoué :</strong> ' + esc(d.aiError) + ' — recommandation déterministe conservée.</div>'
+      : '') +
     '<h6>Contexte de détection</h6><ul class="small">' +
     '<li>Détecté le ' + fmtDate(d.createdAt) + ' par ' + esc(d.detectedBy || '—') + (d.detectedIp ? ' (' + esc(d.detectedIp) + ')' : '') + '</li>' +
     '<li>Environnement : ' + esc(d.environment || '—') + ' · version appli : ' + esc(d.appVersion || '—') + '</li>' +
@@ -382,51 +377,81 @@ export function ImprovementsTab() {
     }
   }
 
+  // Groupement par priorité (01/10/2026, "regrouper visuellement par priorité") — uniquement quand
+  // le tri est "priorité" (sinon "récent" perdrait son sens si on le découpait aussi par groupe) et
+  // qu'aucun filtre de priorité précis n'est actif (un seul groupe serait redondant avec le filtre).
+  const groupedByPriority = useMemo(() => {
+    if (!pagedRows || sort !== 'priority' || priorityFilter) return null;
+    const groups = new Map<string, Improvement[]>();
+    for (const key of PRIORITY_ORDER) groups.set(key, []);
+    for (const imp of pagedRows) {
+      const key = PRIORITY[imp.priority] ? imp.priority : 'MEDIUM';
+      groups.get(key)!.push(imp);
+    }
+    return PRIORITY_ORDER.map((key) => [key, groups.get(key)!] as const).filter(([, list]) => list.length > 0);
+  }, [pagedRows, sort, priorityFilter]);
+
   return (
     <div>
-      <style>{`.imp-detail { white-space: pre-line; }`}</style>
+      <style>{`
+        .imp-detail { white-space: pre-line; }
+        .iq-card { background: #ffffff; border: 1px solid #e9ecf2; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: .75rem; box-shadow: 0 1px 3px rgba(27,42,74,.05); }
+        .iq-card-title { font-size: .95rem; font-weight: 600; color: #1B2A4A; margin-bottom: .3rem; }
+        .iq-card-summary { color: #44516B; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .iq-badge { display: inline-flex; align-items: center; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: .28rem .65rem; border-radius: 999px; }
+        .iq-badge-danger { background: #F5EDEC; color: #7A4A45; }
+        .iq-badge-amber { background: #FDF1DD; color: #8A5A00; }
+        .iq-badge-navy { background: #EDF1F7; color: #1B2A4A; }
+        .iq-badge-neutral { background: #F1F3F5; color: #5B6B85; }
+        .iq-badge-ghost { background: transparent; border: 1px solid #DCE3F0; color: #5B6B85; }
+        .iq-badge-status-PROPOSED, .iq-badge-status-IN_PROGRESS, .iq-badge-status-TO_VERIFY { background: #EDF1F7; color: #1B2A4A; }
+        .iq-badge-status-APPLIED, .iq-badge-status-IMPROVED { background: #ECFDF5; color: #047857; }
+        .iq-badge-status-DISMISSED, .iq-badge-status-NO_EFFECT { background: #F1F3F5; color: #5B6B85; }
+        .iq-btn-outline { background: transparent; border: 1px solid #DCE3F0; color: #1B2A4A; }
+        .iq-btn-outline:hover { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+        .iq-btn-success { background: #1B2A4A; border: 1px solid #1B2A4A; color: #fff; }
+        .iq-btn-success:hover { background: #14203a; border-color: #14203a; color: #fff; }
+        .iq-group-heading { display: flex; align-items: center; gap: .5rem; margin: 1.25rem 0 .6rem; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #8a93a8; }
+        .iq-group-heading:first-child { margin-top: 0; }
+      `}</style>
 
-      <div className="card mb-3">
-        <div className="card-body">
-          <div className="alert alert-light border small mb-0">
-            <strong>À quoi ça sert :</strong> le chien de garde surveille en continu les anomalies{' '}
-            <em>silencieuses</em> (prédictions jamais évaluables, jobs en échec, biais de précision par magasin,
-            synchro en retard, questions chatbot sans réponse...), propose un correctif (réglage + reco dev, enrichi
-            par l'IA pour les priorités), puis <strong>vérifie après coup</strong> si le correctif appliqué a
-            vraiment amélioré la métrique (IMPROVED) ou non (NO_EFFECT). Vous restez décisionnaire : rien n'est
-            appliqué automatiquement.
-          </div>
+      <div className="iq-card mb-3" style={{ background: '#F7F9FC' }}>
+        <div className="small" style={{ color: '#44516B' }}>
+          <strong style={{ color: '#1B2A4A' }}>À quoi ça sert :</strong> le chien de garde surveille en continu les
+          anomalies <em>silencieuses</em> (prédictions jamais évaluables, jobs en échec, biais de précision par
+          magasin, synchro en retard, questions chatbot sans réponse...), propose un correctif (réglage + reco dev,
+          enrichi par l'IA pour les priorités), puis <strong>vérifie après coup</strong> si le correctif appliqué a
+          vraiment amélioré la métrique (IMPROVED) ou non (NO_EFFECT). Vous restez décisionnaire : rien n'est
+          appliqué automatiquement.
         </div>
       </div>
 
-      <div className="card mb-3">
-        <div className="card-body d-flex flex-wrap gap-2 align-items-center">
-          <button type="button" className="btn btn-primary" disabled={generating} onClick={handleGenerate}>
-            {generating ? 'Analyse en cours...' : 'Analyser maintenant'}
-          </button>
-          <select className="form-select" style={{ maxWidth: 200 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="">Tous statuts</option>
-            <option value="PROPOSED">Proposées</option>
-            <option value="IN_PROGRESS">En cours</option>
-            <option value="TO_VERIFY">À vérifier</option>
-            <option value="APPLIED">Appliquées</option>
-            <option value="IMPROVED">Améliorées</option>
-            <option value="NO_EFFECT">Sans effet</option>
-            <option value="DISMISSED">Ignorées</option>
-          </select>
-          <select className="form-select" style={{ maxWidth: 180 }} value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
-            <option value="">Toutes priorités</option>
-            <option value="CRITICAL">Critique</option>
-            <option value="HIGH">Élevée</option>
-            <option value="MEDIUM">Moyenne</option>
-            <option value="LOW">Faible</option>
-          </select>
-          <select className="form-select" style={{ maxWidth: 180 }} value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="priority">Tri : priorité</option>
-            <option value="recent">Tri : récent</option>
-          </select>
-          <span className="small text-muted ms-auto">{summary}</span>
-        </div>
+      <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <button type="button" className="btn iq-btn-success" disabled={generating} onClick={handleGenerate}>
+          {generating ? 'Analyse en cours...' : 'Analyser maintenant'}
+        </button>
+        <select className="form-select form-select-sm" style={{ maxWidth: 170 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">Tous statuts</option>
+          <option value="PROPOSED">Proposées</option>
+          <option value="IN_PROGRESS">En cours</option>
+          <option value="TO_VERIFY">À vérifier</option>
+          <option value="APPLIED">Appliquées</option>
+          <option value="IMPROVED">Améliorées</option>
+          <option value="NO_EFFECT">Sans effet</option>
+          <option value="DISMISSED">Ignorées</option>
+        </select>
+        <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+          <option value="">Toutes priorités</option>
+          <option value="CRITICAL">Critique</option>
+          <option value="HIGH">Élevée</option>
+          <option value="MEDIUM">Moyenne</option>
+          <option value="LOW">Faible</option>
+        </select>
+        <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="priority">Tri : priorité</option>
+          <option value="recent">Tri : récent</option>
+        </select>
+        <span className="small fw-semibold ms-auto" style={{ color: '#1B2A4A' }}>{summary}</span>
       </div>
 
       <div>
@@ -435,9 +460,21 @@ export function ImprovementsTab() {
         {rows && rows.length === 0 && (
           <div className="alert alert-light border">Aucune recommandation pour ce filtre. Lancez "Analyser maintenant".</div>
         )}
-        {pagedRows?.map((imp) => (
-          <ImprovementCard key={imp.id} imp={imp} onAction={handleAction} onEdit={handleEdit} onDetail={handleDetail} />
-        ))}
+        {groupedByPriority
+          ? groupedByPriority.map(([key, list]) => (
+              <div key={key}>
+                <div className="iq-group-heading">
+                  <span className={`iq-badge ${PRIORITY[key].badge}`}>{PRIORITY[key].label}</span>
+                  <span>{list.length} recommandation(s)</span>
+                </div>
+                {list.map((imp) => (
+                  <ImprovementCard key={imp.id} imp={imp} onAction={handleAction} onEdit={handleEdit} onDetail={handleDetail} />
+                ))}
+              </div>
+            ))
+          : pagedRows?.map((imp) => (
+              <ImprovementCard key={imp.id} imp={imp} onAction={handleAction} onEdit={handleEdit} onDetail={handleDetail} />
+            ))}
       </div>
       <Pagination page={page} pageCount={pageCount} onChange={setPage} />
 
@@ -498,10 +535,10 @@ export function ImprovementsTab() {
                   {editState.error && <div className="alert alert-danger mt-3">{editState.error}</div>}
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setEditState(null)}>
+                  <button type="button" className="btn iq-btn-outline" onClick={() => setEditState(null)}>
                     Annuler
                   </button>
-                  <button type="button" className="btn btn-primary" disabled={editSaving} onClick={saveEdit}>
+                  <button type="button" className="btn iq-btn-success" disabled={editSaving} onClick={saveEdit}>
                     Enregistrer
                   </button>
                 </div>
@@ -532,10 +569,10 @@ export function ImprovementsTab() {
                   {noteState.error && <div className="alert alert-danger mt-2">{noteState.error}</div>}
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setNoteState(null)}>
+                  <button type="button" className="btn iq-btn-outline" onClick={() => setNoteState(null)}>
                     Annuler
                   </button>
-                  <button type="button" className="btn btn-primary" disabled={noteSaving} onClick={confirmNote}>
+                  <button type="button" className="btn iq-btn-success" disabled={noteSaving} onClick={confirmNote}>
                     Confirmer
                   </button>
                 </div>

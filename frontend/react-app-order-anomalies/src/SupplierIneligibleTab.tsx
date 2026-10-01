@@ -58,7 +58,7 @@ export function SupplierIneligibleTab() {
           ))}
         </select>
         <span className="oa-toolbar-count">{rows ? `${filteredRows.length} article(s)` : ''}</span>
-        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={load}>
+        <button type="button" className="btn btn-sm oa-btn-outline" onClick={load}>
           Actualiser
         </button>
       </div>
@@ -69,7 +69,7 @@ export function SupplierIneligibleTab() {
         <div className="text-center text-muted py-4">Chargement...</div>
       ) : filteredRows.length === 0 ? (
         <div className="text-center text-muted py-5">
-          <iconify-icon icon="solar:check-circle-bold-duotone" style={{ fontSize: '2rem', color: '#c9ccd1' }}></iconify-icon>
+          <iconify-icon icon="solar:check-circle-bold-duotone" style={{ fontSize: '2rem', color: '#C7D0E0' }}></iconify-icon>
           <div className="mt-2">Aucun article non rattaché pour ce filtre.</div>
         </div>
       ) : (

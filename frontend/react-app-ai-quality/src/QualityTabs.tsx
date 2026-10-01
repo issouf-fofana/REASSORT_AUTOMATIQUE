@@ -48,7 +48,16 @@ export function QualityTabs() {
 
   return (
     <div>
-      <style>{`.aiq-tabs-wrap { margin-bottom: 1.75rem; }`}</style>
+      <style>{`
+        .aiq-tabs-wrap { margin-bottom: 1.75rem; }
+        /* NotchTabBar (composant partagé avec Paramètres/Guide du projet) gère sa pilule active en
+           zinc-950 (noir) par défaut — surchargée ici en marine (01/10/2026, "applique le nouveau
+           style") sans modifier le composant partagé. */
+        .aiq-tabs-wrap .reassort-tabs-root { background-color: #EDF1F7; }
+        .aiq-tabs-wrap .reassort-tabs-root [role="tab"].text-zinc-500 { color: #5B6B85; }
+        .aiq-tabs-wrap .reassort-tabs-root [role="tab"]:hover.text-zinc-500 { color: #1B2A4A; }
+        .aiq-tabs-wrap .reassort-tabs-root .bg-zinc-950 { background-color: #1B2A4A !important; }
+      `}</style>
       <div className="aiq-tabs-wrap">
         <NotchTabBar tabs={TABS} activeId={activeTab} onActiveChange={(id) => selectTab(id as TabId)} />
       </div>

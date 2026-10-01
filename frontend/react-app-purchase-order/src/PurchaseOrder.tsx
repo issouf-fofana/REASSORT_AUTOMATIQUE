@@ -665,6 +665,14 @@ export function PurchaseOrder() {
         }
         .article-detail-btn iconify-icon,
         .pa-open-btn iconify-icon { font-size: .9rem; }
+        /* L'icône hérite normalement de la couleur du texte du bouton — mais articleAlertIcon()
+           (ProposalTable.tsx) lui ajoute sa propre classe de couleur (ex: .reassort-alert-soft, brun
+           ambré) pour l'ancien usage en icône nue, qui se fond désormais dans le fond ambre plein du
+           bouton (signalé le 01/10/2026, icône invisible). Le bouton a toujours besoin d'un contraste
+           fort quel que soit l'état de l'alerte, donc on l'impose ici plutôt que de dépendre de la
+           classe posée par alert.cls. */
+        .article-detail-btn iconify-icon { color: #1B2A4A !important; }
+        .pa-open-btn iconify-icon { color: #ffffff !important; }
         /* Modals de cet écran (ArticleDetailModal, ProductAnalyticsModal, WeeklyPlanHistoryModal,
            etc.) restylées en marine/ambre (demande du 01/10/2026) pour rester cohérentes avec les
            cartes de secteurs/rayons — purement visuel, markup Bootstrap inchangé. */

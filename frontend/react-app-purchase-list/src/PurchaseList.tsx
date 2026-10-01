@@ -137,8 +137,22 @@ export function PurchaseList() {
   function ensureGrid() {
     if (gridApiRef.current) return gridApiRef.current;
     if (!gridDivRef.current) return null;
+    // Même personnalisation locale que ProposalTable.tsx (Proposition de commande) — demande du
+    // 01/10/2026, "applique le nouveau style dans historique aussi" — zébrage, en-têtes marqués,
+    // bordures nettes, sans toucher au thème partagé REASSORT_AG_GRID_THEME_SOFT (withParams retourne
+    // un thème immutable local à cette grille).
+    const tableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
+      rowHeight: 48,
+      headerHeight: 38,
+      headerFontSize: 11.5,
+      headerFontWeight: 700,
+      dataFontSize: 13,
+      cellHorizontalPadding: 10,
+      oddRowBackgroundColor: '#FAFAFA',
+      rowBorder: { color: '#D9DCE1' },
+    });
     gridApiRef.current = window.agGrid.createGrid(gridDivRef.current, {
-      theme: window.REASSORT_AG_GRID_THEME_SOFT,
+      theme: tableTheme,
       columnDefs: [
         { headerName: 'Rayon', field: '_department', rowGroup: true, hide: true, filter: 'agTextColumnFilter' },
         {
@@ -390,8 +404,18 @@ export function PurchaseList() {
             value: (l.sellingPrice || 0) * qtySent,
           };
         });
+        const detailTableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
+          rowHeight: 48,
+          headerHeight: 38,
+          headerFontSize: 11.5,
+          headerFontWeight: 700,
+          dataFontSize: 13,
+          cellHorizontalPadding: 10,
+          oddRowBackgroundColor: '#FAFAFA',
+          rowBorder: { color: '#D9DCE1' },
+        });
         detailGridApiRef.current = window.agGrid.createGrid(detailGridDivRef.current, {
-          theme: window.REASSORT_AG_GRID_THEME_SOFT,
+          theme: detailTableTheme,
           columnDefs: [
             { headerName: 'EAN', field: 'ean', filter: 'agTextColumnFilter', width: 130 },
             { headerName: 'Article', field: 'label', flex: 1, minWidth: 200, filter: 'agTextColumnFilter' },
@@ -440,15 +464,21 @@ export function PurchaseList() {
     <div>
       <style>{`
         #orders-grid, #order-detail-grid { width: 100%; }
-        .po-metric-row { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
-        .po-metric-row-item { flex: 1 1 160px; padding: 1rem 1.5rem 1rem 1.5rem; border-right: 1px solid var(--bs-border-color, #dee2e6); }
-        .po-metric-row-item:last-child { border-right: none; }
-        .po-metric-label { font-size: .8125rem; color: var(--bs-secondary-color, #6c757d); margin: 0 0 .35rem; }
-        .po-metric-value { font-size: 1.5rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; margin: 0; }
-        .po-metric-value.is-alert { color: #B91C1C; }
-        @media (max-width: 767px) {
-          .po-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
-        }
+        /* Cartes KPI marine/ambre (01/10/2026, remplace l'ancienne rangée de texte plat sans icône
+           ni couleur) — même esprit que ProposalHeader.tsx (Proposition de commande). */
+        .po-metric-row { display: flex; flex-wrap: wrap; gap: .85rem; padding: 1rem 1.25rem; border-bottom: 1px solid #e9ecf2; }
+        .po-metric-card { flex: 1 1 180px; display: flex; align-items: center; gap: .75rem; padding: .85rem 1rem; border-radius: 10px; background: #F7F9FC; border: 1px solid #e9ecf2; }
+        .po-metric-icon { width: 36px; height: 36px; border-radius: 8px; background: #1B2A4A; color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; flex-shrink: 0; }
+        .po-metric-label { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8a93a8; margin: 0 0 .2rem; }
+        .po-metric-value { font-size: 1.3rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; margin: 0; color: #1B2A4A; }
+        .po-metric-value.is-alert { color: #b91c1c; }
+        .po-metric-card.is-alert .po-metric-icon { background: #F5EDEC; color: #7A4A45; }
+        /* Modal de détail commande restylée en marine/ambre, cohérent avec Proposition de commande. */
+        .modal-content { border: none; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 48px rgba(27, 42, 74, .22); }
+        .modal-header { background: #1B2A4A; border-bottom: none; padding: 1.15rem 1.5rem; }
+        .modal-header .modal-title { color: #ffffff; font-weight: 600; font-size: 1.02rem; }
+        .modal-header .btn-close { filter: invert(1) grayscale(1) brightness(1.8); opacity: .85; }
+        .modal-header .btn-close:hover { opacity: 1; }
       `}</style>
 
       <div className="row">
@@ -485,7 +515,7 @@ export function PurchaseList() {
                 <button className="btn btn-sm btn-outline-dark" title="Export CSV, ouvrable directement dans Excel" onClick={handleExportCsv}>
                   <iconify-icon icon="solar:file-download-bold-duotone" className="align-middle"></iconify-icon> Exporter (CSV)
                 </button>
-                <button className="btn btn-sm btn-outline-primary" disabled={refreshing} onClick={loadOrders}>
+                <button className="btn btn-sm btn-outline-secondary" disabled={refreshing} onClick={loadOrders}>
                   Actualiser
                 </button>
                 <div ref={toolbarRef} className="d-flex gap-2"></div>
@@ -493,21 +523,41 @@ export function PurchaseList() {
             </div>
             {orders.length > 0 && (
               <div className="po-metric-row">
-                <div className="po-metric-row-item">
-                  <p className="po-metric-label">Commandes affichées</p>
-                  <p className="po-metric-value">{total}</p>
+                <div className="po-metric-card">
+                  <div className="po-metric-icon">
+                    <iconify-icon icon="solar:document-text-bold-duotone"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="po-metric-label">Commandes affichées</p>
+                    <p className="po-metric-value">{total}</p>
+                  </div>
                 </div>
-                <div className="po-metric-row-item">
-                  <p className="po-metric-label">Complètes</p>
-                  <p className="po-metric-value">{complete}</p>
+                <div className="po-metric-card">
+                  <div className="po-metric-icon">
+                    <iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="po-metric-label">Complètes</p>
+                    <p className="po-metric-value">{complete}</p>
+                  </div>
                 </div>
-                <div className="po-metric-row-item">
-                  <p className="po-metric-label">En attente de livraison</p>
-                  <p className="po-metric-value">{pending}</p>
+                <div className="po-metric-card">
+                  <div className="po-metric-icon">
+                    <iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="po-metric-label">En attente de livraison</p>
+                    <p className="po-metric-value">{pending}</p>
+                  </div>
                 </div>
-                <div className="po-metric-row-item">
-                  <p className="po-metric-label">Annulées</p>
-                  <p className={`po-metric-value${cancelledAlert ? ' is-alert' : ''}`}>{cancelled}</p>
+                <div className={`po-metric-card${cancelledAlert ? ' is-alert' : ''}`}>
+                  <div className="po-metric-icon">
+                    <iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="po-metric-label">Annulées</p>
+                    <p className={`po-metric-value${cancelledAlert ? ' is-alert' : ''}`}>{cancelled}</p>
+                  </div>
                 </div>
               </div>
             )}

@@ -125,17 +125,20 @@ export function AiMastery() {
   return (
     <div>
       <style>{`
+        /* Recoloré en marine/ambre (01/10/2026, "applique le nouveau style") — garde les couleurs
+           sémantiques vert/ambre/rouge pour les niveaux de maîtrise (un vrai statut, pas une
+           variation arbitraire de couleur par carte). */
         .mastery-intro {
-          background: #fafafa;
-          border: 1px solid #ececec;
+          background: #F7F9FC;
+          border: 1px solid #e9ecf2;
           border-radius: 12px;
           padding: 1.1rem 1.35rem;
           margin-bottom: 1.5rem;
           font-size: .87rem;
-          color: #444444;
+          color: #44516B;
           line-height: 1.6;
         }
-        .mastery-intro strong { color: #000000; }
+        .mastery-intro strong { color: #1B2A4A; }
 
         .mastery-toolbar {
           display: flex;
@@ -144,57 +147,62 @@ export function AiMastery() {
           flex-wrap: wrap;
           margin-bottom: 1.5rem;
         }
-        .mastery-toolbar-count { color: #9198a1; font-size: .82rem; margin-left: auto; }
+        .mastery-toolbar-btn {
+          background: #1B2A4A; border: 1px solid #1B2A4A; color: #fff;
+        }
+        .mastery-toolbar-btn:hover, .mastery-toolbar-btn:focus { background: #14203a; border-color: #14203a; color: #fff; }
+        .mastery-toolbar-btn:disabled { opacity: .6; color: #fff; }
+        .mastery-toolbar-count { color: #8a93a8; font-size: .82rem; margin-left: auto; font-weight: 600; }
 
         .mastery-card {
           background: #ffffff;
-          border: 1px solid #ececec;
+          border: 1px solid #e9ecf2;
           border-radius: 14px;
           padding: 1.25rem 1.5rem;
           margin-bottom: 1rem;
-          box-shadow: 0 1px 2px rgba(20, 20, 20, .03);
+          box-shadow: 0 1px 3px rgba(27, 42, 74, .05);
           transition: box-shadow .2s ease, border-color .2s ease;
         }
-        .mastery-card:hover { box-shadow: 0 4px 16px rgba(20, 20, 20, .06); border-color: #e2e4e7; }
+        .mastery-card:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; }
 
         .mastery-card-header { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.1rem; }
         .mastery-domain-icon {
           width: 36px; height: 36px; border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
-          background: #f1f2f4; color: #17181a; font-size: 1.1rem; flex-shrink: 0;
+          background: #1B2A4A; color: #F5A623; font-size: 1.1rem; flex-shrink: 0;
         }
-        .mastery-domain-title { font-size: 1rem; font-weight: 700; color: #17181a; }
+        .mastery-domain-title { font-size: 1rem; font-weight: 700; color: #1B2A4A; }
         .mastery-method-badge {
           margin-left: auto;
           font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-          color: #6c757d; background: #f1f2f4; border-radius: 999px; padding: .3rem .7rem;
+          color: #5B6B85; background: #EDF1F7; border-radius: 999px; padding: .3rem .7rem;
           white-space: nowrap;
         }
 
         .mastery-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1rem; }
         @media (max-width: 767px) { .mastery-metrics { grid-template-columns: 1fr; gap: 1rem; } }
-        .mastery-metric-label { font-size: .78rem; color: #6c757d; font-weight: 500; }
+        .mastery-metric-label { font-size: .78rem; color: #5B6B85; font-weight: 500; }
         .mastery-metric-value { font-size: 1.05rem; font-weight: 700; }
-        .mastery-metric-value-secondary { font-size: 1.05rem; font-weight: 700; color: #6c757d; }
-        .mastery-metric-max { font-size: .72rem; font-weight: 500; color: #b1b6bc; margin-left: 1px; }
-        .mastery-metric-value.mastery-high { color: #198754; }
-        .mastery-metric-value.mastery-mid { color: #d68910; }
-        .mastery-metric-value.mastery-low { color: #c0392b; }
+        .mastery-metric-value-secondary { font-size: 1.05rem; font-weight: 700; color: #5B6B85; }
+        .mastery-metric-max { font-size: .72rem; font-weight: 500; color: #9aa7c2; margin-left: 1px; }
+        .mastery-metric-value.mastery-high { color: #047857; }
+        .mastery-metric-value.mastery-mid { color: #8A5A00; }
+        .mastery-metric-value.mastery-low { color: #7A4A45; }
 
-        .mastery-bar { height: 6px; border-radius: 999px; background: #eef0f2; overflow: hidden; }
+        .mastery-bar { height: 6px; border-radius: 999px; background: #EDF1F7; overflow: hidden; }
         .mastery-bar-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
-        .mastery-bar-fill.mastery-bar-secondary { background-color: #b1b6bc; }
-        .mastery-bar-fill.mastery-high { background-color: #198754; }
-        .mastery-bar-fill.mastery-mid { background-color: #d68910; }
+        .mastery-bar-fill.mastery-bar-secondary { background-color: #9aa7c2; }
+        .mastery-bar-fill.mastery-high { background-color: #10b981; }
+        .mastery-bar-fill.mastery-mid { background-color: #F5A623; }
         .mastery-bar-fill.mastery-low { background-color: #c0392b; }
 
-        .mastery-footer { font-size: .78rem; color: #9198a1; padding-top: .85rem; border-top: 1px solid #f2f3f4; }
+        .mastery-footer { font-size: .78rem; color: #8a93a8; padding-top: .85rem; border-top: 1px solid #EDF1F7; }
 
-        .mastery-issues { margin-top: .85rem; padding-top: .85rem; border-top: 1px solid #f2f3f4; }
-        .mastery-issues-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #9198a1; margin-bottom: .4rem; }
-        .mastery-issues-list { margin: 0; padding-left: 1.1rem; font-size: .85rem; color: #2c2d30; }
+        .mastery-issues { margin-top: .85rem; padding-top: .85rem; border-top: 1px solid #EDF1F7; }
+        .mastery-issues-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #8a93a8; margin-bottom: .4rem; }
+        .mastery-issues-list { margin: 0; padding-left: 1.1rem; font-size: .85rem; color: #33415C; }
         .mastery-issues-list li { margin-bottom: .2rem; }
-        .mastery-issue-count { color: #9198a1; font-size: .8rem; }
+        .mastery-issue-count { color: #8a93a8; font-size: .8rem; }
       `}</style>
 
       <div className="mastery-intro">
@@ -207,7 +215,7 @@ export function AiMastery() {
       </div>
 
       <div className="mastery-toolbar">
-        <button type="button" className="btn btn-dark" disabled={recomputing} onClick={recompute}>
+        <button type="button" className="btn mastery-toolbar-btn" disabled={recomputing} onClick={recompute}>
           {recomputing ? 'Calcul en cours...' : 'Recalculer maintenant'}
         </button>
         <span className="mastery-toolbar-count">{rows ? `${rows.length} domaine(s)` : ''}</span>

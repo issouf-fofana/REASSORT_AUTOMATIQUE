@@ -187,8 +187,21 @@ export function SalesHistory() {
   function buildGridOptions(withDepartment: boolean) {
     const dateColDef = withDepartment ? { ...baseColumnDefs[0], sort: null } : baseColumnDefs[0];
     const columnDefs = withDepartment ? [departmentColumnDef, dateColDef, ...baseColumnDefs.slice(1)] : [...baseColumnDefs];
+    // Même personnalisation locale que ProposalTable.tsx/PurchaseList.tsx (01/10/2026, "applique le
+    // nouveau style ici aussi") : zébrage, en-têtes marqués, bordures nettes, sans toucher au thème
+    // partagé REASSORT_AG_GRID_THEME_SOFT (withParams retourne un thème immutable local à cette grille).
+    const tableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
+      rowHeight: 48,
+      headerHeight: 38,
+      headerFontSize: 11.5,
+      headerFontWeight: 700,
+      dataFontSize: 13,
+      cellHorizontalPadding: 10,
+      oddRowBackgroundColor: '#FAFAFA',
+      rowBorder: { color: '#D9DCE1' },
+    });
     return {
-      theme: window.REASSORT_AG_GRID_THEME_SOFT,
+      theme: tableTheme,
       columnDefs,
       localeText: window.AG_GRID_LOCALE_FR,
       domLayout: 'autoHeight',
@@ -407,16 +420,16 @@ export function SalesHistory() {
         #sh-grid { width: 100%; }
         .sh-group-header-row {
           display: flex; align-items: center; height: 100%; padding: 0 12px;
-          background-color: #f1f3f5; font-weight: 600; color: #1a1a1a; border-bottom: 1px solid #dee2e6;
+          background-color: #EDF1F7; font-weight: 600; color: #1B2A4A; border-bottom: 1px solid #DCE3F0;
         }
-        .sh-metric-row { display: flex; flex-wrap: wrap; }
-        .sh-metric-row-item { flex: 1 1 180px; padding: 1rem 1.5rem 1rem 0; border-right: 1px solid var(--bs-border-color, #dee2e6); }
-        .sh-metric-row-item:last-child { border-right: none; }
-        .sh-metric-label { font-size: .8125rem; color: var(--bs-secondary-color, #6c757d); margin: 0 0 .35rem; }
-        .sh-metric-value { font-size: 1.5rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; margin: 0; }
-        @media (max-width: 767px) {
-          .sh-metric-row-item { border-right: none; border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
-        }
+        /* Cartes KPI marine/ambre (01/10/2026, remplace l'ancienne rangée de texte plat). */
+        .sh-metric-row { display: flex; flex-wrap: wrap; gap: .85rem; }
+        .sh-metric-card { flex: 1 1 180px; display: flex; align-items: center; gap: .75rem; padding: .85rem 1rem; border-radius: 10px; background: #F7F9FC; border: 1px solid #e9ecf2; }
+        .sh-metric-icon { width: 36px; height: 36px; border-radius: 8px; background: #1B2A4A; color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; flex-shrink: 0; }
+        .sh-metric-label { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8a93a8; margin: 0 0 .2rem; }
+        .sh-metric-value { font-size: 1.25rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; margin: 0; color: #1B2A4A; }
+        .sh-btn-navy { background-color: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+        .sh-btn-navy:hover, .sh-btn-navy:focus { background-color: #14203a; border-color: #14203a; color: #fff; }
       `}</style>
 
       <div className="row mb-3">
@@ -462,7 +475,7 @@ export function SalesHistory() {
                   <input type="text" className="form-control" placeholder="Optionnel" value={ean} onChange={(e) => setEan(e.target.value)} />
                 </div>
                 <div className="col-md-2">
-                  <button type="button" className="btn btn-primary w-100" onClick={() => search(1)}>
+                  <button type="button" className="btn sh-btn-navy w-100" onClick={() => search(1)}>
                     Rechercher
                   </button>
                 </div>
@@ -489,21 +502,41 @@ export function SalesHistory() {
       <div className="card mb-3">
         <div className="card-body py-2">
           <div className="sh-metric-row">
-            <div className="sh-metric-row-item">
-              <p className="sh-metric-label">Lignes trouvées</p>
-              <p className="sh-metric-value">{statCount}</p>
+            <div className="sh-metric-card">
+              <div className="sh-metric-icon">
+                <iconify-icon icon="solar:document-text-bold-duotone"></iconify-icon>
+              </div>
+              <div>
+                <p className="sh-metric-label">Lignes trouvées</p>
+                <p className="sh-metric-value">{statCount}</p>
+              </div>
             </div>
-            <div className="sh-metric-row-item">
-              <p className="sh-metric-label">Quantité totale</p>
-              <p className="sh-metric-value">{statQty}</p>
+            <div className="sh-metric-card">
+              <div className="sh-metric-icon">
+                <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
+              </div>
+              <div>
+                <p className="sh-metric-label">Quantité totale</p>
+                <p className="sh-metric-value">{statQty}</p>
+              </div>
             </div>
-            <div className="sh-metric-row-item">
-              <p className="sh-metric-label">Chiffre d'affaires (HT)</p>
-              <p className="sh-metric-value">{statRevenue}</p>
+            <div className="sh-metric-card">
+              <div className="sh-metric-icon">
+                <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon>
+              </div>
+              <div>
+                <p className="sh-metric-label">Chiffre d'affaires (HT)</p>
+                <p className="sh-metric-value">{statRevenue}</p>
+              </div>
             </div>
-            <div className="sh-metric-row-item">
-              <p className="sh-metric-label">Chiffre d'affaires (TTC)</p>
-              <p className="sh-metric-value">{statRevenueTtc}</p>
+            <div className="sh-metric-card">
+              <div className="sh-metric-icon">
+                <iconify-icon icon="solar:wallet-money-bold-duotone"></iconify-icon>
+              </div>
+              <div>
+                <p className="sh-metric-label">Chiffre d'affaires (TTC)</p>
+                <p className="sh-metric-value">{statRevenueTtc}</p>
+              </div>
             </div>
           </div>
         </div>

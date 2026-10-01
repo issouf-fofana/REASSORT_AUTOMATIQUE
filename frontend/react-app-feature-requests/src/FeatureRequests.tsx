@@ -47,13 +47,15 @@ const STATUS_LABELS: Record<string, string> = {
   closed: 'Clôturée',
 };
 
+// Recoloré en marine/ambre (01/10/2026, "applique le style aussi") — remplace les couleurs
+// Bootstrap par défaut (bg-primary/bg-warning/bg-info/bg-dark).
 const STATUS_BADGE_CLASS: Record<string, string> = {
-  new: 'bg-primary',
-  needs_information: 'bg-warning text-dark',
-  pending: 'bg-secondary',
-  in_progress: 'bg-info text-dark',
-  resolved: 'bg-success',
-  closed: 'bg-dark',
+  new: 'fr-badge-navy',
+  needs_information: 'fr-badge-amber',
+  pending: 'fr-badge-neutral',
+  in_progress: 'fr-badge-navy',
+  resolved: 'fr-badge-success',
+  closed: 'fr-badge-neutral',
 };
 
 const ALL_STATUSES = Object.keys(STATUS_LABELS);
@@ -109,6 +111,14 @@ export function FeatureRequests() {
 
   return (
     <div className="row">
+      <style>{`
+        .fr-badge-navy { background-color: #1B2A4A; color: #ffffff; }
+        .fr-badge-amber { background-color: #FDF1DD; color: #8A5A00; }
+        .fr-badge-neutral { background-color: #EDF1F7; color: #5B6B85; }
+        .fr-badge-success { background-color: #ECFDF5; color: #047857; }
+        .list-group-item-action.active { background-color: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+        .list-group-item-action.active .text-muted { color: #C7D0E0 !important; }
+      `}</style>
       <div className="col-12 mb-4">
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div>

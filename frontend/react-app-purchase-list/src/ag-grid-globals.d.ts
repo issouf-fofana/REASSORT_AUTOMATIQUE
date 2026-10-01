@@ -10,7 +10,7 @@ declare global {
     agGrid: {
       createGrid: (el: HTMLElement, options: any) => any;
     };
-    REASSORT_AG_GRID_THEME_SOFT: unknown;
+    REASSORT_AG_GRID_THEME_SOFT: { withParams: (params: Record<string, unknown>) => unknown };
     REASSORT_AG_GRID_THEME: { withParams: (params: Record<string, unknown>) => unknown };
     AG_GRID_LOCALE_FR: Record<string, string>;
     reassortAgGridToolbar: (gridApi: any, containerEl: HTMLElement) => void;

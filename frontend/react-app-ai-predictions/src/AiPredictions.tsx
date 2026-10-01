@@ -65,24 +65,26 @@ const AI_ACTION_LABELS: Record<string, string> = {
   VERIFY_STOCK: 'Vérifier le stock',
   NO_ACTION: 'Rien à signaler',
 };
+// Badges recolorés en palette marine/ambre adoucie (01/10/2026, "applique le nouveau style ici
+// aussi") — remplace les couleurs Bootstrap par défaut (bg-dark/bg-warning/bg-danger/bg-success).
 const AI_ACTION_BADGE_CLASS: Record<string, string> = {
-  ORDER_NOW: 'bg-dark',
-  ORDER_MORE: 'bg-warning text-dark',
-  ORDER_LESS: 'bg-secondary',
-  WAIT: 'bg-light text-dark border',
-  STOCK_RISK: 'bg-danger',
-  OVERSTOCK: 'bg-warning text-dark',
-  DEMAND_INCREASE: 'bg-success',
-  DEMAND_DECREASE: 'bg-secondary',
-  ANOMALY: 'bg-danger',
-  VERIFY_STOCK: 'bg-danger',
-  NO_ACTION: 'bg-light text-dark border',
+  ORDER_NOW: 'reassort-badge-navy',
+  ORDER_MORE: 'reassort-badge-amber',
+  ORDER_LESS: 'reassort-badge-neutral',
+  WAIT: 'reassort-badge-neutral',
+  STOCK_RISK: 'reassort-badge-danger',
+  OVERSTOCK: 'reassort-badge-amber',
+  DEMAND_INCREASE: 'reassort-badge-success',
+  DEMAND_DECREASE: 'reassort-badge-neutral',
+  ANOMALY: 'reassort-badge-danger',
+  VERIFY_STOCK: 'reassort-badge-danger',
+  NO_ACTION: 'reassort-badge-neutral',
 };
 
 function confidenceColor(score: number): string {
-  if (score >= 70) return '#000000';
-  if (score >= 40) return '#666666';
-  return '#999999';
+  if (score >= 70) return '#1B2A4A';
+  if (score >= 40) return '#F5A623';
+  return '#C7D0E0';
 }
 
 function labelCellRenderer(params: any) {
@@ -274,8 +276,20 @@ export function AiPredictions() {
   function ensureGrid() {
     if (gridApiRef.current) return gridApiRef.current;
     if (!gridDivRef.current) return null;
+    // Même personnalisation locale que les autres tableaux (01/10/2026) : zébrage, en-têtes marqués,
+    // bordures nettes, sans toucher au thème partagé REASSORT_AG_GRID_THEME_SOFT.
+    const tableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
+      rowHeight: 48,
+      headerHeight: 38,
+      headerFontSize: 11.5,
+      headerFontWeight: 700,
+      dataFontSize: 13,
+      cellHorizontalPadding: 10,
+      oddRowBackgroundColor: '#FAFAFA',
+      rowBorder: { color: '#D9DCE1' },
+    });
     gridApiRef.current = window.agGrid.createGrid(gridDivRef.current, {
-      theme: window.REASSORT_AG_GRID_THEME_SOFT,
+      theme: tableTheme,
       columnDefs: gridColumnDefs,
       rowData: [],
       localeText: window.AG_GRID_LOCALE_FR,
@@ -484,9 +498,14 @@ export function AiPredictions() {
   return (
     <div>
       <style>{`
-        .confidence-bar { height: 6px; border-radius: 0; background-color: #e5e5e5; overflow: hidden; }
-        .confidence-bar-fill { height: 100%; background-color: #000000; }
+        .confidence-bar { height: 6px; border-radius: 999px; background-color: #EDF1F7; overflow: hidden; }
+        .confidence-bar-fill { height: 100%; }
         #aip-grid { width: 100%; }
+        .reassort-badge-navy { background-color: #1B2A4A; color: #ffffff; }
+        .reassort-badge-amber { background-color: #FDF1DD; color: #8A5A00; }
+        .reassort-badge-neutral { background-color: #EDF1F7; color: #5B6B85; }
+        .reassort-badge-danger { background-color: #F5EDEC; color: #7A4A45; }
+        .reassort-badge-success { background-color: #ECFDF5; color: #047857; }
       `}</style>
 
       <div className="row mb-3">
@@ -541,7 +560,7 @@ export function AiPredictions() {
                   </select>
                 </div>
                 <div className="col-md-3">
-                  <button type="button" className="btn btn-primary w-100" onClick={loadPredictions}>
+                  <button type="button" className="btn w-100" style={{ background: '#1B2A4A', borderColor: '#1B2A4A', color: '#fff' }} onClick={loadPredictions}>
                     Actualiser
                   </button>
                 </div>

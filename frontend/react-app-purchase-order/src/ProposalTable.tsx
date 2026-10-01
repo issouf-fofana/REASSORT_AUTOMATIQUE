@@ -115,10 +115,13 @@ function stockCellRenderer(params: any) {
   const wrap = document.createElement('div');
   wrap.className = 'd-flex align-items-center gap-1';
   let html = stockValue !== null && stockValue !== undefined ? (stockValue < 0 ? `<span class="text-danger fw-semibold">${stockValue.toFixed(1)}</span>` : `<span>${stockValue.toFixed(1)}</span>`) : '<span>—</span>';
+  // Badges avec texte au lieu d'icônes nues (01/10/2026, "fait comme le menu action" — même logique
+  // de lisibilité appliquée aux indicateurs Stock actuel) : non cliquables (information seulement,
+  // le détail complet reste dans ArticleDetailModal), mais lisibles sans avoir à survoler.
   if (unreliableStock) {
-    html += `<iconify-icon icon="solar:danger-triangle-bold-duotone" class="reassort-alert-soft" title="Stock non fiable — ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"></iconify-icon>`;
+    html += `<span class="badge reassort-mini-badge reassort-warning-badge" title="Stock non fiable — ne se corrige que par une intégration de facture ou un inventaire physique côté RPOS"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> Non fiable</span>`;
   } else if (l.dlvStock) {
-    html += `<iconify-icon icon="solar:tag-price-bold-duotone" class="text-info" title="${l.dlvStock.toFixed(1)} en DLV — stock retiré du calcul car basculé sur un EAN séparé"></iconify-icon>`;
+    html += `<span class="badge reassort-mini-badge reassort-info-badge" title="${l.dlvStock.toFixed(1)} en DLV — stock retiré du calcul car basculé sur un EAN séparé"><iconify-icon icon="solar:tag-price-bold-duotone"></iconify-icon> DLV</span>`;
   }
   wrap.innerHTML = html;
   return wrap;
@@ -134,12 +137,13 @@ function avgSalesCellRenderer(params: any) {
   }
   // Moyenne par jour ajoutée à côté de celle par semaine (demande du 30/09/2026).
   let html = `<span>${l.avgWeeklySales.toFixed(1)} /sem. · ${(l.avgWeeklySales / 7).toFixed(1)} /j</span>`;
+  // Badges avec texte au lieu d'icônes nues (01/10/2026, même traitement que Stock actuel/Actions).
   if (l.seasonalityAdjusted) {
-    html += `<iconify-icon icon="solar:calendar-bold-duotone" class="text-info" title="Saisonnalité : ajustée par rapport à la même période l'année dernière (écart ${l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?'})"></iconify-icon>`;
+    html += `<span class="badge reassort-mini-badge reassort-info-badge" title="Saisonnalité : ajustée par rapport à la même période l'année dernière (écart ${l.seasonalityDeviationPct !== null && l.seasonalityDeviationPct !== undefined ? l.seasonalityDeviationPct.toFixed(0) + '%' : '?'})"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Saison.</span>`;
   } else if (l.forecastMethod === 'smoothed') {
-    html += `<iconify-icon icon="solar:chart-2-bold-duotone" class="text-success" title="Prévision lissée : donne plus de poids aux ventes récentes qu'à une moyenne plate"></iconify-icon>`;
+    html += `<span class="badge reassort-mini-badge reassort-info-badge" title="Prévision lissée : donne plus de poids aux ventes récentes qu'à une moyenne plate"><iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> Lissée</span>`;
   } else if (l.weekdayAdjusted) {
-    html += `<iconify-icon icon="solar:calendar-mark-bold-duotone" class="text-primary" title="Jour de semaine : la quantité tient compte du profil de vente par jour (ex: samedi plus fort)"></iconify-icon>`;
+    html += `<span class="badge reassort-mini-badge reassort-info-badge" title="Jour de semaine : la quantité tient compte du profil de vente par jour (ex: samedi plus fort)"><iconify-icon icon="solar:calendar-mark-bold-duotone"></iconify-icon> Jour sem.</span>`;
   }
   wrap.innerHTML = html;
   return wrap;
