@@ -66,7 +66,7 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
       // changerait cette hauteur de quelques pixels sans qu'on le remarque. Valeur fixe et explicite
       // à la place : hauteur de l'île (h-8) = 32px, plus de pt-3 sur le conteneur racine (retiré en
       // même temps que ce commentaire, cf. plus bas) donc 32px est directement où l'île se termine.
-      className="absolute inset-x-0 top-[32px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-zinc-950 p-4 shadow-lg"
+      className="absolute inset-x-0 top-[32px] z-50 flex flex-wrap justify-center gap-6 overflow-x-auto bg-[#1B2A4A] p-4 shadow-lg"
     >
       {groups.map((group) => {
         // Demande du 27/09/2026 : une colonne à trop d'entrées (Paramètres, 6 sous-onglets) s'étirait
@@ -196,11 +196,11 @@ export function ReassortNotch() {
           padding-top (pt-3 retiré) donc l'île touche déjà directement le sommet de l'écran — cette
           bande chevauche volontairement ses 24 premiers pixels (h-6 > différence avec l'île) sans
           incidence visuelle, l'île étant rendue après dans le DOM et donc toujours au-dessus. */}
-      <div className="absolute inset-x-0 top-0 h-6 bg-zinc-950" />
+      <div className="absolute inset-x-0 top-0 h-6 bg-[#1B2A4A]" />
       <div
         data-radius
         style={radius('0 0 14px 14px')}
-        className="relative flex h-8 w-auto max-w-full items-center gap-2.5 rounded-b-2xl bg-zinc-950 px-2.5 text-zinc-50"
+        className="relative flex h-8 w-auto max-w-full items-center gap-2.5 rounded-b-2xl bg-[#1B2A4A] px-2.5 text-zinc-50"
       >
         <NotchLeftWing />
         <NotchRightWing />
