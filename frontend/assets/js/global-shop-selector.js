@@ -166,7 +166,7 @@
     hiddenSelect.innerHTML = Object.keys(byPos).sort().map(function (posId) {
       const list = byPos[posId].slice().sort(function (a, b) { return (a.reference || '').localeCompare(b.reference || ''); });
       const options = list.map(function (s) {
-        return '<option value="' + s.id + '" data-reference="' + s.reference + '" data-name="' + s.name + '">' + s.reference + ' - ' + s.name + '</option>';
+        return '<option value="' + s.id + '" data-reference="' + s.reference + '" data-name="' + s.name + '" data-pos-id="' + s.posId + '">' + s.reference + ' - ' + s.name + '</option>';
       }).join('');
       return '<optgroup label="' + (list[0].posLabel || posId) + '">' + options + '</optgroup>';
     }).join('');
@@ -180,7 +180,10 @@
         const opt = hiddenSelect.selectedOptions[0];
         if (!opt) return;
         const posLabel = opt.parentElement && opt.parentElement.tagName === 'OPTGROUP' ? opt.parentElement.label : '';
-        setActiveShop({ id: opt.value, reference: opt.dataset.reference, name: opt.dataset.name, posLabel: posLabel });
+        // posId inclus (bug trouvé le 01/10/2026 : magasin global persisté sans posId faisait
+        // échouer GET /reassort/orders?shop=... côté Tableau de bord pour un compte ADMIN, resolvePosId
+        // exigeant ce paramètre explicitement — cf. backend/src/middleware/auth.js).
+        setActiveShop({ id: opt.value, reference: opt.dataset.reference, name: opt.dataset.name, posLabel: posLabel, posId: opt.dataset.posId });
       });
       window.reassortMakeShopPickerSearchable(hiddenSelect);
     } else {

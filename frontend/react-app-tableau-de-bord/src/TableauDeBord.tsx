@@ -169,7 +169,7 @@ export function TableauDeBord() {
       <style>{`
         /* Cartes KPI blanches avec bordure + hover (01/10/2026, "trop fort" en fond marine plein —
            revenu au même esprit que les cartes de secteurs/rayons sur Proposition de commande). */
-        .kpi-card { border: 1px solid #e9ecf2; border-radius: 14px; background: #ffffff; box-shadow: 0 1px 3px rgba(27, 42, 74, .05); transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease; }
+        .kpi-card { border: 1px solid #e9ecf2; border-radius: 14px; background: #F9FAFC; box-shadow: 0 1px 3px rgba(27, 42, 74, .05); transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease; }
         .kpi-card:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; transform: translateY(-1px); }
         .kpi-card .card-body { padding: 1.1rem 1.2rem .85rem; }
         .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #EDF1F7 !important; }
@@ -178,7 +178,7 @@ export function TableauDeBord() {
         .kpi-label { font-size: .78rem; color: #5B6B85; margin: 0; }
         .kpi-footer { padding: .55rem 1.2rem; font-size: .72rem; border-top: 1px solid #EDF1F7; color: #8a93a8; }
         .kpi-footer a { color: #1B2A4A !important; font-weight: 600; }
-        .kpi-card.kpi-card-chart { background: #fff; }
+        .kpi-card.kpi-card-chart { background: #F9FAFC; }
         .kpi-card.kpi-card-chart:hover { transform: none; }
         /* Badges de statut de commande, palette adoucie (dupliquée depuis Proposition de commande,
            chaque app React a son propre bundle CSS). */

@@ -312,7 +312,10 @@
       const user = window.reassortGetUser && window.reassortGetUser();
       const convShop = json.data.rposShopId ? shopsById.get(json.data.rposShopId) : null;
       if (convShop && !(user && window.reassortIsSingleShopRole(user.role)) && convShop.id !== currentShopId()) {
-        window.reassortSetActiveShop({ id: convShop.id, reference: convShop.reference, name: convShop.name });
+        // posId inclus (bug trouvé le 01/10/2026 : magasin global persisté sans posId faisait
+        // échouer GET /reassort/orders?shop=... côté Tableau de bord pour un compte ADMIN, resolvePosId
+        // exigeant ce paramètre explicitement — cf. backend/src/middleware/auth.js).
+        window.reassortSetActiveShop({ id: convShop.id, reference: convShop.reference, name: convShop.name, posId: convShop.posId });
       }
       departmentSelect.value = json.data.department || '';
       subDepartmentInput.value = json.data.subDepartment || '';

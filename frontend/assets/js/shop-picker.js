@@ -29,7 +29,12 @@
     const dashIndex = text.indexOf(' - ');
     const reference = opt.dataset.reference || (dashIndex !== -1 ? text.slice(0, dashIndex).trim() : '');
     const name = opt.dataset.name || (dashIndex !== -1 ? text.slice(dashIndex + 3).trim() : text.trim());
-    return { posLabel: groupLabel, reference: reference, name: name };
+    // posId manquant du magasin global persisté (bug trouvé le 01/10/2026 : Tableau de bord envoyait
+    // GET /reassort/orders?shop=... SANS &pos=..., rejeté 400 "Aucun magasin assigné à ce compte"
+    // pour un compte ADMIN multi-magasins) — resolvePosId exige explicitement ce paramètre pour
+    // ADMIN/SUPERVISOR (cf. backend/src/middleware/auth.js), jamais déduit du shopId seul.
+    const posId = opt.dataset.posId || '';
+    return { posLabel: groupLabel, reference: reference, name: name, posId: posId };
   }
 
   function updateShopContext(opt) {
@@ -45,7 +50,7 @@
   function syncToGlobalShop(opt) {
     if (!window.reassortSetActiveShop) return;
     const parsed = parseShopOption(opt);
-    window.reassortSetActiveShop({ id: opt.value, reference: parsed.reference, name: parsed.name, posLabel: parsed.posLabel });
+    window.reassortSetActiveShop({ id: opt.value, reference: parsed.reference, name: parsed.name, posLabel: parsed.posLabel, posId: parsed.posId });
   }
 
   function buildPicker(selectEl) {
