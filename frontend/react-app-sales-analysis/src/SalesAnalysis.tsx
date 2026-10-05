@@ -29,7 +29,7 @@ export function SalesAnalysis() {
   const [user] = useState(() => window.reassortGetUser());
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
 
-  const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string } | null>(null);
+  const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string; reference?: string; name?: string } | null>(null);
   const [selectedShopId, setSelectedShopId] = useState('');
 
   const [detail, setDetail] = useState<SalesAnalysisDetail | null>(null);
@@ -51,6 +51,15 @@ export function SalesAnalysis() {
     const pos = isSingleShop ? user?.rposPosId || '' : selectedShop?.posId || '';
     if (!id) return '';
     return `shop=${encodeURIComponent(id)}${pos ? '&pos=' + encodeURIComponent(pos) : ''}`;
+  }
+
+  // Référence/nom du magasin à transmettre à POST /proposal/analyze (requis par le backend) : pour
+  // un compte ADMIN/SUPERVISOR, user.rposShopReference est toujours null (pas de magasin fixe) — il
+  // faut les reprendre du magasin actif choisi dans le sélecteur global, pas de l'utilisateur
+  // (bug "Référence du magasin requise" constaté le 05/10/2026, faute de cette distinction).
+  function activeShopIdentity(): { reference: string; name: string } {
+    if (isSingleShop) return { reference: user?.rposShopReference || '', name: user?.rposShopName || '' };
+    return { reference: selectedShop?.reference || '', name: selectedShop?.name || '' };
   }
 
   async function load() {
@@ -87,13 +96,13 @@ export function SalesAnalysis() {
       return;
     }
     if (!window.reassortGetActiveShop || !window.reassortOnActiveShopChange) return;
-    const syncToActiveShop = (shop: { id: string; posId?: string } | null) => {
+    const syncToActiveShop = (shop: { id: string; posId?: string; reference?: string; name?: string } | null) => {
       if (!shop) return;
       setSelectedShop(shop);
       setSelectedShopId(shop.id);
     };
     syncToActiveShop(window.reassortGetActiveShop());
-    window.reassortOnActiveShopChange((shop) => syncToActiveShop(shop as { id: string; posId?: string } | null));
+    window.reassortOnActiveShopChange((shop) => syncToActiveShop(shop as { id: string; posId?: string; reference?: string; name?: string } | null));
   }, [isSingleShop]);
 
   useEffect(() => {
@@ -115,10 +124,11 @@ export function SalesAnalysis() {
     setRunning(true);
     setRunStep('SALES');
     try {
+      const { reference, name } = activeShopIdentity();
       const { runId } = await apiFetch<{ runId: string }>(`/reassort/proposal/analyze?${qs}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopReference: user?.rposShopReference, shopName: user?.rposShopName }),
+        body: JSON.stringify({ shopReference: reference, shopName: name }),
       });
       pollRef.current = window.setInterval(async () => {
         try {
