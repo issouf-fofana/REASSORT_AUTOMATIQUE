@@ -16,6 +16,41 @@ function fmtNum(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// Liste dépliable des commandes validées ayant servi au calcul (demande du 05/10/2026 : "afficher
+// aussi les commandes validées de l'autre côté, l'entête de la commande") — repliée par défaut pour
+// ne pas alourdir chaque carte, la plupart des utilisateurs n'ayant besoin que du résumé au-dessus.
+function HistoryDetail({ history }: { history: { quantity: number; generatedAt: string; orderReference: string | null }[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="oa-history mt-2">
+      <button type="button" className="btn btn-link btn-sm p-0 oa-history-toggle" onClick={() => setOpen((v) => !v)}>
+        <iconify-icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'}></iconify-icon>{' '}
+        {open ? 'Masquer' : 'Voir'} le détail des {history.length} commande(s) validée(s)
+      </button>
+      {open && (
+        <table className="table table-sm oa-history-table mt-2 mb-0">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>N° commande</th>
+              <th>Quantité validée</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map((h, i) => (
+              <tr key={i}>
+                <td>{fmtDate(h.generatedAt)}</td>
+                <td>{h.orderReference || '—'}</td>
+                <td>{fmtNum(h.quantity)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function AnomalyCard({ a, onAction }: { a: OrderAnomaly; onAction: (id: string, status: 'ACKNOWLEDGED' | 'DISMISSED') => void }) {
   return (
     <div className="oa-card">
@@ -40,6 +75,12 @@ function AnomalyCard({ a, onAction }: { a: OrderAnomaly; onAction: (id: string, 
           Quantité proposée : <strong>{fmtNum(a.newQuantity)}</strong> — habituellement entre <strong>{fmtNum(a.historicalMin)}</strong> et{' '}
           <strong>{fmtNum(a.historicalMax)}</strong> (moyenne {fmtNum(a.historicalMean)}, sur {a.sampleSize} commande(s) passée(s))
         </div>
+        {a.historyDetail && a.historyDetail.length > 0 && <HistoryDetail history={a.historyDetail} />}
+        {a.trendContext && (
+          <div className="oa-trend-context">
+            <iconify-icon icon="solar:chart-2-bold-duotone"></iconify-icon> {a.trendContext}
+          </div>
+        )}
         {a.contextNote && <div className="oa-note">Note : {a.contextNote}</div>}
         {a.status === 'PENDING' && (
           <div className="mt-3">
@@ -148,6 +189,11 @@ export function OrderAnomalies() {
         .oa-ean { color: #8a93a8; font-size: .82rem; font-weight: 400; }
         .oa-shop { font-size: .82rem; color: #5B6B85; margin-top: .2rem; }
         .oa-figures { font-size: .88rem; color: #33415C; margin-top: .6rem; }
+        .oa-trend-context { font-size: .82rem; color: #8A5A00; background: #FDF1DD; border-radius: .5rem; padding: .45rem .7rem; margin-top: .6rem; }
+        .oa-history-toggle { color: #1B2A4A; text-decoration: none; font-weight: 600; }
+        .oa-history-toggle:hover { text-decoration: underline; }
+        .oa-history-table { font-size: .82rem; }
+        .oa-history-table th { color: #8a93a8; font-weight: 600; border-top: none; }
         .oa-note { font-size: .82rem; color: #5B6B85; font-style: italic; margin-top: .6rem; }
         .oa-btn-outline { background: transparent; border: 1px solid #DCE3F0; color: #1B2A4A; }
         .oa-btn-outline:hover { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }

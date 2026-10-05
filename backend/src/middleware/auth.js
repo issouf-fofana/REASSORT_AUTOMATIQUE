@@ -30,6 +30,36 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/**
+ * Autorise ADMIN et SUPERVISOR (demande du 05/10/2026 : "le superviseur peut voir plusieurs
+ * magasins aussi") — les vues multi-magasins (Tableau de bord, Tous les magasins) étaient jusque-là
+ * réservées à requireAdmin seul, ce qui bloquait un SUPERVISOR (403) alors que le frontend les lui
+ * affichait déjà (isSingleShop ne distingue que les rôles à UN SEUL magasin). Le périmètre réel
+ * (tous les magasins pour ADMIN, seulement les siens pour SUPERVISOR) est appliqué séparément par
+ * getAccessibleShopIds, jamais ici — ce middleware ne fait que l'authentification de rôle.
+ */
+function requireAdminOrSupervisor(req, res, next) {
+  if (req.user?.role !== 'ADMIN' && req.user?.role !== 'SUPERVISOR') {
+    return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs et superviseurs' });
+  }
+  next();
+}
+
+/**
+ * Résout les rposShopId que ce compte a le droit de voir dans une vue multi-magasins : tous les
+ * magasins actifs pour ADMIN, uniquement son périmètre SupervisedShop pour SUPERVISOR. Retourne
+ * null pour ADMIN (signifie "aucun filtre à appliquer", pour éviter de charger explicitement la
+ * table Shop entière juste pour reconstruire une liste que le SQL peut ignorer) et un tableau
+ * (jamais null) pour SUPERVISOR, y compris vide si ce compte n'a encore aucun magasin assigné.
+ */
+async function getAccessibleShopIds(req) {
+  if (req.user.role === 'SUPERVISOR') {
+    const supervised = await prisma.supervisedShop.findMany({ where: { userId: req.user.id }, select: { rposShopId: true } });
+    return supervised.map((s) => s.rposShopId);
+  }
+  return null;
+}
+
 // DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER partagent exactement le même cloisonnement magasin que
 // l'ancien rôle STORE (toujours rposShopId du compte, jamais un ?shop= arbitraire) — seule la
 // granularité département/rayon (assignedDepartment) et les permissions IA par capacité les
@@ -95,4 +125,4 @@ async function requireSupervisedShop(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, resolveShopId, resolvePosId, requireSupervisedShop, SINGLE_SHOP_ROLES };
+module.exports = { requireAuth, requireAdmin, requireAdminOrSupervisor, getAccessibleShopIds, resolveShopId, resolvePosId, requireSupervisedShop, SINGLE_SHOP_ROLES };

@@ -472,6 +472,15 @@ async function analyzeSales(posId, shopId, shopReference, periodOverride, onProg
   const period = await resolvePeriod(posId, shopId, config);
   console.log(`[proposalService] Période résolue : ${period.start} -> ${period.end} (mode ${config.periodMode})`);
 
+  // Seuils de détection d'anomalie de commande (Paramètres, demande du 05/10/2026 — en dur
+  // auparavant) : lus une seule fois ici, pas à chaque article, puis transmis à processArticle.
+  const orderAnomalyMinSampleSizeRaw = parseInt(await systemConfig.getValue(systemConfig.KEYS.ORDER_ANOMALY_MIN_SAMPLE_SIZE), 10);
+  const orderAnomalyThresholdRaw = parseFloat(await systemConfig.getValue(systemConfig.KEYS.ORDER_ANOMALY_THRESHOLD));
+  const orderAnomalyThresholds = {
+    minSampleSize: Number.isFinite(orderAnomalyMinSampleSizeRaw) && orderAnomalyMinSampleSizeRaw > 0 ? orderAnomalyMinSampleSizeRaw : undefined,
+    anomalyThreshold: Number.isFinite(orderAnomalyThresholdRaw) && orderAnomalyThresholdRaw > 0 ? orderAnomalyThresholdRaw : undefined,
+  };
+
   const periodDays = Math.max(1, (new Date(period.end) - new Date(period.start)) / (24 * 60 * 60 * 1000));
 
   const salesResult = await getSalesLinesForPeriod(posId, shopId, shopReference, period.start, period.end);
@@ -917,7 +926,7 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     let orderAnomaly = null;
     if (quantityProposed > 0) {
       try {
-        const anomalyResult = await orderAnomalyService.detectOrderAnomaly(shopId, ean, quantityProposed);
+        const anomalyResult = await orderAnomalyService.detectOrderAnomaly(shopId, ean, quantityProposed, orderAnomalyThresholds);
         if (anomalyResult.anomaly) orderAnomaly = anomalyResult;
       } catch (err) {
         console.error(`[proposalService] Détection d'anomalie de commande échouée pour ${ean} (shop=${shopId}) : ${err.message}`);
@@ -1126,16 +1135,41 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   const anomalyMinDailyRaw = await systemConfig.getValue(systemConfig.KEYS.ANOMALY_MIN_DAILY_SALES);
   const anomalyMinDailyParsed = parseFloat(anomalyMinDailyRaw);
   const anomalyMinDailySales = Number.isFinite(anomalyMinDailyParsed) && anomalyMinDailyParsed >= 0 ? anomalyMinDailyParsed : 1;
+
+  // Seuils de tendance (Paramètres, demande du 05/10/2026 — en dur auparavant dans anomalyService.js) :
+  // lus une seule fois par génération, undefined si invalide/absent pour retomber sur les constantes
+  // par défaut du module (cf. signature de detectSalesSpikeOrDrop/computeTrendScore).
+  const parseConfiguredNumber = async (key) => {
+    const parsed = parseFloat(await systemConfig.getValue(key));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const trendThresholds = {
+    spikeThresholdPct: await parseConfiguredNumber(systemConfig.KEYS.ANOMALY_SALES_SPIKE_THRESHOLD_PCT),
+    dropThresholdPct: await parseConfiguredNumber(systemConfig.KEYS.ANOMALY_SALES_DROP_THRESHOLD_PCT),
+    growingThresholdPct: await parseConfiguredNumber(systemConfig.KEYS.ANOMALY_TREND_GROWING_THRESHOLD_PCT),
+    decliningThresholdPct: await parseConfiguredNumber(systemConfig.KEYS.ANOMALY_TREND_DECLINING_THRESHOLD_PCT),
+    volatileCvThreshold: await parseConfiguredNumber(systemConfig.KEYS.ANOMALY_VOLATILE_CV_THRESHOLD),
+  };
+
   for (const p of result.proposals) {
     const { anomalies, trend } = detectAnomalies({
       stock: p.stock,
       avgWeeklySales: p.avgWeeklySales,
       dailyHistory: p.dailyHistory,
       minAvgDailySales: anomalyMinDailySales,
+      trendThresholds,
     });
     p.anomalies = anomalies;
     p.trendCategory = trend.category;
     p.trendChangePct = trend.changePct;
+
+    // Contextualisation de l'anomalie de commande avec la tendance de vente (amelioration.md §7,
+    // 05/10/2026) : trend n'est connu qu'ICI (dailyHistory déjà traité), alors que orderAnomaly a
+    // été posé plus tôt dans processArticle — on l'enrichit a posteriori plutôt que de déplacer le
+    // calcul de tendance, qui dépend de données déjà calculées à cet endroit précis.
+    if (p.orderAnomaly) {
+      p.orderAnomaly.trendContext = orderAnomalyService.buildTrendContext(p.orderAnomaly, trend);
+    }
   }
 
   // Casse/perte récurrente (§30-31, ajout du 16/09/2026) : une baisse de stock n'est pas toujours de
@@ -1361,6 +1395,8 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           historicalMax: p.orderAnomaly.historicalMax,
           sampleSize: p.orderAnomaly.sampleSize,
           direction: p.orderAnomaly.direction,
+          trendContext: p.orderAnomaly.trendContext || null,
+          historyDetail: p.orderAnomaly.historyDetail ? JSON.stringify(p.orderAnomaly.historyDetail) : null,
         })),
       });
     } catch (err) {
@@ -2162,13 +2198,22 @@ function weekStartOf(date) {
  * Une semaine sans proposition validée reste présente dans le résultat avec rate: null (jamais
  * silencieusement absente), pour ne pas donner l'illusion d'un trou continu dans le graphique.
  */
+/**
+ * @param {string|string[]|null} shopId - un magasin unique (comportement d'origine), un tableau de
+ *   plusieurs magasins (demande du 05/10/2026 : courbe de conformité agrégée "Tous les magasins"
+ *   pour ADMIN/SUPERVISOR, cf. AllShopsView.tsx), ou null (ADMIN, aucun filtre = tous les magasins).
+ *   Un tableau vide filtre explicitement sur "aucun magasin" (SUPERVISOR sans périmètre), jamais
+ *   traité comme "pas de filtre".
+ */
 async function getWeeklyConformityRate(shopId, weeks = 10) {
   const now = new Date();
   const windowStart = weekStartOf(new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000));
 
+  const shopFilter = Array.isArray(shopId) ? { in: shopId } : shopId;
+
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED', validatedAt: { gte: windowStart } },
+      proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: 'VALIDATED', validatedAt: { gte: windowStart } },
     },
     select: {
       excludedOutOfScope: true,
@@ -2212,17 +2257,25 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
  * un. "Aujourd'hui" = jour calendaire courant (UTC), cohérent avec le reste du projet qui n'utilise
  * pas de lib de dates.
  */
-async function getTodayProposalShops() {
+/**
+ * @param {string[]|null} [shopIdFilter] - périmètre à restreindre (demande du 05/10/2026, mêmes
+ *   raisons que getAdminDashboard ci-dessous) — null = tous les magasins (ADMIN).
+ */
+async function getTodayProposalShops(shopIdFilter = null) {
   const todayStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
   const proposals = await prisma.proposal.findMany({
-    where: { status: 'GENERATED', generatedAt: { gte: todayStart } },
+    where: { status: 'GENERATED', generatedAt: { gte: todayStart }, ...(shopIdFilter ? { rposShopId: { in: shopIdFilter } } : {}) },
     select: {
       id: true,
       rposShopId: true,
       rposShopReference: true,
       rposShopName: true,
       generatedAt: true,
-      linesTotal: true,
+      // linesTotal n'est rempli qu'à la VALIDATION (envoi vers RPOS, cf. commentaire du modèle
+      // Proposal) — toujours null pour une proposition encore GENERATED comme ici, d'où le nombre
+      // d'articles affiché à "—" côté Tableau de bord (bug constaté le 05/10/2026). On compte
+      // directement les ProposalLine à la place (_count, pas de second aller-retour par magasin).
+      _count: { select: { lines: true } },
     },
     orderBy: { generatedAt: 'desc' },
   });
@@ -2234,7 +2287,14 @@ async function getTodayProposalShops() {
   for (const p of proposals) {
     if (seen.has(p.rposShopId)) continue;
     seen.add(p.rposShopId);
-    result.push(p);
+    result.push({
+      id: p.id,
+      rposShopId: p.rposShopId,
+      rposShopReference: p.rposShopReference,
+      rposShopName: p.rposShopName,
+      generatedAt: p.generatedAt,
+      linesTotal: p._count.lines,
+    });
   }
   return result;
 }
@@ -2307,8 +2367,16 @@ async function getOverstockRate(shopId) {
  * magasins de ce dashboard après la migration des rôles vers DIRECTOR/DEPARTMENT_HEAD/SHELF_STOCKER
  * — un magasin existe indépendamment des comptes qui lui sont éventuellement assignés).
  */
-async function getAdminDashboard() {
+/**
+ * @param {string[]|null} [shopIdFilter] - périmètre à restreindre (demande du 05/10/2026 : ouvrir
+ *   cette vue aux SUPERVISOR, limités à leurs magasins, pas à tous) — null = aucun filtre, tous les
+ *   magasins actifs (comportement ADMIN inchangé). Un tableau vide filtre explicitement sur "aucun
+ *   magasin", jamais traité comme "pas de filtre" (sinon un SUPERVISOR sans périmètre assigné
+ *   verrait par erreur tous les magasins).
+ */
+async function getAdminDashboard(shopIdFilter = null) {
   const shopRows = await prisma.shop.findMany({
+    where: shopIdFilter ? { rposShopId: { in: shopIdFilter } } : undefined,
     select: { rposShopId: true, reference: true, name: true, rposPosId: true },
   });
   const shops = shopRows.map((s) => ({

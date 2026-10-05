@@ -39,7 +39,7 @@ function coefficientOfVariation(values) {
  * à la moyenne du reste de la période. Ignore les périodes trop courtes (pas assez de recul pour
  * distinguer un vrai signal d'une fluctuation normale).
  */
-function detectSalesSpikeOrDrop(dailyHistory) {
+function detectSalesSpikeOrDrop(dailyHistory, { spikeThresholdPct = SALES_SPIKE_THRESHOLD_PCT, dropThresholdPct = SALES_DROP_THRESHOLD_PCT } = {}) {
   if (!dailyHistory || dailyHistory.length < MIN_DAYS_FOR_TREND) return null;
 
   const quantities = dailyHistory.map((d) => d.quantity || 0);
@@ -59,10 +59,10 @@ function detectSalesSpikeOrDrop(dailyHistory) {
   }
 
   const changePct = ((recentAvg - baselineAvg) / baselineAvg) * 100;
-  if (changePct >= SALES_SPIKE_THRESHOLD_PCT) {
+  if (changePct >= spikeThresholdPct) {
     return { type: 'SALES_SPIKE', changePct: Math.round(changePct), message: `Ventes en hausse de ${Math.round(changePct)}% sur les ${RECENT_WINDOW_DAYS} derniers jours vs le reste de la période.` };
   }
-  if (changePct <= SALES_DROP_THRESHOLD_PCT) {
+  if (changePct <= dropThresholdPct) {
     return { type: 'SALES_DROP', changePct: Math.round(changePct), message: `Ventes en chute de ${Math.round(Math.abs(changePct))}% sur les ${RECENT_WINDOW_DAYS} derniers jours vs le reste de la période.` };
   }
   return null;
@@ -96,12 +96,12 @@ function detectStockInconsistency(stock, avgWeeklySales, dailyHistory, minAvgDai
  * UNKNOWN. Indépendant de detectSalesSpikeOrDrop (qui ne regarde que les tout derniers jours) :
  * la tendance ici pondère l'ensemble de l'historique disponible.
  */
-function computeTrendScore(dailyHistory) {
+function computeTrendScore(dailyHistory, { growingThresholdPct = TREND_GROWING_THRESHOLD_PCT, decliningThresholdPct = TREND_DECLINING_THRESHOLD_PCT, volatileCvThreshold = VOLATILE_CV_THRESHOLD } = {}) {
   if (!dailyHistory || dailyHistory.length < MIN_DAYS_FOR_TREND) return { category: 'UNKNOWN', changePct: null };
 
   const quantities = dailyHistory.map((d) => d.quantity || 0);
   const cv = coefficientOfVariation(quantities);
-  if (cv >= VOLATILE_CV_THRESHOLD) return { category: 'VOLATILE', changePct: null };
+  if (cv >= volatileCvThreshold) return { category: 'VOLATILE', changePct: null };
 
   const mid = Math.floor(quantities.length / 2);
   const firstHalfAvg = average(quantities.slice(0, mid));
@@ -109,8 +109,8 @@ function computeTrendScore(dailyHistory) {
   if (firstHalfAvg <= 0) return { category: secondHalfAvg > 0 ? 'GROWING' : 'UNKNOWN', changePct: null };
 
   const changePct = ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100;
-  if (changePct >= TREND_GROWING_THRESHOLD_PCT) return { category: 'GROWING', changePct: Math.round(changePct) };
-  if (changePct <= TREND_DECLINING_THRESHOLD_PCT) return { category: 'DECLINING', changePct: Math.round(changePct) };
+  if (changePct >= growingThresholdPct) return { category: 'GROWING', changePct: Math.round(changePct) };
+  if (changePct <= decliningThresholdPct) return { category: 'DECLINING', changePct: Math.round(changePct) };
   return { category: 'STABLE', changePct: Math.round(changePct) };
 }
 
@@ -120,14 +120,14 @@ function computeTrendScore(dailyHistory) {
  * minAvgDailySales : seuil "rupture invisible" (voir detectStockInconsistency), transmis par
  * l'appelant (proposalService le lit en config une fois par génération).
  */
-function detectAnomalies({ stock, avgWeeklySales, dailyHistory, minAvgDailySales = 1 }) {
+function detectAnomalies({ stock, avgWeeklySales, dailyHistory, minAvgDailySales = 1, trendThresholds = {} }) {
   const anomalies = [];
-  const spikeOrDrop = detectSalesSpikeOrDrop(dailyHistory);
+  const spikeOrDrop = detectSalesSpikeOrDrop(dailyHistory, trendThresholds);
   if (spikeOrDrop) anomalies.push(spikeOrDrop);
   const stockInconsistency = detectStockInconsistency(stock, avgWeeklySales, dailyHistory, minAvgDailySales);
   if (stockInconsistency) anomalies.push(stockInconsistency);
 
-  const trend = computeTrendScore(dailyHistory);
+  const trend = computeTrendScore(dailyHistory, trendThresholds);
 
   return { anomalies, trend };
 }

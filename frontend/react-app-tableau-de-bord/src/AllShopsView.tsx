@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from './api/client';
 import { Pagination } from './Pagination';
+import { ConformityTrendChart } from './ConformityTrendChart';
 import type { AdminDashboardData, PerShopRow } from './types';
 
 const PAGE_SIZE = 10;
@@ -154,6 +155,18 @@ export function AllShopsView() {
               value={pct(data.globalConformityRate)}
               sub="propositions validées sans modification"
               isAlert={data.globalConformityRate !== null && data.globalConformityRate < 0.6}
+            />
+          </div>
+
+          {/* Courbe d'évolution agrégée (demande du 05/10/2026 : "l'admin doit pouvoir afficher pour
+              tout les magasin et voir l'évolution") — ADMIN = tous les magasins, SUPERVISOR = son
+              périmètre uniquement (filtré côté backend par /admin/conformity/weekly). Distincte de
+              "Conformité globale" ci-dessus (un chiffre unique, pas de tendance dans le temps). */}
+          <div className="mb-3">
+            <ConformityTrendChart
+              shopQueryParam=""
+              endpoint="/reassort/admin/conformity/weekly"
+              title="Taux de conformité agrégé — 10 dernières semaines (tous les magasins visibles)"
             />
           </div>
 

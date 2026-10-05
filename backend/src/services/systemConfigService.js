@@ -31,6 +31,19 @@ const KEYS = {
   // sur les derniers jours, malgré un stock disponible, est jugé incohérent. Baissable (ex: 0.5)
   // pour surveiller aussi les articles lents, au prix de plus de faux positifs sur les intermittents.
   ANOMALY_MIN_DAILY_SALES: 'ANOMALY_MIN_DAILY_SALES',
+  // Seuils de détection d'anomalie de COMMANDE (orderAnomalyService.js, amelioration.md §5-9,
+  // exposés en Paramètres le 05/10/2026 à la demande de l'utilisateur) : auparavant en dur dans le
+  // code, maintenant réglables pour s'adapter à des magasins à comportement différent (rotation
+  // lente, historique court...) sans toucher au code.
+  ORDER_ANOMALY_MIN_SAMPLE_SIZE: 'ORDER_ANOMALY_MIN_SAMPLE_SIZE',
+  ORDER_ANOMALY_THRESHOLD: 'ORDER_ANOMALY_THRESHOLD',
+  // Seuils de tendance de vente (anomalyService.js, utilisés aussi par orderAnomalyService pour
+  // contextualiser une anomalie de commande, cf. buildTrendContext) — mêmes raisons, même date.
+  ANOMALY_SALES_SPIKE_THRESHOLD_PCT: 'ANOMALY_SALES_SPIKE_THRESHOLD_PCT',
+  ANOMALY_SALES_DROP_THRESHOLD_PCT: 'ANOMALY_SALES_DROP_THRESHOLD_PCT',
+  ANOMALY_TREND_GROWING_THRESHOLD_PCT: 'ANOMALY_TREND_GROWING_THRESHOLD_PCT',
+  ANOMALY_TREND_DECLINING_THRESHOLD_PCT: 'ANOMALY_TREND_DECLINING_THRESHOLD_PCT',
+  ANOMALY_VOLATILE_CV_THRESHOLD: 'ANOMALY_VOLATILE_CV_THRESHOLD',
   // Évaluation des prédictions passées (CAHIER_DES_CHARGES.md §22, étape 5) : compare prédiction
   // et réalité une fois la période cible terminée.
   PREDICTION_OUTCOME_CRON: 'PREDICTION_OUTCOME_CRON',
@@ -202,6 +215,13 @@ const ENV_FALLBACK = {
   // 1 unité/jour par défaut : en dessous de ce rythme habituel, un silence récent des ventes
   // n'est pas signalé comme rupture invisible (cf. ANOMALY_MIN_DAILY_SALES ci-dessus).
   [KEYS.ANOMALY_MIN_DAILY_SALES]: () => '1',
+  [KEYS.ORDER_ANOMALY_MIN_SAMPLE_SIZE]: () => '3',
+  [KEYS.ORDER_ANOMALY_THRESHOLD]: () => '2',
+  [KEYS.ANOMALY_SALES_SPIKE_THRESHOLD_PCT]: () => '80',
+  [KEYS.ANOMALY_SALES_DROP_THRESHOLD_PCT]: () => '-60',
+  [KEYS.ANOMALY_TREND_GROWING_THRESHOLD_PCT]: () => '15',
+  [KEYS.ANOMALY_TREND_DECLINING_THRESHOLD_PCT]: () => '-15',
+  [KEYS.ANOMALY_VOLATILE_CV_THRESHOLD]: () => '1.2',
   [KEYS.AI_ANALYSIS_PROMPT_TEMPLATE]: () => `Tu es un analyste de la demande pour un magasin de grande distribution ({{shopReference}} {{shopName}}).
 
 Pour chaque article ci-dessous, procède dans cet ordre précis — n'inverse pas les étapes :

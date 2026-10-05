@@ -3,7 +3,7 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAdmin, resolveShopId, resolvePosId } = require('../../middleware/auth');
+const { requireAdminOrSupervisor, getAccessibleShopIds, resolveShopId, resolvePosId } = require('../../middleware/auth');
 const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const {
@@ -264,6 +264,22 @@ router.get('/conformity/weekly', async (req, res) => {
   }
 });
 
+// GET /api/reassort/admin/conformity/weekly?weeks=10 - taux de conformité agrégé, semaine par
+// semaine, sur PLUSIEURS magasins (demande du 05/10/2026 : "l'admin doit pouvoir afficher pour tous
+// les magasins et voir l'évolution") — ADMIN = tous les magasins, SUPERVISOR = son périmètre
+// uniquement. Distincte de /conformity/weekly ci-dessus (un seul magasin, via resolveShopId).
+router.get('/admin/conformity/weekly', requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const weeksRaw = parseInt(req.query.weeks, 10);
+    const weeks = Number.isFinite(weeksRaw) ? Math.min(26, Math.max(4, weeksRaw)) : 10;
+    const result = await getWeeklyConformityRate(shopIdFilter, weeks);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/stockout-rate - taux de rupture (articles déjà en rupture au moment de la
 // génération, sur les propositions validées)
 router.get('/stockout-rate', async (req, res) => {
@@ -347,10 +363,13 @@ router.get('/ai-decision-log', async (req, res) => {
 });
 
 // GET /api/reassort/admin/today-proposals - magasins ayant une proposition générée aujourd'hui
-// (ADMIN uniquement, Tableau de bord vue multi-magasins, 30/09/2026).
-router.get('/admin/today-proposals', requireAdmin, async (req, res) => {
+// (ADMIN = tous les magasins, SUPERVISOR = son périmètre uniquement — demande du 05/10/2026,
+// auparavant réservé ADMIN strict, bloquait les SUPERVISOR avec un 403. Tableau de bord vue
+// multi-magasins, 30/09/2026).
+router.get('/admin/today-proposals', requireAdminOrSupervisor, async (req, res) => {
   try {
-    const result = await getTodayProposalShops();
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const result = await getTodayProposalShops(shopIdFilter);
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Today proposal shops error:', error);
@@ -358,10 +377,12 @@ router.get('/admin/today-proposals', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/reassort/admin/dashboard - vue globale multi-magasins (ADMIN uniquement, readme §32)
-router.get('/admin/dashboard', requireAdmin, async (req, res) => {
+// GET /api/reassort/admin/dashboard - vue globale multi-magasins (ADMIN = tous les magasins,
+// SUPERVISOR = son périmètre uniquement — mêmes raisons que ci-dessus. readme §32)
+router.get('/admin/dashboard', requireAdminOrSupervisor, async (req, res) => {
   try {
-    const result = await getAdminDashboard();
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const result = await getAdminDashboard(shopIdFilter);
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Admin dashboard error:', error);

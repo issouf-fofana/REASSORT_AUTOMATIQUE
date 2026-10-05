@@ -683,26 +683,91 @@ function ToggleOnlyCard({
 
 // --- Carte "Détection d'anomalies" ---
 
-function AnomalyThresholdCard({ initialValue }: { initialValue: string }) {
-  const [value, setValue] = useState(initialValue);
+interface AnomalyThresholdValues {
+  minDailySales: string;
+  orderMinSampleSize: string;
+  orderAnomalyThreshold: string;
+  salesSpikePct: string;
+  salesDropPct: string;
+  trendGrowingPct: string;
+  trendDecliningPct: string;
+  volatileCv: string;
+}
+
+function AnomalyThresholdCard({ initial }: { initial: AnomalyThresholdValues }) {
+  const [values, setValues] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setValue(initialValue), [initialValue]);
+  useEffect(() => setValues(initial), [initial]);
+
+  function setField(key: keyof AnomalyThresholdValues, v: string) {
+    setValues((prev) => ({ ...prev, [key]: v }));
+  }
 
   async function handleSave() {
     setError(null);
     setSuccess(null);
-    const raw = parseFloat(value);
-    if (!Number.isFinite(raw) || raw < 0) {
-      setError('Erreur: Saisissez un nombre positif ou nul (ex: 1, 0.5, 0).');
+
+    // Validation groupée (amelioration.md §5-9, seuils exposés le 05/10/2026 — auparavant en dur
+    // dans orderAnomalyService.js/anomalyService.js) : chaque champ a ses propres bornes de sens,
+    // on n'enregistre rien tant qu'un seul est invalide, pour ne jamais sauvegarder un état incohérent.
+    const minDailySales = parseFloat(values.minDailySales);
+    const orderMinSampleSize = parseInt(values.orderMinSampleSize, 10);
+    const orderAnomalyThreshold = parseFloat(values.orderAnomalyThreshold);
+    const salesSpikePct = parseFloat(values.salesSpikePct);
+    const salesDropPct = parseFloat(values.salesDropPct);
+    const trendGrowingPct = parseFloat(values.trendGrowingPct);
+    const trendDecliningPct = parseFloat(values.trendDecliningPct);
+    const volatileCv = parseFloat(values.volatileCv);
+
+    if (!Number.isFinite(minDailySales) || minDailySales < 0) {
+      setError('Erreur: "Vente habituelle min." doit être un nombre positif ou nul.');
       return;
     }
+    if (!Number.isFinite(orderMinSampleSize) || orderMinSampleSize < 1) {
+      setError('Erreur: "Historique minimum requis" doit être un entier d\'au moins 1.');
+      return;
+    }
+    if (!Number.isFinite(orderAnomalyThreshold) || orderAnomalyThreshold <= 0) {
+      setError('Erreur: "Sensibilité de l\'alerte" doit être un nombre strictement positif.');
+      return;
+    }
+    if (!Number.isFinite(salesSpikePct) || salesSpikePct <= 0) {
+      setError('Erreur: "Seuil explosion de ventes" doit être un pourcentage positif.');
+      return;
+    }
+    if (!Number.isFinite(salesDropPct) || salesDropPct >= 0) {
+      setError('Erreur: "Seuil chute de ventes" doit être un pourcentage négatif.');
+      return;
+    }
+    if (!Number.isFinite(trendGrowingPct) || trendGrowingPct <= 0) {
+      setError('Erreur: "Seuil tendance en hausse" doit être un pourcentage positif.');
+      return;
+    }
+    if (!Number.isFinite(trendDecliningPct) || trendDecliningPct >= 0) {
+      setError('Erreur: "Seuil tendance en baisse" doit être un pourcentage négatif.');
+      return;
+    }
+    if (!Number.isFinite(volatileCv) || volatileCv <= 0) {
+      setError('Erreur: "Seuil de volatilité" doit être un nombre strictement positif.');
+      return;
+    }
+
     setSaving(true);
     try {
-      await saveSystemConfigKey('ANOMALY_MIN_DAILY_SALES', String(raw));
-      setSuccess('Seuil enregistré — appliqué dès la prochaine génération.');
+      await Promise.all([
+        saveSystemConfigKey('ANOMALY_MIN_DAILY_SALES', String(minDailySales)),
+        saveSystemConfigKey('ORDER_ANOMALY_MIN_SAMPLE_SIZE', String(orderMinSampleSize)),
+        saveSystemConfigKey('ORDER_ANOMALY_THRESHOLD', String(orderAnomalyThreshold)),
+        saveSystemConfigKey('ANOMALY_SALES_SPIKE_THRESHOLD_PCT', String(salesSpikePct)),
+        saveSystemConfigKey('ANOMALY_SALES_DROP_THRESHOLD_PCT', String(salesDropPct)),
+        saveSystemConfigKey('ANOMALY_TREND_GROWING_THRESHOLD_PCT', String(trendGrowingPct)),
+        saveSystemConfigKey('ANOMALY_TREND_DECLINING_THRESHOLD_PCT', String(trendDecliningPct)),
+        saveSystemConfigKey('ANOMALY_VOLATILE_CV_THRESHOLD', String(volatileCv)),
+      ]);
+      setSuccess('Seuils enregistrés — appliqués dès la prochaine génération.');
     } catch (err) {
       setError('Erreur: ' + (err as Error).message);
     } finally {
@@ -719,13 +784,14 @@ function AnomalyThresholdCard({ initialValue }: { initialValue: string }) {
         <div className="alert alert-light border small">
           <strong>À quoi ça sert :</strong> le système signale automatiquement les comportements anormaux
           (explosion ou chute brutale des ventes, stock disponible mais silence total des ventes = rupture
-          invisible possible). Un article signalé voit son score de confiance pénalisé, pour éviter de commander
-          sur une base douteuse.
+          invisible possible, quantité de commande très différente de l'habitude). Un article signalé voit son
+          score de confiance pénalisé, pour éviter de commander sur une base douteuse.
         </div>
+
         <div className="mb-3">
           <label className="form-label fw-semibold">Vente habituelle min. pour signaler une rupture invisible</label>
           <div className="input-group" style={{ maxWidth: 220 }}>
-            <input type="number" className="form-control" min={0} step={0.5} value={value} onChange={(e) => setValue(e.target.value)} />
+            <input type="number" className="form-control" min={0} step={0.5} value={values.minDailySales} onChange={(e) => setField('minDailySales', e.target.value)} />
             <span className="input-group-text">u/jour</span>
           </div>
           <div className="form-text">
@@ -734,7 +800,78 @@ function AnomalyThresholdCard({ initialValue }: { initialValue: string }) {
             articles lents (plus de faux positifs sur les intermittents).
           </div>
         </div>
-        <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={handleSave}>
+
+        <hr />
+        <h6 className="fw-semibold">Anomalie de quantité commandée</h6>
+        <div className="form-text mb-3">
+          Compare une nouvelle quantité à l'historique des commandes <em>validées</em> pour cet article dans ce
+          magasin (amelioration.md §5-9) — jamais une conclusion automatique "commande incorrecte", juste un
+          écart signalé à vérifier.
+        </div>
+        <div className="row g-3 mb-3">
+          <div className="col-sm-6">
+            <label className="form-label fw-semibold">Historique minimum requis</label>
+            <div className="input-group">
+              <input type="number" className="form-control" min={1} step={1} value={values.orderMinSampleSize} onChange={(e) => setField('orderMinSampleSize', e.target.value)} />
+              <span className="input-group-text">commande(s)</span>
+            </div>
+            <div className="form-text">Sous ce nombre de commandes validées, l'écart n'est jamais jugé (historique trop court).</div>
+          </div>
+          <div className="col-sm-6">
+            <label className="form-label fw-semibold">Sensibilité de l'alerte</label>
+            <div className="input-group">
+              <input type="number" className="form-control" min={0.1} step={0.1} value={values.orderAnomalyThreshold} onChange={(e) => setField('orderAnomalyThreshold', e.target.value)} />
+              <span className="input-group-text">écarts-types</span>
+            </div>
+            <div className="form-text">Plus bas = plus sensible (plus d'alertes). 2 est un seuil statistique courant.</div>
+          </div>
+        </div>
+
+        <hr />
+        <h6 className="fw-semibold">Tendance de vente</h6>
+        <div className="form-text mb-3">
+          Sert à catégoriser l'évolution des ventes d'un article (GROWING/DECLINING/VOLATILE), affichée en
+          contexte sur les anomalies de commande quand elle va dans le même sens que l'écart.
+        </div>
+        <div className="row g-3">
+          <div className="col-sm-6 col-lg-4">
+            <label className="form-label fw-semibold">Seuil explosion de ventes</label>
+            <div className="input-group">
+              <input type="number" className="form-control" min={1} step={5} value={values.salesSpikePct} onChange={(e) => setField('salesSpikePct', e.target.value)} />
+              <span className="input-group-text">%</span>
+            </div>
+          </div>
+          <div className="col-sm-6 col-lg-4">
+            <label className="form-label fw-semibold">Seuil chute de ventes</label>
+            <div className="input-group">
+              <input type="number" className="form-control" step={5} value={values.salesDropPct} onChange={(e) => setField('salesDropPct', e.target.value)} />
+              <span className="input-group-text">%</span>
+            </div>
+          </div>
+          <div className="col-sm-6 col-lg-4">
+            <label className="form-label fw-semibold">Seuil de volatilité</label>
+            <div className="input-group">
+              <input type="number" className="form-control" min={0.1} step={0.1} value={values.volatileCv} onChange={(e) => setField('volatileCv', e.target.value)} />
+              <span className="input-group-text">CV</span>
+            </div>
+          </div>
+          <div className="col-sm-6 col-lg-4">
+            <label className="form-label fw-semibold">Seuil tendance en hausse</label>
+            <div className="input-group">
+              <input type="number" className="form-control" min={1} step={1} value={values.trendGrowingPct} onChange={(e) => setField('trendGrowingPct', e.target.value)} />
+              <span className="input-group-text">%</span>
+            </div>
+          </div>
+          <div className="col-sm-6 col-lg-4">
+            <label className="form-label fw-semibold">Seuil tendance en baisse</label>
+            <div className="input-group">
+              <input type="number" className="form-control" step={1} value={values.trendDecliningPct} onChange={(e) => setField('trendDecliningPct', e.target.value)} />
+              <span className="input-group-text">%</span>
+            </div>
+          </div>
+        </div>
+
+        <button type="button" className="btn btn-primary btn-sm mt-3" disabled={saving} onClick={handleSave}>
           {saving ? 'Enregistrement…' : 'Enregistrer'}
         </button>
         {error && <div className="alert alert-danger mt-3">{error}</div>}
@@ -749,6 +886,13 @@ interface AiSystemConfig {
   CHATBOT_LLM_FALLBACK_ENABLED?: string;
   CHATBOT_FEATURE_TRACKING_ENABLED?: string;
   ANOMALY_MIN_DAILY_SALES?: string;
+  ORDER_ANOMALY_MIN_SAMPLE_SIZE?: string;
+  ORDER_ANOMALY_THRESHOLD?: string;
+  ANOMALY_SALES_SPIKE_THRESHOLD_PCT?: string;
+  ANOMALY_SALES_DROP_THRESHOLD_PCT?: string;
+  ANOMALY_TREND_GROWING_THRESHOLD_PCT?: string;
+  ANOMALY_TREND_DECLINING_THRESHOLD_PCT?: string;
+  ANOMALY_VOLATILE_CV_THRESHOLD?: string;
   AI_ANALYSIS_PROMPT_TEMPLATE?: string;
   CHATBOT_PROMPT_TEMPLATE?: string;
   CHATBOT_SUGGESTED_QUESTIONS?: string;
@@ -812,7 +956,18 @@ export function AiSection() {
         réponse trouvée — coût et latence additionnels, uniquement sur ces questions-là. Sans ce réglage, le
         chatbot explique toujours pourquoi il ne peut pas répondre, mais rien n'est enregistré automatiquement.
       </ToggleOnlyCard>
-      <AnomalyThresholdCard initialValue={config.ANOMALY_MIN_DAILY_SALES || '1'} />
+      <AnomalyThresholdCard
+        initial={{
+          minDailySales: config.ANOMALY_MIN_DAILY_SALES || '1',
+          orderMinSampleSize: config.ORDER_ANOMALY_MIN_SAMPLE_SIZE || '3',
+          orderAnomalyThreshold: config.ORDER_ANOMALY_THRESHOLD || '2',
+          salesSpikePct: config.ANOMALY_SALES_SPIKE_THRESHOLD_PCT || '80',
+          salesDropPct: config.ANOMALY_SALES_DROP_THRESHOLD_PCT || '-60',
+          trendGrowingPct: config.ANOMALY_TREND_GROWING_THRESHOLD_PCT || '15',
+          trendDecliningPct: config.ANOMALY_TREND_DECLINING_THRESHOLD_PCT || '-15',
+          volatileCv: config.ANOMALY_VOLATILE_CV_THRESHOLD || '1.2',
+        }}
+      />
       <AiAnalysisPromptCard initialValue={config.AI_ANALYSIS_PROMPT_TEMPLATE || ''} />
       <ChatbotPromptCard initialValue={config.CHATBOT_PROMPT_TEMPLATE || ''} />
       <ChatbotIntentRulesCard />
