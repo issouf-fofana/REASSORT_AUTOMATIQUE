@@ -223,6 +223,26 @@ async function getProductByEan(posId, shopId, ean) {
 }
 
 /**
+ * Recherche d'articles par nom/libellé partiel (demande du 05/10/2026 : "si je met pas tout le nom
+ * il doit me donner les variantes" — ex: "codys" sans préciser le format doit lister les variantes
+ * réellement vendues dans ce magasin plutôt que de demander un code EAN à l'utilisateur ou d'en
+ * inventer un). `label_1__icontains` confirmé par test direct contre le serveur RPOS comme le seul
+ * paramètre de filtre texte réellement respecté par /api/product/ (search=, label=, q= et
+ * name__icontains= sont silencieusement ignorés et renvoient tout le catalogue RPOS non filtré,
+ * ean__in est le seul autre filtre confirmé ailleurs dans ce fichier). Toujours scopé à `shop`, donc
+ * jamais de résultat d'un autre magasin.
+ */
+async function searchProductsByLabel(posId, shopId, query, { limit = 10 } = {}) {
+  const data = await rposGet(posId, '/api/product/', {
+    shop: shopId,
+    label_1__icontains: query,
+    page_size: limit,
+    fields: 'ean,label_1,label_2,selling_price,stock,department',
+  });
+  return { count: data.count || 0, results: data.results || [] };
+}
+
+/**
  * Résout le "rayon générique" d'un code de vente sans article catalogué (demande du 21/09/2026 :
  * "il y a des générique avec code et d'autre non... il faut faire la différence entre Code article
  * saisi et Code article") — un article générique (vente au poids/valeur libre, ex: "GENERIQUE
@@ -1221,6 +1241,7 @@ async function getProductGisement(posId, shopId, ean) {
 module.exports = {
   getShops,
   getProductByEan,
+  searchProductsByLabel,
   getGenericArticleDepartment,
   getPriceChangeHistory,
   getSupplierByCode,

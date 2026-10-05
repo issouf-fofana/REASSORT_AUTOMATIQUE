@@ -809,6 +809,35 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
 }
 
 /**
+ * searchArticlesByName(posId, shopId, query) — recherche d'articles par nom/libellé partiel (demande
+ * du 05/10/2026 : "si je met pas tout le nom il doit me donner les variantes" — ex: "codys" sans
+ * préciser le format doit lister les variantes réellement vendues dans ce magasin, jamais inventer un
+ * code EAN ni refuser sèchement). Un seul résultat → le LLM peut enchaîner directement sur sa fiche
+ * complète (le prompt l'y invite, cf. chatbotService.js) ; plusieurs résultats → le LLM doit lister
+ * les variantes et demander de préciser (ex: "tu parles du Codys 25CL ou du 50CL ?"), jamais deviner
+ * laquelle l'utilisateur veut. Limité à 10 résultats : au-delà, le nom est trop générique pour une
+ * vraie recherche d'article (le LLM doit alors demander un terme plus précis).
+ */
+async function searchArticlesByName(posId, shopId, query) {
+  const { count, results } = await rpos.searchProductsByLabel(posId, shopId, query, { limit: 10 });
+  if (!results.length) return { found: false, message: `Aucun article trouvé pour "${query}" dans ce magasin.` };
+  return {
+    found: true,
+    query,
+    totalMatches: count,
+    truncated: count > results.length,
+    articles: results.map((p) => ({
+      ean: p.ean,
+      label: p.label_1,
+      label2: p.label_2 || null,
+      sellingPrice: toNum(p.selling_price),
+      stock: toNum(p.stock),
+      department: p.department ? { name: p.department.name, code: p.department.code } : null,
+    })),
+  };
+}
+
+/**
  * getArticleDetails(posId, shopId, ean) — fiche complète d'un article en direct depuis RPOS
  * (demande du 15/09/2026 : un admin doit pouvoir demander "où se trouve cet article", "quel est
  * son prix actuel", "a-t-il une promo" et toute autre info produit). Distinct de getArticleStock
@@ -1424,6 +1453,7 @@ module.exports = {
   getRevenueTrendAllShops,
   getSilentShops,
   getArticleDetails,
+  searchArticlesByName,
   getArticlesByGisement,
   getTopGisements,
   getPriceChangeHistory,

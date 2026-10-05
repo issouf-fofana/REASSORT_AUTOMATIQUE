@@ -20,7 +20,7 @@ const featureRequestService = require('./featureRequestService');
 // aiPermissionsService.TOOL_CAPABILITY (sans getStoreStock, jamais une cible directe de règle —
 // c'est un repli interne de getArticleStock sans EAN, pas une intention détectable par mot-clé).
 const VALID_INTENT_TOOLS = new Set([
-  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
+  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
@@ -44,7 +44,11 @@ const FALLBACK_INTENT_RULES = [
   // detectIntent) mais celui-ci ne couvre que le motif "X% du CA", jamais "quel rayon vend le mieux"
   // qui ne passe que par cette liste générique.
   { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente', 'quel rayon vend le mieux', 'quel rayon vend le plus', 'meilleur rayon', 'rayon qui vend le plus', 'rayon qui vend le mieux', 'classement des rayons', 'comparer les rayons', 'comparaison des rayons'], tool: 'getParetoArticles' },
-  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
+  // "le prix de" (sans "vente"/"actuel") ajouté le 05/10/2026 (bug trouvé en testant la recherche
+  // par nom : "quel est le prix de l'article codys ?" ne matchait aucun mot-clé existant — seuls
+  // "prix de vente"/"prix actuel"/"quel prix" l'étaient — donc tombait sur le filet LLM générique au
+  // lieu de cette règle déterministe, qui seule sait basculer vers searchArticlesByName/EAN manquant.
+  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'le prix de', 'prix de l\'article', 'prix de larticle', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
   { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
@@ -231,6 +235,28 @@ function extractGisement(question) {
   const GENERIC_WORDS = new Set(['chaque', 'tous', 'tout', 'toutes', 'les', 'des', 'de', 'sur', 'pour', 'avec', 'dans']);
   const firstWord = captured.split(/\s+/)[0].toLowerCase();
   return GENERIC_WORDS.has(firstWord) ? null : captured;
+}
+
+/**
+ * Extrait un nom/libellé d'article probable d'une question qui n'a pas d'EAN explicite (demande du
+ * 05/10/2026 : "quel est le prix de codys" doit déclencher une vraie recherche par nom — cf.
+ * searchArticlesByName, chatbotToolsService.js — plutôt que de systématiquement demander un code
+ * EAN). Capture le texte après un déclencheur typique ("article", "produit", "de l'article",
+ * "prix de", "stock de"...) jusqu'à la fin de la question ou un mot de ponctuation/liaison.
+ * Volontairement permissif (un faux positif ne fait que renvoyer 0 résultat, jamais une mauvaise
+ * réponse) : mieux vaut tenter une recherche sur un nom mal découpé que de bloquer sur "précisez le
+ * code EAN" pour une formulation aussi naturelle que "le prix de codys".
+ */
+const ARTICLE_NAME_TRIGGER_REGEX =
+  /(?:article|produit|l'article|du produit)\s+(?!\d)([a-zàâäéèêëïîôöùûüç0-9][\w\s'àâäéèêëïîôöùûüç.,%+-]{1,60})(?:\s*[?.!]|$)/i;
+function extractArticleNameQuery(question) {
+  const match = (question || '').match(ARTICLE_NAME_TRIGGER_REGEX);
+  if (!match) return null;
+  const captured = match[1].trim().replace(/\s+/g, ' ');
+  // Un EAN capté comme "nom" (ex: "l'article 100144265") n'est pas un nom — extractEan s'en charge
+  // déjà séparément et doit toujours primer sur ce chemin (vérifié en amont dans runSingleTool).
+  if (/^\d+$/.test(captured)) return null;
+  return captured.length >= 2 ? captured : null;
 }
 
 function normalizeForMatch(str) {
@@ -635,6 +661,7 @@ const TOOL_CATALOG = [
   { name: 'getRevenueAllShops', description: 'Classement du CA de TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le CA de tous les magasins", "chiffre d\'affaires de chaque magasin", jamais pour une question sur UN seul magasin précis.', params: { date: 'date ISO aaaa-mm-jj, optionnel' } },
   { name: 'getSalesHistory', description: 'Historique/évolution des ventes (quantités, tendance) sur les derniers jours, du magasin ou d\'un article.', params: { ean: 'code EAN article, optionnel', days: 'nombre de jours, optionnel (défaut 30)', department: 'rayon, optionnel' } },
   { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
+  { name: 'searchArticlesByName', description: 'Recherche un ou plusieurs articles par nom/libellé partiel (ex: "codys", "coca cola") quand aucun code EAN n\'est identifiable dans la question — utiliser PLUTÔT que getArticleDetails avec tool: null dans ce cas précis.', params: { query: 'nom ou libellé partiel de l\'article, OBLIGATOIRE' } },
   { name: 'getArticlesByGisement', description: 'Liste tous les articles rangés dans un gisement précis (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS", "ACCESSOIRES DE CUISINE") — à ne pas confondre avec le rayon/département (classification produit). Utile pour "quels articles sont dans tel gisement", "tops ventes par gisement/emplacement".', params: { gisement: 'nom ou code approximatif du gisement recherché, OBLIGATOIRE' } },
   { name: 'getTopGisements', description: 'Classement des gisements (positions physiques de stockage) par chiffre d\'affaires généré — utile quand la question porte sur les gisements SANS en nommer un précis (ex: "top des gisements", "quels gisements vendent le plus").', params: { days: 'nombre de jours de la période, optionnel (défaut 30)' } },
   { name: 'getPriceChangeHistory', description: 'Historique des changements de prix (dont mises en promo) d\'un article précis.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
@@ -709,6 +736,28 @@ async function resolveAllowedShopIds(user) {
   if (user.role === 'ADMIN') return (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId);
   if (user.role === 'SUPERVISOR') return (await prisma.supervisedShop.findMany({ where: { userId: user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
   return [];
+}
+
+/**
+ * Résout une recherche d'article par nom partiel (demande du 05/10/2026 : "codys" sans préciser le
+ * format doit lister les variantes réelles). Un seul résultat → enchaîne directement sur sa fiche
+ * complète (getArticleDetails), avec la même vérification de périmètre Rayonniste/Chef de
+ * département que le chemin EAN explicite (jamais sautée juste parce que l'EAN vient d'une
+ * recherche par nom). Plusieurs résultats ou aucun → renvoie tel quel, le prompt (cf.
+ * buildChatbotPrompt, searchByNameNote) demande alors au LLM de lister les variantes et de
+ * demander de préciser, jamais de deviner laquelle l'utilisateur veut.
+ */
+async function resolveArticleByName(posId, rposShopId, articleNameQuery, user) {
+  const searchResult = await tools.searchArticlesByName(posId, rposShopId, articleNameQuery);
+  if (searchResult.found && searchResult.articles.length === 1) {
+    const resolvedEan = searchResult.articles[0].ean;
+    const inScope = await isEanInUserScope(rposShopId, resolvedEan, user);
+    if (!inScope) {
+      return { toolName: 'getArticleDetails', toolResult: { found: false, permissionDenied: true, message: 'Vous n\'avez pas accès à cet article, il n\'est pas dans votre périmètre.' } };
+    }
+    return { toolName: 'getArticleDetails', toolResult: await tools.getArticleDetails(posId, rposShopId, resolvedEan) };
+  }
+  return { toolName: 'searchArticlesByName', toolResult: searchResult };
 }
 
 /**
@@ -899,6 +948,9 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
   const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
   const daysQuery = explicitDays || naturalRange?.days || (llmParams ? llmParams.days : null) || null;
+  // Nom d'article probable, seulement utile quand aucun EAN n'a pu être résolu (sinon l'EAN prime
+  // toujours — cf. searchArticlesByName plus bas, basculé uniquement dans ce cas précis).
+  const articleNameQuery = !ean ? (extractArticleNameQuery(question) || (llmParams ? llmParams.query : null) || null) : null;
 
   // Un ADMIN/SUPERVISOR peut cibler UN AUTRE magasin que celui de la session en cours en le nommant
   // explicitement ("le magasin 035 a un CA de combien ?", cf. extractTargetShopReference) — jamais
@@ -965,9 +1017,19 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   try {
     switch (toolName) {
       case 'getArticleDetails':
-        if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        // Pas d'EAN mais un nom probable dans la question ("quel est le prix de codys") : recherche
+        // par libellé partiel plutôt que de bloquer sur "précisez le code EAN" (demande du
+        // 05/10/2026) — cf. resolveArticleByName ci-dessous.
+        if (!ean && articleNameQuery) return resolveArticleByName(posId, rposShopId, articleNameQuery, user);
+        if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN ou le nom de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
         return { toolName, toolResult: await tools.getArticleDetails(posId, rposShopId, ean) };
+      case 'searchArticlesByName':
+        // Choisi directement par le LLM de repli (filet n°3) quand aucune règle déterministe
+        // n'a identifié getArticleDetails via mots-clés — même résolution que ci-dessus.
+        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        if (!articleNameQuery) return { toolName, toolResult: { found: false, message: 'Précisez le nom ou le code EAN de l\'article recherché.' } };
+        return resolveArticleByName(posId, rposShopId, articleNameQuery, user);
       case 'getArticlesByGisement':
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         // Aucun nom de gisement précisé ("chaque gisement", "mes gisements") : bascule sur un
@@ -1256,7 +1318,14 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const eanNote = hasEanField
       ? '\n\nQuand ta réponse énumère des articles individuels, présente-les en LISTE À PUCES Markdown (une puce par article, jamais un paragraphe dense), indique TOUJOURS leur code (EAN/code article, présent dans les données sous un champ comme "ean", "code" ou "originEan") à côté du nom, jamais le nom seul — nécessaire pour retrouver l\'article en caisse ou en rayon. Format recommandé pour chaque puce : "**NOM** (code XXXXXXXXX) : <détail chiffré>".'
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}`;
+    // searchArticlesByName (ajouté le 05/10/2026, demande explicite : une recherche par nom partiel
+    // comme "codys" doit lister les variantes réelles plutôt que bloquer sur "précisez le code EAN")
+    // : n'atteint jamais ce chemin avec un seul résultat (runSingleTool enchaîne alors directement
+    // sur getArticleDetails pour avoir la fiche complète) — toujours plusieurs articles ici.
+    const searchByNameNote = toolName === 'searchArticlesByName' && toolResult.found
+      ? `\n\nIMPORTANT pour cette réponse : ${toolResult.articles.length} articles différents correspondent au nom recherché ("${toolResult.query}") — ne choisis JAMAIS un seul article au hasard ni ne suppose lequel l'utilisateur veut. Liste TOUTES les variantes trouvées (nom complet et code à côté, prix si pertinent pour la question), puis termine ta réponse par une question explicite lui demandant de préciser laquelle il veut dire (ex: "Tu parles du Codys 25CL ou du 50CL ?"). Ne réponds à la question initiale (prix, stock...) qu'une fois l'article précisé dans un message suivant.`
+      : '';
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}${searchByNameNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
