@@ -391,6 +391,28 @@ router.get('/proposal/analyze/status', async (req, res) => {
   }
 });
 
+// GET /api/reassort/proposal/analyze/detail - détail complet de la dernière analyse sauvegardée
+// pour ce magasin, article par article (demande du 05/10/2026 : "je dois avoir une vue où le
+// magasin peut voir le résultat d'une analyse... sans l'utiliser directement pour générer une
+// commande" — une analyse volontaire sert à regarder l'évolution des ventes/commandes par article,
+// indépendamment de la génération de proposition). Contrairement à /analyze/status ci-dessus (juste
+// les métadonnées), renvoie le payload complet via loadSalesAnalysisForGeneration — potentiellement
+// plusieurs centaines d'articles, jamais appelé en polling répété comme /status.
+router.get('/proposal/analyze/detail', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+
+    const analysis = await loadSalesAnalysisForGeneration(shopId);
+    if (!analysis) {
+      return res.status(404).json({ success: false, message: 'Aucune analyse disponible pour ce magasin — lancez une analyse au préalable.' });
+    }
+    res.json({ success: true, data: analysis });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/proposal/generate-from-analysis - génère une proposition à partir de
 // l'analyse déjà sauvegardée pour ce magasin (rapide : ne recharge jamais les ventes). Permet de
 // lancer plusieurs générations différentes (ex: avec des `limit` différents) à partir de la même

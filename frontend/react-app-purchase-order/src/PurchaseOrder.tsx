@@ -513,11 +513,15 @@ export function PurchaseOrder() {
         .reassort-dept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
         @media (max-width: 1399px) { .reassort-dept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 767px) { .reassort-dept-grid { grid-template-columns: 1fr; } }
+        /* Icônes revenues à l'ambre unique (demande du 05/10/2026, "trop de couleur, il faut mettre
+           en jaune") après une tentative de couleur par secteur le même jour — annulée. Poids de
+           police allégés en même temps ("trop de police grasse") : seul le titre de carte reste en
+           600, les valeurs de métrique passent de 700 à 600. */
         .reassort-dept-row {
-          --row-navy: #1B2A4A;
           --row-amber: #F5A623;
           display: block;
-          border: 1px solid #e9ecf2;
+          position: relative;
+          border: 1px solid #D6DEEA;
           border-radius: 14px;
           background: #ffffff;
           box-shadow: 0 1px 3px rgba(27, 42, 74, .05);
@@ -525,37 +529,39 @@ export function PurchaseOrder() {
           overflow: hidden;
           height: 100%;
         }
-        .reassort-dept-row:hover { box-shadow: 0 8px 20px rgba(27, 42, 74, .1); border-color: #c7d2e8; transform: translateY(-1px); }
-        .reassort-dept-row .card-body { padding: 1.1rem 1.3rem; }
+        .reassort-dept-row:hover { box-shadow: 0 10px 24px rgba(27, 42, 74, .12); border-color: #c7d2e8; transform: translateY(-2px); }
+        .reassort-dept-row .card-body { padding: 1.2rem 1.3rem 1.1rem; }
         .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: .9rem; }
         .row-identity { display: flex; align-items: flex-start; gap: .85rem; min-width: 0; }
         .reassort-dept-row .tile-icon {
-          width: 38px; height: 38px; border-radius: 10px;
+          width: 40px; height: 40px; border-radius: 11px;
           display: flex; align-items: center; justify-content: center;
-          background: var(--row-navy);
+          /* Inversé le 05/10/2026 ("icône en jaune et le fond en bleu") : fond marine, pictogramme
+             ambre — couleurs d'origine du site, après plusieurs essais dans l'autre sens. */
+          background: #1B2A4A;
           color: var(--row-amber);
-          font-size: 1.1rem;
+          font-size: 1.15rem;
           flex-shrink: 0;
         }
-        .reassort-dept-row .card-title { font-size: .95rem; font-weight: 600; letter-spacing: -.005em; color: #1B2A4A; margin-bottom: .2rem; }
+        .reassort-dept-row .card-title { font-size: .97rem; font-weight: 600; letter-spacing: -.005em; color: #1B2A4A; margin-bottom: .2rem; }
         .reassort-dept-row .tile-count { color: #5B6B85; font-size: .78rem; margin-bottom: 0; }
         .row-metrics { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: center; }
         .row-metric { min-width: 70px; }
-        .row-metric-label { display: flex; align-items: center; gap: .35rem; color: #8a93a8; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
+        .row-metric-label { display: flex; align-items: center; gap: .35rem; color: #8a93a8; font-size: .68rem; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
         .row-metric-label iconify-icon { font-size: .85rem; }
-        .row-metric-value { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
+        .row-metric-value { font-size: .97rem; font-weight: 600; color: #1B2A4A; }
         .row-progress-wrap { flex: 1 1 100%; min-width: 140px; }
-        .tile-progress { height: 6px; border-radius: 999px; background-color: #EDF1F7; overflow: hidden; margin-top: .4rem; }
-        .tile-progress-fill { height: 100%; background-color: var(--row-amber); border-radius: 999px; transition: width .35s ease; }
+        .tile-progress { height: 7px; border-radius: 999px; background-color: #EDF1F7; overflow: hidden; margin-top: .4rem; }
+        .tile-progress-fill { height: 100%; background: var(--row-amber); border-radius: 999px; transition: width .35s ease; }
         .row-status-badge {
-          font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+          font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
           padding: .35rem .7rem; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
           display: inline-flex; align-items: center; gap: .3rem;
         }
         .row-status-badge.status-done { background: #ECFDF5; color: #047857; }
         .row-status-badge.status-failed { background: #F5EDEC; color: #7A4A45; }
         .row-status-badge.status-pending { background: #EDF1F7; color: #5B6B85; }
-        /* Variante neutre (RemainderTile) : icône et accents gris plutôt que marine/ambre. */
+        /* Variante neutre (RemainderTile) : icône et accents gris plutôt qu'ambre. */
         .reassort-dept-row-neutral .tile-icon { background: #EEF1F6; color: #5B6B85; }
         .reassort-dept-row-neutral .card-title { color: #5B6B85; }
         .reassort-dept-row-neutral .tile-progress-fill { background-color: #97A3BC; }

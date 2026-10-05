@@ -127,6 +127,14 @@ RUN npm ci
 COPY react-app-order-anomalies/ .
 RUN npm run build
 
+# Stage de build de Résultat de l'analyse (05/10/2026, nouvelle page) — même pattern Vite séparé.
+FROM node:20-alpine AS sales-analysis-builder
+WORKDIR /app
+COPY react-app-sales-analysis/package*.json ./
+RUN npm ci
+COPY react-app-sales-analysis/ .
+RUN npm run build
+
 FROM node:20-alpine AS feature-requests-builder
 WORKDIR /app
 COPY react-app-feature-requests/package*.json ./
@@ -216,6 +224,10 @@ COPY --from=ai-mastery-builder /app/dist /usr/share/nginx/html/ai-mastery-app
 # nginx dédiée (voir nginx.conf) — dernière page du site migrée vers React.
 COPY --from=order-anomalies-builder /app/dist /usr/share/nginx/html/order-anomalies-app
 COPY --from=auth-signin-builder /app/dist /usr/share/nginx/html/auth-signin-app
+
+# Résultat du build React (Résultat de l'analyse, 05/10/2026), servi sous /sales-analysis-app/ par
+# une règle nginx dédiée (voir nginx.conf).
+COPY --from=sales-analysis-builder /app/dist /usr/share/nginx/html/sales-analysis-app
 
 # Résultat du build React (Demandes d'évolution, 25/09/2026), servi sous /feature-requests-app/ par
 # une règle nginx dédiée (voir nginx.conf).

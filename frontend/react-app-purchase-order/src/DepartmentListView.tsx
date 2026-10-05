@@ -19,25 +19,13 @@ function groupLines(lines: ProposalLine[], keyFn: (l: ProposalLine) => string): 
   return Array.from(byKey.entries()).sort((a, b) => b[1].revenuePct - a[1].revenuePct);
 }
 
-// Icône décorative par secteur/rayon : purement esthétique (aucune logique métier), une
-// correspondance mot-clé raisonnable suffit — un rayon non reconnu retombe sur une icône neutre.
-const SECTOR_ICON_BY_KEYWORD: [string, string][] = [
-  ['sec', 'solar:box-bold-duotone'],
-  ['frais', 'solar:leaf-bold-duotone'],
-  ['bazar', 'solar:bag-smile-bold-duotone'],
-  ['textile', 'solar:t-shirt-bold-duotone'],
-  ['liquide', 'solar:bottle-bold-duotone'],
-  ['boisson', 'solar:cup-hot-bold-duotone'],
-  ['hygiène', 'solar:health-bold-duotone'],
-  ['hygiene', 'solar:health-bold-duotone'],
-  ['entretien', 'solar:spray-can-bold-duotone'],
-  ['surgel', 'solar:snowflake-bold-duotone'],
-];
-
-function sectorIcon(name: string): string {
-  const key = name.toLowerCase();
-  const match = SECTOR_ICON_BY_KEYWORD.find(([kw]) => key.includes(kw));
-  return match ? match[1] : 'solar:widget-2-bold-duotone';
+// Icône unique pour tous les secteurs/rayons (demande du 05/10/2026, "il faut faire même style
+// comme ça") — après plusieurs tentatives de variation par rayon (icône+couleur, puis icône seule),
+// l'utilisateur a tranché pour une seule icône cohérente partout plutôt qu'une forme différente par
+// mot-clé. sectorMeta reste une fonction (plutôt qu'une constante utilisée directement) pour garder
+// un seul point d'appel si une distinction par secteur redevient utile plus tard.
+function sectorMeta(_name: string): { icon: string } {
+  return { icon: 'solar:widget-2-bold-duotone' };
 }
 
 function DeptTile({
@@ -56,6 +44,7 @@ function DeptTile({
   order?: ProposalOrder | null;
 }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
+  const { icon } = sectorMeta(name);
   const statusMeta = !order
     ? null
     : order.status === 'DONE'
@@ -81,7 +70,7 @@ function DeptTile({
         <div className="row-top">
           <div className="row-identity">
             <div className="tile-icon">
-              <iconify-icon icon={sectorIcon(name)}></iconify-icon>
+              <iconify-icon icon={icon}></iconify-icon>
             </div>
             <div>
               <h5 className="card-title">{name}</h5>

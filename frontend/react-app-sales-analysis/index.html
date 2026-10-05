@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Résultat de l'analyse | Réassort Automatique</title>
+
+    <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/theme-override.css?v=2026-10-01-2" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/notch-nav.css?v=2026-09-27-12" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+    <script src="/assets/js/config.js"></script>
+    <script src="/assets/js/backend-config.js"></script>
+    <script src="/assets/js/reassort-auth.js"></script>
+    <script src="/assets/js/shop-picker.js"></script>
+  </head>
+  <body data-page-title="Résultat de l'analyse">
+    <script src="/assets/js/loading-overlay.js"></script>
+
+    <div id="layout-sidebar-slot"></div>
+    <div id="notch-nav-slot" style="display:none;"></div>
+    <button type="button" id="reset-layout" class="visually-hidden" aria-hidden="true" tabindex="-1"></button>
+
+    <main class="content">
+      <div id="layout-topbar-slot"></div>
+      <script src="/assets/js/layout-collapsible.js?v=2026-09-26-1"></script>
+      <script src="/assets/js/notch-nav.js?v=2026-09-27-12"></script>
+      <script src="/assets/js/global-shop-selector.js"></script>
+      <script src="/assets/js/reassort-toast.js"></script>
+
+      <div class="py-4">
+        <div class="container-xxl">
+          <div id="root"></div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
+    <script src="/assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+    <script src="/assets/volt/vendor/simplebar/dist/simplebar.min.js"></script>
+    <script src="/assets/js/notifications-bell.js"></script>
+    <script src="/assets/js/ai-assistant-widget.js"></script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

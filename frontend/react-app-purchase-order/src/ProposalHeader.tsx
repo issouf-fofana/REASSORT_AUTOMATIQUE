@@ -89,33 +89,53 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
   return (
     <div className="ph-card mb-3">
       <style>{`
-        .ph-card { background: #ffffff; border: 1px solid #e9ecf2; border-radius: 14px; box-shadow: 0 1px 3px rgba(27,42,74,.05); overflow: hidden; }
-        .ph-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem 1.3rem; background: #1B2A4A; color: #ffffff; }
-        .ph-identity { display: flex; align-items: center; gap: .9rem; min-width: 0; }
-        .ph-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,.12); color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
-        .ph-number { font-weight: 700; font-size: .98rem; }
-        .ph-shop { color: #C7D0E0; font-size: .8rem; }
-        .ph-status { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .35rem .8rem; border-radius: 999px; white-space: nowrap; background: rgba(245,166,35,.18); color: #F5A623; }
-        .ph-status.validated { background: rgba(34,197,94,.18); color: #86efac; }
-        .ph-metrics { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: .9rem 1.3rem; }
-        .ph-metric { min-width: 100px; }
-        .ph-metric-label { display: flex; align-items: center; gap: .35rem; color: #8a93a8; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
-        .ph-metric-label iconify-icon { font-size: .85rem; }
-        .ph-metric-value { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
+        /* Refonte du 05/10/2026 ("afficher les contours pour chaque partie") : chaque compartiment —
+           bandeau identité/statut, puis chaque métrique individuellement — a son propre contour net
+           et visible, pas un séparateur à peine perceptible comme la tentative précédente
+           (#EDF1F7 sur blanc). Bordures à #D6DEEA (même teinte que .reassort-info-badge ailleurs
+           sur le site), clairement lisibles sans être agressives. */
+        /* Bandeau passé en blanc (demande du 05/10/2026, "trop de bleu à l'écran, le marine doit
+           rester la sidebar seule") — fini le fond dégradé marine ici, l'identité reste lisible en
+           texte foncé simple et le seul accent de couleur est le badge de statut. */
+        .ph-card { background: #ffffff; border: 1px solid #D6DEEA; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(27,42,74,.08); }
+        .ph-top {
+          display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+          padding: 1.1rem 1.4rem;
+          background: #ffffff;
+          border-bottom: 1px solid #D6DEEA;
+        }
+        .ph-number { font-weight: 600; font-size: 1.1rem; letter-spacing: -.01em; color: #1B2A4A; }
+        .ph-shop { color: #5B6B85; font-size: .82rem; margin-top: .15rem; }
+        /* Pilule pleine (demande du 05/10/2026 : remise après une tentative "texte seul" jugée trop
+           discrète) — mêmes couleurs que la version d'origine, juste un contour en plus pour rester
+           cohérent avec le reste de la refonte "contours visibles". */
+        .ph-status {
+          font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+          padding: .35rem .8rem; border-radius: 999px; white-space: nowrap;
+          background: #F5A623; color: #1B2A4A; border: 1px solid rgba(255,255,255,.25);
+        }
+        .ph-status.validated { background: #22c55e; color: #0b3b1f; }
+        /* Grille façon tableau (demande du 05/10/2026, "séparé par les bordures comme dans un
+           tableau") : chaque métrique est une vraie cellule avec un contour complet sur ses 4 côtés
+           (via un gap négatif + bordure pleine + chevauchement des bordures adjacentes, pattern CSS
+           classique pour un tableau sans bordures doublées), pas juste un filet entre deux blocs. */
+        .ph-metrics {
+          display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          background: #D6DEEA; gap: 1px;
+        }
+        .ph-metric { background: #ffffff; padding: .9rem 1.4rem; }
+        .ph-metric-label { color: #8a93a8; font-size: .72rem; margin-bottom: .2rem; }
+        .ph-metric-value { font-size: 1.1rem; font-weight: 600; line-height: 1.15; color: #1B2A4A; }
         .ph-metric-value.success { color: #047857; }
         .ph-metric-value.danger { color: #b91c1c; }
+        @media (max-width: 767px) { .ph-metric { border-right: none; } }
       `}</style>
       <div className="ph-top">
-        <div className="ph-identity">
-          <div className="ph-icon">
-            <iconify-icon icon="solar:document-text-bold-duotone"></iconify-icon>
-          </div>
-          <div className="min-width-0">
-            <div className="ph-number">Proposition {proposalNumber}</div>
-            <div className="ph-shop" title={fmtDateTime(proposal.generatedAt)}>
-              {proposal.rposShopReference || '—'}
-              {proposal.rposShopName ? ` — ${proposal.rposShopName}` : ''}
-            </div>
+        <div className="min-width-0">
+          <div className="ph-number">Proposition {proposalNumber}</div>
+          <div className="ph-shop" title={fmtDateTime(proposal.generatedAt)}>
+            {proposal.rposShopReference || '—'}
+            {proposal.rposShopName ? ` — ${proposal.rposShopName}` : ''}
           </div>
         </div>
         <span className={`ph-status${proposal.status === 'VALIDATED' ? ' validated' : ''}`}>
@@ -124,18 +144,14 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
       </div>
       <div className="ph-metrics">
         <div className="ph-metric">
-          <div className="ph-metric-label">
-            <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon> Analyse
-          </div>
+          <div className="ph-metric-label">Analyse</div>
           <div className="ph-metric-value" title={periodModeLabel || undefined}>
             {periodLabel || '—'}
           </div>
         </div>
         {dataAvailability?.found && dataAvailability.oldestDate && dataAvailability.newestDate && (
           <div className="ph-metric">
-            <div className="ph-metric-label">
-              <iconify-icon icon="solar:database-bold-duotone"></iconify-icon> Données dispo.
-            </div>
+            <div className="ph-metric-label">Données dispo.</div>
             <div
               className="ph-metric-value"
               title="Étendue complète de l'historique de ventes synchronisé pour ce magasin, indépendamment de la période d'analyse."
@@ -145,23 +161,17 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
           </div>
         )}
         <div className="ph-metric">
-          <div className="ph-metric-label">
-            <iconify-icon icon="solar:box-bold-duotone"></iconify-icon> Articles
-          </div>
+          <div className="ph-metric-label">Articles</div>
           <div className="ph-metric-value">{summary.total}</div>
         </div>
         {summary.hasEligibilityData && (
           <>
             <div className="ph-metric">
-              <div className="ph-metric-label">
-                <iconify-icon icon="solar:check-circle-bold-duotone"></iconify-icon> Commandables
-              </div>
+              <div className="ph-metric-label">Commandables</div>
               <div className="ph-metric-value success">{summary.commandableCount}</div>
             </div>
             <div className="ph-metric">
-              <div className="ph-metric-label">
-                <iconify-icon icon="solar:close-circle-bold-duotone"></iconify-icon> Non commandables
-              </div>
+              <div className="ph-metric-label">Non commandables</div>
               <div className={`ph-metric-value${summary.nonCommandableCount > 0 ? ' danger' : ''}`}>
                 {summary.nonCommandableCount}
               </div>
