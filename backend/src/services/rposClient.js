@@ -255,20 +255,31 @@ async function getPriceChangeHistory(posId, shopId, ean, { limit = 50 } = {}) {
     page_size: limit,
     ordering: '-date',
   });
-  return (data.results || []).map((r) => ({
-    date: r.date,
-    ean: r.ean,
-    label: r.label_1 || null,
-    // *_display_name déjà en français lisible côté RPOS (ex: "prix d'achat", "prix de vente",
-    // "prix promo" / "maj auto prix", "modification manuelle"...) : pas besoin de retraduire des
-    // codes numériques nous-mêmes (confirmé par test direct le 15/09/2026).
-    priceType: r.price_type_display_name || null,
-    oldPrice: r.old_price !== undefined && r.old_price !== null ? Number(r.old_price) : null,
-    newPrice: r.new_price !== undefined && r.new_price !== null ? Number(r.new_price) : null,
-    isPriceIncrease: !!r.is_price_increase,
-    context: r.context_display_name || null,
-    user: r.username || null,
-  }));
+  return (data.results || []).map((r) => {
+    const oldPrice = r.old_price !== undefined && r.old_price !== null ? Number(r.old_price) : null;
+    const newPrice = r.new_price !== undefined && r.new_price !== null ? Number(r.new_price) : null;
+    return {
+      date: r.date,
+      ean: r.ean,
+      label: r.label_1 || null,
+      // *_display_name déjà en français lisible côté RPOS (ex: "prix d'achat", "prix de vente",
+      // "prix promo" / "maj auto prix", "modification manuelle"...) : pas besoin de retraduire des
+      // codes numériques nous-mêmes (confirmé par test direct le 15/09/2026).
+      priceType: r.price_type_display_name || null,
+      oldPrice,
+      newPrice,
+      // oldPriceLabel/newPriceLabel (bug constaté le 05/10/2026 : le LLM inventait une valeur
+      // numérique quand oldPrice/newPrice valait null, ex: "prix de vente passé de 180 à 200" sur
+      // une ligne priceType="prix promo" qui n'a jamais eu de prix de vente) — un texte prêt à
+      // l'emploi porté par CHAQUE ligne plutôt qu'une seule note générale au niveau de l'outil, pour
+      // rester explicite même si le LLM ne relit pas cette note en détail pour chaque ligne.
+      oldPriceLabel: oldPrice !== null ? `${oldPrice} FCFA` : 'aucun prix promo actif avant ce changement',
+      newPriceLabel: newPrice !== null ? `${newPrice} FCFA` : 'aucun prix promo actif après ce changement',
+      isPriceIncrease: !!r.is_price_increase,
+      context: r.context_display_name || null,
+      user: r.username || null,
+    };
+  });
 }
 
 // Filtre ean__in supporté par /api/product/ (confirmé par test direct) : sur un magasin à cache

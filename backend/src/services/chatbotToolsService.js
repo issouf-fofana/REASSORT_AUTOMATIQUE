@@ -994,7 +994,26 @@ async function getTopGisements(posId, shopId, { days = 30 } = {}) {
 async function getPriceChangeHistory(posId, shopId, ean) {
   const history = await rpos.getPriceChangeHistory(posId, shopId, ean, { limit: 30 });
   if (!history.length) return { found: false, message: `Aucun changement de prix enregistré pour l'article ${ean}.` };
-  return { found: true, ean, label: history[0].label, changeCount: history.length, history };
+  return {
+    found: true,
+    ean,
+    label: history[0].label,
+    changeCount: history.length,
+    // Note explicite pour le LLM (bug constaté le 05/10/2026) : sans ce rappel, il confondait
+    // priceType "prix promo" avec le prix de vente normal, et interprétait oldPrice/newPrice à null
+    // (RPOS renvoie "-") comme un retour à une valeur numérique inventée plutôt que "pas de prix
+    // promo actif à ce moment-là" — halluciné dans sa réponse (ex: "le prix de vente est passé de
+    // 180 à 200 FCFA" alors qu'aucune ligne priceType="prix de vente" n'existe dans l'historique).
+    interpretationNote:
+      "priceType distingue 3 types de prix INDÉPENDANTS : \"prix de vente\" (le prix normal affiché en caisse), " +
+      "\"prix promo\" (un prix réduit temporaire, actif seulement quand non null), et \"prix d'achat\" (coût " +
+      "fournisseur, invisible au client). Ne jamais mélanger ces types dans une même phrase comme s'ils étaient " +
+      "le même prix. Utilise TOUJOURS oldPriceLabel/newPriceLabel (déjà du texte prêt à l'emploi) plutôt que " +
+      "oldPrice/newPrice bruts pour rédiger ta phrase — quand la valeur est vide (oldPrice/newPrice à null), " +
+      "oldPriceLabel/newPriceLabel disent explicitement \"aucun prix promo actif\" : reprends cette formulation " +
+      "mot pour mot dans ta réponse, ne la remplace JAMAIS par un chiffre inventé ni ne la passe sous silence.",
+    history,
+  };
 }
 
 /**
