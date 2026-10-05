@@ -1374,13 +1374,18 @@ Ne dis jamais que la fonctionnalité existe déjà ou qu'elle sera disponible à
     //      lieu de deviner la bonne formulation par tâtonnement.
     //   2) la question est HORS PÉRIMÈTRE (aucun rapport avec le réassort/ventes/stock) : là seule
     //      la liste générique des capacités a du sens, une reformulation ne servirait à rien.
-    // Le LLM tranche lui-même entre les deux cas au vu de la question réelle — cette distinction ne
+    //   3) ce n'est PAS une question du tout, juste une salutation/politesse ("salut", "bonjour",
+    //      "merci", "ça va ?") : répondre "je ne dispose pas de cette donnée" est absurde ici — rien
+    //      n'a été demandé (bug constaté le 05/10/2026 : "salut" recevait exactement la même réponse
+    //      que "quel est le prix du Bitcoin ?", qui EST une vraie question hors périmètre).
+    // Le LLM tranche lui-même entre les trois cas au vu de la question réelle — cette distinction ne
     // peut pas être détectée de façon fiable par mots-clés (ARTICLE_SCOPED_TOOLS ne couvre pas tous
     // les cas d'ambiguïté possibles).
     const capabilitiesList = (suggestedQuestions || []).map((q) => `- ${q}`).join('\n');
-    dataSection = `Aucun outil de données spécifique n'a été identifié pour cette question — deux cas possibles, à distinguer toi-même :
+    dataSection = `Aucun outil de données spécifique n'a été identifié pour cette question — trois cas possibles, à distinguer toi-même :
 1) Si la question semble porter sur un sujet couvert (ventes, stock, CA, commandes, article...) mais est formulée de façon ambiguë, incomplète ou avec une faute qui empêche de la traiter avec certitude (ex: référence à "cet article" sans code EAN identifiable, formulation qui pourrait viser plusieurs données différentes) : dis que tu n'es pas sûr de bien comprendre, PUIS propose 1 à 3 reformulations précises et concrètes de CETTE question précise (pas une liste générique) que l'utilisateur peut reposer telles quelles pour obtenir une réponse.
-2) Si la question n'a manifestement aucun rapport avec le réassort, les ventes, le stock, les commandes ou la prévision (hors périmètre) : dis clairement que tu ne disposes pas de cette donnée, PUIS liste explicitement (en puces) les types de questions auxquelles tu peux répondre avec des données réelles, à partir de cette liste :\n${capabilitiesList}`;
+2) Si la question n'a manifestement aucun rapport avec le réassort, les ventes, le stock, les commandes ou la prévision (hors périmètre) : dis clairement que tu ne disposes pas de cette donnée, PUIS liste explicitement (en puces) les types de questions auxquelles tu peux répondre avec des données réelles, à partir de cette liste :\n${capabilitiesList}
+3) Si ce n'est PAS une question mais une simple salutation ou formule de politesse ("salut", "bonjour", "merci", "ça va ?", "au revoir"...) : réponds-y naturellement et brièvement (ex: "Bonjour ! Comment puis-je vous aider ?"), JAMAIS "je ne dispose pas de cette donnée" qui n'a aucun sens ici — tu peux ensuite, si tu le souhaites, mentionner brièvement 1-2 exemples de ce que tu peux faire, sans ressortir la liste complète des capacités.`;
   }
 
   // Persona/ton/consignes de format éditables depuis Paramètres > IA (CHATBOT_PROMPT_TEMPLATE,
