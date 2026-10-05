@@ -390,12 +390,25 @@ router.get('/platform-guide', async (req, res) => {
 
 // GET /api/reassort/chatbot/conversations - liste des conversations de l'utilisateur connecté
 // (toutes magasins confondus, plus récentes d'abord), pour la liste latérale façon ChatGPT.
+// ?search=<texte> (demande du 05/10/2026 : "ajouter une barre de recherche... cherche par le
+// texte") filtre sur le titre OU le contenu de n'importe quel message de la conversation —
+// recherche faite en base (pas côté client) pour couvrir le texte des échanges, jamais chargés en
+// entier juste pour filtrer la liste.
 router.get('/chatbot/conversations', async (req, res) => {
   try {
+    const { search } = req.query;
     const conversations = await prisma.chatbotConversation.findMany({
-      where: { userId: req.user.id },
+      where: {
+        userId: req.user.id,
+        ...(search ? {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { messages: { some: { content: { contains: search, mode: 'insensitive' } } } },
+          ],
+        } : {}),
+      },
       orderBy: { updatedAt: 'desc' },
-      select: { id: true, title: true, rposShopId: true, department: true, subDepartment: true, updatedAt: true },
+      select: { id: true, title: true, rposShopId: true, department: true, subDepartment: true, createdAt: true, updatedAt: true },
       take: 100,
     });
     res.json({ success: true, data: conversations });

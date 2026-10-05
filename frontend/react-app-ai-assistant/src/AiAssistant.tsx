@@ -17,6 +17,7 @@ interface Conversation {
   rposShopId: string | null;
   department: string | null;
   subDepartment: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -65,6 +66,21 @@ interface Turn {
   // Purement visuel pour l'instant (30/09/2026) : aucune persistance backend, juste l'état du
   // bouton like/dislike affiché sous la réponse.
   feedback?: 'up' | 'down' | null;
+}
+
+// Date/heure de création affichée sous chaque titre de conversation (demande du 05/10/2026) —
+// format court et relatif ("aujourd'hui 14h32", "hier 09h10", "05/10 14h32") plutôt qu'une date
+// complète systématique, plus rapide à lire dans une liste compacte.
+function formatConversationDate(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (isSameDay(d, now)) return `Aujourd'hui ${time}`;
+  if (isSameDay(d, yesterday)) return `Hier ${time}`;
+  return `${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} ${time}`;
 }
 
 function escapeHtml(str: string): string {
@@ -252,6 +268,10 @@ export function AiAssistant() {
   const [suggestionsHidden, setSuggestionsHidden] = useState(() => localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === '1');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  // Recherche par texte dans l'historique des conversations (demande du 05/10/2026) — filtre en
+  // base sur le titre ET le contenu des échanges (cf. GET /chatbot/conversations?search=), avec un
+  // debounce pour ne pas relancer la requête à chaque frappe.
+  const [conversationSearch, setConversationSearch] = useState('');
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [shopReady, setShopReady] = useState(false);
   const [department, setDepartment] = useState('');
@@ -302,9 +322,10 @@ export function AiAssistant() {
     if (shopId) loadDepartments(shopId);
   }, [currentShopId, loadDepartments]);
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (search?: string) => {
     try {
-      const data = await apiFetch<Conversation[]>('/reassort/chatbot/conversations');
+      const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+      const data = await apiFetch<Conversation[]>(`/reassort/chatbot/conversations${qs}`);
       setConversations(data);
       setConversationsError(null);
     } catch (err) {
@@ -312,10 +333,23 @@ export function AiAssistant() {
     }
   }, []);
 
+  // Debounce de la recherche (300ms) — évite un appel serveur à chaque frappe, cf. champ de
+  // recherche dans aia-conv-list plus bas.
+  useEffect(() => {
+    const timer = setTimeout(() => { loadConversations(conversationSearch); }, 300);
+    return () => clearTimeout(timer);
+  }, [conversationSearch, loadConversations]);
+
   function startNewConversation() {
     setCurrentConversationId(null);
     setTurns([]);
     setConversationError(null);
+    // Retire ?conversation=... de l'URL (demande du 05/10/2026 : "quand j'actualise il quitte la
+    // conversation" — l'URL est la source de vérité qui permet de rester sur la bonne conversation
+    // après un rafraîchissement, cf. openConversation ci-dessous et la restauration au montage).
+    const url = new URL(window.location.href);
+    url.searchParams.delete('conversation');
+    window.history.pushState({}, '', url);
   }
 
   async function openConversation(id: string) {
@@ -323,6 +357,12 @@ export function AiAssistant() {
       const data = await apiFetch<ConversationDetail>(`/reassort/chatbot/conversations/${id}`);
       setCurrentConversationId(id);
       setConversationError(null);
+      // Conversation active persistée dans l'URL (bug du 05/10/2026, voir commentaire ci-dessus) —
+      // pushState plutôt que replaceState : permet aussi au bouton "précédent" du navigateur de
+      // naviguer entre les conversations ouvertes dans cette session.
+      const url = new URL(window.location.href);
+      url.searchParams.set('conversation', id);
+      window.history.pushState({}, '', url);
 
       const user = window.reassortGetUser();
       const convShop = data.rposShopId ? shopsById.get(data.rposShopId) : null;
@@ -553,7 +593,17 @@ export function AiAssistant() {
       .then(setSuggestedQuestions)
       .catch(() => {});
 
-    loadConversations();
+    // loadConversations() du montage initial géré par le useEffect debounce ci-dessus (se déclenche
+    // aussi au montage, conversationSearch valant '' au départ) — pas la peine de le dupliquer ici.
+
+    // Restaure la conversation active depuis l'URL au chargement (bug du 05/10/2026 : "quand
+    // j'actualise il quitte sur la conversation") — après le chargement des magasins ci-dessus
+    // (openConversation restaure le magasin actif associé à la conversation, a besoin de shopsById
+    // déjà rempli). Un ID invalide/supprimé échoue silencieusement vers l'écran d'accueil habituel.
+    const conversationIdFromUrl = new URLSearchParams(window.location.search).get('conversation');
+    if (conversationIdFromUrl) {
+      openConversation(conversationIdFromUrl).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -562,10 +612,13 @@ export function AiAssistant() {
       <style>{`
         .aia-layout { display: flex; gap: 1rem; height: calc(100vh - 220px); min-height: 480px; }
         .aia-conv-list { width: 280px; flex-shrink: 0; background-color: #ffffff; border: 1px solid #e5e5e5; overflow-y: auto; }
-        .aia-conv-item { display: flex; align-items: center; justify-content: space-between; padding: .65rem .85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: .85rem; }
+        .aia-conv-item { display: flex; align-items: center; justify-content: space-between; padding: .55rem .85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: .85rem; }
         .aia-conv-item:hover { background-color: #f5f5f5; }
         .aia-conv-item.active { background-color: #000000; color: #ffffff; }
-        .aia-conv-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; }
+        .aia-conv-main { overflow: hidden; flex-grow: 1; min-width: 0; }
+        .aia-conv-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .aia-conv-date { display: block; font-size: .72rem; color: #999; margin-top: .1rem; }
+        .aia-conv-item.active .aia-conv-date { color: #ccc; }
         .aia-conv-delete { opacity: .5; margin-left: .5rem; flex-shrink: 0; }
         .aia-conv-delete:hover { opacity: 1; }
         .aia-conv-item.active .aia-conv-delete { color: #ffffff; }
@@ -760,15 +813,31 @@ export function AiAssistant() {
       <div className="aia-layout">
         <div className="aia-conv-list">
           <div className="p-2 border-bottom">
-            <button type="button" className="btn btn-dark btn-sm w-100" onClick={startNewConversation}>
+            <button type="button" className="btn btn-dark btn-sm w-100 mb-2" onClick={startNewConversation}>
               + Nouvelle conversation
             </button>
+            <div className="position-relative">
+              <iconify-icon
+                icon="solar:magnifer-linear"
+                style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#999', fontSize: '.9rem' }}
+              ></iconify-icon>
+              <input
+                type="search"
+                className="form-control form-control-sm"
+                style={{ paddingLeft: 30 }}
+                placeholder="Rechercher une conversation..."
+                value={conversationSearch}
+                onChange={(e) => setConversationSearch(e.target.value)}
+              />
+            </div>
           </div>
           <div>
             {conversationsError ? (
               <div className="p-3 text-danger small">Erreur : {conversationsError}</div>
             ) : conversations.length === 0 ? (
-              <div className="p-3 text-muted small">Aucune conversation pour le moment.</div>
+              <div className="p-3 text-muted small">
+                {conversationSearch ? 'Aucune conversation ne correspond à cette recherche.' : 'Aucune conversation pour le moment.'}
+              </div>
             ) : (
               conversations.map((c) => (
                 <div
@@ -776,7 +845,10 @@ export function AiAssistant() {
                   className={`aia-conv-item${c.id === currentConversationId ? ' active' : ''}`}
                   onClick={() => openConversation(c.id)}
                 >
-                  <span className="aia-conv-title">{c.title}</span>
+                  <div className="aia-conv-main">
+                    <span className="aia-conv-title">{c.title}</span>
+                    <span className="aia-conv-date">{formatConversationDate(c.createdAt)}</span>
+                  </div>
                   <iconify-icon
                     icon="solar:trash-bin-minimalistic-linear"
                     className="aia-conv-delete"
