@@ -24,7 +24,7 @@
     .aip-detail-panel.show { transform: translateX(0); }
     .aip-detail-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; flex-shrink: 0; }
     .aip-detail-panel-body { padding: 1.25rem; overflow-y: auto; flex-grow: 1; }
-    .aip-period-btn.active { background-color: #000000 !important; color: #ffffff !important; border-color: #000000 !important; }
+    .aip-period-btn.active { background-color: #1B2A4A !important; color: #ffffff !important; border-color: #1B2A4A !important; }
 
     .aip-simple-view { display: flex; flex-direction: column; gap: 1.25rem; }
     /* Vue à deux colonnes : la carte recommandation reste fixe et visible à gauche pendant que le
@@ -43,7 +43,7 @@
       .aip-simple-view.aip-two-col { flex-direction: column; }
       .aip-simple-view.aip-two-col > .aip-reco-column { position: static; flex-basis: auto; width: 100%; }
     }
-    .aip-reco-card { background-color: #000000; color: #ffffff; padding: 1.75rem 1.5rem; text-align: center; }
+    .aip-reco-card { background-color: #1B2A4A; color: #ffffff; padding: 1.75rem 1.5rem; text-align: center; }
     .aip-reco-card .aip-reco-eyebrow { font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: #999999; margin-bottom: .75rem; }
     .aip-reco-card .aip-reco-eyebrow iconify-icon { vertical-align: -2px; margin-right: .35rem; }
     .aip-reco-card .aip-reco-headline { font-size: 1.05rem; line-height: 1.5; margin-bottom: 1.25rem; }
@@ -51,21 +51,21 @@
     .aip-reco-card .aip-reco-quantity { font-size: 3.5rem; font-weight: 700; line-height: 1; }
     .aip-reco-card .aip-reco-quantity-unit { font-size: .8rem; color: #999999; letter-spacing: .04em; text-transform: uppercase; margin-top: .35rem; }
 
-    .aip-why-btn { display: block; width: 100%; background: none; border: 1px solid #000000; color: #000000; padding: .65rem; font-size: .85rem; font-weight: 600; letter-spacing: .02em; }
-    .aip-why-btn:hover { background-color: #000000; color: #ffffff; }
+    .aip-why-btn { display: block; width: 100%; background: none; border: 1px solid #1B2A4A; color: #1B2A4A; padding: .65rem; font-size: .85rem; font-weight: 600; letter-spacing: .02em; }
+    .aip-why-btn:hover { background-color: #1B2A4A; color: #ffffff; }
 
     .aip-order-qty-card { border: 1px solid #e5e5e5; padding: 1.25rem; }
     .aip-order-qty-card label { font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; color: #666; display: block; margin-bottom: .5rem; }
     .aip-order-qty-card .input-group input { font-size: 1.4rem; font-weight: 600; text-align: center; }
     .aip-order-qty-hint { font-size: .75rem; color: #999; margin-top: .5rem; }
-    .aip-order-qty-hint.aip-qty-changed { color: #000; font-weight: 600; }
+    .aip-order-qty-hint.aip-qty-changed { color: #1B2A4A; font-weight: 600; }
 
-    .aip-ai-loading { border: 1px solid #000000; padding: 2rem 1.5rem; text-align: center; }
-    .aip-ai-loading .aip-scan-bar { height: 3px; background: linear-gradient(90deg, transparent, #000000, transparent); background-size: 200% 100%; animation: aip-scan 1.4s linear infinite; margin-bottom: 1.25rem; }
+    .aip-ai-loading { border: 1px solid #1B2A4A; padding: 2rem 1.5rem; text-align: center; }
+    .aip-ai-loading .aip-scan-bar { height: 3px; background: linear-gradient(90deg, transparent, #1B2A4A, transparent); background-size: 200% 100%; animation: aip-scan 1.4s linear infinite; margin-bottom: 1.25rem; }
     @keyframes aip-scan { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     .aip-ai-loading .aip-loading-label { font-size: .85rem; letter-spacing: .04em; text-transform: uppercase; color: #333; font-weight: 600; }
     .aip-ai-loading .aip-loading-detail { font-size: .8rem; color: #999; margin-top: .5rem; }
-    @media (prefers-reduced-motion: reduce) { .aip-scan-bar { animation: none; background: #000000; } }
+    @media (prefers-reduced-motion: reduce) { .aip-scan-bar { animation: none; background: #1B2A4A; } }
 
     .aip-stream-cursor { animation: aip-blink 1s step-end infinite; }
     @keyframes aip-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
@@ -77,7 +77,7 @@
     .aip-qa-turn { font-size: .85rem; }
     .aip-qa-question { font-weight: 600; margin-bottom: .35rem; }
     .aip-qa-question::before { content: "Vous : "; font-weight: 400; color: #999; }
-    .aip-qa-answer { border-left: 3px solid #000000; padding: .1rem 1rem; line-height: 1.5; }
+    .aip-qa-answer { border-left: 3px solid #1B2A4A; padding: .1rem 1rem; line-height: 1.5; }
     .aip-qa-answer p, .aip-reasoning-block p { margin: 0 0 .5rem; }
     .aip-qa-answer p:last-child, .aip-reasoning-block p:last-child { margin-bottom: 0; }
     .aip-md-list { margin: 0 0 .5rem; padding-left: 1.2rem; }
@@ -88,10 +88,10 @@
     .aip-detail-view { display: none; }
     .aip-detail-view.show { display: block; }
     .aip-simple-view.hide { display: none; }
-    .aip-back-btn { display: flex; align-items: center; gap: .4rem; background: none; border: none; padding: 0; font-size: .85rem; font-weight: 600; color: #000000; margin-bottom: 1.25rem; }
+    .aip-back-btn { display: flex; align-items: center; gap: .4rem; background: none; border: none; padding: 0; font-size: .85rem; font-weight: 600; color: #1B2A4A; margin-bottom: 1.25rem; }
     .aip-detail-section { margin-bottom: 1.5rem; }
     .aip-detail-section h6 { font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: #666; margin-bottom: .65rem; }
-    .aip-reasoning-block { border-left: 3px solid #000000; padding: .1rem 1rem; font-size: .9rem; line-height: 1.6; }
+    .aip-reasoning-block { border-left: 3px solid #1B2A4A; padding: .1rem 1rem; font-size: .9rem; line-height: 1.6; }
 
     .aip-classic-card { background-color: #f5f5f5; border: 1px solid #e5e5e5; padding: 1rem 1.25rem; }
     .aip-classic-card .aip-classic-eyebrow { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: #999; margin-bottom: .5rem; }
@@ -99,13 +99,13 @@
     .aip-signal-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
     .aip-signal-label { width: 150px; flex-shrink: 0; font-size: .8rem; color: #666; }
     .aip-signal-bar { height: 8px; border-radius: 0; background-color: #e5e5e5; flex-grow: 1; overflow: hidden; }
-    .aip-signal-bar-fill { height: 100%; background-color: #000000; }
+    .aip-signal-bar-fill { height: 100%; background-color: #1B2A4A; }
     .aip-signal-value { width: 40px; text-align: right; font-size: .8rem; font-weight: 600; }
 
     .aip-spark-hover-target { cursor: pointer; }
     .aip-spark-tooltip {
       position: absolute; top: 0; z-index: 10; pointer-events: none;
-      background-color: #000000; color: #ffffff; padding: .4rem .65rem; font-size: .75rem;
+      background-color: #1B2A4A; color: #ffffff; padding: .4rem .65rem; font-size: .75rem;
       line-height: 1.4; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.25);
     }
   `;
@@ -777,7 +777,7 @@
       return { x: x, y: y };
     });
     const points = coords.map(function (c) { return c.x + ',' + c.y; }).join(' ');
-    const dots = coords.map(function (c) { return '<circle cx="' + c.x + '" cy="' + c.y + '" r="2.5" fill="#000000"></circle>'; }).join('');
+    const dots = coords.map(function (c) { return '<circle cx="' + c.x + '" cy="' + c.y + '" r="2.5" fill="#1B2A4A"></circle>'; }).join('');
     // Cercles invisibles plus larges (rayon 10 au lieu de 2.5) superposés aux points visibles : une
     // cible de survol plus généreuse que le petit point réel, plus facile à atteindre avec la souris
     // sans agrandir visuellement les points affichés. data-date/data-value alimentent le tooltip au
@@ -792,7 +792,7 @@
     return '<div class="aip-spark-wrap" id="' + instanceId + '" style="position:relative;">' +
       '<div class="aip-spark-tooltip" style="display:none;"></div>' +
       '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:100px;overflow:visible;">' +
-        '<polyline points="' + points + '" fill="none" stroke="#000000" stroke-width="2"></polyline>' + dots + hoverTargets +
+        '<polyline points="' + points + '" fill="none" stroke="#1B2A4A" stroke-width="2"></polyline>' + dots + hoverTargets +
       '</svg>' + labels +
       '</div>';
   }

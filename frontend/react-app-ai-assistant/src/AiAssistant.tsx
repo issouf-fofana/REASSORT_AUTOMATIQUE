@@ -611,10 +611,15 @@ export function AiAssistant() {
     <div>
       <style>{`
         .aia-layout { display: flex; gap: 1rem; height: calc(100vh - 220px); min-height: 480px; }
+        /* Bouton "Nouvelle conversation" en marine (demande du 05/10/2026, "la couleur noir corrige
+           met le bleu du site") plutôt que le noir Bootstrap par défaut (btn-dark) — cohérent avec
+           la palette marine/ambre du reste du site. */
+        .aia-btn-navy { background-color: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+        .aia-btn-navy:hover, .aia-btn-navy:focus { background-color: #14203a; border-color: #14203a; color: #fff; }
         .aia-conv-list { width: 280px; flex-shrink: 0; background-color: #ffffff; border: 1px solid #e5e5e5; overflow-y: auto; }
         .aia-conv-item { display: flex; align-items: center; justify-content: space-between; padding: .55rem .85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: .85rem; }
         .aia-conv-item:hover { background-color: #f5f5f5; }
-        .aia-conv-item.active { background-color: #000000; color: #ffffff; }
+        .aia-conv-item.active { background-color: #1B2A4A; color: #ffffff; }
         .aia-conv-main { overflow: hidden; flex-grow: 1; min-width: 0; }
         .aia-conv-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .aia-conv-date { display: block; font-size: .72rem; color: #999; margin-top: .1rem; }
@@ -758,7 +763,7 @@ export function AiAssistant() {
         }
         .aia-suggestion-btn:hover,
         .aia-suggestion-btn:focus {
-          background-color: #000000;
+          background-color: #1B2A4A;
           color: #ffffff;
         }
         .aia-chart-wrap { margin-top: .75rem; padding: .75rem 0 0; border-top: 1px solid #eeeeee; }
@@ -813,7 +818,7 @@ export function AiAssistant() {
       <div className="aia-layout">
         <div className="aia-conv-list">
           <div className="p-2 border-bottom">
-            <button type="button" className="btn btn-dark btn-sm w-100 mb-2" onClick={startNewConversation}>
+            <button type="button" className="btn aia-btn-navy btn-sm w-100 mb-2" onClick={startNewConversation}>
               + Nouvelle conversation
             </button>
             <div className="position-relative">

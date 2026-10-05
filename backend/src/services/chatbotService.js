@@ -1247,7 +1247,16 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
           ? ` ATTENTION : "Rayon non renseigné" représente ${toolResult.unassignedRevenueSharePct}% du CA, une part anormalement élevée — signale-le explicitement dans ta réponse comme une limite de données actuelle (la dernière génération de proposition ne couvre probablement pas assez d'articles pour connaître leur rayon), pas comme un vrai rayon au même titre que les autres. Règle STRICTE et sans exception, même si "Rayon non renseigné" a la plus grosse part de CA : ne l\'inclus JAMAIS dans un classement numéroté de rayons (jamais "1.", "2.", "le meilleur rayon est...") — mentionne-le uniquement à part, dans ta phrase d\'avertissement sur la limite de données, jamais mêlé aux vrais rayons (bug constaté le 05/10/2026 : une réponse le classait "1er rayon" quand une autre reformulation de la même question l\'excluait correctement — ce sera toujours la seconde version, jamais la première).`
           : '')
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}`;
+    // Règle générale sur les codes article (bug constaté le 05/10/2026 : "quels articles sont en
+    // DLV ?" listait les articles par nom seul, sans leur code EAN pourtant présent dans les
+    // données (ex: champ "originEan") — utile pour retrouver l'article en caisse/en rayon). Détecte
+    // la présence d'un champ EAN générique plutôt que de lister chaque nom de champ possible
+    // (originEan, code, ean selon l'outil) : s'applique à toute liste d'articles, pas seulement DLV.
+    const hasEanField = /"(?:ean|code|originEan)"\s*:/.test(JSON.stringify(toolResult));
+    const eanNote = hasEanField
+      ? '\n\nQuand ta réponse énumère des articles individuels, présente-les en LISTE À PUCES Markdown (une puce par article, jamais un paragraphe dense), indique TOUJOURS leur code (EAN/code article, présent dans les données sous un champ comme "ean", "code" ou "originEan") à côté du nom, jamais le nom seul — nécessaire pour retrouver l\'article en caisse ou en rayon. Format recommandé pour chaque puce : "**NOM** (code XXXXXXXXX) : <détail chiffré>".'
+      : '';
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article

@@ -90,7 +90,7 @@ function MegaMenu({ groups, activeId, onSelect }: { groups: NavGroup[]; activeId
                     onClick={() => onSelect(entry)}
                     className={cn(
                       'flex w-full cursor-pointer items-start gap-2 px-2.5 py-2 text-left text-sm outline-none transition-colors select-none',
-                      isActive ? 'bg-zinc-800 font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+                      isActive ? 'bg-[#2A3E66] font-semibold text-zinc-50' : 'text-zinc-400 hover:bg-[#24355A] hover:text-zinc-200',
                     )}
                   >
                     <Icon className={cn('size-4 shrink-0 mt-0.5', isActive ? 'text-zinc-50' : 'text-zinc-400')} />
@@ -191,11 +191,13 @@ export function ReassortNotch() {
       className="sticky top-0 z-[100] flex w-full items-start justify-center px-2"
     >
       {/* Bande pleine largeur derrière l'île, demande explicite du 26/09/2026 ("il faut ajouter une
-          barre noire en haut [...] pour ne pas qu'on voie les coins") : masque le fond blanc de la
-          page sur les côtés de l'île (bien plus étroite que l'écran). Le conteneur parent n'a plus de
+          barre noire en haut [...] pour ne pas qu'on voie les coins") : masque le fond de la page sur
+          les côtés de l'île (bien plus étroite que l'écran). Le conteneur parent n'a plus de
           padding-top (pt-3 retiré) donc l'île touche déjà directement le sommet de l'écran — cette
-          bande chevauche volontairement ses 24 premiers pixels (h-6 > différence avec l'île) sans
-          incidence visuelle, l'île étant rendue après dans le DOM et donc toujours au-dessus. */}
+          bande chevauche volontairement ses 24 premiers pixels (h-6, délibérément plus courte que
+          l'île en h-8 : c'est ce différentiel qui crée l'effet "encoche iPhone" avec les coins
+          arrondis de l'île qui dépassent sous la bande) sans incidence visuelle, l'île étant rendue
+          après dans le DOM et donc toujours au-dessus. */}
       <div className="absolute inset-x-0 top-0 h-6 bg-[#1B2A4A]" />
       <div
         data-radius
@@ -217,12 +219,12 @@ export function ReassortNotch() {
           title="Afficher le menu latéral"
           data-radius
           style={radius('9999px')}
-          className="flex size-6 shrink-0 items-center justify-center rounded-full text-zinc-400 outline-none transition-colors hover:bg-zinc-800 hover:text-zinc-50"
+          className="flex size-6 shrink-0 items-center justify-center rounded-full text-zinc-400 outline-none transition-colors hover:bg-[#2A3E66] hover:text-zinc-50"
         >
           <PanelLeftOpen className="size-4" />
         </button>
 
-        <div className="h-5 w-px shrink-0 bg-zinc-800" />
+        <div className="h-5 w-px shrink-0 bg-[#2A3E66]" />
 
         <button
           type="button"
@@ -231,14 +233,14 @@ export function ReassortNotch() {
           onClick={() => setIsOpen((v) => !v)}
           data-radius
           style={radius('9999px')}
-          className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-semibold outline-none transition-colors hover:bg-zinc-900"
+          className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-semibold outline-none transition-colors hover:bg-[#2A3E66]"
         >
           {ActiveIcon && <ActiveIcon className="size-4 shrink-0 text-zinc-300" />}
           <span className="max-w-[220px] truncate leading-none">{activeEntry?.label}</span>
           <ChevronDown className={cn('size-3.5 text-zinc-400 transition-transform duration-200', isOpen && 'rotate-180')} />
         </button>
 
-        <div className="h-5 w-px shrink-0 bg-zinc-800" />
+        <div className="h-5 w-px shrink-0 bg-[#2A3E66]" />
 
         {/* Magasin (global-shop-selector.js), notifications (notifications-bell.js), utilisateur/
             déconnexion — mêmes IDs que topbar.html pour que ces scripts existants continuent de
@@ -266,7 +268,7 @@ export function ReassortNotch() {
               aria-expanded="false"
               data-radius
               style={radius('9999px')}
-              className="relative flex size-6 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 outline-none"
+              className="relative flex size-6 items-center justify-center rounded-full text-zinc-300 hover:bg-[#2A3E66] hover:text-zinc-50 outline-none"
             >
               <Bell className="size-4" />
             </button>
@@ -275,8 +277,8 @@ export function ReassortNotch() {
             <div data-radius style={radius('0.75rem')} className="dropdown-menu absolute right-0 top-full mt-2 hidden w-80 rounded-xl bg-white p-0 text-sm text-zinc-900 shadow-lg" />
           </div>
 
-          <div className="flex items-center gap-2 border-l border-zinc-800 pl-3">
-            <span data-radius style={radius('9999px')} className="flex size-5 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
+          <div className="flex items-center gap-2 border-l border-[#2A3E66] pl-3">
+            <span data-radius style={radius('9999px')} className="flex size-5 items-center justify-center rounded-full bg-[#2A3E66] text-zinc-300">
               <UserIcon className="size-3.5" />
             </span>
             <span id="user-menu-name" className="hidden lg:inline text-xs font-semibold text-zinc-200 max-w-[90px] truncate">
@@ -289,7 +291,7 @@ export function ReassortNotch() {
               title="Déconnexion"
               data-radius
               style={radius('9999px')}
-              className="flex size-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-red-400 outline-none"
+              className="flex size-5 items-center justify-center rounded-full text-zinc-400 hover:bg-[#2A3E66] hover:text-red-400 outline-none"
             >
               <LogOut className="size-3.5" />
             </button>
