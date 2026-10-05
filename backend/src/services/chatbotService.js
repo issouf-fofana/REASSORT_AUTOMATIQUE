@@ -384,6 +384,26 @@ function extractDate(question) {
 }
 
 /**
+ * Détecte une PLAGE explicite à deux bornes ("du 01/09/2026 au 30/09/2026", "entre le 1/9/2026 et
+ * le 30/9/2026") — bug constaté le 05/10/2026 : extractDate ne capture que la PREMIÈRE date
+ * complète trouvée dans le texte, donc "du 01/09/2026 au 30/09/2026" retombait silencieusement sur
+ * le seul 01/09/2026 (un jour), la borde de fin étant purement ignorée. Cherche deux dates
+ * complètes jj/mm/aaaa distinctes dans la question ; si une seule est trouvée, retourne null (pas
+ * une plage, laisse extractDate gérer ce cas comme avant).
+ */
+function extractDateRange(question) {
+  const text = question || '';
+  const dateRegex = /\b(\d{1,2})\D(\d{1,2})\D(\d{4})\b/g;
+  const matches = [...text.matchAll(dateRegex)];
+  if (matches.length < 2) return null;
+  const toIso = (m) => `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const start = toIso(matches[0]);
+  const end = toIso(matches[matches.length - 1]);
+  if (start === end) return null; // deux mentions de la même date, pas une vraie plage
+  return { start, end };
+}
+
+/**
  * Résolveur de périodes en français (bug trouvé le 27/09/2026, campagne de test dynamique après
  * résolution de la panne disque qui avait empêché toute exécution) : jusqu'ici, aucune formulation
  * de période autre que "jj/mm/aaaa" (extractDate) ou "N jours" (extractDays) n'était comprise.
@@ -453,13 +473,16 @@ function resolveDateRange(question) {
   }
 
   if (/\b(le\s+)?mois\s+dernier\b|\bmois\s+precedent\b/.test(q)) {
+    // Mois calendaire précédent EXACT (1er au dernier jour) — corrigé le 05/10/2026 : l'ancienne
+    // version renvoyait une fenêtre glissante "depuis le 1er du mois précédent jusqu'à MAINTENANT",
+    // qui englobait aussi le début du mois courant (ex: le 5 octobre, "le mois dernier" couvrait en
+    // réalité le 31/08 au 05/10, 35 jours — jamais le vrai septembre seul). getRevenue sait
+    // maintenant exprimer une vraie plage à deux bornes (dateRangeStart/dateRangeEnd), donc plus
+    // besoin de ce contournement en `days`.
     const now = new Date();
-    // Nombre de jours écoulés depuis le 1er du mois précédent jusqu'à maintenant — englobe tout le
-    // mois précédent complet (même logique que "semaine dernière" ci-dessus : les outils ne savent
-    // filtrer que par une fenêtre glissante de N jours, jamais par bornes calendaires arbitraires).
     const firstOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-    const daysSince = Math.ceil((now.getTime() - firstOfLastMonth.getTime()) / (24 * 60 * 60 * 1000));
-    return { days: daysSince };
+    const lastOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    return { dateRangeStart: firstOfLastMonth.toISOString().slice(0, 10), dateRangeEnd: lastOfLastMonth.toISOString().slice(0, 10) };
   }
   if (/\bce\s+mois([ -]ci)?\b|\bmois\s+en\s+cours\b|\bmois\s+courant\b/.test(q)) {
     const now = new Date();
@@ -669,6 +692,22 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
     if (lastTurn.toolUsed) toolName = lastTurn.toolUsed;
   }
 
+  // Filet de sécurité n°2bis (bug constaté le 05/10/2026) : une relance qui précise seulement une
+  // PÉRIODE ("je veux que pour le mois de septembre", "pour la semaine dernière plutôt") sans
+  // conjonction de continuation ni mot-clé d'intention reconnu — le LLM répondait "je ne suis pas
+  // sûr de comprendre" alors que le tour précédent portait déjà sur un outil daté (ex: getRevenue).
+  // Distinct du filet n°2 ci-dessus : ne dépend pas d'un mot de départ précis, mais exige que la
+  // question contienne une vraie formulation de période reconnue par extractDate/extractDateRange/
+  // extractDays/resolveDateRange — jamais déclenché par une question courte sans aucune mention de
+  // période, qui reste traitée comme hors sujet plutôt que supposée être une relance.
+  if (!toolName && conversationHistory && conversationHistory.length) {
+    const hasDateSignal = extractDateRange(question) || extractDate(question) || extractDays(question) || resolveDateRange(question);
+    if (hasDateSignal) {
+      const lastTurn = conversationHistory[conversationHistory.length - 1];
+      if (lastTurn.toolUsed) toolName = lastTurn.toolUsed;
+    }
+  }
+
   // Filet de sécurité n°3 : function-calling par LLM (cf. detectIntentViaLlm), dernier recours
   // avant d'abandonner — uniquement si aucune règle déterministe ci-dessus n'a rien trouvé du tout.
   let llmParams = null;
@@ -707,15 +746,24 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       if (pastEan) { ean = pastEan; break; }
     }
   }
-  const rawDate = extractDate(question);
+  // Plage explicite à deux bornes ("du 01/09/2026 au 30/09/2026") : vérifiée AVANT extractDate, qui
+  // ne capture que la première date du texte et aurait silencieusement ignoré la borne de fin (bug
+  // constaté le 05/10/2026). Quand une vraie plage est détectée, elle prime sur tout le reste
+  // (date/days/naturalRange ci-dessous ne sont plus évalués pour la détection de période).
+  const explicitDateRange = extractDateRange(question);
+  const rawDate = explicitDateRange ? null : extractDate(question);
   const explicitDate = rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate;
-  const explicitDays = extractDays(question);
+  const explicitDays = explicitDateRange ? null : extractDays(question);
   // resolveDateRange ("hier", "cette semaine", "le mois dernier"...) n'intervient QUE si aucune date
   // ou nombre de jours explicite n'a déjà été trouvé par extractDate/extractDays ci-dessus — une
   // formulation numérique précise ("le 14/09/2026", "les 45 derniers jours") reste toujours prioritaire
   // sur une formulation relative détectée par erreur dans la même question (peu probable mais sans
   // ambiguïté à trancher autrement).
-  const naturalRange = (!explicitDate && !explicitDays) ? resolveDateRange(question) : null;
+  const naturalRange = (!explicitDateRange && !explicitDate && !explicitDays) ? resolveDateRange(question) : null;
+  // naturalRange peut maintenant porter une vraie plage calendaire (ex: "le mois dernier" -> 1er au
+  // dernier jour du mois précédent, cf. resolveDateRange) plutôt qu'un simple `days` approximatif —
+  // fusionnée ici avec explicitDateRange pour suivre le même chemin jusqu'à getRevenue.
+  const effectiveDateRange = explicitDateRange || (naturalRange?.dateRangeStart ? { start: naturalRange.dateRangeStart, end: naturalRange.dateRangeEnd } : null);
   const date = explicitDate || naturalRange?.date || (llmParams ? llmParams.date : null) || null;
   const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
   const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
@@ -828,7 +876,13 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // période d'analyse par défaut du magasin (posId transmis ci-dessous) plutôt qu'un repli
         // silencieux sur 1 jour — imposer `|| 1` ici aurait empêché ce nouveau comportement de
         // s'appliquer.
-        const revenueResult = await tools.getRevenue(effectiveShopId, { date, days: daysQuery || null, department, ean, posId });
+        const revenueResult = await tools.getRevenue(effectiveShopId, {
+          date,
+          days: daysQuery || null,
+          dateRangeStart: effectiveDateRange?.start || null,
+          dateRangeEnd: effectiveDateRange?.end || null,
+          department, ean, posId,
+        });
         // targetShopLabel présent seulement si un AUTRE magasin a été explicitement ciblé (cf. plus
         // haut) : le LLM doit alors préciser DANS QUEL magasin, sinon la réponse resterait ambiguë
         // pour un ADMIN qui vient de nommer un magasin différent du sien.
