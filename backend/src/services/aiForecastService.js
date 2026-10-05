@@ -565,24 +565,41 @@ async function streamWithFallbackImpl(prompt, onChunk, context) {
       continue;
     }
     let startedStreaming = false;
-    try {
-      const apiKey = crypto.decrypt(key.encryptedApiKey);
-      const fullText = await streamer(apiKey, key.model, prompt, (chunk) => {
-        startedStreaming = true;
-        onChunk(chunk);
-      }, { providerKeyId: key.id, context });
-      await prisma.aiProviderKey.update({
-        where: { id: key.id },
-        data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
-      });
-      return { fullText, providerUsed: key.provider };
-    } catch (err) {
-      errors.push(`${key.label} (${key.provider}): ${err.message}`);
-      await prisma.aiProviderKey.update({
-        where: { id: key.id },
-        data: { lastError: err.message, lastErrorAt: new Date() },
-      }).catch(() => {});
-      if (startedStreaming) throw err; // déjà affiché du texte à l'utilisateur, pas de bascule silencieuse
+    // Retry léger sur la MÊME clé avant de l'abandonner (bug constaté le 05/10/2026, environnement
+    // de test avec une seule clé active : "fetch failed" — panne réseau transitoire vers l'API du
+    // fournisseur — faisait planter toute la question immédiatement, sans aucune seconde chance,
+    // alors qu'un simple retry quelques centaines de ms après suffit la plupart du temps. Limité à
+    // 2 tentatives et seulement si rien n'a encore été streamé (ne jamais relancer un flux déjà
+    // partiellement affiché à l'utilisateur) et à une erreur réseau plausible (pas une clé invalide
+    // ou un refus applicatif du fournisseur, qui échoueraient de la même façon à chaque tentative).
+    const isTransientNetworkError = (err) => /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|network/i.test(err.message || '');
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const apiKey = crypto.decrypt(key.encryptedApiKey);
+        const fullText = await streamer(apiKey, key.model, prompt, (chunk) => {
+          startedStreaming = true;
+          onChunk(chunk);
+        }, { providerKeyId: key.id, context });
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
+        });
+        return { fullText, providerUsed: key.provider };
+      } catch (err) {
+        const canRetry = attempt < MAX_ATTEMPTS && !startedStreaming && isTransientNetworkError(err);
+        if (canRetry) {
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          continue;
+        }
+        errors.push(`${key.label} (${key.provider}): ${err.message}`);
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastError: err.message, lastErrorAt: new Date() },
+        }).catch(() => {});
+        if (startedStreaming) throw err; // déjà affiché du texte à l'utilisateur, pas de bascule silencieuse
+        break; // passe à la clé suivante (sortie de la boucle de retry, pas de throw)
+      }
     }
   }
   throw new Error(`Toutes les clés IA ont échoué :\n${errors.join('\n')}`);
@@ -617,20 +634,30 @@ async function callWithFallbackImpl(prompt, context) {
       errors.push(`${key.label}: fournisseur "${key.provider}" non supporté`);
       continue;
     }
-    try {
-      const apiKey = crypto.decrypt(key.encryptedApiKey);
-      const result = await caller(apiKey, key.model, prompt, { providerKeyId: key.id, context });
-      await prisma.aiProviderKey.update({
-        where: { id: key.id },
-        data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
-      });
-      return { result, providerUsed: key.provider, keyLabel: key.label };
-    } catch (err) {
-      errors.push(`${key.label} (${key.provider}): ${err.message}`);
-      await prisma.aiProviderKey.update({
-        where: { id: key.id },
-        data: { lastError: err.message, lastErrorAt: new Date() },
-      }).catch(() => {});
+    // Retry léger sur la même clé pour une erreur réseau transitoire — même correctif et mêmes
+    // raisons que streamWithFallbackImpl ci-dessus (bug du 05/10/2026).
+    const isTransientNetworkError = (err) => /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|network/i.test(err.message || '');
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const apiKey = crypto.decrypt(key.encryptedApiKey);
+        const result = await caller(apiKey, key.model, prompt, { providerKeyId: key.id, context });
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
+        });
+        return { result, providerUsed: key.provider, keyLabel: key.label };
+      } catch (err) {
+        if (attempt < MAX_ATTEMPTS && isTransientNetworkError(err)) {
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          continue;
+        }
+        errors.push(`${key.label} (${key.provider}): ${err.message}`);
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastError: err.message, lastErrorAt: new Date() },
+        }).catch(() => {});
+      }
     }
   }
   throw new Error(`Toutes les clés IA ont échoué :\n${errors.join('\n')}`);

@@ -358,6 +358,11 @@ async function getRevenue(rposShopId, { date, dateRangeStart, dateRangeEnd, days
       periodStart: dateStart.toISOString(),
       periodEnd: dateEnd.toISOString(),
       periodMode,
+      // isNormalNegative (bug constaté le 05/10/2026) : "le magasin 035 a un CA de combien hier ?"
+      // répondait correctement "aucune vente enregistrée le 04/10" PUIS ajoutait "en phase de
+      // développement", contradictoire — un magasin réellement sans vente ce jour-là est une
+      // réponse complète et honnête, pas une lacune de la fonctionnalité CA elle-même.
+      isNormalNegative: true,
     };
   }
 
@@ -454,6 +459,12 @@ async function getRevenueAllShops(allowedShopIds, { date, days = 1 } = {}) {
     found: true,
     date: date || null,
     days: date ? null : days,
+    // periodStart/periodEnd (bug constaté le 05/10/2026 : "et c'est quel jour ?" posée après un
+    // classement multi-magasins ne pouvait pas être répondue, cette fonction n'exposait jamais les
+    // bornes réellement utilisées — contrairement à getRevenue, qui le fait déjà) — bornes ISO
+    // explicites, la seule source de vérité pour la période réellement couverte par ce classement.
+    periodStart: dateStart.toISOString(),
+    periodEnd: dateEnd.toISOString(),
     shopCount: results.length,
     totalRevenueExclTaxCfa: results.reduce((s, r) => s + r.revenueExclTaxCfa, 0),
     shops: results,
@@ -766,7 +777,11 @@ async function getPredictionAccuracy(rposShopId, { days = 90 } = {}) {
   });
 
   const withPct = outcomes.filter((o) => o.percentageError !== null);
-  if (!withPct.length) return { found: false, message: `Aucune prédiction évaluée sur les ${days} derniers jours pour ce magasin.` };
+  // isNormalNegative (bug constaté le 05/10/2026 : "quelle est la précision de l'IA ?" répondait
+  // correctement "0 prédiction évaluée" PUIS ajoutait "en phase de développement sur ce point",
+  // contradictoire — la fonctionnalité existe et vient de répondre, il n'y a juste aucune donnée à
+  // évaluer sur cette fenêtre) — réponse négative normale et complète, pas une lacune du système.
+  if (!withPct.length) return { found: false, message: `Aucune prédiction évaluée sur les ${days} derniers jours pour ce magasin.`, isNormalNegative: true };
 
   const avgAbsError = withPct.reduce((s, o) => s + Math.abs(o.percentageError), 0) / withPct.length;
   return {
@@ -787,7 +802,10 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
     select: { id: true, department: true, rposOrderReference: true, createdAt: true, receptionStatus: true },
     take: 50,
   });
-  return { found: orders.length > 0, days, count: orders.length, orders };
+  // isNormalNegative (même correctif que getPredictionAccuracy ci-dessus, bug constaté le
+  // 05/10/2026) : "aucune commande récente" est une vraie réponse complète, pas une lacune —
+  // l'ancien comportement disait "aucune commande" PUIS "en phase de développement", contradictoire.
+  return { found: orders.length > 0, days, count: orders.length, orders, isNormalNegative: orders.length === 0 ? true : undefined };
 }
 
 /**

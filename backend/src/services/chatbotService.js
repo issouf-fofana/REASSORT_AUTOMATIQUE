@@ -369,7 +369,33 @@ function extractDays(question) {
  * même principe que periodService.js (l'heure système du serveur peut être décalée par rapport aux
  * vraies dates de vente, notamment en environnement de test).
  */
+// Noms de mois français (bug constaté le 05/10/2026 : "entre le 15 et le 20 septembre 2026" ne
+// matchait aucune regex, qui n'acceptait que jj/mm/aaaa purement numérique — une formulation très
+// naturelle en français pourtant). Normalise "15 septembre 2026" en "15/09/2026" AVANT les regex
+// numériques existantes, plutôt que dupliquer toute la logique jj/mm/aaaa pour ce cas — un seul
+// point d'entrée, réutilisé par extractDate ET extractDateRange ci-dessous.
+const MONTH_NAME_TO_NUM = {
+  janvier: '01', février: '02', fevrier: '02', mars: '03', avril: '04', mai: '05', juin: '06',
+  juillet: '07', août: '08', aout: '08', septembre: '09', octobre: '10', novembre: '11', décembre: '12', decembre: '12',
+};
+function normalizeMonthNames(question) {
+  const monthPattern = Object.keys(MONTH_NAME_TO_NUM).join('|');
+  let text = question || '';
+  // Ellipse "entre le 15 et le 20 septembre 2026" (bug constaté le 05/10/2026) : le premier jour
+  // n'a pas son propre mois/année dans le texte, il partage ceux du second — complète-le d'abord,
+  // AVANT la conversion standard ci-dessous, pour que les deux jours finissent avec le même
+  // mois/année explicite.
+  const ellipsisRegex = new RegExp(`\\b(\\d{1,2})\\s*(?:er)?\\s+et\\s+(?:le\\s+)?(\\d{1,2})\\s*(?:er)?\\s+(${monthPattern})\\.?\\s+(\\d{4})\\b`, 'gi');
+  text = text.replace(ellipsisRegex, (_m, day1, day2, monthName, year) => `${day1} ${monthName} ${year} et ${day2} ${monthName} ${year}`);
+  // "15 septembre 2026" ou "15 sept. 2026" -> "15/09/2026". L'année est optionnelle dans le texte
+  // mais requise dans la regex numérique en aval (extractDate/extractDateRange exigent \d{4}) —
+  // une date sans année explicite ("le 15 septembre") reste gérée par le filet dayOnly existant.
+  const regex = new RegExp(`\\b(\\d{1,2})\\s*(?:er)?\\s+(${monthPattern})\\.?\\s+(\\d{4})\\b`, 'gi');
+  return text.replace(regex, (_m, day, monthName) => `${day}/${MONTH_NAME_TO_NUM[monthName.toLowerCase()]}/${_m.match(/\d{4}/)[0]}`);
+}
+
 function extractDate(question) {
+  question = normalizeMonthNames(question);
   const full = (question || '').match(/\b(\d{1,2})\D(\d{1,2})\D(\d{4})\b/) || (question || '').match(/\b(\d{4})\D(\d{1,2})\D(\d{1,2})\b/);
   if (full) {
     // Détermine l'ordre (jj/mm/aaaa vs aaaa/mm/jj) selon la position du groupe à 4 chiffres.
@@ -392,7 +418,7 @@ function extractDate(question) {
  * une plage, laisse extractDate gérer ce cas comme avant).
  */
 function extractDateRange(question) {
-  const text = question || '';
+  const text = normalizeMonthNames(question || '');
   const dateRegex = /\b(\d{1,2})\D(\d{1,2})\D(\d{4})\b/g;
   const matches = [...text.matchAll(dateRegex)];
   if (matches.length < 2) return null;
@@ -401,6 +427,57 @@ function extractDateRange(question) {
   const end = toIso(matches[matches.length - 1]);
   if (start === end) return null; // deux mentions de la même date, pas une vraie plage
   return { start, end };
+}
+
+/**
+ * Filet de secours ultime pour une période non reconnue par les regex ci-dessus (demande du
+ * 05/10/2026 : "il doit trouver la bonne date... même le format le plus compliqué, il doit marcher
+ * comme Claude/GPT") — plutôt que d'empiler indéfiniment des regex pour chaque nouvelle formulation
+ * ("17 au 20/09/2026", "17 au 18 du mois dernier", etc.), demande directement au LLM de résoudre la
+ * période décrite en langage libre vers des bornes ISO explicites. Volontairement UN SEUL appel LLM
+ * supplémentaire (~1-2s), déclenché seulement quand extractDateRange/extractDate/extractDays/
+ * resolveDateRange n'ont RIEN trouvé — jamais le chemin par défaut, pour ne pas ralentir inutilement
+ * les formulations déjà bien couvertes par les regex rapides. `today` doit venir de la donnée réelle
+ * la plus récente en base pour ce magasin (même principe que resolveDayOnlyDate), jamais de
+ * l'horloge système seule, pour que "le mois dernier" reste cohérent avec le reste du système si
+ * l'horloge serveur est décalée par rapport aux vraies dates de vente (environnement de test).
+ */
+async function resolveDateRangeViaLlm(question, rposShopId) {
+  // "Aujourd'hui" résolu depuis la dernière vente connue pour CE magasin, jamais l'horloge système
+  // seule (même principe que resolveDayOnlyDate juste au-dessus) — reste cohérent avec le reste du
+  // système si l'horloge serveur est décalée par rapport aux vraies dates de vente (environnement
+  // de test). Repli sur l'horloge système seulement si aucune vente n'existe encore pour ce magasin.
+  const lastSale = await prisma.salesLine.findFirst({ where: { rposShopId }, orderBy: { date: 'desc' }, select: { date: true } });
+  const todayIso = (lastSale ? lastSale.date : new Date()).toISOString().slice(0, 10);
+
+  // Format TABLEAU à un seul élément (pas un objet nu) : callWithFallback passe systématiquement
+  // par parseJsonArrayFromText, qui exige un "[...]" et rejette un "{...}" avec l'erreur "Réponse IA
+  // sans tableau JSON reconnaissable" (bug constaté le 05/10/2026 lors du premier essai de cette
+  // fonction) — toute l'infrastructure d'appel LLM partagée de ce projet est bâtie autour de ce
+  // contrat, pas la peine d'en créer un second juste pour cet appel.
+  const prompt = `Tu es un extracteur de dates. Aujourd'hui (date de référence) : ${todayIso}.
+Lis cette question et détermine UNIQUEMENT la période calendaire qu'elle décrit, rien d'autre.
+Question : "${question}"
+Réponds STRICTEMENT avec un TABLEAU JSON contenant UN SEUL objet, sans aucun texte autour, au format :
+[{"start": "AAAA-MM-JJ", "end": "AAAA-MM-JJ"}]
+Si la question décrit un seul jour précis (pas une plage), mets la même date pour start et end.
+Si la question ne décrit AUCUNE période ou date identifiable, réponds exactement : [{"start": null, "end": null}]
+Ne déduis ou n'invente jamais une période qui n'est pas clairement exprimée dans la question.`;
+
+  try {
+    const { result } = await callWithFallback(prompt, 'chatbot-date-resolution');
+    const parsed = Array.isArray(result) ? result[0] : result;
+    if (!parsed || !parsed.start || !parsed.end) return null;
+    // Même garde-fou qu'ailleurs dans ce fichier (rollover de date invalide) : une date mal formée
+    // ne doit jamais être transmise telle quelle à un outil, qui la rejetterait avec une erreur brute.
+    const isValidIso = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(new Date(d).getTime());
+    if (!isValidIso(parsed.start) || !isValidIso(parsed.end)) return null;
+    return { start: parsed.start, end: parsed.end };
+  } catch {
+    // LLM indisponible ou réponse mal formée : jamais remonté à l'utilisateur, la question retombe
+    // simplement sur le comportement par défaut de l'outil (ex: getRevenue sans date -> défaut 1 jour).
+    return null;
+  }
 }
 
 /**
@@ -485,11 +562,24 @@ function resolveDateRange(question) {
     return { dateRangeStart: firstOfLastMonth.toISOString().slice(0, 10), dateRangeEnd: lastOfLastMonth.toISOString().slice(0, 10) };
   }
   if (/\bce\s+mois([ -]ci)?\b|\bmois\s+en\s+cours\b|\bmois\s+courant\b/.test(q)) {
+    // Plage calendaire explicite (1er du mois courant -> aujourd'hui), corrigé le 05/10/2026 : le
+    // calcul en `days` (Math.ceil de l'écart en millisecondes) arrondissait à tort d'un jour dès que
+    // l'heure courante dépassait minuit (ex: le 05/10 à 09h55, l'écart réel avec le 1er/10 00:00 UTC
+    // est 4,4 jours, arrondi à 5 -> dateStart retombait sur le 30/09 au lieu du 01/10). Une plage à
+    // bornes explicites ne souffre pas de cet arrondi.
     const now = new Date();
     const firstOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const daysSince = Math.ceil((now.getTime() - firstOfMonth.getTime()) / (24 * 60 * 60 * 1000)) || 1;
-    return { days: daysSince };
+    return { dateRangeStart: firstOfMonth.toISOString().slice(0, 10), dateRangeEnd: now.toISOString().slice(0, 10) };
   }
+
+  // Durée RELATIVE sans ancrage calendaire ("sur une semaine", "sur un mois", "comparer... sur une
+  // semaine") — bug constaté le 05/10/2026 : "compare le CA de tous les magasins sur une semaine"
+  // retombait sur 1 seul jour, ni extractDays (qui exige un chiffre, "7 jours") ni les formes
+  // calendaires ci-dessus ("cette semaine"/"la semaine dernière") ne couvrant "une semaine" au sens
+  // générique de "une fenêtre de 7 jours". Distinct de "semaine dernière"/"cette semaine" déjà
+  // gérées plus haut (jamais ré-matché ici grâce à l'ordre des checks).
+  if (/\b(sur\s+|d['e]\s*)?une\s+semaine\b/.test(q)) return { days: 7 };
+  if (/\b(sur\s+|d['e]\s*)?un\s+mois\b/.test(q)) return { days: 30 };
 
   return null;
 }
@@ -659,7 +749,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // question dit explicitement "cet article" sans EAN, il doit réutiliser le dernier EAN de la
   // conversation comme tous les autres outils ci-dessous, jamais retomber silencieusement sur un
   // périmètre plus large que celui demandé.
-  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue']);
+  // getArticleStockAllShops ajouté le 05/10/2026 (bug constaté : "le stock de cet article dans tous
+  // les magasins" sans EAN explicite ne réutilisait jamais le dernier EAN de la conversation,
+  // contrairement à getArticleStock pour un seul magasin — la question échouait en demandant de
+  // préciser un EAN qui venait pourtant d'être donné juste avant).
+  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getArticleStockAllShops', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue']);
 
   // Filet de sécurité n°1 : un EAN explicite dans la question mais aucun mot-clé reconnu (ex: "tu
   // peux me dire tout sur cet article : 100446452 ?", formulation imprévue) — plutôt que de
@@ -750,7 +844,31 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // ne capture que la première date du texte et aurait silencieusement ignoré la borne de fin (bug
   // constaté le 05/10/2026). Quand une vraie plage est détectée, elle prime sur tout le reste
   // (date/days/naturalRange ci-dessous ne sont plus évalués pour la détection de période).
-  const explicitDateRange = extractDateRange(question);
+  // Limité aux outils qui savent déjà consommer une vraie plage à deux bornes (dateRangeStart/
+  // dateRangeEnd) — getSalesHistory/getPredictionAccuracy/getTopGisements ne savent encore exprimer
+  // qu'un `days` glissant, les étendre à une plage est un chantier séparé. Déclaré ici (plutôt que
+  // juste avant son premier usage plus bas) car réutilisé par le signal de plage textuel ci-dessous.
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops']);
+
+  let explicitDateRange = extractDateRange(question);
+  // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
+  // deux dates complètes requises) n'a pas su résoudre — ex: "du 17 au 20/09/2026" (un seul jour
+  // isolé + une date complète), bug constaté le 05/10/2026 : sans ce signal, extractDate capturait
+  // SEULEMENT "20/09/2026" et la question entière retombait sur un jour unique, le "17" isolé étant
+  // silencieusement perdu. Dans ce cas, on consulte le LLM directement ICI (avant extractDate),
+  // plutôt que de laisser explicitDate se remplir à tort et bloquer le filet de secours plus bas
+  // (qui ne se déclenche que si explicitDate est resté vide).
+  // Élargi le 05/10/2026 (bug : "le CA du 2ème trimestre 2026" — extractDate capturait à tort
+  // dayOnly=2 depuis "du 2ème", bloquant ensuite le filet de secours général plus bas qui exige
+  // !explicitDate) : un mot désignant une période complexe (trimestre/semestre/année/exercice) est
+  // un signal tout aussi fiable qu'une vraie plage "entre...et" qu'aucune regex numérique de ce
+  // fichier ne sait résoudre — forcer le passage par LLM ICI, avant qu'extractDate n'ait la chance
+  // de se tromper sur un chiffre isolé dans l'expression ("2ème", "3e", etc.).
+  const RANGE_SIGNAL_REGEX = /\bentre\b.*\bet\b|\bdu\b.*\bau\b|trimestre|semestre|\bannée\b|\bannee\b|exercice/i;
+  if (!explicitDateRange && DATE_SENSITIVE_TOOLS.has(toolName) && RANGE_SIGNAL_REGEX.test(question)) {
+    const llmRange = await resolveDateRangeViaLlm(question, rposShopId);
+    if (llmRange) explicitDateRange = llmRange;
+  }
   const rawDate = explicitDateRange ? null : extractDate(question);
   const explicitDate = rawDate && typeof rawDate === 'object' ? await resolveDayOnlyDate(rposShopId, rawDate.dayOnly) : rawDate;
   const explicitDays = explicitDateRange ? null : extractDays(question);
@@ -763,7 +881,20 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // naturalRange peut maintenant porter une vraie plage calendaire (ex: "le mois dernier" -> 1er au
   // dernier jour du mois précédent, cf. resolveDateRange) plutôt qu'un simple `days` approximatif —
   // fusionnée ici avec explicitDateRange pour suivre le même chemin jusqu'à getRevenue.
-  const effectiveDateRange = explicitDateRange || (naturalRange?.dateRangeStart ? { start: naturalRange.dateRangeStart, end: naturalRange.dateRangeEnd } : null);
+  let effectiveDateRange = explicitDateRange || (naturalRange?.dateRangeStart ? { start: naturalRange.dateRangeStart, end: naturalRange.dateRangeEnd } : null);
+  // Filet de secours LLM (demande du 05/10/2026 : "il doit trouver la bonne date... même le format
+  // le plus compliqué") — déclenché UNIQUEMENT quand aucune regex n'a rien trouvé (aucune plage, pas
+  // de date, pas de nombre de jours, pas de formulation relative reconnue), ET que la question
+  // ressemble vraiment à une demande datée plutôt qu'une question sans aucune notion de période
+  // (DATE_LIKE_HINT évite un appel LLM superflu — coûteux en latence — sur une question qui n'a
+  // clairement aucun rapport avec une date). Limité aux outils qui consomment réellement une période
+  // (DATE_SENSITIVE_TOOLS, déclaré plus haut) : pas la peine pour un outil qui ignore de toute façon
+  // date/days.
+  const DATE_LIKE_HINT = /\d|janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|hier|aujourd|semaine|mois|période|periode|depuis|dernier|dernière|derniere/i;
+  if (!effectiveDateRange && !explicitDate && !explicitDays && !naturalRange && DATE_SENSITIVE_TOOLS.has(toolName) && DATE_LIKE_HINT.test(question)) {
+    const llmRange = await resolveDateRangeViaLlm(question, rposShopId);
+    if (llmRange) effectiveDateRange = llmRange;
+  }
   const date = explicitDate || naturalRange?.date || (llmParams ? llmParams.date : null) || null;
   const percentage = extractPercentage(question) || (llmParams ? llmParams.thresholdPct : null) || null;
   const gisementQuery = extractGisement(question) || (llmParams ? llmParams.gisement : null) || null;
@@ -1113,7 +1244,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const paretoNote = toolName === 'getParetoArticles'
       ? '\n\nIMPORTANT pour cette réponse : présente le classement PAR RAYON (champ "departments" du JSON, déjà trié par part de CA décroissante) comme structure principale de ta réponse — jamais la liste "lines" (détail par article individuel) sauf si la question porte explicitement sur des articles précis plutôt que des rayons. Pour chaque rayon, indique son nom, sa part de CA et son nombre d\'articles contributeurs.'
         + (toolResult.departmentDataIncomplete
-          ? ` ATTENTION : "Rayon non renseigné" représente ${toolResult.unassignedRevenueSharePct}% du CA, une part anormalement élevée — signale-le explicitement dans ta réponse comme une limite de données actuelle (la dernière génération de proposition ne couvre probablement pas assez d'articles pour connaître leur rayon), pas comme un vrai rayon au même titre que les autres.`
+          ? ` ATTENTION : "Rayon non renseigné" représente ${toolResult.unassignedRevenueSharePct}% du CA, une part anormalement élevée — signale-le explicitement dans ta réponse comme une limite de données actuelle (la dernière génération de proposition ne couvre probablement pas assez d'articles pour connaître leur rayon), pas comme un vrai rayon au même titre que les autres. Règle STRICTE et sans exception, même si "Rayon non renseigné" a la plus grosse part de CA : ne l\'inclus JAMAIS dans un classement numéroté de rayons (jamais "1.", "2.", "le meilleur rayon est...") — mentionne-le uniquement à part, dans ta phrase d\'avertissement sur la limite de données, jamais mêlé aux vrais rayons (bug constaté le 05/10/2026 : une réponse le classait "1er rayon" quand une autre reformulation de la même question l\'excluait correctement — ce sera toujours la seconde version, jamais la première).`
           : '')
       : '';
     dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}`;
