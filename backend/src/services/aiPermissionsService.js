@@ -63,7 +63,9 @@ const TOOL_CAPABILITY = {
   getParetoArticles: 'sales',
   getRevenueTrendAllShops: 'revenueShop', // classement/évolution du CA réseau, même capacité que le CA global d'un magasin
   getOrders: 'orders',
+  getValidatedOrders: 'orders',
   getCurrentProposal: 'orders',
+  explainProposalQuantity: 'orders',
   getOrderAnomalies: 'orders',
   getPendingProposalsAllShops: 'orders',
   getOrderAnomaliesAllShops: 'orders',

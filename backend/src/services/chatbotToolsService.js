@@ -13,6 +13,7 @@ const rpos = require('./rposClient');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { listAnomalies } = require('./orderAnomalyService');
+const aiForecastService = require('./aiForecastService');
 
 // Seuil "article générique" identique à excludeGenericArticlesBelowPrice (configService.js,
 // utilisé par proposalService.js) : un article dont le prix de vente RPOS est en dessous n'est pas
@@ -558,7 +559,16 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
   };
 }
 
-/** getCurrentProposal() — la proposition en attente de validation pour ce magasin. */
+/**
+ * getCurrentProposal() — la proposition en attente de validation pour ce magasin.
+ *
+ * departmentBreakdown ajouté le 06/10/2026 (demande explicite : "combien de commandes on été
+ * proposées par le magasin X, avec le détail de chaque, commande liquide: 38 articles...") : sans
+ * rayon précisé, le détail ligne par ligne (jusqu'à 200 lignes) était la seule donnée disponible —
+ * jamais un vrai résumé par rayon exploitable pour une question globale sur UN magasin. Toujours
+ * calculé sur l'ENSEMBLE des lignes (jamais limité par le département demandé, si renseigné), pour
+ * donner le contexte complet même quand la question cible un rayon précis en plus.
+ */
 async function getCurrentProposal(rposShopId, { department } = {}) {
   const proposal = await prisma.proposal.findFirst({
     where: { rposShopId, status: 'GENERATED' },
@@ -570,14 +580,70 @@ async function getCurrentProposal(rposShopId, { department } = {}) {
   const lines = department ? proposal.lines.filter((l) => l.department === department) : proposal.lines;
   if (department && !lines.length) return { found: false, message: `Aucun article du rayon "${department}" dans la proposition en attente.` };
 
+  const byDept = new Map();
+  for (const l of proposal.lines) {
+    const key = l.department || 'Rayon non renseigné';
+    byDept.set(key, (byDept.get(key) || 0) + 1);
+  }
+  const departmentBreakdown = [...byDept.entries()]
+    .map(([dept, articleCount]) => ({ department: dept, articleCount }))
+    .sort((a, b) => b.articleCount - a.articleCount);
+
   return {
     found: true,
     generatedAt: proposal.generatedAt,
     status: proposal.status,
     department: department || null,
     articleCount: lines.length,
+    totalArticleCount: proposal.lines.length,
+    departmentBreakdown,
     lines: lines.slice(0, 200),
   };
+}
+
+/**
+ * explainProposalQuantity(rposShopId, ean) — raisonnement IA en direct expliquant la quantité
+ * suggérée pour UN article de la proposition en attente (demande explicite du 06/10/2026 : "quel
+ * article a le plus de quantité dans cette commande et pourquoi... il doit pouvoir m'expliquer").
+ * Réutilise EXACTEMENT le même appel que le panneau "Analyser" de la page IA & Prédictions
+ * (analyzeArticleRealtime, cf. routes/reassort/ai.js POST .../ai-analyze-article) plutôt que de
+ * dupliquer la logique de raisonnement — un seul vrai point d'entrée pour "pourquoi cette quantité".
+ * Appel LLM à chaque fois (pas de cache), donc plus lent qu'un outil de lecture pure — jamais
+ * déclenché pour autre chose qu'une vraie demande d'EXPLICATION (pas juste "quelle quantité").
+ */
+async function explainProposalQuantity(rposShopId, ean) {
+  const proposal = await prisma.proposal.findFirst({
+    where: { rposShopId, status: 'GENERATED' },
+    orderBy: { generatedAt: 'desc' },
+  });
+  if (!proposal) return { found: false, message: 'Aucune proposition en attente de validation pour ce magasin.' };
+
+  const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
+  if (!line) return { found: false, message: `Article ${ean} introuvable dans la proposition en attente de ce magasin.` };
+
+  try {
+    const result = await aiForecastService.analyzeArticleRealtime({
+      shopReference: proposal.rposShopReference,
+      shopName: proposal.rposShopName,
+      line,
+      shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
+      posId: proposal.rposPosId,
+      shopId: proposal.rposShopId,
+    });
+    return {
+      found: true,
+      ean: line.ean,
+      label: line.label,
+      department: line.department,
+      systemSuggestedQuantity: line.quantitySuggested,
+      aiRecommendedQuantity: result.quantity,
+      reasoning: result.reasoning,
+    };
+  } catch (err) {
+    // IA indisponible (clé API, timeout...) : honnête sur l'échec plutôt que de faire planter toute
+    // la conversation — même filet que le reste des outils de ce fichier.
+    return { found: false, message: `L'analyse IA de cet article a échoué (${err.message}).` };
+  }
 }
 
 /** getStockoutRisks() — articles dont la rupture est proche (daysUntilStockout bas), triés par urgence. */
@@ -806,6 +872,78 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
   // 05/10/2026) : "aucune commande récente" est une vraie réponse complète, pas une lacune —
   // l'ancien comportement disait "aucune commande" PUIS "en phase de développement", contradictoire.
   return { found: orders.length > 0, days, count: orders.length, orders, isNormalNegative: orders.length === 0 ? true : undefined };
+}
+
+/**
+ * getValidatedOrders(posId, shopId, {days}) — commandes fournisseur VALIDÉES pour ce magasin, avec
+ * le détail complet côté RPOS (demande explicite du 06/10/2026 : "quand une commande est validée...
+ * il doit me donner... qui a validé, heure, date, numéro commande, libellé, statut, fournisseur,
+ * date commande, date livraison, date validation, observation, créée par, validée par"). Distinct de
+ * getOrders (vue "commandes créées par CETTE plateforme", champs internes limités) : ici on croise
+ * ProposalOrder (pour savoir que la commande vient bien de Réassort Auto, et par quel rayon) avec
+ * /api/supplier_order/ RPOS (source réelle de tous les champs détaillés demandés, y compris
+ * created_by/validated_by — jamais disponibles côté base locale). Une commande ProposalOrder sans
+ * correspondance RPOS trouvée (rposOrderReference null, ou introuvable côté RPOS) est quand même
+ * listée avec les champs RPOS à null plutôt qu'silencieusement omise — toujours honnête sur ce qui
+ * manque réellement.
+ */
+async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
+  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const platformOrders = await prisma.proposalOrder.findMany({
+    where: {
+      proposal: { rposShopId: shopId },
+      createdAt: { gte: dateStart },
+      rposOrderValidated: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { department: true, rposOrderReference: true, createdAt: true, receptionStatus: true },
+    take: 50,
+  });
+  if (!platformOrders.length) {
+    return { found: true, days, count: 0, orders: [], isNormalNegative: true, message: 'Aucune commande validée sur cette période pour ce magasin.' };
+  }
+
+  // Un seul appel RPOS paginé pour tout le lot plutôt qu'un appel par commande (jusqu'à 50) : la
+  // référence filtre déjà côté serveur, mais /api/supplier_order/ n'accepte qu'une référence à la
+  // fois — on récupère donc une fenêtre large (200 dernières commandes toutes sources confondues,
+  // plus que suffisant pour y retrouver les 50 références de platformOrders) puis on fait
+  // correspondre par référence en mémoire, plus robuste qu'un filtre texte imprécis côté RPOS.
+  let rposOrdersByRef = new Map();
+  if (posId) {
+    try {
+      const { results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false });
+      for (const o of results || []) {
+        if (o.reference) rposOrdersByRef.set(o.reference, o);
+      }
+    } catch {
+      // RPOS injoignable : on renvoie quand même la vue plateforme, avec les champs RPOS à null
+      // plutôt que de faire échouer toute la réponse pour une donnée partiellement indisponible.
+    }
+  }
+
+  const orders = platformOrders.map((po) => {
+    const rposOrder = po.rposOrderReference ? rposOrdersByRef.get(po.rposOrderReference) : null;
+    return {
+      department: po.department,
+      createdAt: po.createdAt,
+      receptionStatus: po.receptionStatus,
+      rposOrderReference: po.rposOrderReference || null,
+      rposStatus: rposOrder?.status_display || null,
+      orderDate: rposOrder?.date || null,
+      deliveryDate: rposOrder?.delivery_date || null,
+      validationDate: rposOrder?.validation_date || null,
+      supplier: rposOrder?.supplier ? { name: rposOrder.supplier.name, code: rposOrder.supplier.code } : null,
+      createdBy: rposOrder?.created_by || null,
+      validatedBy: rposOrder?.validated_by || null,
+      // observation : champ demandé mais absent de la réponse RPOS /api/supplier_order/ (confirmé
+      // par test direct le 06/10/2026 — champs réels : id/reference/external_reference/date/
+      // validation_date/delivery_date/status_display/supplier/created_by/validated_by, rien de plus)
+      // — toujours null, jamais inventé.
+      observation: null,
+    };
+  });
+
+  return { found: true, days, count: orders.length, orders };
 }
 
 /**
@@ -1267,21 +1405,46 @@ async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage
  * (pas encore validée) — même donnée que proposalReminderJob.js/endOfDayValidationRecapJob.js,
  * exposée ici en lecture pour une question directe au chat ("quelles propositions sont encore en
  * attente ?").
+ *
+ * generatedAt/generatedToday ajoutés le 06/10/2026 (bug constaté en conversation réelle) :
+ * "en attente de validation" (statut GENERATED, sans limite de date) et "générée AUJOURD'HUI" sont
+ * deux questions différentes — un magasin dont la génération nocturne a été désactivée garde sa
+ * DERNIÈRE proposition en GENERATED indéfiniment tant qu'elle n'est ni validée ni régénérée (25
+ * magasins sur 26 avaient ici une proposition vieille de 12-13 jours, un seul réellement généré la
+ * veille) ; sans ce champ, "combien de magasins ont eu une génération aujourd'hui ?" recevait
+ * exactement la même réponse que "combien de propositions en attente ?", en réutilisant à tort le
+ * décompte complet (toutes dates confondues) pour une question qui portait précisément sur la date.
  */
 async function getPendingProposalsAllShops(allowedShopIds) {
   if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
 
   const pending = await prisma.proposal.findMany({
     where: { rposShopId: { in: allowedShopIds }, status: 'GENERATED' },
-    select: { rposShopId: true, rposShopReference: true, rposShopName: true, lines: { select: { id: true } } },
+    select: { rposShopId: true, rposShopReference: true, rposShopName: true, generatedAt: true, lines: { select: { id: true } } },
   });
-  if (!pending.length) return { found: true, shopCount: 0, message: 'Aucune proposition en attente de validation sur votre périmètre actuellement.' };
+  if (!pending.length) return { found: true, shopCount: 0, generatedTodayCount: 0, message: 'Aucune proposition en attente de validation sur votre périmètre actuellement.' };
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
 
   const shops = pending
-    .map((p) => ({ rposShopId: p.rposShopId, shopReference: p.rposShopReference, shopName: p.rposShopName, articlesPending: p.lines.length }))
+    .map((p) => ({
+      rposShopId: p.rposShopId,
+      shopReference: p.rposShopReference,
+      shopName: p.rposShopName,
+      articlesPending: p.lines.length,
+      generatedAt: p.generatedAt,
+      generatedToday: p.generatedAt >= startOfToday,
+    }))
     .sort((a, b) => b.articlesPending - a.articlesPending);
 
-  return { found: true, shopCount: shops.length, totalArticlesPending: shops.reduce((s, r) => s + r.articlesPending, 0), shops };
+  return {
+    found: true,
+    shopCount: shops.length,
+    generatedTodayCount: shops.filter((s) => s.generatedToday).length,
+    totalArticlesPending: shops.reduce((s, r) => s + r.articlesPending, 0),
+    shops,
+  };
 }
 
 /** getOrderAnomaliesAllShops() — anomalies de commande PENDING sur tout le périmètre (même donnée
@@ -1461,11 +1624,13 @@ module.exports = {
   getRevenueAllShops,
   getSalesHistory,
   getCurrentProposal,
+  explainProposalQuantity,
   getStockoutRisks,
   getOverstockArticles,
   getParetoArticles,
   getPredictionAccuracy,
   getOrders,
+  getValidatedOrders,
   getStockMoveHistory,
   getDlvArticles,
   getArticleDlvStatus,

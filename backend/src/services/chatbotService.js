@@ -13,6 +13,7 @@ const { streamWithFallback, callWithFallback } = require('./aiForecastService');
 const systemConfig = require('./systemConfigService');
 const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./aiPermissionsService');
 const featureRequestService = require('./featureRequestService');
+const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 
 // Noms d'outils valides pour une règle d'intention — sert à ignorer silencieusement une règle
 // invalide plutôt que de planter le chatbot si la config CHATBOT_INTENT_RULES est mal éditée
@@ -22,72 +23,10 @@ const featureRequestService = require('./featureRequestService');
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
 ]);
-
-// Règles par défaut : copie exacte de l'ancien tableau codé en dur, gardée ici comme filet de
-// sécurité UNIQUEMENT si la lecture de CHATBOT_INTENT_RULES échoue totalement (base indisponible,
-// JSON corrompu au point de ne pas être parsable) — le chatbot ne doit jamais se retrouver sans
-// aucune règle de détection. En usage normal, c'est systemConfigService qui fournit déjà ces mêmes
-// valeurs par défaut avant toute édition ; celles-ci ne servent que si CET APPEL précis échoue.
-const FALLBACK_INTENT_RULES = [
-  { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', 'quand a-t-il changé de prix', 'quand est-ce que le prix', 'le prix a changé', 'le prix a change', 'quand le prix', 'prix a changé', 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', 'quand est-ce qu\'il', 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
-  { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
-  // Pareto AVANT ArticleDetails (bug trouvé le 27/09/2026 lors d'un test réel : "quel rayon vend le
-  // mieux ?" répondait la fiche du dernier article consulté) — "quel rayon" (ArticleDetails, cherche
-  // le rayon D'UN article précis) est un sous-ensemble textuel de "quel rayon vend le mieux/le plus"
-  // (Pareto, classement des rayons), donc ArticleDetails gagnait toujours en premier tant qu'il était
-  // testé avant dans cette liste ("premier qui matche gagne", cf. detectIntent). Les deux règles
-  // avaient pourtant déjà cet ordre inversé en théorie (PARETO_PATTERN_REGEX testé avant dans
-  // detectIntent) mais celui-ci ne couvre que le motif "X% du CA", jamais "quel rayon vend le mieux"
-  // qui ne passe que par cette liste générique.
-  { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente', 'quel rayon vend le mieux', 'quel rayon vend le plus', 'meilleur rayon', 'rayon qui vend le plus', 'rayon qui vend le mieux', 'classement des rayons', 'comparer les rayons', 'comparaison des rayons'], tool: 'getParetoArticles' },
-  // "le prix de" (sans "vente"/"actuel") ajouté le 05/10/2026 (bug trouvé en testant la recherche
-  // par nom : "quel est le prix de l'article codys ?" ne matchait aucun mot-clé existant — seuls
-  // "prix de vente"/"prix actuel"/"quel prix" l'étaient — donc tombait sur le filet LLM générique au
-  // lieu de cette règle déterministe, qui seule sait basculer vers searchArticlesByName/EAN manquant.
-  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'le prix de', 'prix de l\'article', 'prix de larticle', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
-  { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de'], tool: 'getRevenue' },
-  { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
-  { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
-  { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', 'lia se trompe', 'l\'ia se trompe', 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
-  // Le mot-clé générique 'commande' seul a été retiré (bug trouvé le 21/09/2026, campagne de
-  // fuzzing large) : matchait à tort par sous-chaîne "commander", "commandé", "commandes anormales"
-  // — écrasant getCurrentProposal ("quoi commander") et getOverstockArticles ("trop commandé") dans
-  // 5 cas sur 8 échecs trouvés. Ne garder que des expressions assez précises pour ne jamais matcher
-  // un simple verbe conjugué ou une question sur un AUTRE sujet contenant accidentellement ce radical.
-  // Placé AVANT la règle getOrders générique ci-dessous : "anomalie(s) de commande" contient
-  // "commande" mais désigne un besoin précis, jamais la simple liste des commandes récentes.
-  { keywords: ['anomalie', 'anomalies', 'commande anormale', 'commandes anormales', 'quantité anormale', 'quantite anormale', 'écart de commande', 'ecart de commande'], tool: 'getOrderAnomalies' },
-  { keywords: ['mes commandes', 'commandes en cours', 'commandes récentes', 'liste des commandes', 'qu\'est-ce qui a été commandé', 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
-  // "aujourd'hui" retiré (bug trouvé le 21/09/2026, campagne de fuzzing large) : trop générique,
-  // matchait à tort N'IMPORTE QUELLE question du jour (ex: "chiffre d'affaire aujourd'hui" tombait
-  // sur getCurrentProposal au lieu de getRevenue). "proposition"/"commander" restent assez précis
-  // pour cet outil sans avoir besoin de ce mot-clé fourre-tout.
-  { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
-  { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
-  // "son stock"/"le stock" ajoutés le 27/09/2026 (bug trouvé via une question à deux volets : "le CA
-  // de cet article et son stock est à combien ?" — le segment isolé "son stock est à combien" ne
-  // matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible" explicite).
-  // "stock du magasin" ajouté le 27/09/2026 (bug trouvé via test réel : "quel est le stock du
-  // magasin ?" ne matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible/son
-  // stock" — jamais "stock du").
-  { keywords: ['stock de', 'stock du', 'stock actuel', 'stock disponible', 'son stock', 'le stock est', 'stock est a', 'stock est à', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien', 'disponibilite', 'disponibilité', 'est-il disponible', 'est il disponible'], tool: 'getArticleStock' },
-  // DLV (demande du 22/09/2026) : PAS une date de péremption, un stock basculé manuellement par le
-  // personnel sur un EAN distinct pour écoulement à prix réduit — cf. chatbotToolsService.js.
-  { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
-  // Ajouté le 27/09/2026 : "est-ce que le système peut répondre combien d'utilisateurs sont dans ce
-  // magasin ?" — donnée de gestion des comptes (pas ventes/stock/réassort), réservée ADMIN
-  // (aiPermissionsService.js, capacité dédiée) contrairement au reste des capacités du chatbot.
-  { keywords: ['combien d\'utilisateurs', 'combien dutilisateurs', 'combien de user', 'combien de comptes', 'nombre d\'utilisateurs', 'nombre dutilisateurs', 'utilisateurs de ce magasin', 'comptes de ce magasin', 'qui travaille dans ce magasin', 'qui a accès à ce magasin', 'qui a acces a ce magasin'], tool: 'getShopUsers' },
-  // Ajouté le 28/09/2026 (spec §7 : "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA") : répond à
-  // "depuis quand avez-vous mes données ?" / "sur combien de temps portent vos données ?" — distinct
-  // de getSalesHistory (l'évolution DES VENTES elles-mêmes) : ici la question porte sur l'étendue de
-  // l'historique disponible, pas sur un chiffre de vente.
-  { keywords: ['depuis quand avez-vous', 'depuis quand avez vous', 'depuis quand tu as', 'depuis quand as-tu', 'depuis quand as tu', 'historique disponible', 'données disponibles', 'donnees disponibles', 'combien de temps d\'historique', 'combien de temps dhistorique', 'sur quelle période portent vos données', 'sur quelle periode portent vos donnees', 'jusqu\'où remonte', 'jusqu ou remonte', 'jusqu\'où peut-on remonter', 'jusqu ou peut on remonter'], tool: 'getDataAvailability' },
-];
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
 // CHAQUE question serait un aller-retour base inutile pour une donnée qui change rarement (édition
@@ -184,10 +123,17 @@ const ALL_SHOPS_STOCK_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'e
 // optionnel vide laisse le curseur juste après l'espace, à une position où le \b de fin de motif ne
 // peut jamais se satisfaire (aucune transition mot/non-mot à cet endroit précis quand le groupe est
 // vide). Restructuré en rendant l'espace ET le qualificatif optionnels ensemble (\s+(entier|complet))?.
-const ALL_SHOPS_PREFIX = "(tous les|toutes les|chaque|quels?|quelles?|l'ensemble des?|l'ensemble de mes|mes)\\s+magasins?|magasins?\\s+(du réseau|de mon réseau|de notre réseau)|(tout|toute)\\s+le\\s+réseau|le\\s+réseau(\\s+(entier|complet))?";
+// "combien de magasins" ajouté le 06/10/2026 (bug trouvé en conversation réelle : "génération pour
+// combien de magasins" ne matchait aucun préfixe existant — ni "tous les"/"chaque"/"quels" devant
+// "magasins", ni "le réseau" — une question "combien de magasins..." porte presque toujours sur le
+// réseau entier, jamais un magasin unique, donc tout aussi légitime que "tous les magasins").
+const ALL_SHOPS_PREFIX = "(tous les|toutes les|chaque|quels?|quelles?|combien de|l'ensemble des?|l'ensemble de mes|mes)\\s+magasins?|magasins?\\s+(du réseau|de mon réseau|de notre réseau)|(tout|toute)\\s+le\\s+réseau|le\\s+réseau(\\s+(entier|complet))?";
 const ALL_SHOPS_STOCKOUT_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(rupture|risque)|\\b(rupture|risque).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
 const ALL_SHOPS_OVERSTOCK_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\bsurstock|\\bsurstock.*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
-const ALL_SHOPS_PENDING_PROPOSAL_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(proposition|valid)|\\b(proposition|valid).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
+// "génération" ajouté le 06/10/2026 (bug trouvé en conversation réelle : "aujourd'hui il y a eu
+// génération pour combien de magasins ?" ne contient ni "proposition" ni "valid", tombait donc sur
+// le filet LLM générique au lieu de cette règle déterministe).
+const ALL_SHOPS_PENDING_PROPOSAL_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\b(proposition|valid|génération|generation|généré|genere)|\\b(proposition|valid|génération|generation|généré|genere).*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
 const ALL_SHOPS_ANOMALY_REGEX = new RegExp(`\\b(${ALL_SHOPS_PREFIX})\\b.*\\banomalie|\\banomalie.*\\b(${ALL_SHOPS_PREFIX})\\b`, 'i');
 // Pas de \b après "fiabilité" (même bug d'accent que ALL_SHOPS_TREND_REGEX ci-dessous : un \b après
 // un "é" final n'est jamais reconnu par le moteur regex JS, "fiabilité\b" ne matchait donc jamais).
@@ -643,6 +589,18 @@ async function resolveDayOnlyDate(rposShopId, day) {
 // dans la conversation. Sans ce cas particulier, une question comme "tu peux m'envoyer le graph ?"
 // ne matchait aucune règle de INTENT_RULES et l'IA répondait à tort "je ne peux pas envoyer de
 // graphique" alors que le frontend sait très bien en construire un à partir d'un toolResult déjà là.
+// Discussion sociale pure (salutation, remerciement, politesse) détectée seulement pour choisir
+// quel PROMPT envoyer au LLM (cf. buildSmallTalkPrompt plus bas) — ne répond jamais elle-même à la
+// place du LLM (demande explicite du 06/10/2026 : "il doit se comporter comme un vrai LLM aussi",
+// pas une réponse statique câblée sur des mots-clés). Volontairement étroite : un vrai message
+// mélangeant politesse ET question ("salut, quel est le CA ?") ne doit jamais basculer ici — seule
+// une question COURTE sans aucun mot évoquant une donnée réelle (magasin, article, stock, vente,
+// prix, commande, rayon...) qualifie, sinon le chemin normal (avec données) reste prioritaire.
+const SMALL_TALK_REGEX = /^\s*(salut|bonjour|bonsoir|coucou|hello|hey|hi|ça va\??|ca va\??|comment vas-tu\??|comment allez-vous\??|merci|merci beaucoup|je te remercie|au revoir|bye|à bientôt|a bientot|bonne journée|bonne journee|bonne soirée|bonne soiree)\s*[!.?]*\s*$/i;
+function isSmallTalk(question) {
+  return SMALL_TALK_REGEX.test(question || '');
+}
+
 const VISUAL_REQUEST_KEYWORDS = ['graph', 'graphique', 'tableau', 'courbe', 'visuel', 'schema', 'diagramme'];
 
 function isVisualRequest(question) {
@@ -669,11 +627,13 @@ const TOOL_CATALOG = [
   { name: 'getArticleStock', description: 'Stock actuel disponible, du magasin entier/un rayon, ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel', department: 'rayon, optionnel' } },
   { name: 'getArticleStockAllShops', description: 'Stock d\'un article précis dans TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le stock de l\'article X dans tous les magasins", jamais pour une question sur UN seul magasin précis.', params: { ean: 'code EAN article, requis' } },
   { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
+  { name: 'explainProposalQuantity', description: 'Raisonnement IA en direct expliquant POURQUOI une quantité précise est suggérée pour UN article de la proposition en attente (pas juste "quelle quantité", une vraie explication). Nécessite un article identifié (EAN explicite ou dernier article mentionné dans la conversation).', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement.', params: { department: 'rayon, optionnel' } },
   { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
-  { name: 'getOrders', description: 'Commandes récentes passées par le magasin.', params: {} },
+  { name: 'getOrders', description: 'Commandes récentes passées par le magasin (vue interne basique : rayon, référence, date, statut de réception).', params: {} },
+  { name: 'getValidatedOrders', description: 'Commandes fournisseur VALIDÉES par ce magasin, avec le détail complet côté caisse (RPOS) : qui a validé, qui a créé, fournisseur, statut, date de commande, de livraison, de validation. Utiliser pour toute question sur une commande déjà validée/son détail complet, jamais getOrders qui n\'a pas ces champs.', params: { days: 'nombre de jours à couvrir, optionnel (défaut 30)' } },
   { name: 'getOrderAnomalies', description: 'Anomalies détectées sur des commandes récentes (quantité validée nettement supérieure ou inférieure à l\'habitude du magasin) — jamais présentées comme des erreurs certaines, seulement des écarts à vérifier.', params: {} },
   { name: 'getStockoutRisksAllShops', description: 'Nombre d\'articles en risque de rupture, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quels magasins ont des ruptures ?", jamais pour une question sur un seul magasin précis.', params: {} },
   { name: 'getOverstockArticlesAllShops', description: 'Nombre d\'articles en surstock, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR).', params: {} },
@@ -802,7 +762,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // les magasins" sans EAN explicite ne réutilisait jamais le dernier EAN de la conversation,
   // contrairement à getArticleStock pour un seul magasin — la question échouait en demandant de
   // préciser un EAN qui venait pourtant d'être donné juste avant).
-  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getArticleStockAllShops', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue']);
+  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getArticleStockAllShops', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue', 'explainProposalQuantity']);
 
   // Filet de sécurité n°1 : un EAN explicite dans la question mais aucun mot-clé reconnu (ex: "tu
   // peux me dire tout sur cet article : 100446452 ?", formulation imprévue) — plutôt que de
@@ -833,6 +793,20 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   if (!toolName && conversationHistory && conversationHistory.length && FOLLOWUP_STARTER_REGEX.test(question.trim())) {
     const lastTurn = conversationHistory[conversationHistory.length - 1];
     if (lastTurn.toolUsed) toolName = lastTurn.toolUsed;
+  }
+
+  // Filet de sécurité n°1bis (bug constaté le 06/10/2026) : une confirmation courte ("oui", "vas-y",
+  // "d'accord", "ok") qui répond à une PROPOSITION faite par l'assistant lui-même dans son tour
+  // précédent (typiquement après une salutation : "tu veux voir le CA du jour ou les ruptures ?")
+  // doit comprendre CETTE proposition précise, pas redemander de préciser alors que c'est justement
+  // l'assistant qui vient de suggérer quoi faire. Le tour précédent peut ne porter AUCUN outil
+  // (lastTurn.toolUsed est null pour un échange de small talk) — on relit alors le TEXTE de la
+  // réponse précédente avec detectIntent, qui y retrouve généralement les mêmes mots-clés que ceux
+  // utilisés pour la proposer (ex: "chiffre d'affaires du jour" dans la réponse -> getRevenue).
+  const SHORT_CONFIRMATION_REGEX = /^\s*(oui|ouais|ouai|vas-?y|d'accord|daccord|ok|okay|exactement|c'est ça|cest ca|tout à fait|tout a fait)\s*[!.?]*\s*$/i;
+  if (!toolName && conversationHistory && conversationHistory.length && SHORT_CONFIRMATION_REGEX.test(question)) {
+    const lastTurn = conversationHistory[conversationHistory.length - 1];
+    toolName = lastTurn.toolUsed || await detectIntent(lastTurn.answer || '');
   }
 
   // Filet de sécurité n°2bis (bug constaté le 05/10/2026) : une relance qui précise seulement une
@@ -961,7 +935,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // explicite). Extensible à d'autres outils mono-magasin au besoin. rposShopId de la session reste
   // le défaut si la référence ne correspond à aucun magasin réel ou hors du périmètre autorisé de
   // l'utilisateur — jamais un magasin arbitraire, exposé à quelqu'un qui n'y a pas droit.
-  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock']);
+  // getCurrentProposal/getValidatedOrders ajoutés le 06/10/2026 (demande explicite : "combien de
+  // commandes ont été proposées par le magasin 035", "quelles commandes ont été validées par le
+  // magasin X" — un ADMIN/SUPERVISOR doit pouvoir cibler n'importe quel magasin de son périmètre
+  // nommément, pas seulement celui de la session en cours).
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders']);
   let effectiveShopId = rposShopId;
   // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
   // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
@@ -1105,6 +1083,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       case 'getOrders':
         // Idem : "mes commandes du mois dernier" ignorait daysQuery et retombait sur le défaut (14j).
         return { toolName, toolResult: await tools.getOrders(rposShopId, { days: daysQuery || 14 }) };
+      case 'getValidatedOrders': {
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30 });
+        return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
+      }
       case 'getOrderAnomalies':
         // getOrderAnomalies ne connaît pas de notion de période (statut PENDING/ACKNOWLEDGED/DISMISSED
         // + limit uniquement, cf. chatbotToolsService.js) : aucune régression de période à corriger ici,
@@ -1157,8 +1140,29 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         }
         return { toolName, toolResult: await tools.getSilentShops(await resolveAllowedShopIds(user), {}) };
       }
-      case 'getCurrentProposal':
-        return { toolName, toolResult: await tools.getCurrentProposal(rposShopId, { department }) };
+      case 'getCurrentProposal': {
+        const proposalResult = await tools.getCurrentProposal(effectiveShopId, { department });
+        return { toolName, toolResult: targetShopLabel ? { ...proposalResult, targetShopLabel } : proposalResult };
+      }
+      case 'explainProposalQuantity': {
+        let targetEan = ean;
+        // Pas d'EAN connu, mais la question désigne l'article par son RANG ("le plus de quantité",
+        // "la plus grosse quantité") plutôt que par un nom précis : on le retrouve nous-mêmes dans
+        // la proposition en attente plutôt que de demander à l'utilisateur un code qu'il ne connaît
+        // justement pas encore (c'est précisément ce qu'il demande qu'on trouve). Couvre aussi "la
+        // plus petite quantité" pour symétrie, même si jamais explicitement demandé.
+        const SUPERLATIVE_QTY_REGEX = /plus\s+(grosse|grande|petite|faible)\s+quantit|plus\s+de\s+quantit|quantit\w*\s+la\s+plus\s+(élevée|elevee|haute|basse)/i;
+        if (!targetEan && SUPERLATIVE_QTY_REGEX.test(question)) {
+          const wantsSmallest = /petite|faible|basse/i.test(question);
+          const proposal = await tools.getCurrentProposal(rposShopId, {});
+          if (proposal.found && proposal.lines && proposal.lines.length) {
+            const sorted = [...proposal.lines].sort((a, b) => wantsSmallest ? a.quantitySuggested - b.quantitySuggested : b.quantitySuggested - a.quantitySuggested);
+            targetEan = sorted[0].ean;
+          }
+        }
+        if (!targetEan) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN ou le nom de l\'article dont vous voulez l\'explication de quantité.' } };
+        return { toolName, toolResult: await tools.explainProposalQuantity(rposShopId, targetEan) };
+      }
       case 'getSalesHistory':
         // Bug trouvé le 27/09/2026 (lecture de code confirmée puis testée dynamiquement) : `days`
         // était codé en dur à 30, ignorant totalement `daysQuery` (extrait par extractDays/
@@ -1274,6 +1278,28 @@ async function runToolForQuestion(rposShopId, question, options = {}) {
 }
 
 /**
+ * Prompt allégé pour une discussion sociale pure (cf. isSmallTalk) — demande explicite du
+ * 06/10/2026 : "salut" prenait le même temps qu'une vraie question de données alors qu'il n'y a
+ * rien à chercher, ET devait se comporter "comme un vrai LLM" (naturel, varié, personnalisé),
+ * jamais une réponse statique câblée sur des mots-clés. Volontairement SANS les 5 blocs de règles
+ * anti-hallucination du prompt principal (§35, found:true/false, salesCount, lastSyncedAt,
+ * targetShopLabel, periodStart/periodEnd) : aucune donnée n'est en jeu ici, ces règles n'auraient
+ * aucun sens et alourdissent inutilement chaque appel. Garde quand même le prénom et l'historique
+ * récent, pour une vraie conversation qui se souvient du fil plutôt qu'un échange sans mémoire.
+ */
+function buildSmallTalkPrompt({ userFirstName, conversationHistory, question }) {
+  const historyText = (conversationHistory || [])
+    .slice(-6)
+    .map((turn) => `Utilisateur : ${turn.question}\nAssistant : ${turn.answer}`)
+    .join('\n\n');
+  return `Tu es l'Assistant IA d'une application de gestion de stock/réassort en magasin, utilisée par ${userFirstName || 'un utilisateur'}. Il/elle vient de te dire quelque chose de social (salutation, remerciement, politesse) plutôt que de poser une vraie question sur ses données.
+
+Réponds-lui naturellement et chaleureusement, comme le ferait un assistant conversationnel normal — varie ta formulation, ne répète jamais la même phrase mot pour mot d'un échange à l'autre. Tu peux l'appeler par son prénom si tu le connais, lui demander comment tu peux l'aider aujourd'hui, et éventuellement glisser un exemple concret de ce que tu sais faire (CA du jour, ruptures de stock, articles en surstock...) sans dresser une liste exhaustive ni être lourd. Reste bref (1 à 3 phrases).
+
+${historyText ? `Échanges précédents dans cette conversation :\n${historyText}\n\n` : ''}Message de l'utilisateur : "${question}"`;
+}
+
+/**
  * Construit le prompt final : contexte utilisateur (magasin, rayon si précisé — jamais plus que ce
  * que ses permissions autorisent, appliqué en amont par la route), historique de conversation,
  * résultat de l'outil appelé le cas échéant, et consigne stricte de ne jamais inventer de données
@@ -1318,6 +1344,31 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const eanNote = hasEanField
       ? '\n\nQuand ta réponse énumère des articles individuels, présente-les en LISTE À PUCES Markdown (une puce par article, jamais un paragraphe dense), indique TOUJOURS leur code (EAN/code article, présent dans les données sous un champ comme "ean", "code" ou "originEan") à côté du nom, jamais le nom seul — nécessaire pour retrouver l\'article en caisse ou en rayon. Format recommandé pour chaque puce : "**NOM** (code XXXXXXXXX) : <détail chiffré>".'
       : '';
+    // getPendingProposalsAllShops (bug constaté le 06/10/2026 en conversation réelle) : "combien de
+    // propositions sont EN ATTENTE" et "combien de magasins ont eu une génération AUJOURD'HUI" sont
+    // deux questions différentes — un magasin dont la génération nocturne est désactivée garde sa
+    // DERNIÈRE proposition en attente indéfiniment, même générée il y a plusieurs jours (shopCount
+    // compte TOUTES les propositions en attente, generatedTodayCount seulement celles du jour même,
+    // cf. champ generatedToday par magasin dans "shops"). Sans cette note, une question sur
+    // "aujourd'hui" recevait à tort le total toutes dates confondues.
+    const pendingProposalsNote = toolName === 'getPendingProposalsAllShops'
+      ? `\n\nIMPORTANT pour cette réponse : "shopCount" (${toolResult.shopCount}) compte TOUS les magasins ayant une proposition en attente de validation, quelle que soit sa date de génération — certaines peuvent dater de plusieurs jours (champ "generatedAt" par magasin). "generatedTodayCount" (${toolResult.generatedTodayCount}) ne compte QUE les magasins dont la proposition a été générée AUJOURD'HUI (champ "generatedToday": true par magasin). Si la question porte sur "aujourd'hui"/"ce jour"/une génération récente, utilise "generatedTodayCount" et seulement les magasins avec "generatedToday": true — ne réponds JAMAIS "shopCount" à une question qui porte explicitement sur aujourd'hui, ce serait une confusion entre deux périodes différentes.`
+      : '';
+    // getCurrentProposal (ajouté le 06/10/2026, demande explicite : "combien de commandes ont été
+    // proposées par le magasin X, avec le détail de chaque, ex: Liquide: 38 articles...") : sans
+    // cette note, le LLM n'avait que "lines" (jusqu'à 200 articles bruts) pour répondre à une
+    // question globale sur un magasin, jamais un vrai résumé par rayon.
+    const proposalBreakdownNote = toolName === 'getCurrentProposal' && toolResult.departmentBreakdown
+      ? `\n\nIMPORTANT pour cette réponse : si la question porte sur le volume global de la proposition (combien d'articles au total, répartition par rayon...) plutôt que sur un article précis, utilise le champ "departmentBreakdown" (déjà trié par nombre d'articles décroissant) comme structure principale de ta réponse — un rayon par ligne avec son nombre d'articles (ex: "LIQUIDES : 38 articles"), jamais la liste "lines" brute dans ce cas. "totalArticleCount" (${toolResult.totalArticleCount}) est le total réel de la proposition, toujours la somme de "departmentBreakdown" — ne le confonds jamais avec "articleCount" qui ne compte que les lignes d'un rayon filtré si la question en ciblait un précis.`
+      : '';
+    // getValidatedOrders (ajouté le 06/10/2026, demande explicite) : certains champs RPOS peuvent
+    // être null (commande sans correspondance RPOS retrouvée, champ absent côté RPOS comme
+    // "observation" qui n'existe simplement pas dans cette API) — ne JAMAIS les présenter comme
+    // "non disponible pour l'instant"/"en développement", juste omettre le champ ou dire qu'il n'est
+    // pas renseigné pour CETTE commande précise, les autres champs présents restant fiables.
+    const validatedOrdersNote = toolName === 'getValidatedOrders' && toolResult.found && toolResult.count > 0
+      ? '\n\nQuand ta réponse énumère des commandes individuelles, présente-les en LISTE À PUCES Markdown (une puce par commande), avec pour chacune : rayon, référence RPOS, fournisseur, statut, date de commande, date de livraison, date de validation, créée par, validée par — en omettant simplement les champs null (commande sans détail RPOS retrouvé) sans dire que c\'est une limite générale de l\'outil.'
+      : '';
     // searchArticlesByName (ajouté le 05/10/2026, demande explicite : une recherche par nom partiel
     // comme "codys" doit lister les variantes réelles plutôt que bloquer sur "précisez le code EAN")
     // : n'atteint jamais ce chemin avec un seul résultat (runSingleTool enchaîne alors directement
@@ -1325,7 +1376,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const searchByNameNote = toolName === 'searchArticlesByName' && toolResult.found
       ? `\n\nIMPORTANT pour cette réponse : ${toolResult.articles.length} articles différents correspondent au nom recherché ("${toolResult.query}") — ne choisis JAMAIS un seul article au hasard ni ne suppose lequel l'utilisateur veut. Liste TOUTES les variantes trouvées (nom complet et code à côté, prix si pertinent pour la question), puis termine ta réponse par une question explicite lui demandant de préciser laquelle il veut dire (ex: "Tu parles du Codys 25CL ou du 50CL ?"). Ne réponds à la question initiale (prix, stock...) qu'une fois l'article précisé dans un message suivant.`
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}${searchByNameNote}`;
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
@@ -1507,8 +1558,16 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   const skipToolForPendingClarification = !!pendingFeatureRequest;
   const effectiveToolResult = skipToolForPendingClarification ? null : toolResult;
   const suggestedQuestions = effectiveToolResult || reusedFromHistory ? null : await getSuggestedQuestions();
+  // Discussion sociale pure (cf. isSmallTalk) : jamais prioritaire sur une vraie intention déjà
+  // résolue par un outil (toolName non vide) — seulement quand aucun outil n'a rien trouvé ET que la
+  // question elle-même n'est, de toute façon, pas une vraie question de données. Prompt dédié,
+  // volontairement plus court (cf. buildSmallTalkPrompt) : moins de texte à traiter par le LLM pour
+  // une réponse qui n'a besoin d'aucune des règles anti-hallucination du prompt principal.
+  const isSmallTalkTurn = !skipToolForPendingClarification && !toolName && !reusedFromHistory && isSmallTalk(question);
   const prompt = skipToolForPendingClarification
     ? `Tu es l'Assistant IA d'une application de gestion de stock/réassort. Tu avais précédemment demandé une précision à l'utilisateur au sujet d'un besoin d'évolution non encore disponible dans l'application : "${pendingFeatureRequest.problem}". L'utilisateur répond maintenant : "${question}". Accuse réception de sa précision en une phrase brève, sans inventer de fonctionnalité ni prétendre l'avoir déjà mise en place.`
+    : isSmallTalkTurn
+    ? buildSmallTalkPrompt({ userFirstName: (user?.name || '').split(' ')[0] || null, conversationHistory, question })
     : await buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult: effectiveToolResult, reusedFromHistory, suggestedQuestions, secondaryToolName, secondaryToolResult: skipToolForPendingClarification ? null : secondaryToolResult });
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
@@ -1539,7 +1598,10 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // contrairement à un found:false sans marqueur (ex: "aucune proposition générée pour ce magasin").
   const toolFoundNothingButUseless = effectiveToolResult && typeof effectiveToolResult === 'object'
     && effectiveToolResult.found === false && !effectiveToolResult.isNormalNegative;
-  const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothingButUseless) && !reusedFromHistory;
+  // isSmallTalkTurn exclu (06/10/2026) : une salutation n'a jamais vocation à devenir une "demande
+  // d'évolution produit" — évite un second appel LLM inutile (celui-ci aurait presque toujours
+  // conclu isFeatureRequest:false de toute façon, mais autant ne pas le déclencher pour rien).
+  const shouldTrackFeatureRequest = (!effectiveToolResult || toolFoundNothingButUseless) && !reusedFromHistory && !isSmallTalkTurn;
 
   // toolResult est retourné tel quel (pas reformaté par le LLM) : le frontend construit son
   // graphique/tableau directement à partir de ces vraies données quand leur forme s'y prête
