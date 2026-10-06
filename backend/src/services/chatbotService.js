@@ -848,15 +848,19 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
     department = await extractDepartment(question, rposShopId);
   }
 
-  // getRevenue seul est ambigu par nature (CA magasin ENTIER par défaut, contrairement aux autres
-  // outils de ARTICLE_SCOPED_TOOLS qui portent TOUJOURS sur un seul article) : une question sans EAN
-  // ni référence explicite à un article ("le magasin a un CA de combien ?", posée fraîchement après
-  // avoir discuté d'un article) ne doit JAMAIS être silencieusement rétrécie au dernier EAN de la
-  // conversation — seule une phrase qui renvoie explicitement à "cet/cette article/produit" déclenche
-  // la réutilisation pour cet outil précis.
+  // getRevenue/getArticleStock sont ambigus par nature (CA ou stock du MAGASIN ENTIER par défaut,
+  // contrairement aux autres outils de ARTICLE_SCOPED_TOOLS qui portent TOUJOURS sur un seul
+  // article) : une question sans EAN ni référence explicite à un article ("le stock du magasin est
+  // à combien ?", posée fraîchement après avoir discuté d'un article précis) ne doit JAMAIS être
+  // silencieusement rétrécie au dernier EAN de la conversation — seule une phrase qui renvoie
+  // explicitement à "cet/cette article/produit" déclenche la réutilisation pour ces deux outils.
+  // getArticleStock ajouté le 06/10/2026 (bug réel observé en prod : "quel est le stock du
+  // magasin ?" répondait sur le dernier article consulté (Codys) au lieu du stock global — même
+  // classe de bug que getRevenue, protection manquante alors que l'outil est tout aussi ambigu).
   const REFERS_TO_ARTICLE_REGEX = /\b(cet|cette|ce|l')\s*(article|produit)\b/i;
   let ean = extractEan(question) || (llmParams && ARTICLE_SCOPED_TOOLS.has(toolName) ? llmParams.ean : null) || null;
-  const canReuseEanForTool = toolName !== 'getRevenue' || REFERS_TO_ARTICLE_REGEX.test(question);
+  const AMBIGUOUS_SCOPE_TOOLS = new Set(['getRevenue', 'getArticleStock']);
+  const canReuseEanForTool = !AMBIGUOUS_SCOPE_TOOLS.has(toolName) || REFERS_TO_ARTICLE_REGEX.test(question);
   if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && canReuseEanForTool && conversationHistory && conversationHistory.length) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
       const pastEan = extractEan(conversationHistory[i].question);
