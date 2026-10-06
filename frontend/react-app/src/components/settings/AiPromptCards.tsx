@@ -60,24 +60,12 @@ interface IntentRule {
   tool: string;
 }
 
-// Copie exacte du tableau par défaut (ENV_FALLBACK.CHATBOT_INTENT_RULES dans
-// systemConfigService.js) : pas de route de "reset" côté backend pour cette clé, on réenregistre
-// ce JSON comme une modification normale.
-const DEFAULT_INTENT_RULES: IntentRule[] = [
-  { keywords: ['changement de prix', 'changé de prix', 'change de prix', 'changement de prix de vente', 'historique de prix', 'historique des prix', 'évolution du prix', 'evolution du prix', "quand a-t-il changé de prix", "quand est-ce que le prix", 'log de prix', 'log changement', 'mis en promo', 'mise en promo', 'mis en promotion', 'depuis quand', "quand est-ce qu'il", 'quand a-t-il', 'quand il a', 'quand est-il passé', 'a quel moment'], tool: 'getPriceChangeHistory' },
-  { keywords: ['pourquoi le stock', 'pourquoi son stock', 'stock a baissé', 'stock a baisse', 'stock a bougé', 'stock a bouge', 'stock a chuté', 'stock a chute', 'stock a diminué', 'stock a diminue', 'mouvement de stock', 'mouvements de stock', 'type de mouvement', 'types de mouvement', 'type de mouvements', 'quel mouvement', 'quels mouvements', 'de la casse', 'en casse', 'casse sur', 'article volé', 'article vole', 'cession de rayon', 'cession entre rayon', 'cession inter-rayon', 'retour fournisseur', 'écart de stock', 'ecart de stock', 'disparition de stock'], tool: 'getStockMoveHistory' },
-  { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', "détails de l'article", 'details de larticle', 'infos article', "informations sur l'article", 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
-  { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente'], tool: 'getParetoArticles' },
-  { keywords: ["chiffre d'affaires", 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', "combien on a vendu en argent", 'recette du jour', 'recette de'], tool: 'getRevenue' },
-  { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
-  { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
-  { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', "lia se trompe", "l'ia se trompe", 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
-  { keywords: ['commande', 'commandes récentes', "qu'est-ce qui a été commandé", 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
-  { keywords: ['proposition', 'proposition en attente', "aujourd'hui", 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
-  { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
-  { keywords: ['stock de', 'stock actuel', 'stock disponible', 'combien il reste', 'combien il en reste', 'reste combien', 'il reste combien'], tool: 'getArticleStock' },
-  { keywords: ['dlv', 'dlc', 'date limite de vente', 'date limite de consommation', 'péremption', 'peremption', 'articles à écouler', 'articles a ecouler', 'stock à solder', 'stock a solder', 'en dlv', 'proche de la peremption', 'proche de la péremption'], tool: 'getDlvArticles' },
-];
+// DEFAULT_INTENT_RULES supprimé le 06/10/2026 : c'était une copie figée du fallback backend, qui
+// avait fini par diverger silencieusement (ordre Pareto/ArticleDetails périmé, plusieurs outils
+// manquants) — un "Réinitialiser" en prod réinjectait donc une liste OBSOLÈTE plutôt que les vraies
+// valeurs par défaut à jour. handleResetToDefaults appelle maintenant POST
+// .../system-config/CHATBOT_INTENT_RULES/reset, qui supprime la ligne en base côté backend pour
+// retomber sur ENV_FALLBACK (chatbotIntentRulesDefault.js, source unique, toujours synchronisée).
 
 const INTENT_TOOL_LABELS_FALLBACK: Record<string, string> = {
   getPriceChangeHistory: 'Historique des changements de prix',
@@ -407,6 +395,12 @@ export function ChatbotIntentRulesCard() {
     }
   }
 
+  // Appelle désormais le backend (POST .../reset, ajouté le 06/10/2026) plutôt que de réenregistrer
+  // DEFAULT_INTENT_RULES ci-dessus : cette constante locale avait fini par diverger silencieusement
+  // du vrai fallback backend (ordre Pareto/ArticleDetails périmé, outils manquants) — un bug
+  // constaté en prod où "réinitialiser" réinjectait en fait une liste OBSOLÈTE. Le backend supprime
+  // la ligne en base, ce qui fait retomber getValue() sur ENV_FALLBACK (chatbotIntentRulesDefault.js,
+  // la vraie source unique, toujours à jour) — plus aucune copie à maintenir ici.
   async function handleResetToDefaults() {
     const confirmed = await window.reassortConfirm(
       'Réinitialiser toutes les règles aux valeurs par défaut ? Cette action remplace la liste actuelle immédiatement.',
@@ -415,8 +409,9 @@ export function ChatbotIntentRulesCard() {
     setError(null);
     setSuccess(null);
     try {
-      await saveSystemConfigKey('CHATBOT_INTENT_RULES', JSON.stringify(DEFAULT_INTENT_RULES));
-      setRules(DEFAULT_INTENT_RULES.map((r) => ({ keywords: [...r.keywords], tool: r.tool })));
+      const data = await apiFetch<{ key: string; value: string }>('/api/reassort/system-config/CHATBOT_INTENT_RULES/reset', { method: 'POST' });
+      const resetRules = JSON.parse(data.value);
+      setRules(resetRules.map((r: IntentRule) => ({ keywords: [...r.keywords], tool: r.tool })));
       setSuccess('Règles réinitialisées aux valeurs par défaut.');
     } catch (err) {
       setError('Erreur : ' + (err instanceof Error ? err.message : String(err)));

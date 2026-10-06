@@ -376,4 +376,19 @@ async function getAll() {
   return result;
 }
 
-module.exports = { KEYS, SENSITIVE_KEYS, getValue, setValue, getAll };
+/**
+ * Supprime la ligne en base pour `key` : getValue() retombe alors automatiquement sur
+ * ENV_FALLBACK[key] (la valeur par défaut à jour, codée en dur) au lieu d'une valeur figée au
+ * moment où elle avait été enregistrée. Ajouté le 06/10/2026 pour un vrai bouton "Réinitialiser"
+ * — avant, "réinitialiser" réenregistrait une COPIE séparée et obsolète du frontend
+ * (AiPromptCards.tsx, DEFAULT_INTENT_RULES), elle-même désynchronisée du code backend (bug
+ * constaté en prod : "quel rayon vend le mieux ?" répondait sur le dernier article consulté car
+ * cette copie frontend plaçait encore getArticleDetails avant getParetoArticles, un ordre corrigé
+ * côté backend depuis le 27/09/2026 mais jamais répercuté côté UI). Ne fait rien si la ligne
+ * n'existe pas déjà (idempotent).
+ */
+async function resetToDefault(key) {
+  await prisma.systemConfig.deleteMany({ where: { key } });
+}
+
+module.exports = { KEYS, SENSITIVE_KEYS, getValue, setValue, getAll, resetToDefault };

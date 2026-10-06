@@ -211,6 +211,25 @@ router.get('/system-config/chatbot-tools', requireAdmin, async (req, res) => {
   res.json({ success: true, data: [...VALID_INTENT_TOOLS].sort() });
 });
 
+// POST /api/reassort/system-config/:key/reset - supprime la valeur enregistrée en base pour que
+// getValue() retombe sur ENV_FALLBACK (toujours à jour, codé en dur) — ajouté le 06/10/2026 pour
+// un vrai reset serveur, voir le commentaire de systemConfigService.resetToDefault pour le bug que
+// ça corrige (une copie frontend figée de CHATBOT_INTENT_RULES, jamais synchronisée). Réservé aux
+// clés non sensibles (une clé API ne doit jamais être "réinitialisée" silencieusement vers une
+// valeur par défaut, qui n'existe généralement pas pour elles de toute façon).
+router.post('/system-config/:key/reset', requireAdmin, async (req, res) => {
+  const { key } = req.params;
+  if (!Object.values(systemConfig.KEYS).includes(key)) {
+    return res.status(400).json({ success: false, message: `Clé de configuration "${key}" inconnue` });
+  }
+  if (systemConfig.SENSITIVE_KEYS.has(key)) {
+    return res.status(400).json({ success: false, message: 'Cette clé ne peut pas être réinitialisée depuis cet écran' });
+  }
+  await systemConfig.resetToDefault(key);
+  const value = await systemConfig.getValue(key);
+  res.json({ success: true, data: { key, value } });
+});
+
 // GET /api/reassort/system-config/jobs-health - état des 4 jobs planifiés (dernier statut, nombre
 // d'échecs consécutifs) : les échecs de cron n'étaient auparavant visibles que dans les logs
 // serveur, sans aucun moyen de les consulter depuis l'UI.
