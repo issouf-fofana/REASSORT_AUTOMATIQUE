@@ -1301,7 +1301,16 @@ async function getStockMoveHistoryAllShops(allowedShopIds, ean, { days = 14, dat
   const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
   if (!shops.length) return { found: false, message: 'Aucun magasin trouvé pour ce compte.' };
 
-  const results = await mapWithConcurrency(shops, 5, async (shop) => {
+  // Promise.all SANS limite de concurrence (pas mapWithConcurrency, bug de lenteur constaté le
+  // 06/10/2026 en conditions réelles : 34s avec concurrency=5, encore ~17-20s avec concurrency=18
+  // — mesuré ensuite qu'un Promise.all brut sur les 26 magasins de la base prend 4-5s, confirmant
+  // que mapWithConcurrency en 2 vagues de 18+4 doublait inutilement le temps). Contrairement à
+  // getArticleStockAllShops (lit ProposalLine en base locale, quasi instantané), cet outil fait un
+  // VRAI appel RPOS distant par magasin — mais le nombre de magasins reste petit (20-30 max) et la
+  // plupart ont leur propre serveur RPOS (18 posId distincts pour 22 magasins vérifiés en base),
+  // donc un seul Promise.all total reste raisonnable sans saturer aucun serveur individuel plus
+  // qu'un utilisateur RPOS normal ne le ferait déjà.
+  const results = await Promise.all(shops.map(async (shop) => {
     try {
       const r = await getStockMoveHistory(shop.rposPosId, shop.rposShopId, ean, { days, dateRangeStart, dateRangeEnd });
       return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, ...r };
@@ -1311,7 +1320,7 @@ async function getStockMoveHistoryAllShops(allowedShopIds, ean, { days = 14, dat
       // "aucun mouvement" (ce qui serait une fausse négative).
       return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false, error: true };
     }
-  });
+  }));
 
   const withMoves = results.filter((r) => r.found && r.totalMoves);
   if (!withMoves.length) {
