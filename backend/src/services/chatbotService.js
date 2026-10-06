@@ -827,8 +827,14 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
 
   // Filet de sécurité n°3 : function-calling par LLM (cf. detectIntentViaLlm), dernier recours
   // avant d'abandonner — uniquement si aucune règle déterministe ci-dessus n'a rien trouvé du tout.
+  // isSmallTalk() exclu explicitement (bug constaté le 06/10/2026 en prod : "salut" prenait 10-12s
+  // au lieu des ~5-6s mesurés en local) — une salutation pure déclenchait ce filet LLM de routage
+  // AVANT même d'atteindre le check isSmallTalk plus bas (askAssistant), qui bascule ensuite vers
+  // le prompt court dédié : "salut" payait donc DEUX appels LLM séquentiels (routage, pour rien,
+  // puis réponse) au lieu d'un seul. Jamais déclenché non plus si CHATBOT_LLM_FALLBACK_ENABLED est
+  // actif : une salutation n'a besoin d'aucun outil de données, quel que soit ce réglage.
   let llmParams = null;
-  if (!toolName) {
+  if (!toolName && !isSmallTalk(question)) {
     const llmFallbackEnabled = (await systemConfig.getValue(systemConfig.KEYS.CHATBOT_LLM_FALLBACK_ENABLED)) === 'true';
     if (llmFallbackEnabled) {
       const llmChoice = await detectIntentViaLlm(question);
@@ -875,7 +881,10 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // dateRangeEnd) — getSalesHistory/getPredictionAccuracy/getTopGisements ne savent encore exprimer
   // qu'un `days` glissant, les étendre à une plage est un chantier séparé. Déclaré ici (plutôt que
   // juste avant son premier usage plus bas) car réutilisé par le signal de plage textuel ci-dessous.
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops']);
+  // getStockMoveHistory ajouté le 06/10/2026 (bug réel : "mouvement sur l'article X du 4 au
+  // 5/09/2026" ignorait la plage et répondait sur les 14 derniers jours glissants — cf.
+  // chatbotToolsService.js, dateRangeStart/dateRangeEnd).
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1030,7 +1039,14 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       case 'getStockMoveHistory':
         if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour voir ses mouvements de stock (casse, cession, retour...).' } };
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-        return { toolName, toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, { days: 14 }) };
+        return {
+          toolName,
+          toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, {
+            days: daysQuery || 14,
+            dateRangeStart: effectiveDateRange?.start || null,
+            dateRangeEnd: effectiveDateRange?.end || null,
+          }),
+        };
       case 'getParetoArticles':
         // days jamais transmis avant le 28/09/2026 (même bug que getRevenue ci-dessous, trouvé lors
         // de l'audit période/Pareto) : "Pareto sur 3 mois" retombait toujours sur 30 jours en dur

@@ -1230,18 +1230,28 @@ async function getPriceChangeHistory(posId, shopId, ean) {
  * stock"). Une baisse de stock n'est pas toujours une vente — cet outil permet au chatbot de répondre
  * avec la vraie cause plutôt que de supposer que tout écart vient de la demande client.
  */
-async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
-  const dateEnd = new Date();
-  const dateStart = new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+// dateRangeStart/dateRangeEnd ajoutés le 06/10/2026 (bug constaté en conversation réelle : "le
+// mouvement sur l'article X à la date du 4 au 5/09/2026" ignorait totalement cette plage passée et
+// répondait sur les 14 derniers jours glissants depuis maintenant, donc sur la mauvaise période —
+// même limite déjà documentée dans le README comme non couverte, cf. passation : "getSalesHistory,
+// getPredictionAccuracy... getStockMoveHistory ne savent encore exprimer qu'un days glissant").
+async function getStockMoveHistory(posId, shopId, ean, { days = 14, dateRangeStart, dateRangeEnd } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
   const summary = await stockMoveAnalysis.getStockMoveSummary(
     posId, shopId, ean, dateStart.toISOString(), dateEnd.toISOString(),
   );
   if (!summary.totalMoves) {
-    // Rien sur la fenêtre récente (souvent 14j par défaut) : chercher le tout dernier mouvement
-    // connu, sans limite de temps, pour donner une vraie date plutôt qu'un silence qui laisse croire
-    // à tort qu'aucune donnée n'existe DU TOUT pour cet article (bug réel signalé le 29/09/2026 : un
-    // article dont le dernier mouvement remontait à plus d'un mois répondait "en développement",
-    // trompeur — la donnée existe, elle est juste antérieure à la fenêtre par défaut).
+    // Rien sur la fenêtre demandée : chercher le tout dernier mouvement connu, sans limite de
+    // temps, pour donner une vraie date plutôt qu'un silence qui laisse croire à tort qu'aucune
+    // donnée n'existe DU TOUT pour cet article (bug réel signalé le 29/09/2026 : un article dont le
+    // dernier mouvement remontait à plus d'un mois répondait "en développement", trompeur — la
+    // donnée existe, elle est juste antérieure à la fenêtre par défaut). Cherché jusqu'à
+    // dateEnd (jamais au-delà) : sur une plage PASSÉE explicite, remonter après la fin demandée
+    // donnerait un "dernier mouvement connu" dans le futur par rapport à la question posée,
+    // trompeur de la même façon (ex: "4 au 5 septembre" ne doit jamais répondre avec une vente
+    // d'aujourd'hui comme si elle répondait à la question).
     const veryOldStart = new Date('2000-01-01').toISOString();
     let lastKnownMove = null;
     try {
@@ -1251,11 +1261,14 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
       // Repli best-effort : un échec ici ne doit jamais empêcher de répondre au moins la formule
       // honnête "aucun mouvement récent", jamais planter toute la conversation pour ce seul détail.
     }
+    const periodLabel = hasExplicitRange
+      ? `du ${dateStart.toISOString().slice(0, 10)} au ${dateEnd.toISOString().slice(0, 10)}`
+      : `sur les ${days} derniers jours`;
     return {
       found: false,
       message: lastKnownMove
-        ? `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours. Le dernier mouvement connu remonte au ${lastKnownMove.date.slice(0, 10)} (${lastKnownMove.typeLabel}).`
-        : `Aucun mouvement de stock enregistré pour l'article ${ean} sur les ${days} derniers jours, ni dans l'historique disponible.`,
+        ? `Aucun mouvement de stock enregistré pour l'article ${ean} ${periodLabel}. Le dernier mouvement connu remonte au ${lastKnownMove.date.slice(0, 10)} (${lastKnownMove.typeLabel}).`
+        : `Aucun mouvement de stock enregistré pour l'article ${ean} ${periodLabel}, ni dans l'historique disponible.`,
       lastKnownMoveDate: lastKnownMove ? lastKnownMove.date : null,
       lastKnownMoveType: lastKnownMove ? lastKnownMove.typeLabel : null,
       // isNormalNegative (29/09/2026, généralisé depuis lastKnownMoveDate) : ce found:false porte une
@@ -1263,7 +1276,13 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14 } = {}) {
       isNormalNegative: true,
     };
   }
-  return { found: true, days, ...summary };
+  return {
+    found: true,
+    days: hasExplicitRange ? null : days,
+    periodStart: dateStart.toISOString(),
+    periodEnd: dateEnd.toISOString(),
+    ...summary,
+  };
 }
 
 /**
