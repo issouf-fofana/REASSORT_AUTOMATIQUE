@@ -540,8 +540,26 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
       ).sort((a, b) => b.quantity - a.quantity).slice(0, 30)
     : null;
 
+  // message/isNormalNegative ajoutés le 06/10/2026 (bug constaté en conditions réelles : "combien
+  // on a vendu de cet article sur les 30 derniers jours ?" sur un article réellement sans vente sur
+  // la période renvoyait found:false SANS aucun message — le LLM, livré à lui-même, concluait à
+  // tort "fonctionnalité pas encore disponible, système en développement" alors que c'est une vraie
+  // réponse honnête et complète : aucune vente synchronisée pour cet article sur cette période).
+  // Même principe que getOrders/getStockMoveHistory déjà corrigés pour ce piège.
+  if (!lines.length) {
+    const scope = ean ? `l'article ${ean}` : department ? `le rayon "${department}"` : 'ce magasin';
+    return {
+      found: false,
+      days,
+      ean: ean || null,
+      department: department || null,
+      message: `Aucune vente enregistrée pour ${scope} sur les ${days} derniers jours.`,
+      isNormalNegative: true,
+    };
+  }
+
   return {
-    found: lines.length > 0,
+    found: true,
     days,
     ean: ean || null,
     department: department || null,

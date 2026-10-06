@@ -873,9 +873,13 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // getArticleStock ajouté le 06/10/2026 (bug réel observé en prod : "quel est le stock du
   // magasin ?" répondait sur le dernier article consulté (Codys) au lieu du stock global — même
   // classe de bug que getRevenue, protection manquante alors que l'outil est tout aussi ambigu).
+  // getSalesHistory ajouté le 06/10/2026 (même bug réel observé : "comment évoluent les ventes ce
+  // mois-ci ?", posée après avoir consulté un article précis, répondait "la requête a ciblé
+  // l'article [EAN]" au lieu des ventes globales du magasin — getSalesHistory sert aussi de vue
+  // magasin entier sans EAN, exactement comme getRevenue/getArticleStock).
   const REFERS_TO_ARTICLE_REGEX = /\b(cet|cette|ce|l')\s*(article|produit)\b/i;
   let ean = extractEan(question) || (llmParams && ARTICLE_SCOPED_TOOLS.has(toolName) ? llmParams.ean : null) || null;
-  const AMBIGUOUS_SCOPE_TOOLS = new Set(['getRevenue', 'getArticleStock']);
+  const AMBIGUOUS_SCOPE_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getSalesHistory']);
   const canReuseEanForTool = !AMBIGUOUS_SCOPE_TOOLS.has(toolName) || REFERS_TO_ARTICLE_REGEX.test(question);
   if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && canReuseEanForTool && conversationHistory && conversationHistory.length) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
