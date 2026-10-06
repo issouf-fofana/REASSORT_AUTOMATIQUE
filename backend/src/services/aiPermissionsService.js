@@ -56,6 +56,7 @@ const TOOL_CAPABILITY = {
   // aucun message d'erreur explicite autre que "cette fonctionnalité" (capability 'unclassified').
   // Même capacité que la version single-shop (getArticleStock -> 'stock').
   getArticleStockAllShops: 'stock',
+  getStockMoveHistoryAllShops: 'stock',
   getStockMoveHistory: 'stock',
   getDlvArticles: 'stock',
   getArticleDlvStatus: 'stock',

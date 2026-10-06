@@ -1286,6 +1286,50 @@ async function getStockMoveHistory(posId, shopId, ean, { days = 14, dateRangeSta
 }
 
 /**
+ * getStockMoveHistoryAllShops(allowedShopIds, ean, {days, dateRangeStart, dateRangeEnd}) —
+ * mouvements de stock d'un article précis sur TOUS les magasins accessibles au compte (demande du
+ * 06/10/2026 : "les mouvements de type vente sur cet article dans tout les magasins" — jusqu'ici
+ * getStockMoveHistory ne savait répondre que pour le magasin de la session en cours, répondant
+ * honnêtement "non disponible" sur une vraie demande réseau plutôt que d'inventer). Même principe
+ * que getArticleStockAllShops : une requête RPOS par magasin (chacun son propre posId), en
+ * parallèle borné — jamais un seul groupBy partagé, les mouvements de stock vivent côté RPOS, pas
+ * en base locale.
+ */
+async function getStockMoveHistoryAllShops(allowedShopIds, ean, { days = 14, dateRangeStart, dateRangeEnd } = {}) {
+  if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
+  if (!shops.length) return { found: false, message: 'Aucun magasin trouvé pour ce compte.' };
+
+  const results = await mapWithConcurrency(shops, 5, async (shop) => {
+    try {
+      const r = await getStockMoveHistory(shop.rposPosId, shop.rposShopId, ean, { days, dateRangeStart, dateRangeEnd });
+      return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, ...r };
+    } catch {
+      // Un magasin dont le serveur RPOS est injoignable ne doit jamais faire échouer toute la
+      // réponse réseau — il est simplement omis des résultats trouvés, jamais présenté comme
+      // "aucun mouvement" (ce qui serait une fausse négative).
+      return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false, error: true };
+    }
+  });
+
+  const withMoves = results.filter((r) => r.found && r.totalMoves);
+  if (!withMoves.length) {
+    return { found: true, ean, days: dateRangeStart ? null : days, periodStart: dateRangeStart || null, periodEnd: dateRangeEnd || null, shopCount: shops.length, shops: [], message: `Aucun mouvement de stock trouvé pour l'article ${ean} sur la période demandée, sur l'ensemble des ${shops.length} magasins accessibles.`, isNormalNegative: true };
+  }
+
+  return {
+    found: true,
+    ean,
+    days: dateRangeStart ? null : days,
+    periodStart: dateRangeStart || null,
+    periodEnd: dateRangeEnd || null,
+    shopCount: withMoves.length,
+    shops: withMoves,
+  };
+}
+
+/**
  * getDlvArticles() — articles ayant actuellement du stock en DLV (Date Limite de Vente courte,
  * demande du 22/09/2026). PAS une date de péremption automatique : un geste manuel du personnel
  * qui bascule une partie du stock d'un article sur un EAN "DLV" distinct, vendu à prix réduit
@@ -1651,6 +1695,7 @@ module.exports = {
   getOrders,
   getValidatedOrders,
   getStockMoveHistory,
+  getStockMoveHistoryAllShops,
   getDlvArticles,
   getArticleDlvStatus,
   getDataAvailability,

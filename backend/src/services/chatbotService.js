@@ -23,7 +23,7 @@ const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
 ]);
@@ -111,6 +111,14 @@ const ALL_SHOPS_REVENUE_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l
 // doit gagner sur la règle générique getArticleStock (mono-magasin).
 const ALL_SHOPS_STOCK_REGEX = /\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\bstocks?\b|\bstocks?\b.*\b(tous les|toutes les|chaque|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
 
+// getStockMoveHistoryAllShops ajouté le 06/10/2026 (demande explicite : "les mouvements de type
+// vente sur cet article dans tout les magasin" — formulation réelle observée, "tout" sans s et
+// "magasin" au singulier malgré le pluriel sous-entendu) : même principe que ALL_SHOPS_STOCK_REGEX
+// ci-dessus, mais pour les MOUVEMENTS (casse, cession, retour, vente...) plutôt que le stock actuel.
+// tou[st]? (pas tous?) : "tous?" ne couvre que "tou"/"tous", jamais "tout" (bug trouvé en testant
+// cette regex directement : "dans tout les magasin" ne matchait pas malgré le "?" sur le "s").
+const ALL_SHOPS_MOVE_REGEX = /\b(tou[st]? les|toutes? les|chaque|dans tou[st]? les|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b.*\bmouvements?\b|\bmouvements?\b.*\b(tou[st]? les|toutes? les|chaque|dans tou[st]? les|l'ensemble des?|l'ensemble de mes|mes)\s+magasins?\b/i;
+
 // "tous/chaque/mes magasins" + un mot-clé du domaine concerné (demande du 26/09/2026, pilotage
 // réseau pour un compte multi-magasins) — même principe que les deux regex ci-dessus : sans cette
 // priorité, "quels magasins ont des ruptures ?" retomberait sur getStockoutRisks mono-magasin.
@@ -157,6 +165,7 @@ async function detectIntent(question) {
   if (ALL_SHOPS_TREND_REGEX.test(question)) return 'getRevenueTrendAllShops';
   if (ALL_SHOPS_REVENUE_REGEX.test(question)) return 'getRevenueAllShops';
   if (ALL_SHOPS_STOCK_REGEX.test(question)) return 'getArticleStockAllShops';
+  if (ALL_SHOPS_MOVE_REGEX.test(question)) return 'getStockMoveHistoryAllShops';
   if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
   const rules = await getIntentRules();
   for (const rule of rules) {
@@ -626,6 +635,7 @@ const TOOL_CATALOG = [
   { name: 'getStockMoveHistory', description: 'Mouvements de stock d\'un article précis (casse, vol, cession de rayon, retour fournisseur) expliquant une variation de stock.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getArticleStock', description: 'Stock actuel disponible, du magasin entier/un rayon, ou d\'un article précis si un EAN est donné.', params: { ean: 'code EAN article, optionnel', department: 'rayon, optionnel' } },
   { name: 'getArticleStockAllShops', description: 'Stock d\'un article précis dans TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le stock de l\'article X dans tous les magasins", jamais pour une question sur UN seul magasin précis.', params: { ean: 'code EAN article, requis' } },
+  { name: 'getStockMoveHistoryAllShops', description: 'Mouvements de stock (casse, cession, retour, vente...) d\'un article précis dans TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "les mouvements de l\'article X dans tous les magasins", jamais pour une question sur UN seul magasin précis.', params: { ean: 'code EAN article, requis', dateRangeStart: 'date ISO de début, optionnel', dateRangeEnd: 'date ISO de fin, optionnel' } },
   { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
   { name: 'explainProposalQuantity', description: 'Raisonnement IA en direct expliquant POURQUOI une quantité précise est suggérée pour UN article de la proposition en attente (pas juste "quelle quantité", une vraie explication). Nécessite un article identifié (EAN explicite ou dernier article mentionné dans la conversation).', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement.', params: { department: 'rayon, optionnel' } },
@@ -884,7 +894,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // getStockMoveHistory ajouté le 06/10/2026 (bug réel : "mouvement sur l'article X du 4 au
   // 5/09/2026" ignorait la plage et répondait sur les 14 derniers jours glissants — cf.
   // chatbotToolsService.js, dateRangeStart/dateRangeEnd).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory']);
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1206,6 +1216,30 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
           ? (await prisma.shop.findMany({ select: { rposShopId: true } })).map((s) => s.rposShopId)
           : (await prisma.supervisedShop.findMany({ where: { userId: user.id }, select: { rposShopId: true } })).map((s) => s.rposShopId);
         return { toolName, toolResult: await tools.getArticleStockAllShops(allowedShopIds, ean) };
+      }
+      case 'getStockMoveHistoryAllShops': {
+        if (!ean) return { toolName, toolResult: { found: false, message: "Précisez le code EAN de l'article pour consulter ses mouvements de stock dans tous les magasins." } };
+        // Même repli que getArticleStockAllShops/getRevenueAllShops : un compte à un seul magasin
+        // fixe retombe silencieusement sur SON magasin seul plutôt que sur une erreur.
+        if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
+          return {
+            toolName: 'getStockMoveHistory',
+            toolResult: await tools.getStockMoveHistory(posId, rposShopId, ean, {
+              days: daysQuery || 14,
+              dateRangeStart: effectiveDateRange?.start || null,
+              dateRangeEnd: effectiveDateRange?.end || null,
+            }),
+          };
+        }
+        const allShopsAllowedIds = await resolveAllowedShopIds(user);
+        return {
+          toolName,
+          toolResult: await tools.getStockMoveHistoryAllShops(allShopsAllowedIds, ean, {
+            days: daysQuery || 14,
+            dateRangeStart: effectiveDateRange?.start || null,
+            dateRangeEnd: effectiveDateRange?.end || null,
+          }),
+        };
       }
       case 'getDlvArticles':
         return ean
