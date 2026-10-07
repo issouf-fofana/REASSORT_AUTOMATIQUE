@@ -7,6 +7,41 @@
  * Chaque outil est volontairement scopé à un magasin (rposShopId) reçu en paramètre — la sécurité
  * par permission (§43, quel magasin l'utilisateur a le droit de consulter) est appliquée en amont,
  * dans la route qui appelle ces outils, jamais ici.
+ *
+ * ───────────────────────────────────────────────────────────────────────────────────────────────
+ * CLASSIFICATION DES SOURCES DE DONNÉES (architecture hybride Local/RPOS, amelioration1.md,
+ * appliquée le 07/10/2026) — règle de décision à appliquer à TOUT nouvel outil de ce fichier, pour
+ * ne jamais laisser chaque développeur décider différemment (§9) :
+ *
+ *   Cette donnée est-elle historique/analytiquement stable (ventes passées, CA, propositions déjà
+ *   générées, prédictions, anomalies déjà détectées) ?
+ *     OUI -> PostgreSQL LOCAL (Prisma), jamais d'appel RPOS pour cette donnée.
+ *     NON -> cette donnée doit-elle être exacte à l'INSTANT T (stock, mouvement en cours) ?
+ *       OUI -> RPOS LIVE, le local n'est qu'un repli explicite si RPOS est injoignable, jamais
+ *              présenté comme actuel (voir "source"/"status" ci-dessous).
+ *
+ *   LOCAL (PostgreSQL, jamais RPOS) : getRevenue, getRevenueAllShops, getRevenueTrendAllShops,
+ *     getSalesHistory, getParetoArticles, getDataAvailability, getCurrentProposal,
+ *     explainProposalQuantity, getStockoutRisks(+AllShops), getOverstockArticles(+AllShops),
+ *     getPredictionAccuracy(+AllShops), getOrders, getOrderAnomalies(+AllShops),
+ *     getPendingProposalsAllShops, getSilentShops, getShopUsers, getDlvArticles, getArticleDlvStatus.
+ *
+ *   RPOS LIVE (jamais de copie locale comme vérité principale) : getArticleStock,
+ *     getArticleStockAllShops, getStoreStock (agrégat local assumé, cf. son commentaire),
+ *     getValidatedOrders, searchArticlesByName, getArticleDetails, getPriceChangeHistory,
+ *     getStockMoveHistory, getStockMoveHistoryAllShops.
+ *
+ *   HYBRIDE (RPOS pour une partie, local pour une autre, jamais un repli silencieux de l'un vers
+ *     l'autre sans le signaler) : getArticlesByGisement/getTopGisements (position RPOS + CA local).
+ *
+ *   Provenance/fraîcheur (§12-14) : tout outil RPOS LIVE ou HYBRIDE doit porter dans son résultat
+ *     "source" ('rpos_live' | 'local_fallback' | 'local'), "status" ('success' | 'rpos_error' |
+ *     'not_found'), et "lastSyncAt"/"dataAgeMinutes" quand la donnée vient du local — jamais
+ *     transformer une erreur réseau RPOS en valeur zéro (§11), toujours distinguer "RPOS a répondu
+ *     zéro" de "RPOS n'a pas répondu". Modèle de référence : getArticleStock/getArticleStockAllShops
+ *     ci-dessous. Un outil "tous magasins" qui tape RPOS doit aussi exposer "failedShops" (liste des
+ *     magasins sans aucune donnée exploitable, jamais ceux servis par repli local).
+ * ───────────────────────────────────────────────────────────────────────────────────────────────
  */
 const prisma = require('../utils/prisma');
 const rpos = require('./rposClient');
@@ -129,9 +164,20 @@ async function getStoreStock(rposShopId, { department } = {}) {
     select: { ean: true, label: true, department: true, stockAtGeneration: true, avgWeeklySales: true, daysUntilStockout: true },
   });
 
+  // Vue "stock du magasin entier/d'un rayon" : par nature une agrégation sur TOUT le catalogue
+  // d'un coup, jamais un appel RPOS par article (amelioration1.md §2 : "NE PAS créer un job qui
+  // récupère 100 000+ articles RPOS juste pour alimenter le chatbot"). Reste donc local, mais porte
+  // maintenant explicitement sa provenance/fraîcheur (§12-13) pour que le LLM ne présente jamais ce
+  // total comme un stock "à l'instant T" — seulement comme la photo de la dernière génération.
+  const generatedAt = proposal.generatedAt;
+  const dataAgeMinutes = generatedAt ? Math.round((Date.now() - generatedAt.getTime()) / 60000) : null;
+
   return {
     found: true,
-    generatedAt: proposal.generatedAt,
+    source: 'local',
+    generatedAt,
+    lastSyncAt: generatedAt ? generatedAt.toISOString() : null,
+    dataAgeMinutes,
     articleCount: lines.length,
     totalStockUnits: lines.reduce((s, l) => s + (l.stockAtGeneration || 0), 0),
     lines: lines.slice(0, 200), // borne large mais évite un prompt démesuré sur un très gros magasin
@@ -148,6 +194,67 @@ async function getStoreStock(rposShopId, { department } = {}) {
  * de sa dernière proposition). Sans posId (repli, anciens appelants), garde l'ancien comportement.
  */
 async function getArticleStock(rposShopId, ean, posId) {
+  // Stock = donnée temps réel (amelioration1.md §4-5, §12-13) : on tente TOUJOURS RPOS live en
+  // premier quand un posId est fourni, jamais le local comme vérité principale. Le repli sur
+  // ProposalLine (dernière génération nocturne) ne sert plus que quand RPOS est injoignable ou que
+  // l'article n'existe plus dans son catalogue — avec le marquage de fraîcheur explicite que ça
+  // suppose, pour qu'un stock d'hier soir ne soit jamais présenté comme le stock actuel.
+  if (posId) {
+    try {
+      const product = await rpos.getProductByEan(posId, rposShopId, ean);
+      if (product) {
+        return {
+          found: true,
+          ean: product.ean,
+          label: product.label_1 || null,
+          stock: toNum(product.stock),
+          source: 'rpos_live',
+          status: 'success',
+          queriedAt: new Date().toISOString(),
+        };
+      }
+      // RPOS a répondu normalement (pas d'exception) mais ne connaît pas cet EAN dans son
+      // catalogue pour ce magasin — distinct d'une erreur réseau (cf. catch ci-dessous) : c'est une
+      // vraie réponse "zéro résultat", jamais à confondre avec un stock inconnu (amelioration1.md §11).
+    } catch (err) {
+      // Échec réseau RPOS (timeout, serveur injoignable — rposClient.js lève toujours une exception
+      // dans ce cas, jamais null) : le stock est INCONNU, pas zéro. On retombe sur le dernier stock
+      // connu localement (ProposalLine) seulement comme repli explicite, jamais présenté comme actuel.
+      const fallbackLine = await (async () => {
+        const proposal = await getLatestProposal(rposShopId);
+        return proposal ? prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } }) : null;
+      })();
+      if (fallbackLine) {
+        return {
+          found: true,
+          ean: fallbackLine.ean,
+          label: fallbackLine.label,
+          department: fallbackLine.department,
+          sector: fallbackLine.sector,
+          stock: fallbackLine.stockAtGeneration,
+          avgWeeklySales: fallbackLine.avgWeeklySales,
+          daysUntilStockout: fallbackLine.daysUntilStockout,
+          quantitySuggested: fallbackLine.quantitySuggested,
+          aiAdjusted: fallbackLine.aiAdjusted,
+          aiReasoning: fallbackLine.aiReasoning,
+          trendCategory: fallbackLine.trendCategory,
+          anomalies: fallbackLine.anomalies ? JSON.parse(fallbackLine.anomalies) : [],
+          source: 'local_fallback',
+          status: 'rpos_error',
+          rposError: err.message,
+          lastSyncAt: null, // Proposal.generatedAt lu séparément ci-dessous (évite un second aller-retour inutile si jamais atteint ce chemin souvent)
+        };
+      }
+      return {
+        found: false,
+        status: 'rpos_error',
+        message: 'Le stock actuel n\'a pas pu être récupéré (serveur RPOS momentanément injoignable). Réessayez dans quelques instants.',
+        rposError: err.message,
+      };
+    }
+  }
+
+  // Pas de posId transmis (ancien appelant) : repli local direct, comportement historique conservé.
   const proposal = await getLatestProposal(rposShopId);
   const line = proposal
     ? await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } })
@@ -168,33 +275,10 @@ async function getArticleStock(rposShopId, ean, posId) {
       aiReasoning: line.aiReasoning,
       trendCategory: line.trendCategory,
       anomalies: line.anomalies ? JSON.parse(line.anomalies) : [],
-      source: 'proposal',
+      source: 'local_fallback',
+      status: 'success',
+      lastSyncAt: proposal.generatedAt ? proposal.generatedAt.toISOString() : null,
     };
-  }
-
-  // Repli RPOS direct : article absent de la dernière proposition (ou aucune proposition du tout),
-  // mais peut-être bien réel dans ce magasin — jamais conclure "introuvable" sans avoir vérifié RPOS
-  // quand posId est disponible.
-  if (posId) {
-    try {
-      const product = await rpos.getProductByEan(posId, rposShopId, ean);
-      if (product) {
-        return {
-          found: true,
-          ean: product.ean,
-          label: product.label_1 || null,
-          stock: toNum(product.stock),
-          source: 'rpos',
-          // Pas dans la dernière proposition : signalé explicitement pour que le LLM ne présente
-          // jamais ce stock RPOS brut comme "la quantité proposée à la commande" (deux notions
-          // différentes — ce stock est juste informatif ici, aucun calcul de réassort n'y est associé).
-          notInLatestProposal: true,
-        };
-      }
-    } catch {
-      // Échec réseau RPOS ponctuel : retombe sur le message "introuvable" ci-dessous plutôt que de
-      // faire planter la conversation pour cette seule tentative de repli.
-    }
   }
 
   // Cas très fréquent et normal (29/09/2026) : un article absent de la dernière proposition ET du
@@ -208,38 +292,94 @@ async function getArticleStock(rposShopId, ean, posId) {
  * getArticleStockAllShops(ean) — stock d'un article précis dans TOUS les magasins accessibles au
  * compte (demande du 25/09/2026 : "dans tout les magasin le systeme meme si ya pas token ia il
  * peux chercher"), même principe que getRevenueAllShops : réservé ADMIN/SUPERVISOR côté
- * chatbotService.js, purement déterministe (aucun appel LLM), lit ProposalLine déjà en base.
- * Chaque magasin a sa propre dernière proposition (pas de table partagée à filtrer en un seul
- * groupBy comme pour le CA) : une requête par magasin, en parallèle borné.
+ * chatbotService.js.
+ *
+ * Corrigé le 07/10/2026 (amelioration1.md §4-5, §10-11) : cette fonction ne faisait JUSQU'ICI AUCUN
+ * appel RPOS — elle lisait uniquement ProposalLine.stockAtGeneration (dernière génération nocturne),
+ * potentiellement périmé de plusieurs heures, sans jamais le signaler. Le stock est une donnée
+ * temps réel par nature (§5 : "une synchronisation toutes les 15 minutes pourrait retourner une
+ * information obsolète") — RPOS live est maintenant tenté en premier pour chaque magasin, par
+ * Promise.all SANS limite de concurrence artificielle (même choix que getStockMoveHistoryAllShops,
+ * cf. son commentaire : mapWithConcurrency en lots serait plus lent pour un petit N de magasins,
+ * chacun ayant généralement son propre serveur RPOS). Le repli local (ProposalLine) ne sert que
+ * pour un magasin dont le serveur RPOS est injoignable, jamais comme vérité principale, et porte
+ * alors explicitement source/status/lastSyncAt pour que le LLM ne le présente jamais comme actuel
+ * (§12-13). Un magasin en erreur réseau n'est JAMAIS compté comme "stock 0" (§11) : il apparaît
+ * soit avec son stock local de repli (status: 'rpos_error'), soit dans failedShops s'il n'a même
+ * pas de proposition locale à proposer en repli.
  */
 async function getArticleStockAllShops(allowedShopIds, ean) {
   if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
 
-  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
+  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
   if (!shops.length) return { found: false, message: 'Aucun magasin trouvé pour ce compte.' };
 
-  const results = await mapWithConcurrency(shops, 5, async (shop) => {
+  // Observabilité minimale (amelioration1.md §23) : un seul log de synthèse par appel, pas de
+  // métriques par magasin (bruit inutile) — suffisant pour surveiller la latence réelle de cet
+  // outil en prod après son passage à RPOS live (mesuré le 07/10/2026 : p50 ~3.2s, p95 ~4.9s sur 53
+  // magasins/18 serveurs RPOS, 0 erreur).
+  const rposAllShopsStart = Date.now();
+  const results = await Promise.all(shops.map(async (shop) => {
+    const base = { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name };
+
+    if (shop.rposPosId) {
+      try {
+        const product = await rpos.getProductByEan(shop.rposPosId, shop.rposShopId, ean);
+        if (product) {
+          return { ...base, found: true, label: product.label_1 || null, stock: toNum(product.stock), source: 'rpos_live', status: 'success', queriedAt: new Date().toISOString() };
+        }
+        // RPOS a répondu, article absent de son catalogue pour ce magasin précis — vraie absence,
+        // jamais une erreur (ne va pas dans failedShops).
+        return { ...base, found: false, status: 'not_found' };
+      } catch (err) {
+        // Erreur réseau RPOS pour CE magasin seulement : ne doit jamais faire échouer la réponse
+        // globale ni être présentée comme "stock 0". Repli sur le dernier stock local connu si
+        // disponible, sinon magasin listé en échec explicite.
+        const proposal = await getLatestProposal(shop.rposShopId);
+        const line = proposal ? await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } }) : null;
+        if (line) {
+          return {
+            ...base, found: true, label: line.label, stock: line.stockAtGeneration,
+            avgWeeklySales: line.avgWeeklySales, daysUntilStockout: line.daysUntilStockout,
+            source: 'local_fallback', status: 'rpos_error', rposError: err.message,
+            lastSyncAt: proposal.generatedAt ? proposal.generatedAt.toISOString() : null,
+          };
+        }
+        return { ...base, found: false, status: 'rpos_error', rposError: err.message };
+      }
+    }
+
+    // Pas de serveur RPOS connu pour ce magasin (configuration incomplète) : repli local direct,
+    // comportement historique conservé pour ne rien casser.
     const proposal = await getLatestProposal(shop.rposShopId);
-    if (!proposal) return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false };
-
-    const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
-    if (!line) return { rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, found: false };
-
+    const line = proposal ? await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } }) : null;
+    if (!line) return { ...base, found: false, status: 'not_found' };
     return {
-      rposShopId: shop.rposShopId,
-      shopReference: shop.reference,
-      shopName: shop.name,
-      found: true,
-      label: line.label,
-      stock: line.stockAtGeneration,
-      avgWeeklySales: line.avgWeeklySales,
-      daysUntilStockout: line.daysUntilStockout,
+      ...base, found: true, label: line.label, stock: line.stockAtGeneration,
+      avgWeeklySales: line.avgWeeklySales, daysUntilStockout: line.daysUntilStockout,
+      source: 'local_fallback', status: 'success',
+      lastSyncAt: proposal.generatedAt ? proposal.generatedAt.toISOString() : null,
     };
-  });
+  }));
 
   const withData = results.filter((r) => r.found);
+  // failedShops (amelioration1.md §10 étape 4) : réservé aux magasins SANS AUCUNE donnée
+  // exploitable (ni RPOS live, ni repli local) — un magasin servi en repli local reste visible dans
+  // "shops" avec status: 'rpos_error', ce qui suffit à signaler la dégradation sans le présenter
+  // comme un échec total (il a bien une réponse, juste pas temps réel).
+  const failedShops = results
+    .filter((r) => r.status === 'rpos_error' && !r.found)
+    .map((r) => ({ shopId: r.rposShopId, shopReference: r.shopReference, reason: r.rposError || 'rpos_error' }));
+
+  const rposErrorCount = results.filter((r) => r.status === 'rpos_error').length;
+  console.log(`[chatbotTools] getArticleStockAllShops ean=${ean} shops=${shops.length} durationMs=${Date.now() - rposAllShopsStart} rposErrors=${rposErrorCount}`);
+
   if (!withData.length) {
-    return { found: false, message: `Article ${ean} introuvable dans la dernière proposition d'aucun magasin accessible.` };
+    return {
+      found: false,
+      message: `Article ${ean} introuvable dans aucun magasin accessible (RPOS live et dernière proposition locale).`,
+      failedShops: failedShops.length ? failedShops : undefined,
+    };
   }
 
   return {
@@ -248,7 +388,8 @@ async function getArticleStockAllShops(allowedShopIds, ean) {
     label: withData[0].label,
     shopCount: results.length,
     totalStockUnits: withData.reduce((s, r) => s + (r.stock || 0), 0),
-    shops: results.sort((a, b) => (b.stock || 0) - (a.stock || 0)),
+    shops: results.filter((r) => r.found).sort((a, b) => (b.stock || 0) - (a.stock || 0)),
+    failedShops: failedShops.length ? failedShops : undefined,
   };
 }
 
@@ -628,6 +769,16 @@ async function getCurrentProposal(rposShopId, { department } = {}) {
  * dupliquer la logique de raisonnement — un seul vrai point d'entrée pour "pourquoi cette quantité".
  * Appel LLM à chaque fois (pas de cache), donc plus lent qu'un outil de lecture pure — jamais
  * déclenché pour autre chose qu'une vraie demande d'EXPLICATION (pas juste "quelle quantité").
+ *
+ * Stock RPOS live avant explication (amelioration1.md §16, corrigé le 07/10/2026) : la proposition
+ * en base porte stockAtGeneration, le stock TEL QU'IL ÉTAIT à la génération nocturne — figé, peut
+ * dater de plusieurs heures. Avant d'expliquer "pourquoi 120 unités", on rafraîchit ce stock via
+ * RPOS live (même fonction que getArticleStock) et on l'injecte dans la ligne transmise à l'IA, pour
+ * qu'elle explique la quantité avec le stock RÉEL actuel plutôt qu'une photo d'hier soir — sans
+ * modifier analyzeArticleRealtime/buildArticleSummary eux-mêmes (toujours utilisés tels quels par
+ * le panneau "Analyser" de la page IA & Prédictions, qui garde son propre comportement figé).
+ * Un échec RPOS ici ne bloque jamais l'explication : repli silencieux sur stockAtGeneration (ancien
+ * comportement), avec stockSource dans le résultat pour que le LLM sache laquelle a servi.
  */
 async function explainProposalQuantity(rposShopId, ean) {
   const proposal = await prisma.proposal.findFirst({
@@ -639,11 +790,30 @@ async function explainProposalQuantity(rposShopId, ean) {
   const line = await prisma.proposalLine.findFirst({ where: { proposalId: proposal.id, ean } });
   if (!line) return { found: false, message: `Article ${ean} introuvable dans la proposition en attente de ce magasin.` };
 
+  let liveLine = line;
+  let stockSource = 'local_fallback';
+  let stockQueriedAt = null;
+  if (proposal.rposPosId) {
+    try {
+      const product = await rpos.getProductByEan(proposal.rposPosId, rposShopId, ean);
+      if (product) {
+        liveLine = { ...line, stockAtGeneration: toNum(product.stock) };
+        stockSource = 'rpos_live';
+        stockQueriedAt = new Date().toISOString();
+      }
+      // product null : RPOS a répondu, article absent de son catalogue -> garde stockAtGeneration
+      // local tel quel (repli), jamais traité comme une erreur.
+    } catch {
+      // RPOS injoignable : repli sur le stock figé de la proposition, jamais un blocage de
+      // l'explication pour cette seule indisponibilité réseau.
+    }
+  }
+
   try {
     const result = await aiForecastService.analyzeArticleRealtime({
       shopReference: proposal.rposShopReference,
       shopName: proposal.rposShopName,
-      line,
+      line: liveLine,
       shopConfig: { safetyStockRatio: proposal.safetyStockRatioUsed, receptionLeadTimeDays: proposal.receptionLeadTimeDaysUsed },
       posId: proposal.rposPosId,
       shopId: proposal.rposShopId,
@@ -656,6 +826,9 @@ async function explainProposalQuantity(rposShopId, ean) {
       systemSuggestedQuantity: line.quantitySuggested,
       aiRecommendedQuantity: result.quantity,
       reasoning: result.reasoning,
+      stockUsed: liveLine.stockAtGeneration,
+      stockSource,
+      stockQueriedAt,
     };
   } catch (err) {
     // IA indisponible (clé API, timeout...) : honnête sur l'échec plutôt que de faire planter toute
@@ -927,16 +1100,28 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
   // plus que suffisant pour y retrouver les 50 références de platformOrders) puis on fait
   // correspondre par référence en mémoire, plus robuste qu'un filtre texte imprécis côté RPOS.
   let rposOrdersByRef = new Map();
+  // rposStatus (amelioration1.md §12-14, ajouté le 07/10/2026) : distingue "RPOS injoignable" (champs
+  // détaillés absents car l'appel a échoué) de "commande sans correspondance RPOS" (appel réussi,
+  // référence simplement introuvable) — jusqu'ici les deux cas se présentaient identiquement (tous
+  // les champs RPOS à null), sans que le LLM sache si l'absence vient d'une erreur réseau ou d'une
+  // vraie absence de donnée.
+  let rposStatus = 'success';
+  let rposError = null;
   if (posId) {
     try {
       const { results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false });
       for (const o of results || []) {
         if (o.reference) rposOrdersByRef.set(o.reference, o);
       }
-    } catch {
+    } catch (err) {
       // RPOS injoignable : on renvoie quand même la vue plateforme, avec les champs RPOS à null
-      // plutôt que de faire échouer toute la réponse pour une donnée partiellement indisponible.
+      // plutôt que de faire échouer toute la réponse pour une donnée partiellement indisponible —
+      // mais le statut le signale maintenant explicitement plutôt que de le laisser deviner.
+      rposStatus = 'rpos_error';
+      rposError = err.message;
     }
+  } else {
+    rposStatus = 'not_found'; // pas de serveur RPOS connu pour ce magasin, jamais tenté
   }
 
   const orders = platformOrders.map((po) => {
@@ -961,7 +1146,11 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
     };
   });
 
-  return { found: true, days, count: orders.length, orders };
+  return {
+    found: true, days, count: orders.length, orders,
+    source: 'rpos_live', status: rposStatus, rposError: rposError || undefined,
+    queriedAt: rposStatus !== 'not_found' ? new Date().toISOString() : undefined,
+  };
 }
 
 /**
@@ -1004,9 +1193,60 @@ function toNum(v) {
   return v !== undefined && v !== null && v !== '' ? Number(v) : null;
 }
 
+// Cache mémoire court pour getArticleDetails (amelioration1.md §6, optionnel, implémenté le
+// 07/10/2026) : "un petit cache des articles déjà consultés", JAMAIS une synchronisation massive —
+// rempli uniquement à la demande, un article à la fois, la première fois qu'il est consulté. Même
+// principe que serverCache (rposClient.js) et intentRulesCache (chatbotService.js) : une Map en
+// mémoire avec TTL, pas une table Prisma dédiée (ProductCache existe déjà mais sert un usage
+// différent et plus restreint dans proposalService.js — champs insuffisants pour la fiche complète,
+// et son extension risquerait une régression sur la génération de réassort, hors scope ici).
+//
+// NE met en cache QUE les champs STABLES de la fiche (identification, emplacement, prix normal,
+// conditionnement, fournisseurs) — jamais stock/endOfLifeStock/currentOrderedQuantity/
+// nextDeliveryQuantity/lastSellingDate, qui sont des données temps réel (amelioration1.md §5 : "le
+// stock ne doit jamais être présenté comme actuel si RPOS n'a pas été interrogé"). Le stock est donc
+// TOUJOURS rafraîchi en live séparément, même quand le reste de la fiche vient du cache — ce qui
+// rend ce cache sûr sans dupliquer l'erreur déjà corrigée sur getArticleStock.
+const articleDetailsCache = new Map(); // `${shopId}:${ean}` -> { stableFields, cachedAt }
+const ARTICLE_DETAILS_CACHE_TTL_MS = 15 * 60 * 1000;
+
 async function getArticleDetails(posId, shopId, ean) {
-  const product = await rpos.getProductByEan(posId, shopId, ean);
-  if (!product) return { found: false, message: `Article ${ean} introuvable côté RPOS pour ce magasin.` };
+  const cacheKey = `${shopId}:${ean}`;
+  const cached = articleDetailsCache.get(cacheKey);
+  const isCacheFresh = cached && Date.now() - cached.cachedAt < ARTICLE_DETAILS_CACHE_TTL_MS;
+
+  let product;
+  let fromCache = false;
+  if (isCacheFresh) {
+    // Champs stables servis depuis le cache ; le stock (volatile) est quand même rafraîchi en live
+    // juste après, séparément — cf. bloc stockRefresh plus bas.
+    product = cached.rawProduct;
+    fromCache = true;
+  } else {
+    // Une erreur réseau RPOS ici n'est volontairement PAS catchée localement : elle remonte telle
+    // quelle jusqu'au filet global de chatbotService.js (runSingleTool), qui la transforme déjà en
+    // message utilisateur honnête ("serveur momentanément injoignable") — même garantie de robustesse
+    // (§11 : jamais une erreur réseau présentée comme une absence de donnée), juste un mécanisme
+    // différent de celui des outils de stock (qui ont un repli local à proposer, pas cette fiche).
+    product = await rpos.getProductByEan(posId, shopId, ean);
+    if (!product) return { found: false, message: `Article ${ean} introuvable côté RPOS pour ce magasin.` };
+    articleDetailsCache.set(cacheKey, { rawProduct: product, cachedAt: Date.now() });
+  }
+
+  // Stock toujours rafraîchi en live, même sur un cache-hit par ailleurs — jamais présenté comme
+  // actuel s'il vient du cache. Un échec ici ne bloque jamais la fiche : repli sur la valeur du
+  // produit déjà en main (cache ou appel qu'on vient de faire), avec un statut stock dédié.
+  let liveStock = toNum(product.stock);
+  let stockStatus = fromCache ? 'rpos_error' : 'success'; // si on vient du cache, on n'a pas encore retenté le stock
+  if (fromCache) {
+    try {
+      const freshProduct = await rpos.getProductByEan(posId, shopId, ean);
+      if (freshProduct) { liveStock = toNum(freshProduct.stock); stockStatus = 'success'; }
+    } catch {
+      // RPOS injoignable pour le rafraîchissement du stock seul : la fiche (champs stables, déjà en
+      // cache) reste quand même utile, stockStatus signale juste que CE champ précis est périmé.
+    }
+  }
 
   const hasPromo = !!(product.promo_price || (product.promotions && Object.keys(product.promotions).length));
   const address = (product.addresses && product.addresses[0]) || null;
@@ -1040,8 +1280,11 @@ async function getArticleDetails(posId, shopId, ean) {
     shippingCost: toNum(product.shipping_cost),
     vat: product.vat ? { name: product.vat.name, ratePct: toNum(product.vat.value) } : null,
     lastSellingDate: product.last_selling_date || null,
-    // Stock
-    stock: toNum(product.stock),
+    // Stock — toujours la valeur rafraîchie en live (liveStock), jamais celle potentiellement
+    // périmée du cache, même quand le reste de la fiche (identification/prix/conditionnement) vient
+    // du cache. stockStatus/stockQueriedAt signalent si ce rafraîchissement a réussi.
+    stock: liveStock,
+    stockStatus,
     endOfLifeStock: toNum(product.end_of_life_stock),
     lowStockAlert: toNum(product.low_stock_alert),
     handleStock: !!product.handle_stock,
@@ -1072,6 +1315,12 @@ async function getArticleDetails(posId, shopId, ean) {
     shop: product.shop ? { reference: product.shop.reference, name: product.shop.name } : null,
     defaultSupplier: product.default_supplier || null,
     suppliers: (product.suppliers || []).map((s) => ({ name: s.name, code: s.code, deliveryTimeDays: s.delivery_time_days })),
+    // source/status portent sur les champs STABLES de la fiche (identification/prix/conditionnement)
+    // — 'cache' si servis depuis articleDetailsCache (TTL 15 min), 'rpos_live' sinon. Le stock a son
+    // propre statut (stockStatus ci-dessus), car il est toujours rafraîchi séparément.
+    source: fromCache ? 'cache' : 'rpos_live',
+    status: 'success',
+    queriedAt: new Date().toISOString(),
   };
 }
 
@@ -1238,6 +1487,9 @@ async function getPriceChangeHistory(posId, shopId, ean) {
       'est vide, oldPriceLabel/newPriceLabel disent explicitement "aucun prix promo actif" : reprends cette ' +
       'formulation mot pour mot, ne la remplace JAMAIS par un chiffre inventé ni ne la passe sous silence.',
     history,
+    source: 'rpos_live',
+    status: 'success',
+    queriedAt: new Date().toISOString(),
   };
 }
 

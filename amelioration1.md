@@ -1,364 +1,1062 @@
-Pour la proposition de commande et les commandes déjà validées, je veux mettre en place une logique d'analyse intelligente.
+# Mission Claude Code — Évolution architecture Chatbot IA REASSORT_AUTO
 
-Une commande déjà passée par un magasin ne doit **jamais être considérée simplement comme un blocage automatique**.
+## 1. Objectif
 
-Elle doit être récupérée et analysée par l'IA afin de déterminer si la quantité déjà commandée est suffisante par rapport à la consommation réelle et à la demande prévue.
+Faire évoluer l'architecture actuelle du chatbot IA de REASSORT_AUTO vers une architecture hybride **Local PostgreSQL + RPOS Live**, sans casser les fonctionnalités existantes.
 
-### 1. Lorsqu'une commande récente existe
+### Principe fondamental
 
-Exemple :
+* Les données historiques et analytiques restent en PostgreSQL local.
+* Les données temps réel critiques, notamment le stock actuel, restent interrogées directement depuis RPOS.
+* Ne PAS synchroniser l'intégralité du catalogue RPOS.
+* Ne PAS transformer le projet en copie complète de RPOS.
+* Le LLM ne doit jamais accéder directement à PostgreSQL ou à RPOS.
+* Le LLM reçoit uniquement les résultats JSON produits par les tools.
+* Conserver le routage déterministe actuel par regex/mots-clés.
+* Le LLM reste un fallback de routage et le générateur de réponse naturelle.
 
-```text
-Magasin : 050
-Article : Produit X
-
-Commande passée : hier
-Quantité commandée : 40 unités
-
-Ventes moyennes : 100 unités / jour
-```
-
-Lorsque le système détecte aujourd'hui que cet article nécessite potentiellement un réassort, l'IA doit d'abord vérifier les commandes déjà passées.
-
-Elle doit constater :
-
-> ⚠️ **Commande récente détectée**
-
-> Vous avez commandé **40 unités hier**, alors que la consommation moyenne actuelle est d'environ **100 unités par jour**.
-
-L'IA doit ensuite analyser l'ensemble du contexte :
-
-* quantité commandée hier ;
-* date et heure de la commande ;
-* ventes avant la commande ;
-* ventes depuis la commande ;
-* moyenne des ventes ;
-* évolution des ventes ;
-* demande récente ;
-* stock actuel ;
-* commandes déjà en cours ;
-* délai de réception si disponible ;
-* historique des commandes de cet article ;
-* besoin prévu pour les prochains jours.
-
-### 2. L'IA doit déterminer si la commande existante est suffisante
-
-Elle ne doit pas simplement faire :
+Architecture cible :
 
 ```text
-Commande récente = Oui
-        ↓
-Quantité proposée = 0
+                         ┌──────────────────┐
+                         │       RPOS       │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+              Synchronisation              Requêtes LIVE
+                    │                           │
+                    ▼                           ▼
+          ┌──────────────────┐         ┌──────────────────┐
+          │ PostgreSQL local │         │    RPOS API      │
+          │                  │         │                  │
+          │ SalesLine        │         │ Stock actuel     │
+          │ Proposals        │         │ Stock magasins   │
+          │ Predictions      │         │ Mouvements       │
+          │ Orders           │         │ données temps réel│
+          │ Anomalies        │         └────────┬─────────┘
+          └────────┬─────────┘                  │
+                   │                            │
+                   └──────────────┬─────────────┘
+                                  ▼
+                           Chatbot Tools
+                                  │
+                                  ▼
+                            JSON structuré
+                                  │
+                                  ▼
+                                LLM
+                                  │
+                                  ▼
+                             Réponse UI
 ```
-
-Elle doit plutôt faire :
-
-```text
-Commande récente
-       ↓
-Quantité commandée
-       ↓
-Analyse de la consommation
-       ↓
-Analyse de la demande future
-       ↓
-Comparaison avec le besoin
-       ↓
-La quantité commandée est-elle suffisante ?
-       ↓
-     ┌──────────────┐
-     │              │
-    OUI            NON
-     │              │
-     ↓              ↓
-Pas de nouvelle   Proposer une
-commande          quantité supplémentaire
-```
-
-### 3. Exemple où la commande est insuffisante
-
-Supposons :
-
-```text
-Commande hier : 40 unités
-Vente moyenne : 100 unités/jour
-Stock actuel : 20 unités
-Tendance : ventes en hausse
-```
-
-L'IA doit pouvoir dire :
-
-> ⚠️ **Commande récente insuffisante**
->
-> Une commande de 40 unités a été passée hier. Cependant, la consommation actuelle est d'environ 100 unités par jour et les ventes récentes montrent une demande élevée.
->
-> La quantité déjà commandée ne semble pas suffisante pour couvrir le besoin prévu.
->
-> **Recommandation IA : commander 80 unités supplémentaires.**
-
-Le chiffre final doit évidemment être **calculé par l'IA à partir des données réelles**, et non fixé arbitrairement à 80.
-
-### 4. Exemple où la commande est suffisante
-
-Si le magasin a commandé :
-
-```text
-Commande hier : 200 unités
-Vente moyenne : 80 unités/jour
-Stock actuel : 100 unités
-```
-
-et que l'analyse montre que le stock + la commande couvrent suffisamment la demande prévue, l'IA doit dire :
-
-> ✅ **Aucune nouvelle commande nécessaire pour le moment**
->
-> Une commande de 200 unités a été passée hier. Après analyse du stock disponible, de la consommation récente et de la demande prévue, cette commande est actuellement suffisante.
->
-> **Quantité supplémentaire recommandée : 0**
-
-### 5. L'IA doit également contrôler si les commandes sont anormales
-
-Je veux également que l'IA utilise **l'historique des achats/commandes** pour détecter les comportements inhabituels.
-
-Exemple :
-
-Historique :
-
-```text
-Commande 1 → 50 unités
-Commande 2 → 60 unités
-Commande 3 → 55 unités
-Commande 4 → 70 unités
-Commande 5 → 65 unités
-```
-
-Puis aujourd'hui :
-
-```text
-Nouvelle commande → 400 unités
-```
-
-L'IA doit détecter que **400 unités est très différent du comportement habituel**.
-
-Elle doit générer une alerte :
-
-> ⚠️ **Quantité de commande inhabituelle**
->
-> La quantité commandée aujourd'hui est de 400 unités.
->
-> L'historique des commandes de cet article montre généralement des quantités comprises entre 50 et 70 unités.
->
-> Cette commande est donc nettement supérieure au comportement habituel.
->
-> **Vérification recommandée.**
-
-### 6. L'inverse doit également être détecté
-
-Si l'historique montre :
-
-```text
-50
-60
-55
-70
-65
-```
-
-et qu'une nouvelle commande est seulement :
-
-```text
-5 unités
-```
-
-l'IA doit également détecter cette anomalie.
-
-Elle peut afficher :
-
-> ⚠️ **Quantité de commande inhabituellement faible**
->
-> La quantité commandée est de 5 unités alors que les commandes précédentes étaient généralement comprises entre 50 et 70 unités.
->
-> La consommation récente est également supérieure à cette quantité.
->
-> **Vérifiez cette commande avant de poursuivre.**
-
-### 7. Comparaison avec l'historique
-
-L'IA doit donc pouvoir comparer une nouvelle commande avec :
-
-* les anciennes quantités commandées ;
-* la fréquence des commandes ;
-* les ventes au moment de chaque commande ;
-* la consommation moyenne ;
-* les pics de consommation ;
-* les périodes de forte ou faible activité ;
-* le stock disponible ;
-* les commandes encore en cours.
-
-Elle doit essayer de comprendre **pourquoi une quantité est différente de l'habitude**.
-
-Une différence n'est pas forcément une erreur.
-
-Par exemple, une commande de 400 unités peut être parfaitement normale si :
-
-* une promotion est prévue ;
-* la demande augmente fortement ;
-* une période particulière approche ;
-* le magasin a une forte reprise d'activité ;
-* un événement exceptionnel explique cette quantité.
-
-Dans ce cas, l'IA doit prendre le contexte en compte avant de déclencher une alerte.
-
-### 8. Les alertes doivent être mémorisées pour les prochaines analyses
-
-Lorsqu'une anomalie de commande est détectée, je veux également que le système puisse la conserver dans l'historique d'analyse.
-
-Par exemple :
-
-```text
-18/09/2026
-Article : Produit X
-Magasin : 050
-
-Quantité commandée : 400
-Quantité habituelle : 50–70
-
-Anomalie détectée :
-Quantité exceptionnellement élevée
-
-Analyse IA :
-Écart important par rapport à l'historique
-```
-
-Cela permettra au système de retrouver cette information lors des analyses futures.
-
-Si le même type de comportement se reproduit, l'IA pourra tenir compte de cet historique.
-
-### 9. Attention : l'IA ne doit pas accuser automatiquement l'utilisateur d'une erreur
-
-Une anomalie signifie simplement :
-
-> **« Cette quantité est différente du comportement habituel. »**
-
-Elle ne doit pas automatiquement conclure :
-
-> « La commande est incorrecte. »
-
-Elle doit analyser le contexte et demander une vérification lorsque les données ne permettent pas de justifier clairement l'écart.
-
-### 10. Logique globale souhaitée
-
-Le fonctionnement du réassort doit donc devenir :
-
-```text
-Détection d'un besoin potentiel
-          ↓
-Recherche des commandes récentes
-          ↓
-Une commande existe ?
-          ↓
-        OUI
-          ↓
-Analyser la quantité commandée
-          ↓
-Comparer avec :
-- consommation actuelle
-- ventes récentes
-- tendance
-- stock
-- demande prévue
-- commandes en cours
-- historique des commandes
-          ↓
-La commande suffit-elle ?
-     ↓              ↓
-    OUI            NON
-     ↓              ↓
-Nouvelle          Proposer une
-commande = 0      quantité complémentaire
-```
-
-En parallèle :
-
-```text
-Chaque nouvelle commande
-          ↓
-Comparaison avec l'historique
-          ↓
-Détection d'un comportement inhabituel
-          ↓
-Analyse du contexte
-          ↓
-Alerte si nécessaire
-          ↓
-Conservation de l'anomalie
-          ↓
-Utilisation possible dans les analyses futures
-```
-
-### Objectif final
-
-Je veux que l'IA puisse comprendre des situations comme :
-
-> **« Le magasin a déjà commandé cet article hier. Il a commandé 40 unités, mais sa consommation actuelle est d'environ 100 unités par jour. Après analyse du stock, des ventes récentes, de la demande prévue et des commandes en cours, cette quantité semble insuffisante. Je recommande donc une quantité supplémentaire de X unités. »**
-
-Et également :
-
-> **« Une commande de 400 unités vient d'être passée. Cette quantité est nettement supérieure aux quantités habituellement commandées pour cet article. J'ai vérifié l'évolution des ventes et le contexte disponible, mais l'écart reste inhabituel. Je déclenche donc une alerte pour vérification. »**
-
-Le système doit donc analyser **à la fois les besoins futurs et les décisions de commande déjà prises**.
-
-Les commandes passées deviennent ainsi une source d'information importante pour l'IA, aussi bien pour **éviter les surcommandes** que pour **détecter les sous-commandes et les comportements inhabituels**.
 
 ---
 
-## Chantier futur : gestion des DLC/DLV (dates limites de consommation/vente) dans le réassort
+# 2. Ne pas faire de réplication complète
 
-**Statut : à démarrer, bloqué faute d'accès réseau (19/09/2026).**
+IMPORTANT :
 
-### Contexte
+NE PAS créer un job qui récupère les 100 000 / 200 000 / 500 000 articles RPOS simplement pour alimenter le chatbot.
 
-L'utilisateur a confirmé que les DLV (dates limites de vente) sont disponibles côté API RPOS —
-**endpoint identifié le 21/09/2026** : `end_of_life_product` (vu via l'URL d'administration RPOS :
-`https://pos1-prod-prosuma.prosuma.pos/administration/#!/end_of_life_product?page=1&created_at_0=...&created_at_1=...&is_deleted=false&page_size=250&search_options_view=normal`).
-Reste à explorer l'API REST correspondante (probablement `/api/end_of_life_product/`, à confirmer —
-même convention que les autres endpoints déjà utilisés dans rposClient.js, ex: `/api/product/`,
-`/api/product_addressing/`) une fois l'accès réseau RPOS disponible : structure exacte des champs
-(date de péremption par lot ou par article ?, quantité concernée, lien avec ProductCache.ean).
+Le système doit fonctionner avec :
 
-### Pourquoi c'est important (analyse du 19/09/2026)
+```text
+Données analytiques
+        ↓
+PostgreSQL local
 
-Identifié comme la plus grosse lacune métier de l'Assistant IA / du calcul de réassort : aucune
-notion de péremption n'existe nulle part dans le système actuel (confirmé par recherche dans tout
-le code — `proposalService.js`, `chatbotToolsService.js`, schéma Prisma). Le calcul de quantité à
-commander (`computeQuantityToOrder`, proposalService.js) ne connaît que la vente moyenne, le stock
-et les commandes en cours — il peut donc proposer une quantité qui semble cohérente avec la
-demande, mais qui expose le magasin à de la perte sèche si l'article est périssable et proche de sa
-DLC (le stock ne sera jamais vendu avant péremption, quelle que soit la demande théorique).
+Données temps réel
+        ↓
+RPOS Live
+```
 
-### Ce qu'il faudra faire une fois l'accès réseau rétabli
+Le PostgreSQL local doit être considéré comme un **read model métier optimisé**, pas comme une copie de RPOS.
 
-1. **Explorer l'API RPOS** pour trouver l'endpoint/champ exposant les DLV par lot ou par article
-   (probablement `/api/product/` avec un champ dédié, ou un endpoint séparé type
-   `/api/stock_batch/` ou `/api/expiry/` — à confirmer, aucune certitude à ce stade).
-2. Déterminer si la DLV est suivie **par lot de réception** (plusieurs dates possibles pour un même
-   article selon les livraisons successives) ou **par article seul** (une seule date, plus simple
-   mais moins précis) — ça détermine toute l'architecture de stockage côté base.
-3. **Décider du périmètre v1** : probablement démarrer par un nouveau tool chatbot
-   (`getExpiringArticles` ou similaire, sur le modèle de `getStockoutRisks`/`getOverstockArticles`)
-   avant d'intégrer la DLC dans le calcul de proposition lui-même (chantier plus lourd, touche
-   `computeQuantityToOrder` et le cœur du calcul).
-4. Vérifier si un nouveau modèle Prisma est nécessaire (ex: `ProductExpiry` ou champ ajouté à
-   `ProductCache`) ou si l'info peut rester en lecture directe RPOS à la demande, sans persistance
-   locale (dépend du volume et de la fraîcheur nécessaire).
+---
 
-### Rappel des autres lacunes métier identifiées le même jour (non traitées, par ordre d'impact)
+# 3. Classification des données
 
-2. Aucune anticipation d'impact promo sur le réassort (une promo à venir devrait ajuster la
-   quantité proposée à l'avance, pas seulement signaler qu'une promo est en cours).
-3. Aucune vue consolidée de la casse/démarque (uniquement article par article sur demande,
-   `getStockMoveHistory` — pas de KPI global "quel rayon perd le plus").
-4. Aucune analyse de fiabilité fournisseur (retards de livraison récurrents, taux de rupture par
-   fournisseur).
-5. Aucune anticipation calendaire/événementielle proactive (Ramadan, Noël, rentrée...) au-delà de
-   l'ajustement de saisonnalité déjà basé sur l'historique.
+Créer une documentation/code centralisant la classification suivante.
+
+## 3.1 Données locales
+
+Ces données doivent rester dans PostgreSQL :
+
+### Ventes
+
+* SalesLine
+* historique des ventes
+* CA
+* quantités vendues
+* ventes par article
+* ventes par magasin
+* ventes par rayon
+* Pareto
+* tendances
+* périodes historiques
+
+### Réassort
+
+* Proposal
+* ProposalLine
+* historique des propositions
+* quantités proposées
+* quantités validées
+* corrections utilisateur
+* historique des décisions
+
+### IA
+
+* AIPredictionOutcome
+* précision
+* historique des prédictions
+* anomalies
+* métriques du modèle
+
+### Commandes
+
+* données locales déjà synchronisées
+* historiques nécessaires aux analyses
+
+Ces tools doivent continuer à utiliser PostgreSQL/Prisma.
+
+---
+
+# 4. Données temps réel
+
+Les données suivantes doivent rester RPOS Live lorsque la question demande une valeur actuelle :
+
+## Stock
+
+```text
+getArticleStock
+getArticleStockAllShops
+getStoreStock
+```
+
+Exemples :
+
+> Quel est le stock de Coca 1.5L ?
+
+> Quel est le stock de cet article dans tous les magasins ?
+
+Ces questions doivent interroger RPOS directement.
+
+NE PAS utiliser une copie locale du stock comme vérité principale.
+
+---
+
+# 5. Pourquoi le stock reste LIVE
+
+Le stock est une donnée très volatile.
+
+Exemple :
+
+```text
+08:00 → stock 100
+08:05 → vente 20
+08:06 → vente 10
+08:07 → stock 70
+```
+
+Une synchronisation toutes les 15 minutes pourrait retourner une information obsolète.
+
+Donc :
+
+```text
+Question stock
+     ↓
+RPOS Live
+     ↓
+Stock actuel
+```
+
+Le système peut éventuellement conserver une dernière valeur connue uniquement pour :
+
+* diagnostic ;
+* observabilité ;
+* fallback technique ;
+* affichage de l'heure de dernière consultation.
+
+Mais cette valeur ne doit jamais être présentée comme le stock actuel si RPOS n'a pas été interrogé.
+
+---
+
+# 6. Données hybrides
+
+Certaines données peuvent être local + RPOS.
+
+## Fiche article
+
+```text
+getArticleDetails
+```
+
+Ne pas synchroniser tout le catalogue.
+
+Comportement :
+
+```text
+Question
+   ↓
+EAN connu ?
+   │
+   ├── oui → RPOS
+   │
+   └── non → searchArticlesByName → RPOS
+```
+
+Optionnellement, conserver un petit cache des articles déjà consultés.
+
+Ce cache ne doit pas devenir une synchronisation massive.
+
+---
+
+# 7. Prix
+
+Pour le prix actuel, privilégier RPOS si l'information doit être exacte et actuelle.
+
+Pour l'historique des prix :
+
+```text
+getPriceChangeHistory
+```
+
+RPOS peut rester la source principale.
+
+Si le volume et la latence deviennent problématiques, envisager plus tard une synchronisation ciblée de l'historique.
+
+NE PAS faire cette optimisation dans la première phase sans mesure réelle.
+
+---
+
+# 8. Mouvements de stock
+
+Pour :
+
+```text
+getStockMoveHistory
+getStockMoveHistoryAllShops
+```
+
+Conserver RPOS Live dans un premier temps.
+
+La priorité est de conserver la donnée réelle.
+
+Ne pas répliquer tous les mouvements de tous les articles de tous les magasins sans mesurer le volume.
+
+---
+
+# 9. Règle de décision pour chaque Tool
+
+Créer une règle claire :
+
+```text
+TOOL
+ ↓
+Cette donnée est-elle historique/analytiquement stable ?
+ ↓
+OUI → PostgreSQL local
+ ↓
+NON
+ ↓
+Cette donnée doit-elle être exacte à l'instant T ?
+ ↓
+OUI → RPOS Live
+```
+
+Ne pas laisser chaque développeur décider différemment.
+
+Documenter cette classification dans le code.
+
+---
+
+# 10. Optimisation de getArticleStockAllShops
+
+C'est actuellement un point de latence important.
+
+Situation actuelle :
+
+```text
+getArticleStockAllShops
+        ↓
+Promise.all()
+        ↓
+RPOS magasin 1
+RPOS magasin 2
+RPOS magasin 3
+...
+RPOS magasin N
+```
+
+Ne pas supprimer le temps réel.
+
+Mais améliorer la stratégie.
+
+## Étape 1
+
+Mesurer précisément :
+
+* nombre de magasins ;
+* temps moyen par requête ;
+* p50 ;
+* p95 ;
+* p99 ;
+* taux d'erreur ;
+* timeout ;
+* nombre de magasins réellement autorisés.
+
+## Étape 2
+
+Conserver la parallélisation si le nombre de magasins est raisonnable.
+
+## Étape 3
+
+Ajouter timeout individuel par magasin.
+
+Exemple conceptuel :
+
+```javascript
+Promise.race([
+    getStockFromRpos(shop, ean),
+    timeout(5000)
+])
+```
+
+Un magasin lent ne doit pas bloquer tout le résultat.
+
+## Étape 4
+
+Retourner explicitement les magasins en erreur.
+
+Exemple :
+
+```json
+{
+  "ean": "1234567890123",
+  "results": [...],
+  "failedShops": [
+    {
+      "shopId": "035",
+      "reason": "timeout"
+    }
+  ]
+}
+```
+
+NE JAMAIS transformer une erreur RPOS en stock `0`.
+
+---
+
+# 11. Ne jamais confondre "0" et "erreur"
+
+C'est une règle critique.
+
+```text
+stock = 0
+```
+
+signifie :
+
+> RPOS a répondu que le stock est zéro.
+
+Alors que :
+
+```text
+RPOS timeout
+```
+
+signifie :
+
+> Le stock est inconnu.
+
+Ces deux situations doivent être différentes dans le JSON.
+
+Exemple :
+
+```json
+{
+  "stock": 0,
+  "source": "rpos",
+  "status": "success"
+}
+```
+
+vs :
+
+```json
+{
+  "stock": null,
+  "source": "rpos",
+  "status": "timeout"
+}
+```
+
+Le LLM ne doit jamais transformer `null + timeout` en `0`.
+
+---
+
+# 12. Ajouter la provenance des données
+
+Tous les tools importants doivent retourner des métadonnées de provenance.
+
+Exemple :
+
+```json
+{
+  "data": {...},
+  "source": "local",
+  "generatedAt": "2026-10-07T08:50:00Z"
+}
+```
+
+Pour RPOS :
+
+```json
+{
+  "data": {...},
+  "source": "rpos_live",
+  "queriedAt": "2026-10-07T08:52:13Z"
+}
+```
+
+Pour les outils hybrides :
+
+```json
+{
+  "data": {...},
+  "sources": [
+    "local",
+    "rpos_live"
+  ],
+  "queriedAt": "..."
+}
+```
+
+---
+
+# 13. Ajouter l'état de fraîcheur
+
+Pour les données locales, permettre de connaître :
+
+```text
+lastSyncAt
+dataAge
+```
+
+Exemple :
+
+```json
+{
+  "source": "local",
+  "lastSyncAt": "2026-10-07T08:45:00Z",
+  "dataAgeMinutes": 12
+}
+```
+
+Cela permettra au LLM de ne pas présenter une donnée locale ancienne comme une donnée temps réel.
+
+---
+
+# 14. Modifier le prompt système
+
+Le prompt doit connaître la différence entre :
+
+```text
+source = local
+```
+
+et :
+
+```text
+source = rpos_live
+```
+
+Règles :
+
+### Source RPOS Live
+
+Le LLM peut présenter la donnée comme actuelle.
+
+### Source locale
+
+Le LLM doit respecter `lastSyncAt` si cette information est pertinente.
+
+### Erreur RPOS
+
+Le LLM doit dire que la donnée actuelle n'a pas pu être récupérée.
+
+Il ne doit jamais inventer une valeur.
+
+---
+
+# 15. Exemple de comportement attendu
+
+Question :
+
+> Quel est le stock de l'article 1234567890123 ?
+
+Pipeline :
+
+```text
+detectIntent
+      ↓
+getArticleStock
+      ↓
+RPOS LIVE
+      ↓
+{
+  "ean": "...",
+  "stock": 42,
+  "source": "rpos_live"
+}
+      ↓
+LLM
+      ↓
+"Le stock actuel est de 42 unités."
+```
+
+---
+
+# 16. Exemple réassort
+
+Question :
+
+> Pourquoi proposes-tu de commander 120 unités ?
+
+Pipeline :
+
+```text
+                    Question
+                       │
+           ┌───────────┴────────────┐
+           ▼                        ▼
+      PostgreSQL                 RPOS Live
+           │                        │
+    ventes historiques          stock actuel
+    moyenne ventes              stock magasin
+    prévision
+    stock sécurité
+    délai fournisseur
+    proposition
+           │                        │
+           └───────────┬────────────┘
+                       ▼
+                  Tool Result
+                       │
+                       ▼
+                      LLM
+                       │
+                       ▼
+                   Explication
+```
+
+Le LLM explique alors la proposition avec les données réelles.
+
+---
+
+# 17. Ne pas créer un RAG vectoriel pour les données SQL
+
+IMPORTANT :
+
+Ne pas mettre les ventes, stocks et CA dans une base vectorielle simplement pour faire du RAG.
+
+Pour :
+
+> CA du magasin 050 sur 30 jours
+
+utiliser SQL.
+
+Pour :
+
+> articles représentant 80 % du CA
+
+utiliser SQL/Pareto.
+
+Pour :
+
+> stock actuel
+
+utiliser RPOS.
+
+Pour :
+
+> Pourquoi cette quantité est proposée ?
+
+utiliser les données structurées locales + RPOS + éventuellement RAG métier.
+
+---
+
+# 18. RAG futur
+
+Préparer l'architecture pour pouvoir ajouter plus tard un RAG concernant :
+
+* règles métier ;
+* documentation ;
+* procédures ;
+* corrections humaines ;
+* explications de décisions ;
+* historique des corrections ;
+* documentation fournisseurs ;
+* documentation réassort.
+
+Architecture :
+
+```text
+                 Question
+                    │
+          ┌─────────┴──────────┐
+          ▼                    ▼
+      SQL / Tools             RAG
+          │                    │
+          └─────────┬──────────┘
+                    ▼
+                   LLM
+```
+
+Mais ne pas implémenter une vectorisation massive dans cette phase si ce n'est pas nécessaire.
+
+---
+
+# 19. Optimiser les appels LLM
+
+Conserver :
+
+```text
+Regex / règles
+      ↓
+Tool
+```
+
+avant tout appel LLM.
+
+Le fallback :
+
+```text
+detectIntentViaLlm()
+```
+
+reste uniquement pour les formulations inconnues.
+
+Même chose pour :
+
+```text
+resolveDateRangeViaLlm()
+```
+
+Ne pas appeler le LLM pour une date facilement détectable par regex.
+
+---
+
+# 20. Ne pas modifier la sécurité
+
+Conserver impérativement :
+
+```text
+checkToolPermission()
+isEanInUserScope()
+```
+
+et le principe fail-closed.
+
+Chaque nouveau tool doit obligatoirement être ajouté à :
+
+```text
+TOOL_CAPABILITY
+```
+
+Aucun tool non déclaré ne doit être accessible.
+
+Tester notamment :
+
+* ADMIN ;
+* SUPERVISOR ;
+* DIRECTOR ;
+* DEPARTMENT_HEAD ;
+* SHELF_STOCKER ;
+* utilisateur sans rôle ;
+* utilisateur sans permission ;
+* article hors rayon autorisé.
+
+---
+
+# 21. Ne pas casser le contexte conversationnel
+
+Conserver :
+
+```text
+ARTICLE_SCOPED_TOOLS
+AMBIGUOUS_SCOPE_TOOLS
+DATE_SENSITIVE_TOOLS
+```
+
+et toutes les corrections déjà présentes.
+
+Tester notamment :
+
+```text
+"Quel est le stock de l'article X ?"
+"Et son CA ?"
+```
+
+mais aussi :
+
+```text
+"Quel est le stock de l'article X ?"
+"Quel est le stock du magasin ?"
+```
+
+La deuxième question ne doit pas récupérer silencieusement l'EAN précédent.
+
+---
+
+# 22. Tests à ajouter
+
+Créer une suite de tests automatisés pour :
+
+## Stock
+
+```text
+stock actuel
+stock zéro
+RPOS timeout
+RPOS erreur
+article inconnu
+magasin inconnu
+tous magasins
+```
+
+## Données locales
+
+```text
+CA
+ventes
+Pareto
+tendance
+prévision
+proposition
+```
+
+## Fraîcheur
+
+```text
+local récent
+local ancien
+absence de synchronisation
+```
+
+## Permissions
+
+Tester chaque rôle.
+
+## Contexte
+
+Tester les questions successives.
+
+## Questions composées
+
+Tester :
+
+```text
+"Quel est le stock de X et son CA ?"
+```
+
+---
+
+# 23. Observabilité
+
+Ajouter des métriques/logs permettant de savoir :
+
+```text
+question
+intent
+tool
+source
+duration
+rposDuration
+dbDuration
+llmDuration
+totalDuration
+success/error
+```
+
+Exemple :
+
+```json
+{
+  "tool": "getArticleStock",
+  "source": "rpos_live",
+  "rposDurationMs": 820,
+  "llmDurationMs": 2100,
+  "totalDurationMs": 2950
+}
+```
+
+Cela permettra de savoir précisément où se trouve la latence.
+
+---
+
+# 24. KPI à surveiller
+
+Après implémentation, mesurer :
+
+### Chatbot
+
+* temps moyen de réponse ;
+* p50 ;
+* p95 ;
+* p99.
+
+### RPOS
+
+* temps moyen ;
+* timeout ;
+* erreurs ;
+* nombre d'appels par question.
+
+### PostgreSQL
+
+* temps moyen des queries ;
+* queries lentes ;
+* index manquants.
+
+### LLM
+
+* nombre d'appels ;
+* coût ;
+* temps moyen ;
+* fallback routing rate.
+
+Objectif :
+
+```text
+Questions analytiques
+→ principalement PostgreSQL
+
+Questions stock
+→ RPOS Live
+
+Questions inconnues
+→ fallback LLM uniquement
+```
+
+---
+
+# 25. Ordre d'implémentation
+
+NE PAS tout modifier en une seule fois.
+
+Faire les étapes suivantes.
+
+## Phase 1 — Audit
+
+Avant toute modification :
+
+1. analyser `chatbotService.js`
+2. analyser `chatbotToolsService.js`
+3. analyser `salesSyncJob.js`
+4. analyser le schéma Prisma
+5. identifier exactement les tables locales existantes
+6. identifier les appels RPOS existants
+7. identifier les tools et leurs sources actuelles
+8. ne modifier aucun comportement fonctionnel
+
+Produire un rapport avant modification.
+
+---
+
+## Phase 2 — Classification
+
+Créer une matrice :
+
+```text
+Tool
+Source
+Local / Live
+Donnée temps réel ?
+Fallback ?
+Permission ?
+```
+
+Exemple :
+
+```text
+getRevenue
+→ LOCAL
+
+getSalesHistory
+→ LOCAL
+
+getParetoArticles
+→ LOCAL
+
+getArticleStock
+→ RPOS LIVE
+
+getArticleStockAllShops
+→ RPOS LIVE
+
+getArticleDetails
+→ RPOS LIVE
+
+getStockMoveHistory
+→ RPOS LIVE
+```
+
+---
+
+## Phase 3 — Provenance
+
+Ajouter les métadonnées :
+
+```text
+source
+queriedAt
+lastSyncAt
+dataAgeMinutes
+status
+```
+
+sans modifier la logique métier.
+
+---
+
+## Phase 4 — Robustesse RPOS
+
+Améliorer :
+
+* timeout ;
+* gestion des erreurs ;
+* distinction zéro / erreur ;
+* failedShops ;
+* logs ;
+* métriques.
+
+---
+
+## Phase 5 — Optimisation tous magasins
+
+Mesurer puis optimiser :
+
+```text
+getArticleStockAllShops
+getStockMoveHistoryAllShops
+```
+
+Ne pas modifier la concurrence sans benchmark.
+
+---
+
+## Phase 6 — Cache ciblé facultatif
+
+Seulement si les mesures montrent que certaines données non temps réel sont trop lentes :
+
+```text
+ProductCache
+PriceCache
+```
+
+avec TTL.
+
+NE PAS créer de cache massif.
+
+---
+
+## Phase 7 — RAG métier
+
+Seulement après stabilisation du reste.
+
+Ajouter éventuellement :
+
+```text
+règles métier
+historique corrections
+documentation
+```
+
+dans une couche RAG séparée.
+
+---
+
+# 26. Contraintes absolues
+
+Claude Code doit respecter ces règles :
+
+1. Ne pas synchroniser tout le catalogue RPOS.
+2. Ne pas synchroniser tout le stock.
+3. Ne pas remplacer le stock RPOS Live par PostgreSQL.
+4. Ne pas donner au LLM un accès direct à la DB.
+5. Ne pas supprimer les permissions existantes.
+6. Ne pas supprimer les regex existantes.
+7. Ne pas supprimer le fallback LLM.
+8. Ne pas changer les réponses fonctionnelles sans raison.
+9. Ne pas ajouter un nouveau modèle Prisma sans justification.
+10. Ne pas ajouter Redis/vector DB sans nécessité démontrée.
+11. Ne pas optimiser sur une hypothèse : mesurer d'abord.
+12. Toute optimisation doit être réversible.
+13. Tout changement important doit avoir des tests.
+14. Ne jamais convertir une erreur RPOS en valeur `0`.
+15. Une donnée locale doit indiquer sa fraîcheur lorsqu'elle est pertinente.
+
+---
+
+# 27. Résultat final attendu
+
+L'architecture finale doit être :
+
+```text
+                         USER
+                           │
+                           ▼
+                    Intent Detection
+                           │
+                           ▼
+                    Parameter Extraction
+                           │
+                           ▼
+                      Permissions
+                           │
+                           ▼
+                     Tool Selection
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+             ▼                           ▼
+      PostgreSQL LOCAL              RPOS LIVE
+             │                           │
+             │                    stock actuel
+             │                    données temps réel
+             │
+       ventes historiques
+       CA
+       Pareto
+       propositions
+       prédictions
+       anomalies
+       commandes
+             │                           │
+             └─────────────┬─────────────┘
+                           ▼
+                     Tool Result JSON
+                           │
+                           ▼
+                         LLM
+                           │
+                           ▼
+                       Réponse
+```
+
+## Principe final
+
+**LOCAL pour l'historique et l'analyse.**
+
+**RPOS LIVE pour la vérité temps réel.**
+
+**Pas de réplication massive.**
+
+**Pas de RAG pour les données structurées.**
+
+**LLM uniquement après récupération des données.**
+
+Avant de coder, inspecter le repo et produire la matrice actuelle `Tool → Source → Latence → Permission → Donnée`, puis proposer les modifications minimales nécessaires. Ne commencer les modifications qu'après avoir identifié précisément les fichiers et fonctions concernés.

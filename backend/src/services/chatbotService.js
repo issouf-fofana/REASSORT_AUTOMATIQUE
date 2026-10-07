@@ -1382,6 +1382,21 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // pouvoir en fournir, ni re-décrire toutes les données en detail (déjà visibles dans le visuel).
     dataSection = `L'utilisateur demande une représentation visuelle (graphique ou tableau) des données déjà obtenues précédemment dans cette conversation (outil "${toolName}"). Un graphique ou tableau sera affiché automatiquement juste après ta réponse par l'application — ne dis JAMAIS que tu ne peux pas fournir de graphique. Réponds simplement par une phrase confirmant que la représentation demandée est affichée ci-dessous, sans réénumérer le détail des données (déjà visible dans le visuel).`;
   } else if (toolResult) {
+    // Provenance/fraîcheur (amelioration1.md §12-14, ajouté le 07/10/2026) : certains outils de
+    // stock (getArticleStock, getArticleStockAllShops, getStoreStock) portent maintenant un champ
+    // "source" ('rpos_live' vs 'local_fallback'/'local') et "status" ('success'/'rpos_error'/
+    // 'not_found'), avec lastSyncAt/dataAgeMinutes pour le cas local. Consigne générique (jamais
+    // spécifique à un seul outil, contrairement aux notes ci-dessous) : le LLM ne doit JAMAIS
+    // présenter une donnée "local_fallback"/"local" comme le stock actuel sans mentionner qu'elle
+    // date de la dernière synchronisation connue, et ne doit JAMAIS transformer un status
+    // "rpos_error" en une vraie valeur zéro — la donnée est alors INCONNUE, pas nulle.
+    // Regex élargie le 07/10/2026 (explainProposalQuantity) : certains outils préfixent ces champs
+    // (stockSource/stockQueriedAt, pour coexister avec d'autres champs "source" potentiels dans le
+    // même JSON) — on matche la fin du nom de clé, pas seulement le nom exact, pour couvrir les deux.
+    const hasFreshnessFields = /"(?:\w*source|\w*status|\w*lastSync\w*|\w*queriedAt|dataAgeMinutes|failedShops)"\s*:/i.test(JSON.stringify(toolResult));
+    const freshnessNote = hasFreshnessFields
+      ? '\n\nIMPORTANT sur la fraîcheur des données : si un champ "source"/"stockSource" vaut "rpos_live" et qu\'aucune erreur n\'est signalée, présente la valeur comme actuelle sans réserve. Si "source" vaut "cache" (fiche article : nom/prix/rayon/fournisseur, jamais le stock), la donnée reste fiable pour ces informations peu volatiles — ne la présente jamais comme douteuse, mentionne au plus qu\'elle vient d\'une consultation récente si la question insiste sur l\'instant présent. Si "source"/"stockSource" vaut "local_fallback" ou "local", ou si un champ "status"/"stockStatus" vaut "rpos_error", ne présente JAMAIS cette valeur précise comme actuelle — dis explicitement qu\'il s\'agit de la dernière valeur connue (utilise "lastSyncAt"/"dataAgeMinutes"/"queriedAt" si présents pour préciser depuis quand), et si le statut est "rpos_error", précise que le serveur du magasin était temporairement injoignable plutôt que d\'affirmer la valeur avec certitude — un champ "stock" dont "stockStatus" vaut "rpos_error" reste particulièrement sensible : ne jamais l\'annoncer comme le stock actuel. Si "failedShops" est présent et non vide, mentionne explicitement les magasins dont la donnée n\'a pas pu être vérifiée en direct, sans jamais dire qu\'ils ont un stock de zéro.'
+      : '';
     // getParetoArticles (demande du 19/09/2026 : "quand on demande les articles qui font 80% du CA,
     // qu'il découpe par rayon") — le JSON contient DEUX classements (departments, groupé par rayon
     // réel, ET lines, détail par article individuel) : sans cette consigne explicite, le LLM
@@ -1434,7 +1449,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const searchByNameNote = toolName === 'searchArticlesByName' && toolResult.found
       ? `\n\nIMPORTANT pour cette réponse : ${toolResult.articles.length} articles différents correspondent au nom recherché ("${toolResult.query}") — ne choisis JAMAIS un seul article au hasard ni ne suppose lequel l'utilisateur veut. Liste TOUTES les variantes trouvées (nom complet et code à côté, prix si pertinent pour la question), puis termine ta réponse par une question explicite lui demandant de préciser laquelle il veut dire (ex: "Tu parles du Codys 25CL ou du 50CL ?"). Ne réponds à la question initiale (prix, stock...) qu'une fois l'article précisé dans un message suivant.`
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}`;
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
