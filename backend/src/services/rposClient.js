@@ -1018,14 +1018,28 @@ async function getLastSaleDate(posId, shopId) {
 
   for (const days of windowsInDays) {
     const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-    const data = await rposGet(posId, '/api/product_line/', {
-      shop: shopId,
-      date_0: start.toISOString().slice(0, 19),
-      date_1: now.toISOString().slice(0, 19),
-      page_size: 1,
-      ordering: '-date',
-      fields: 'date',
-    });
+    // Erreur réseau (serveur RPOS injoignable) trouvée réellement lente le 07/10/2026 : avant ce
+    // correctif, une panne réseau faisait échouer l'appel À CHAQUE fenêtre successive avec le MÊME
+    // timeout (~15-30s), jusqu'à épuiser les 5 fenêtres par défaut (31/93/366/1830/7320 jours) — 54s
+    // mesurées en conditions réelles pour un magasin dont le serveur RPOS était injoignable, avant
+    // de finalement renvoyer null. Une erreur réseau ne dépend PAS de la fenêtre de dates demandée :
+    // elle sera identique quelle que soit la fenêtre suivante, donc on abandonne dès la première
+    // plutôt que de répéter le même échec. Rethrow immédiat (jamais avalé) : l'appelant
+    // (periodService.resolvePeriod) traite déjà toute exception RPOS comme une vraie panne réseau.
+    let data;
+    try {
+      data = await rposGet(posId, '/api/product_line/', {
+        shop: shopId,
+        date_0: start.toISOString().slice(0, 19),
+        date_1: now.toISOString().slice(0, 19),
+        page_size: 1,
+        ordering: '-date',
+        fields: 'date',
+      });
+    } catch (err) {
+      if (/injoignable/i.test(err.message)) throw err;
+      throw err; // toute autre erreur inattendue : jamais avalée non plus, remonte telle quelle
+    }
     const results = data.results || [];
     if (results.length) return results[0].date;
   }

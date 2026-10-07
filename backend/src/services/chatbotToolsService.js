@@ -734,10 +734,15 @@ async function getCurrentProposal(rposShopId, { department } = {}) {
     orderBy: { generatedAt: 'desc' },
     include: { lines: { select: { ean: true, label: true, quantitySuggested: true, department: true } } },
   });
-  if (!proposal) return { found: false, message: 'Aucune proposition en attente de validation pour ce magasin.' };
+  // isNormalNegative (bug constaté le 07/10/2026 en test réel : "quelle est la proposition en
+  // attente ?" répondait correctement "aucune proposition en attente" PUIS ajoutait "en phase de
+  // développement sur ce point", contradictoire — un magasin qui a déjà tout validé ou dont la
+  // génération nocturne est désactivée n'a légitimement aucune proposition en attente, ce n'est
+  // jamais une lacune de l'outil lui-même). Même correctif déjà appliqué à getOrders/getSalesHistory.
+  if (!proposal) return { found: false, message: 'Aucune proposition en attente de validation pour ce magasin.', isNormalNegative: true };
 
   const lines = department ? proposal.lines.filter((l) => l.department === department) : proposal.lines;
-  if (department && !lines.length) return { found: false, message: `Aucun article du rayon "${department}" dans la proposition en attente.` };
+  if (department && !lines.length) return { found: false, message: `Aucun article du rayon "${department}" dans la proposition en attente.`, isNormalNegative: true };
 
   const byDept = new Map();
   for (const l of proposal.lines) {
@@ -1462,7 +1467,10 @@ async function getTopGisements(posId, shopId, { days = 30 } = {}) {
  */
 async function getPriceChangeHistory(posId, shopId, ean) {
   const history = await rpos.getPriceChangeHistory(posId, shopId, ean, { limit: 30 });
-  if (!history.length) return { found: false, message: `Aucun changement de prix enregistré pour l'article ${ean}.` };
+  // isNormalNegative (bug constaté le 07/10/2026 en test réel) : un article dont le prix n'a jamais
+  // changé est une réponse négative normale et complète, pas une lacune du système — même correctif
+  // déjà appliqué à getOrders/getCurrentProposal/getSalesHistory pour cette classe de bug.
+  if (!history.length) return { found: false, message: `Aucun changement de prix enregistré pour l'article ${ean}.`, isNormalNegative: true };
   // Liste FACTUELLE des priceType réellement présents dans cet historique précis (bug persistant
   // constaté le 05/10/2026, malgré une première note d'interprétation) : le LLM continuait
   // d'inventer une catégorie "prix de vente" absente des données réelles (qui ne contenaient que
