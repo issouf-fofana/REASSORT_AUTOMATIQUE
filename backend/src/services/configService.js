@@ -41,6 +41,14 @@ const DEFAULTS = {
   // Génération automatique nocturne (30/09/2026) : true par défaut, pour ne changer le comportement
   // d'aucun magasin existant — avant ce champ, tous les magasins étaient traités sans filtre.
   nightlyGenerationEnabled: true,
+  // Résolution fournisseur par historique (mission "Logique de gestion des fournisseurs et des
+  // commandes", 07/10/2026) : true par défaut — pour un article non rattaché au fournisseur
+  // central, tente de retrouver le fournisseur de sa dernière commande (2 appels RPOS par article
+  // concerné, mesuré ~700ms-1.3s chacun, atténué par un cache par référence de commande). À
+  // désactiver (false) uniquement si le coût RPOS s'avère trop élevé sur un magasin à fort
+  // catalogue hors-central — le fallback par délai de livraison le plus court reste alors seul
+  // utilisé, sans appel RPOS supplémentaire.
+  useSupplierHistoryResolution: true,
 };
 
 /** Récupère la config d'un magasin, ou les valeurs par défaut si aucune n'a été personnalisée. */

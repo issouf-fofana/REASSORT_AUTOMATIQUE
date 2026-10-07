@@ -498,6 +498,54 @@ async function getDepartmentHierarchy(posId, departmentId) {
 const supplierByCodeCache = new Map();
 const SUPPLIER_CACHE_TTL_MS = 60 * 60 * 1000;
 
+// Cache par référence de commande, dédié à getSupplierOfOrder ci-dessous — mesuré en conditions
+// réelles le 07/10/2026 (mission "Logique de gestion des fournisseurs et des commandes") : sur un
+// échantillon d'articles sans fournisseur central, plusieurs partagent très souvent la MÊME
+// commande historique récente (4 articles sur 5 dans l'échantillon pointaient vers la même
+// référence) — un magasin commande généralement plusieurs articles du même fournisseur en une
+// fois. Sans ce cache, résoudre le fournisseur de ~65 articles non-central mesurait ~60-100s
+// (deux appels RPOS séquentiels par article) ; avec, le nombre de commandes RÉELLEMENT distinctes à
+// résoudre tombe nettement plus bas, pour un cycle de génération nocturne acceptable. Portée
+// mémoire-process (comme supplierByCodeCache ci-dessus), pas partagée entre magasins (la clé
+// inclut posId+shopId), jamais persistée.
+const supplierByOrderRefCache = new Map();
+const SUPPLIER_BY_ORDER_REF_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Résout le fournisseur complet (id/code/name) d'une commande fournisseur RPOS à partir de sa
+ * RÉFÉRENCE (pas son UUID interne — c'est ce que renvoie getLastPurchaseForProduct/
+ * getPurchaseHistoryForProduct via order.reference, jamais order.id directement accessible de ce
+ * côté). Confirmé par test direct le 07/10/2026 contre un vrai serveur RPOS : /api/supplier_order/
+ * filtré par `reference` renvoie l'objet commande complet, supplier inclus (id/code/name/
+ * delivery_time_days) — jamais exposé sur les lignes de /api/supplier_order_line/ elles-mêmes.
+ * Utilisé par proposalService.resolveSupplierForArticle pour l'étape "historique" de la cascade de
+ * résolution fournisseur. Retourne null si la commande est introuvable (jamais une exception qui
+ * bloquerait toute la résolution d'un article pour cette seule raison) ou en cas d'erreur réseau —
+ * l'appelant doit alors passer directement au mécanisme de fallback, jamais rester bloqué.
+ */
+async function getSupplierOfOrder(posId, shopId, orderReference) {
+  if (!orderReference) return null;
+  const cacheKey = `${posId}|${shopId}|${orderReference}`;
+  const cached = supplierByOrderRefCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < SUPPLIER_BY_ORDER_REF_CACHE_TTL_MS) return cached.supplier;
+
+  let supplier = null;
+  try {
+    const data = await rposGet(posId, '/api/supplier_order/', { shop: shopId, reference: orderReference, page_size: 1 });
+    supplier = (data.results || [])[0]?.supplier || null;
+  } catch {
+    // Erreur réseau ponctuelle : jamais remontée telle quelle à l'appelant, qui doit basculer sur
+    // le fallback plutôt que de bloquer toute la résolution de cet article pour une seule requête
+    // d'historique en échec — même principe que checkSupplierEligibility (avale ses propres
+    // erreurs par ligne).
+    return null;
+  }
+  // Un résultat null est aussi mis en cache (évite de retenter indéfiniment la même référence
+  // introuvable dans le même cycle de génération) — TTL identique, pas de distinction nécessaire.
+  supplierByOrderRefCache.set(cacheKey, { supplier, cachedAt: Date.now() });
+  return supplier;
+}
+
 /**
  * Résout l'UUID RPOS d'un fournisseur par son CODE (ex: "000000" pour FOURNISSEUR CENTRALE), pour
  * UN magasin précis — bug critique trouvé le 15/09/2026 : cet UUID est DIFFÉRENT sur chaque
@@ -1259,6 +1307,7 @@ module.exports = {
   getGenericArticleDepartment,
   getPriceChangeHistory,
   getSupplierByCode,
+  getSupplierOfOrder,
   getProductsByEans,
   getDepartmentRootName,
   getDepartmentHierarchy,

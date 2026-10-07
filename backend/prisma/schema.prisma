@@ -779,10 +779,27 @@ model ProposalOrder {
 
   receptionEvents ReceptionEvent[]
 
-  // Un seul ProposalOrder par (proposition, rayon) — demande du 26/09/2026 : "chaque rayon
-  // indépendant, validé une seule fois". Empêche toute course/double clic de créer deux
-  // commandes RPOS distinctes pour le même rayon de la même proposition.
-  @@unique([proposalId, department])
+  // Fournisseur regroupant cette commande (mission "Logique de gestion des fournisseurs et des
+  // commandes", 07/10/2026) — remplace le regroupement par seul rayon : une commande rassemble
+  // maintenant tous les articles RÉSOLUS vers le même fournisseur (cf. ProposalLine.resolvedSupplierId
+  // ci-dessous), potentiellement au sein d'un même rayon si ses articles n'ont pas tous le même
+  // fournisseur résolu. supplierId null pour les commandes créées avant ce champ (toujours central
+  // implicitement, jamais recalculé rétroactivement).
+  supplierId   String? @map("supplier_id") // UUID RPOS du fournisseur, propre à ce magasin
+  supplierName String? @map("supplier_name")
+  // LC (Livraison Centrale, fournisseur central) ou LD (Livraison Directe, tout autre fournisseur) —
+  // convention déjà observée en pratique sur de vraies commandes RPOS de ce magasin
+  // (external_reference "LD S2P ... BOULANGERIE"), reprise ici comme préfixe du nom de commande.
+  deliveryType String? @map("delivery_type")
+
+  // Contrainte revue (était @@unique([proposalId, department]) seul, "chaque rayon validé une
+  // seule fois") : un même rayon peut maintenant produire PLUSIEURS commandes si ses articles sont
+  // résolus vers des fournisseurs différents (ex: rayon BOULANGERIE → une commande Fournisseur X
+  // et une commande Fournisseur Z) — la contrainte anti-doublon porte donc sur le TRIPLET
+  // (proposition, rayon, fournisseur), pas seulement (proposition, rayon). supplierId peut être
+  // null (ancien comportement/fallback) : deux lignes avec supplierId=null et même department sont
+  // alors considérées comme le même groupe, cohérent avec le comportement historique avant ce champ.
+  @@unique([proposalId, department, supplierId])
   @@map("proposal_orders")
 }
 
@@ -933,6 +950,27 @@ model ProposalLine {
   // pour les propositions générées AVANT ce champ (jamais recalculé rétroactivement).
   supplierIneligible Boolean? @map("supplier_ineligible")
   currentSuppliers   String?  @map("current_suppliers") // noms des fournisseurs actuels, séparés par virgule ("aucun" si vide)
+
+  // Résolution intelligente du fournisseur (mission "Logique de gestion des fournisseurs et des
+  // commandes", 07/10/2026) — remplace le blocage binaire de supplierIneligible ci-dessus par une
+  // vraie cascade : fournisseur central si rattaché, sinon fournisseur historique du magasin pour
+  // cet article s'il est toujours rattaché, sinon un autre fournisseur actuellement rattaché
+  // (fallback, priorité au délai de livraison le plus court). supplierIneligible reste calculé en
+  // parallèle (jamais retiré) : il garde son sens d'origine ("pas le central"), distinct de
+  // resolvedSupplierId qui peut être non-null même quand supplierIneligible=true (résolu via
+  // historique/fallback plutôt que bloqué). Tous null si aucun fournisseur valide trouvé (article
+  // non traitable, cf. supplierResolutionOrigin='NONE') ou pour les propositions générées avant ce
+  // champ (jamais recalculé rétroactivement).
+  resolvedSupplierId   String? @map("resolved_supplier_id") // UUID RPOS du fournisseur retenu, propre à ce magasin
+  resolvedSupplierName String? @map("resolved_supplier_name")
+  // D'où vient le fournisseur retenu : CENTRAL (rattaché au fournisseur central) | HISTORY
+  // (retrouvé dans l'historique de commandes du magasin pour cet article, toujours rattaché) |
+  // FALLBACK (aucun historique valide, choisi parmi les fournisseurs actuellement rattachés) |
+  // NONE (aucun fournisseur valide trouvé, article non traitable/bloqué).
+  supplierResolutionOrigin String? @map("supplier_resolution_origin")
+  // LC (Livraison Centrale) si origin=CENTRAL, LD (Livraison Directe) pour HISTORY/FALLBACK, null
+  // si origin=NONE (rien à livrer). Même convention que ProposalOrder.deliveryType.
+  deliveryType String? @map("delivery_type")
 
   // Précision des prévisions (readme §17) : quantité réellement vendue sur la fenêtre de mesure
   // (ReassortConfig.forecastAccuracyWindowDays) après la validation, calculée une seule fois à la

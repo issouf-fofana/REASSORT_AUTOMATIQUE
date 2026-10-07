@@ -858,6 +858,39 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     const supplierIneligible = !suppliers.some((s) => s.code === SUPPLIER_CENTRAL_CODE);
     const currentSuppliers = suppliers.map((s) => s.name).join(', ') || 'aucun';
 
+    // Résolution intelligente du fournisseur (mission "Logique de gestion des fournisseurs et des
+    // commandes", 07/10/2026) : remplace le blocage binaire ci-dessus par resolveSupplierForArticle
+    // (cascade CENTRAL → HISTORY → FALLBACK → NONE, cf. sa doc). Appelée SEULEMENT pour les articles
+    // déjà non-central (supplierIneligible=true) — jamais pour un article central, qui n'a besoin
+    // d'aucun appel RPOS supplémentaire (court-circuit déjà géré dans resolveSupplierForArticle,
+    // mais évité ici en amont pour ne pas payer même l'appel product.suppliers.find() à nouveau).
+    // config.useSupplierHistoryResolution (réglage par magasin, défaut true) permet de désactiver
+    // l'étape HISTORY si son coût RPOS s'avère trop élevé sur un magasin à fort catalogue
+    // hors-central, sans renoncer au fallback par délai de livraison.
+    let resolvedSupplierId = null;
+    let resolvedSupplierName = null;
+    let supplierResolutionOrigin = null;
+    let deliveryType = null;
+    if (supplierIneligible) {
+      const resolution = await resolveSupplierForArticle(posId, shopId, product, {
+        useHistory: config.useSupplierHistoryResolution !== false,
+      });
+      if (resolution.supplier) {
+        resolvedSupplierId = resolution.supplier.id;
+        resolvedSupplierName = resolution.supplier.name;
+      }
+      supplierResolutionOrigin = resolution.origin;
+      deliveryType = resolution.deliveryType;
+    } else {
+      // Central : résolution triviale, jamais besoin de passer par la cascade pour ce cas déjà
+      // tranché par supplierIneligible=false ci-dessus.
+      const centralSupplier = suppliers.find((s) => s.code === SUPPLIER_CENTRAL_CODE);
+      resolvedSupplierId = centralSupplier.id;
+      resolvedSupplierName = centralSupplier.name;
+      supplierResolutionOrigin = 'CENTRAL';
+      deliveryType = 'LC';
+    }
+
     // La quantité déjà commandée déduite du besoin cumule notre propre suivi des commandes en
     // transit de cette plateforme et les commandes RPOS récentes non livrées (hors plateforme),
     // sans compter deux fois la même chose : RPOS finit généralement par refléter la commande de
@@ -1029,6 +1062,10 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
         coverageStatusReason: coverageStatus.reason,
         supplierIneligible,
         currentSuppliers,
+        resolvedSupplierId,
+        resolvedSupplierName,
+        supplierResolutionOrigin,
+        deliveryType,
       },
     };
   }
@@ -1370,6 +1407,10 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           coverageStatusReason: p.coverageStatusReason || null,
           supplierIneligible: p.supplierIneligible,
           currentSuppliers: p.currentSuppliers,
+          resolvedSupplierId: p.resolvedSupplierId,
+          resolvedSupplierName: p.resolvedSupplierName,
+          supplierResolutionOrigin: p.supplierResolutionOrigin,
+          deliveryType: p.deliveryType,
         })),
       },
     },
@@ -1805,6 +1846,72 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
 // Code fournisseur "FOURNISSEUR CENTRALE", tel qu'affiché dans l'en-tête de commande côté UI —
 // utilisé pour résoudre dynamiquement le VRAI UUID RPOS de ce magasin (voir getSupplierByCode).
 const SUPPLIER_CENTRAL_CODE = '000000';
+
+/**
+ * Résolution intelligente du fournisseur d'un article (mission "Logique de gestion des
+ * fournisseurs et des commandes", 07/10/2026) — remplace le blocage binaire "central ou rien"
+ * (supplierIneligible) par une cascade à 3 niveaux :
+ *   1. CENTRAL   — l'article est rattaché au fournisseur central (000000) : toujours prioritaire.
+ *   2. HISTORY   — sinon, le fournisseur de la DERNIÈRE commande de ce magasin pour cet article,
+ *                  SI ce fournisseur est toujours parmi les fournisseurs actuellement rattachés à
+ *                  l'article (un fournisseur peut avoir été retiré du catalogue entre-temps).
+ *   3. FALLBACK  — sinon, parmi les fournisseurs actuellement rattachés, celui dont le délai de
+ *                  livraison (delivery_time_days) est le plus court (règle de priorité validée le
+ *                  07/10/2026 — le magasin reçoit plus vite, à défaut d'autre signal pour trancher).
+ *   4. NONE      — aucun fournisseur valide trouvé : article non traitable, reste bloqué (cas "G"
+ *                  de l'exemple de la mission).
+ *
+ * useHistory=false permet de désactiver l'étape 2 (2 appels RPOS par article potentiellement) sans
+ * toucher au reste de la cascade — utile tant que le coût réel sur un magasin à fort catalogue
+ * hors-central n'a pas été validé en continu (mesuré le 07/10/2026 sur un échantillon : ~60-100s
+ * sans cache pour 65 articles, nettement réduit avec le cache par référence de commande de
+ * getSupplierOfOrder, plusieurs articles partageant souvent la même commande historique récente).
+ *
+ * @param {object} product - objet produit RPOS complet (porte product.suppliers[], déjà récupéré
+ *   en lot à la génération — jamais un appel RPOS supplémentaire pour cette seule liste).
+ * @returns {{ supplier: object|null, origin: 'CENTRAL'|'HISTORY'|'FALLBACK'|'NONE', deliveryType: 'LC'|'LD'|null }}
+ */
+async function resolveSupplierForArticle(posId, shopId, product, { useHistory = true } = {}) {
+  const suppliers = product.suppliers || [];
+
+  const centralSupplier = suppliers.find((s) => s.code === SUPPLIER_CENTRAL_CODE);
+  if (centralSupplier) return { supplier: centralSupplier, origin: 'CENTRAL', deliveryType: 'LC' };
+
+  if (suppliers.length === 0) return { supplier: null, origin: 'NONE', deliveryType: null };
+
+  if (useHistory) {
+    try {
+      const lastPurchase = await rpos.getLastPurchaseForProduct(posId, shopId, product.id);
+      if (lastPurchase?.orderReference) {
+        const historicalSupplier = await rpos.getSupplierOfOrder(posId, shopId, lastPurchase.orderReference);
+        if (historicalSupplier) {
+          // Le fournisseur historique doit être retrouvé parmi les fournisseurs ACTUELLEMENT
+          // rattachés (par id, jamais par nom — deux fournisseurs différents peuvent porter des
+          // noms proches) : un fournisseur retiré du catalogue entre-temps ne doit jamais être
+          // réutilisé, même s'il a servi récemment.
+          const stillLinked = suppliers.find((s) => s.id === historicalSupplier.id);
+          if (stillLinked) return { supplier: stillLinked, origin: 'HISTORY', deliveryType: 'LD' };
+        }
+      }
+    } catch (err) {
+      // Échec de résolution de l'historique (réseau, article jamais commandé...) : ne bloque
+      // jamais la résolution, retombe simplement sur le fallback ci-dessous — même principe que
+      // checkSupplierEligibility (une erreur sur UN article n'affecte jamais les autres).
+      console.warn(`[resolveSupplierForArticle] Résolution historique échouée pour ${product.ean}: ${err.message}`);
+    }
+  }
+
+  // Fallback : fournisseur actuellement rattaché avec le délai de livraison le plus court. Tri
+  // stable sur delivery_time_days (nombre de jours, 0 = le plus rapide) ; un delivery_time_days
+  // manquant/non numérique est traité comme le plus défavorable (Infinity), jamais choisi en
+  // priorité sur un fournisseur dont le délai est réellement connu.
+  const bestFallback = [...suppliers].sort((a, b) => {
+    const da = Number.isFinite(a.delivery_time_days) ? a.delivery_time_days : Infinity;
+    const db = Number.isFinite(b.delivery_time_days) ? b.delivery_time_days : Infinity;
+    return da - db;
+  })[0];
+  return { supplier: bestFallback, origin: 'FALLBACK', deliveryType: 'LD' };
+}
 
 async function createOrderForLines(posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate) {
   const now = new Date();
@@ -2862,4 +2969,5 @@ module.exports = {
   getProductByEanCached,
   attachOrderAnomaliesToLines,
   checkSupplierEligibility,
+  resolveSupplierForArticle,
 };
