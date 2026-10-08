@@ -9,7 +9,12 @@
     <!-- Chemins ABSOLUS (pas relatifs à /settings-app/) : ces fichiers sont servis à la racine du
          site par le même conteneur nginx que les pages HTML classiques, jamais dupliqués ici. -->
     <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
-    <link type="text/css" href="/assets/css/theme.css" rel="stylesheet" />
+    <!-- theme.css retiré (08/10/2026) : fichier legacy encore chargé par les pages .old.html non
+         migrées, mais qui fixe --sidebar-w à 240px — en conflit avec le max-width 300px posé par
+         theme-override.css ci-dessous (celui que chargent les 18 autres apps React déjà migrées),
+         ce qui rendait la sidebar de cette page Paramètres plus étroite que partout ailleurs (bug
+         signalé : "le style de la sidebar dans Paramètres est différent des autres"). Aucune autre
+         app React migrée ne charge theme.css — simple oubli lors de la migration de cette page. -->
     <link type="text/css" href="/assets/css/theme-override.css?v=2026-10-01-2" rel="stylesheet" />
     <link type="text/css" href="/assets/css/notch-nav.css?v=2026-09-27-12" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
