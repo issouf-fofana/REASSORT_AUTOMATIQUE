@@ -481,9 +481,13 @@ body {
    sidebar ne prenne le relais visuellement au même endroit. Désactivé sous 768px (sidebar masquée
    sur mobile, cf. règle .sidebar plus haut) pour ne pas peindre une bande marine inutile.
    Cette bande n'implique aucune interaction : .sidebar (position fixed, z-index supérieur) et
-   #reassort-loading-overlay (cf. loading-overlay.js) se peignent toujours par-dessus normalement. */
+   #reassort-loading-overlay (cf. loading-overlay.js) se peignent toujours par-dessus normalement.
+   body.nav-collapsed EXCLU (bug trouvé le 08/10/2026) : en mode notch (barre compacte, sidebar
+   classique jamais affichée dans ce mode, cf. règles plus bas), cette bande se retrouvait sans
+   rien par-dessus pour la masquer — un bandeau marine orphelin plaqué sur le contenu, qui passait
+   même par-dessus le texte "À quoi ça sert" de la page Assistant IA. */
 @media (min-width: 768px) {
-     body {
+     body:not(.nav-collapsed) {
           background: linear-gradient(to right, #1B2A4A 0, #1B2A4A 300px, #f5f5f5 300px);
      }
 }
