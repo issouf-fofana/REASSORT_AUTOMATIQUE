@@ -285,6 +285,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const topScrollRef = useRef<HTMLDivElement>(null);
   const topScrollInnerRef = useRef<HTMLDivElement>(null);
   const syncingScrollRef = useRef(false);
+  const lastPurchaseScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function getLineState(l: ProposalLine): LineState {
     if (!lineStateRef.current.has(l.id)) {
@@ -786,11 +787,27 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         syncingScrollRef.current = true;
         topScrollRef.current.scrollLeft = e.left;
         syncingScrollRef.current = false;
+
+        // Bug trouvé le 08/10/2026 : "Dernier achat"/"Dernière vente" restaient bloqués sur
+        // "Chargement..." quand ces colonnes sont hors du viewport horizontal initial (hide:true par
+        // défaut, affichées ensuite via le bouton "Colonnes") — AG Grid virtualise aussi les COLONNES
+        // (pas seulement les lignes), donc leurs spans n'existent dans le DOM qu'une fois scrollées
+        // dans le viewport visible, ce qui n'est PAS un onModelUpdated (rowData/filtre/tri inchangés).
+        // Débounce (scroll tire en continu) : un seul passage une fois le scroll stabilisé.
+        if (lastPurchaseScrollDebounceRef.current) clearTimeout(lastPurchaseScrollDebounceRef.current);
+        lastPurchaseScrollDebounceRef.current = setTimeout(() => loadLastPurchasesAutomatically(), 200);
       },
       // Sauvegarde l'ordre/largeur des colonnes à chaque changement manuel de l'utilisateur (glisser
       // une colonne, redimensionner) — persistant tant qu'il n'a pas été explicitement réinitialisé.
       onColumnMoved: (e: any) => { if (e.finished) saveColumnState(); },
       onColumnResized: (e: any) => { if (e.finished) saveColumnState(); },
+      // Rendre visible une colonne masquée (bouton "Colonnes", géré par ag-grid-toolbar.js) peut
+      // placer "Dernier achat"/"Dernière vente" directement dans le viewport déjà visible, sans
+      // aucun scroll associé — même cause que le fix onBodyScroll ci-dessus, déclencheur différent.
+      onColumnVisible: () => {
+        if (lastPurchaseScrollDebounceRef.current) clearTimeout(lastPurchaseScrollDebounceRef.current);
+        lastPurchaseScrollDebounceRef.current = setTimeout(() => loadLastPurchasesAutomatically(), 200);
+      },
     });
     function saveColumnState() {
       try {
