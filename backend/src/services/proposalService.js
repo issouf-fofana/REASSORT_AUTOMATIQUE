@@ -1778,6 +1778,32 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     if (failed === group.lines.length) anyFailedGroup = true;
   }
 
+  // Alerte email avec bon(s) de commande PDF, dès CE rayon validé (demande du 08/10/2026 : l'ancien
+  // comportement n'envoyait qu'un seul email récapitulatif une fois TOUS les rayons de la
+  // proposition validés, ce qui surprenait l'utilisateur en cas de validation rayon par rayon —
+  // aucun email ne partait avant la toute dernière validation). Un email par rayon validé, avec
+  // uniquement les commandes RPOS de CE rayon.
+  const ordersWithRposId = createdOrders.filter((o) => o.order?.id);
+  if (ordersWithRposId.length) {
+    try {
+      const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
+      if (shop) {
+        const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
+        await notifyShopUsersOfOrderCreated(
+          shop,
+          { id: proposalId },
+          ordersWithRposId.map((o) => ({
+            rposOrderId: o.order.id, rposOrderReference: o.order.reference, department,
+            linesTotal: o.processed + o.failed, linesFailed: o.failed, supplierName: o.supplierName, deliveryType: o.deliveryType,
+          })),
+          { isAutoMode: false },
+        );
+      }
+    } catch (mailError) {
+      console.error(`[validateProposalDepartment] Alerte email de commande créée échouée pour le rayon ${department} (proposition ${proposalId}):`, mailError.message);
+    }
+  }
+
   // Reste-t-il des rayons non validés ? Comparé aux rayons distincts de TOUTES les lignes de la
   // proposition ayant AU MOINS UN article à quantité > 0 (pas seulement celles de ce rayon) —
   // un rayon dont toutes les lignes ont quantitySuggested=0 (rien à commander) n'a jamais de
@@ -1823,24 +1849,6 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
       },
     });
 
-    // Alerte email avec bon(s) de commande PDF (TOUTES les commandes, tous rayons ET tous
-    // fournisseurs confondus) — un seul email récapitulatif par cycle, déclenché une seule fois
-    // quand tout est terminé (décision validée le 07/10/2026 : "un seul email récapitulatif à la
-    // fin"). notifyShopUsersOfOrderCreated récupère déjà un PDF par commande RPOS distincte,
-    // donc plusieurs fournisseurs sur le même rayon y sont déjà couverts sans adaptation.
-    try {
-      const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
-      const allCreatedOrders = await prisma.proposalOrder.findMany({
-        where: { proposalId, rposOrderId: { not: null } },
-        select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true, supplierName: true, deliveryType: true },
-      });
-      if (shop && allCreatedOrders.length) {
-        const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
-        await notifyShopUsersOfOrderCreated(shop, { id: proposalId }, allCreatedOrders, { isAutoMode: false });
-      }
-    } catch (mailError) {
-      console.error(`[validateProposalDepartment] Alerte email de commande créée échouée pour la proposition ${proposalId}:`, mailError.message);
-    }
   } else {
     // Rayons restants : Proposal.status ne bouge pas (reste GENERATED, ou VALIDATING si un ancien
     // appel global l'avait déjà mis dans cet état) — les compteurs globaux sont quand même
