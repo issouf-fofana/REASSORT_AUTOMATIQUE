@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Send } from 'lucide-react';
+import { Plus, Send } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 // Adapté du composant "AI Chat Input" (21st.dev, demande du 24/09/2026) : au lieu de son état
@@ -143,16 +143,16 @@ const AIChatInput = ({ value, onChange, onSubmit, disabled, sending, placeholder
 
           <button
             className="hidden sm:flex p-2.5 rounded-full text-neutral-300 cursor-not-allowed flex-shrink-0"
-            title="Micro (indisponible)"
+            title="Joindre un fichier (indisponible)"
             type="button"
             tabIndex={-1}
             disabled
           >
-            <Mic size={19} />
+            <Plus size={19} />
           </button>
           <button
             className={`flex items-center gap-1 p-2.5 rounded-full font-medium justify-center transition flex-shrink-0 ${
-              sending ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-black hover:bg-neutral-800 text-white'
+              sending ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-[#1B2A4A] hover:bg-[#14203a] text-white'
             } disabled:opacity-40`}
             title={sending ? 'Arrêter' : 'Envoyer'}
             type="button"

@@ -83,6 +83,12 @@ function formatConversationDate(iso: string): string {
   return `${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} ${time}`;
 }
 
+// Juste le prénom pour l'accueil façon "Morning, Arihant!" (maquette du 08/10/2026) — userName
+// porte le nom complet (ex: "Issouf Fofana"), trop long pour un titre de bienvenue compact.
+function firstName(fullName: string): string {
+  return fullName.trim().split(/\s+/)[0] || fullName;
+}
+
 function escapeHtml(str: string): string {
   const div = document.createElement('div');
   div.textContent = str;
@@ -786,6 +792,24 @@ export function AiAssistant() {
           pointer-events: none;
         }
         .aia-hero-content { position: relative; z-index: 1; }
+        /* Bouton "Nouvelle conversation" en haut à droite du bloc d'accueil (maquette du 08/10/2026,
+           coin supérieur droit de la carte "New Chat") — redondant avec le bouton de la colonne de
+           gauche, mais accessible directement depuis l'écran d'accueil sans aller chercher ailleurs. */
+        .aia-hero-restart {
+          position: absolute; top: 0; right: 1rem; width: 36px; height: 36px; border-radius: 50%;
+          background-color: #ffffff; border: 1px solid #e5e5e5; color: #1B2A4A;
+          display: flex; align-items: center; justify-content: center; font-size: 1.05rem;
+          transition: background-color .15s ease, transform .15s ease;
+        }
+        .aia-hero-restart:hover { background-color: #F1F3F5; transform: rotate(45deg); }
+        /* Icône ronde marine/ambre au-dessus du titre, même esprit que la maquette (icône dans un
+           badge arrondi au-dessus du message de bienvenue). */
+        .aia-hero-icon {
+          width: 56px; height: 56px; border-radius: 16px; margin: 0 auto .9rem;
+          background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%);
+          color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.6rem;
+          box-shadow: 0 8px 20px rgba(27,42,74,.22);
+        }
         .aia-hero-title { font-size: 2rem; font-weight: 700; color: #1B2A4A; margin-bottom: .5rem; letter-spacing: -.01em; }
         .aia-hero-subtitle { color: #5B6B85; font-size: 1rem; max-width: 480px; margin-left: auto; margin-right: auto; }
         .aia-hero-input { max-width: 640px; }
@@ -922,11 +946,23 @@ export function AiAssistant() {
               <div className="aia-hero text-center">
                 <div className="aia-hero-glow" aria-hidden="true"></div>
                 <div className="aia-hero-content">
+                  <button
+                    type="button"
+                    className="aia-hero-restart"
+                    title="Nouvelle conversation"
+                    onClick={startNewConversation}
+                  >
+                    <iconify-icon icon="solar:refresh-bold-duotone"></iconify-icon>
+                  </button>
+                  <div className="aia-hero-icon" aria-hidden="true">
+                    <iconify-icon icon="solar:chat-round-dots-bold-duotone"></iconify-icon>
+                  </div>
                   <div className="aia-hero-title">
-                    {userName ? `Bonjour ${userName}` : 'Assistant IA Réassort'}
+                    {userName ? `Bonjour ${firstName(userName)} !` : 'Assistant IA Réassort'}
                   </div>
                   <p className="aia-hero-subtitle mb-4">
-                    Posez une question sur les ventes, le stock, les ruptures ou la précision de l'IA — juste en tapant ci-dessous.
+                    Sur quoi travaille-t-on aujourd'hui ? Posez une question sur les ventes, le stock, les
+                    ruptures ou la précision de l'IA.
                   </p>
                   {!shopReady ? (
                     <p className="text-muted small">Sélectionnez un magasin (en haut de page) pour commencer.</p>
