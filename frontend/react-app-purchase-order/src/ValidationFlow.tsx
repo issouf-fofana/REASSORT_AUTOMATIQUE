@@ -64,14 +64,19 @@ const STEP_ICON: Record<StepState, string> = {
   error: 'solar:close-circle-bold-duotone',
 };
 
+// Animation réelle par étape (demande du 08/10/2026 : "fait une animation pour chaque étape", suite
+// au premier jet où l'icône changeait d'état sans transition visible) : l'icône "active" tourne en
+// continu (spin-grow), et le passage à "done"/"error" déclenche un petit effet d'apparition (pop)
+// via une clé React qui force le remount de l'icône à chaque changement d'état.
 function StepRow({ label, state }: { label: string; state: StepState }) {
   const colorClass = state === 'pending' ? 'text-muted' : state === 'active' ? 'text-primary' : state === 'done' ? 'text-success' : 'text-danger';
+  const animClass = state === 'active' ? 'reassort-step-spin' : state === 'done' || state === 'error' ? 'reassort-step-pop' : '';
   return (
-    <li className="list-group-item d-flex align-items-center gap-2">
-      <span>
-        <iconify-icon icon={STEP_ICON[state]} className={colorClass}></iconify-icon>
+    <li className={`list-group-item d-flex align-items-center gap-2 ${state === 'active' ? 'bg-light' : ''}`}>
+      <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>
+        <iconify-icon key={state} icon={STEP_ICON[state]} className={`${colorClass} ${animClass}`}></iconify-icon>
       </span>
-      <span>{label}</span>
+      <span className={state === 'active' ? 'fw-semibold' : ''}>{label}</span>
     </li>
   );
 }
@@ -112,6 +117,7 @@ export function ValidationFlow({
   });
 
   const [progressOpen, setProgressOpen] = useState(false);
+  const [progressMinimized, setProgressMinimized] = useState(false);
   const [sending, setSending] = useState(false);
   const [createStepState, setCreateStepState] = useState<StepState>('pending');
   const [sendStepState, setSendStepState] = useState<StepState>('pending');
@@ -347,6 +353,7 @@ export function ValidationFlow({
     setSending(true);
     resetSteps(validateAfterCreate);
     setProgressOpen(true);
+    setProgressMinimized(false);
 
     if (departmentValidation) {
       // Route synchrone (demande du 26/09/2026) : un seul rayon, pas de polling nécessaire — le
@@ -510,14 +517,35 @@ export function ValidationFlow({
 
   function handleCloseProgress() {
     setProgressOpen(false);
+    setProgressMinimized(false);
     if (shouldReloadOnCloseRef.current) {
       shouldReloadOnCloseRef.current = false;
       onValidated();
     }
   }
 
+  // Minimise au lieu de fermer (demande du 08/10/2026 : "quand je clique dans le vide... ne pas
+  // bloquer") : un clic hors de la modale pendant l'envoi ne l'annule jamais et ne masque jamais
+  // l'avertissement d'échec partiel au passage — il replie juste la fenêtre en un bouton flottant,
+  // l'envoi continue normalement en fond. Rouvrable à tout moment via ce bouton.
+  function handleBackdropClick() {
+    if (sending) {
+      setProgressMinimized(true);
+      return;
+    }
+    // Envoi déjà terminé : un clic dehors équivaut à "fermer" (sauf échec partiel bloquant, déjà
+    // empêché par canClose plus bas — cette fonction n'est jamais appelée dans ce cas).
+    handleCloseProgress();
+  }
+
   return (
     <>
+      <style>{`
+        @keyframes reassort-step-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .reassort-step-spin { display: inline-block; animation: reassort-step-spin 1s linear infinite; }
+        @keyframes reassort-step-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
+        .reassort-step-pop { display: inline-block; animation: reassort-step-pop 0.35s ease-out; }
+      `}</style>
       <div className="d-flex flex-column align-items-end gap-1">
         <button className="btn btn-sm btn-success" disabled={sending} onClick={openConfirm}>
           {departmentValidation ? `Valider le rayon ${departmentValidation}` : 'Valider et envoyer à RPOS'}
@@ -652,16 +680,41 @@ export function ValidationFlow({
         </>
       )}
 
-      {progressOpen && (
+      {progressOpen && !progressMinimized && (
         <>
-          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog" data-bs-backdrop="static">
-            <div className="modal-dialog modal-dialog-centered" role="document">
+          <div
+            className="modal fade show"
+            style={{ display: 'block' }}
+            tabIndex={-1}
+            role="dialog"
+            onMouseDown={(e) => {
+              // Clic sur le fond (pas sur le contenu de la modale) : minimise au lieu de bloquer
+              // (demande du 08/10/2026) — jamais pendant un échec partiel, où fermer sans avoir lu
+              // l'avertissement reste explicitement empêché (cf. commentaire sur le bouton "J'ai
+              // compris" plus bas). e.currentTarget est ce conteneur plein écran : un clic qui
+              // n'atteint pas un descendant (la boîte de dialogue elle-même) remonte jusqu'ici.
+              if (e.target === e.currentTarget && resultHtml?.variant !== 'warning') handleBackdropClick();
+            }}
+          >
+            <div className="modal-dialog modal-dialog-centered" role="document" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">Envoi de la commande à RPOS</h5>
-                  {canClose && resultHtml?.variant !== 'warning' && (
-                    <button type="button" className="btn-close" onClick={handleCloseProgress}></button>
-                  )}
+                  <div className="d-flex align-items-center gap-2">
+                    {sending && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => setProgressMinimized(true)}
+                        title="Continuer en arrière-plan"
+                      >
+                        <iconify-icon icon="solar:minimize-square-bold-duotone"></iconify-icon> Réduire
+                      </button>
+                    )}
+                    {canClose && resultHtml?.variant !== 'warning' && (
+                      <button type="button" className="btn-close" onClick={handleCloseProgress}></button>
+                    )}
+                  </div>
                 </div>
                 <div className="modal-body">
                   <ul className="list-group list-group-flush mb-3">
@@ -705,6 +758,30 @@ export function ValidationFlow({
           </div>
           <div className="modal-backdrop fade show"></div>
         </>
+      )}
+
+      {progressOpen && progressMinimized && (
+        // Bouton flottant pour rouvrir le suivi d'avancement (demande du 08/10/2026 : "ajoute une
+        // option pour réafficher et voir le statut d'avancement") — l'envoi continue normalement en
+        // fond pendant que la modale est réduite, ce badge reste visible tant qu'il n'est pas rouvert.
+        <button
+          type="button"
+          className={`btn ${sending ? 'btn-primary' : resultHtml?.variant === 'warning' ? 'btn-warning' : resultHtml?.variant === 'danger' ? 'btn-danger' : 'btn-success'} shadow-lg d-flex align-items-center gap-2`}
+          style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 1080, borderRadius: 999, padding: '10px 18px' }}
+          onClick={() => setProgressMinimized(false)}
+        >
+          {sending ? (
+            <>
+              <span className="spinner-border spinner-border-sm" role="status"></span>
+              Envoi en cours — {progressPct}%
+            </>
+          ) : (
+            <>
+              <iconify-icon icon="solar:bell-bold-duotone"></iconify-icon>
+              Voir le résultat
+            </>
+          )}
+        </button>
       )}
     </>
   );
