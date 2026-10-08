@@ -55,9 +55,20 @@ export interface ProposalLine {
   wasExcluded?: boolean;
   // Commandabilité fournisseur (spec du 28/09/2026, §1-§2) : null = proposition générée avant ce
   // champ (jamais traité comme "non commandable" par défaut, cf. proposalService.js), true/false
-  // calculé à la génération depuis le rattachement au fournisseur central RPOS.
+  // calculé à la génération depuis le rattachement au fournisseur central RPOS. DEPUIS le 08/10/2026
+  // (mission "Logique de gestion des fournisseurs et des commandes"), supplierIneligible=true ne
+  // signifie plus "bloqué" : voir resolvedSupplierId ci-dessous, seule source de vérité pour la
+  // commandabilité réelle d'un article.
   supplierIneligible?: boolean | null;
   currentSuppliers?: string | null;
+  // Résolution intelligente du fournisseur (resolveSupplierForArticle, proposalService.js) :
+  // central si rattaché, sinon fournisseur historique du magasin pour cet article s'il est encore
+  // rattaché, sinon un fallback par délai de livraison le plus court. null = aucun fournisseur
+  // valide trouvé (article réellement non commandable) OU proposition générée avant ce champ.
+  resolvedSupplierId?: string | null;
+  resolvedSupplierName?: string | null;
+  supplierResolutionOrigin?: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | null;
+  deliveryType?: 'LC' | 'LD' | null;
   // Déjà persistés côté backend depuis longtemps, jamais exposés au frontend avant le 28/09/2026
   // (spec "informations détaillées dans une proposition de commande", §2) :
   // - currentOrderedQuantity : quantité déjà commandée/en transit au moment du calcul (RPOS + cette

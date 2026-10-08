@@ -615,9 +615,19 @@ router.post('/proposal/:id/supplier-check', async (req, res) => {
       return !(decision && decision.excluded);
     });
 
+    // Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes",
+    // retour explicite : "si il n'est pas rattaché au fournisseur central il faut dire qu'il n'est
+    // pas rattaché au fournisseur central et la colonne commandable doit être là si l'article est
+    // commandable sur RPOS ou pas") — DEUX notions distinctes :
+    //   supplierIneligible : rattaché au central ou non (simple classification).
+    //   non commandable (ici) : AUCUN fournisseur RPOS réel du tout (currentSuppliers === 'aucun'),
+    //     vérité calculée à la génération depuis product.suppliers (proposalService.js) — jamais
+    //     resolvedSupplierId seul, qui n'est qu'une PRÉFÉRENCE de résolution (lequel utiliser s'il y
+    //     en a plusieurs), pas la garantie qu'un fournisseur existe. Un article avec un fournisseur
+    //     actif non-central (ex: SANGEL CI) EST commandable, juste pas en livraison centrale.
     const legacyLines = linesToCheck.filter((line) => line.supplierIneligible === null);
     const ineligibleFromField = linesToCheck
-      .filter((line) => line.supplierIneligible === true)
+      .filter((line) => !line.currentSuppliers || line.currentSuppliers === 'aucun')
       .map((line) => ({ lineId: line.id, ean: line.ean, label: line.label, currentSuppliers: line.currentSuppliers || 'aucun' }));
     const ineligibleFromLegacyCheck = legacyLines.length ? await checkSupplierEligibility(posId, shopId, legacyLines) : [];
 
@@ -825,10 +835,18 @@ router.get('/order-anomalies', requireAdmin, async (req, res) => {
 // proposalService.js) : aucun appel RPOS ici, réponse instantanée quel que soit le volume.
 router.get('/supplier-ineligible-articles', requireAdmin, async (req, res) => {
   try {
+    // Vue "non rattaché au central" (classification, inchangée dans son périmètre le 08/10/2026) —
+    // distincte de la commandabilité réelle : un article ici peut très bien être commandable en
+    // livraison directe (LD) si resolveSupplierForArticle lui a trouvé un fournisseur de repli
+    // (resolvedSupplierId non null). Reste volontairement TOUS les articles non-central (ne filtre
+    // pas sur resolvedSupplierId) car c'est la définition même de cette page — resolvedSupplierId/
+    // resolvedSupplierName/supplierResolutionOrigin/deliveryType sont exposés ci-dessous pour que
+    // le frontend distingue "résolu, commandable en LD" de "vraiment bloqué" (origin=NONE).
     const lines = await prisma.proposalLine.findMany({
       where: { supplierIneligible: true, proposal: { status: 'GENERATED' } },
       select: {
         id: true, ean: true, label: true, currentSuppliers: true, department: true, sector: true,
+        resolvedSupplierId: true, resolvedSupplierName: true, supplierResolutionOrigin: true, deliveryType: true,
         proposal: { select: { id: true, rposShopId: true, rposShopReference: true, rposShopName: true } },
       },
       orderBy: [{ proposal: { rposShopReference: 'asc' } }, { label: 'asc' }],
@@ -840,6 +858,12 @@ router.get('/supplier-ineligible-articles', requireAdmin, async (req, res) => {
       currentSuppliers: l.currentSuppliers || 'aucun',
       department: l.department,
       sector: l.sector,
+      // Commandable en livraison directe (LD) si un fournisseur de repli a été résolu, sinon
+      // vraiment non commandable (origin NONE) — distinct du simple "non rattaché au central".
+      resolvedSupplierName: l.resolvedSupplierName,
+      supplierResolutionOrigin: l.supplierResolutionOrigin,
+      deliveryType: l.deliveryType,
+      isCommandable: !!l.resolvedSupplierId,
       proposalId: l.proposal.id,
       rposShopId: l.proposal.rposShopId,
       shopReference: l.proposal.rposShopReference,

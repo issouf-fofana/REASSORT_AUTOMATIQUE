@@ -66,8 +66,12 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
 
   const summary = useMemo(() => {
     const active = proposal.lines.filter((l) => !l.wasExcluded);
-    const commandable = active.filter((l) => l.supplierIneligible !== true);
-    const nonCommandable = active.filter((l) => l.supplierIneligible === true);
+    // Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes") :
+    // non commandable = aucun fournisseur RPOS réel (currentSuppliers === 'aucun'), pas simplement
+    // "pas le central" (supplierIneligible seul) — un article avec un fournisseur actif non-central
+    // EST commandable, juste pas en livraison centrale (LC).
+    const nonCommandable = active.filter((l) => !l.currentSuppliers || l.currentSuppliers === 'aucun');
+    const commandable = active.filter((l) => !!l.currentSuppliers && l.currentSuppliers !== 'aucun');
     const hasEligibilityData = active.some((l) => l.supplierIneligible !== null && l.supplierIneligible !== undefined);
     return {
       total: proposal.lines.length,

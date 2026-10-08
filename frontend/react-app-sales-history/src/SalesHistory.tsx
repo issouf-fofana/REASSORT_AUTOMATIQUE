@@ -42,6 +42,21 @@ interface RowData {
 
 const PAGE_SIZE = 100;
 
+/**
+ * Date du jour au format attendu par <input type="date"> (yyyy-mm-dd), en heure LOCALE du
+ * navigateur — jamais new Date().toISOString().slice(0, 10), qui bascule en UTC et peut renvoyer
+ * "hier" ou "demain" selon le fuseau horaire de l'utilisateur (ex: 23h locale = encore demain en
+ * UTC+1). Sert de valeur par défaut à dateStart/dateEnd pour que la page ouvre toujours sur les
+ * ventes du jour plutôt que tout l'historique du magasin.
+ */
+function getLocalDateInputValue(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function numberFormatter(params: any): string {
   return params.value === null || params.value === undefined ? '—' : params.value.toLocaleString('fr-FR');
 }
@@ -152,8 +167,15 @@ export function SalesHistory() {
 
   const [shops, setShops] = useState<Shop[]>([]);
   const [shopsError, setShopsError] = useState<string | null>(null);
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
+  // Par défaut, date de début/fin = aujourd'hui (corrigé le 08/10/2026 : sans ce filtre, la page
+  // chargeait TOUT l'historique du magasin dès l'ouverture — observé en prod sur un magasin à
+  // fort volume, 1 244 249 lignes, "Chargement..." qui ne finissait jamais d'un point de vue
+  // utilisateur). getLocalDateInputValue() lit l'heure LOCALE du navigateur, jamais
+  // toISOString() seule (qui bascule en UTC et peut afficher "hier" ou "demain" selon le fuseau
+  // de l'utilisateur) — un input type="date" affiche toujours la date telle que l'utilisateur
+  // perçoit "aujourd'hui" sur sa machine.
+  const [dateStart, setDateStart] = useState(getLocalDateInputValue);
+  const [dateEnd, setDateEnd] = useState(getLocalDateInputValue);
   const [ean, setEan] = useState('');
   const [groupByDepartment, setGroupByDepartment] = useState(false);
 

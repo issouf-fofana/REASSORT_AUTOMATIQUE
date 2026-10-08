@@ -323,8 +323,12 @@ export function PurchaseOrder() {
   // porte sur ce qui SERAIT commandé, pas sur tout ce qui a été calculé au départ.
   const eligibilitySummary = useMemo(() => {
     const active = detailLines.filter((l) => !l.wasExcluded);
-    const commandable = active.filter((l) => l.supplierIneligible !== true);
-    const nonCommandable = active.filter((l) => l.supplierIneligible === true);
+    // Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes") :
+    // non commandable = aucun fournisseur RPOS réel (currentSuppliers === 'aucun'), pas simplement
+    // "pas le central" — un article avec un fournisseur actif non-central EST commandable, juste
+    // pas en livraison centrale (LC).
+    const nonCommandable = active.filter((l) => !l.currentSuppliers || l.currentSuppliers === 'aucun');
+    const commandable = active.filter((l) => !!l.currentSuppliers && l.currentSuppliers !== 'aucun');
     const qty = (lines: typeof active) => lines.reduce((sum, l) => sum + (l.quantitySuggested || 0), 0);
     return {
       total: active.length,

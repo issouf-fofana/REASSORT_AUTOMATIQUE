@@ -14,6 +14,15 @@ interface SupplierIneligibleItem {
   currentSuppliers: string;
   department: string | null;
   sector: string | null;
+  // Résolution intelligente du fournisseur (mission "Logique de gestion des fournisseurs et des
+  // commandes", 08/10/2026) : un article de cette liste N'EST PAS forcément bloqué — isCommandable
+  // distingue "résolu via historique/fallback, commandable en LD" de "vraiment aucun fournisseur
+  // valide, bloqué" (origin NONE). Ne pas confondre avec "non rattaché au central" (le critère
+  // d'inclusion dans cette liste), une simple classification.
+  resolvedSupplierName: string | null;
+  supplierResolutionOrigin: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | null;
+  deliveryType: 'LC' | 'LD' | null;
+  isCommandable: boolean;
   proposalId: string;
   rposShopId: string;
   shopReference: string;
@@ -46,8 +55,9 @@ export function SupplierIneligibleTab() {
     <div>
       <div className="oa-intro">
         <strong>À quoi ça sert :</strong> liste, pour toutes les propositions en attente (tous magasins), les articles qui ne sont pas
-        rattachés au fournisseur central côté RPOS — un article dans cette situation risque d'être refusé silencieusement au moment de
-        l'envoi réel de la commande. Calculé automatiquement à chaque génération, sans besoin d'ouvrir chaque rayon un par un.
+        rattachés au fournisseur central côté RPOS. Ça ne veut pas dire qu'ils sont bloqués : le système cherche d'abord un fournisseur
+        de repli (historique du magasin, puis délai de livraison le plus court) — la colonne « Commandable » indique le vrai statut.
+        Seuls les articles marqués « Non » n'ont réellement aucun fournisseur RPOS et ne seront pas envoyés à la commande.
       </div>
 
       <div className="oa-toolbar">
@@ -82,6 +92,7 @@ export function SupplierIneligibleTab() {
                 <th>EAN</th>
                 <th>Rayon</th>
                 <th>Fournisseur actuel</th>
+                <th>Commandable</th>
               </tr>
             </thead>
             <tbody>
@@ -92,6 +103,20 @@ export function SupplierIneligibleTab() {
                   <td>{r.ean}</td>
                   <td>{r.department || '—'}</td>
                   <td>{r.currentSuppliers}</td>
+                  <td>
+                    {r.isCommandable ? (
+                      <span
+                        className="badge bg-success-subtle text-success"
+                        title={`Résolu via ${r.supplierResolutionOrigin === 'HISTORY' ? "l'historique du magasin" : 'le délai de livraison le plus court'} : ${r.resolvedSupplierName || ''}`}
+                      >
+                        Oui ({r.deliveryType || 'LD'})
+                      </span>
+                    ) : (
+                      <span className="badge bg-danger-subtle text-danger" title="Aucun fournisseur valide trouvé — cet article ne sera pas envoyé à la commande.">
+                        Non
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

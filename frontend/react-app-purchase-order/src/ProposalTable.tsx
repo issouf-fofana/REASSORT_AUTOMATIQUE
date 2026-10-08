@@ -149,9 +149,22 @@ function avgSalesCellRenderer(params: any) {
   return wrap;
 }
 
-// Commandabilité fournisseur (spec du 28/09/2026, §2) : badge clair par article, avec raison
-// affichée au survol pour les non-commandables — supplierIneligible null (proposition générée
-// avant ce champ) n'affiche rien, jamais un badge "non commandable" trompeur faute de donnée.
+// Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes", retour
+// explicite de l'utilisateur : "si il n'est pas rattaché au fournisseur central il faut dire qu'il
+// n'est pas rattaché au fournisseur central et la colonne commandable doit être là si l'article est
+// commandable sur RPOS ou pas") — DEUX informations distinctes, jamais mélangées dans le même badge :
+//
+//   1. Rattachement au central (supplierIneligible) : "pas le central", une simple classification,
+//      jamais un jugement de commandabilité à elle seule.
+//   2. Commandable (ce renderer) : l'article a-t-il AU MOINS UN fournisseur réel côté RPOS,
+//      central ou non — vérité portée par currentSuppliers ('aucun' = vraiment aucun fournisseur
+//      RPOS, donc RPOS refusera la ligne quel que soit le fournisseur visé). resolvedSupplierId est
+//      une PRÉFÉRENCE de résolution (lequel utiliser si plusieurs), pas la source de vérité de la
+//      commandabilité — currentSuppliers reste la garantie réelle.
+//
+// Bug corrigé ce jour : le badge affichait "Non commandable" pour un article qui AVAIT bien un
+// fournisseur RPOS actif (ex: SANGEL CI), seulement parce qu'il n'était pas le central — confusion
+// entre les deux notions. "Non commandable" ne doit apparaître QUE si currentSuppliers === 'aucun'.
 function supplierEligibilityCellRenderer(params: any) {
   const l = params.data as ProposalLine;
   const wrap = document.createElement('div');
@@ -159,9 +172,23 @@ function supplierEligibilityCellRenderer(params: any) {
     wrap.innerHTML = '<span class="text-muted">—</span>';
     return wrap;
   }
-  wrap.innerHTML = l.supplierIneligible
-    ? `<span class="badge reassort-mini-badge reassort-badge-soft-danger" title="Fournisseur central non renseigné — cet article ne sera pas intégré à la commande. Fournisseur(s) actuel(s) : ${l.currentSuppliers || 'aucun'}"><iconify-icon icon="solar:close-circle-bold"></iconify-icon> Non commandable</span>`
-    : '<span class="badge reassort-mini-badge bg-success-subtle text-success"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable</span>';
+
+  const hasAnySupplier = !!(l.currentSuppliers && l.currentSuppliers !== 'aucun');
+
+  if (!hasAnySupplier) {
+    wrap.innerHTML = '<span class="badge reassort-mini-badge reassort-badge-soft-danger" title="Aucun fournisseur rattaché à cet article côté RPOS (ni central, ni autre) — cet article ne sera pas intégré à la commande."><iconify-icon icon="solar:close-circle-bold"></iconify-icon> Non commandable</span>';
+    return wrap;
+  }
+
+  // Un fournisseur existe côté RPOS : l'article EST commandable. Le badge central/non-central
+  // reste une précision à part, jamais ce qui décide "commandable" ou non.
+  if (!l.supplierIneligible) {
+    wrap.innerHTML = '<span class="badge reassort-mini-badge bg-success-subtle text-success" title="Rattaché au fournisseur central"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable</span>';
+    return wrap;
+  }
+  const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? 'historique du magasin' : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : null;
+  const resolvedNote = originLabel ? ` — résolu via ${originLabel} : ${l.resolvedSupplierName || ''}` : '';
+  wrap.innerHTML = `<span class="badge reassort-mini-badge bg-success-subtle text-success" title="Non rattaché au fournisseur central${resolvedNote} (${l.deliveryType || 'LD'}). Fournisseur(s) : ${l.currentSuppliers}"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable (${l.deliveryType || 'LD'})</span>`;
   return wrap;
 }
 
