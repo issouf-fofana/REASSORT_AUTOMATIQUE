@@ -2033,12 +2033,14 @@ async function previewDepartmentSupplierGrouping({ proposalId, department, decis
 async function createOrderForLines(posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate, targetSupplier) {
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  // Suffixe de référence enrichi du fournisseur pour une commande non-centrale (mission 08/10/2026) :
-  // reprend la convention déjà observée en pratique sur une vraie commande RPOS de ce projet
-  // ("LD S2P 905350 BOULANGERIE") — permet de distinguer plusieurs commandes du même rayon dans
-  // l'historique RPOS sans ouvrir chacune.
+  // Suffixe de référence enrichi du type (LC/LD) + fournisseur pour une commande non-centrale
+  // (mission 08/10/2026 ; étendu le 08/10/2026 pour marquer aussi LC, suite à une commande réelle où
+  // les deux commandes d'un même rayon étaient indiscernables dans la liste RPOS sans ouvrir
+  // chacune) — reprend la convention déjà observée en pratique sur une vraie commande RPOS de ce
+  // projet ("LD S2P 905350 BOULANGERIE").
+  const deliveryTypeSuffix = targetSupplier?.deliveryType ? ` — ${targetSupplier.deliveryType}` : '';
   const supplierSuffix = targetSupplier && targetSupplier.deliveryType === 'LD' ? ` — ${targetSupplier.name}` : '';
-  const referenceSuffix = department ? ` — ${department}${supplierSuffix}` : supplierSuffix;
+  const referenceSuffix = department ? ` — ${department}${deliveryTypeSuffix}${supplierSuffix}` : `${deliveryTypeSuffix}${supplierSuffix}`;
 
   // Sécurité avant création (spec du 28/09/2026, §5 ; étendue le 08/10/2026 au fournisseur ciblé
   // plutôt que toujours le central) : le filtrage fait dans validateProposalDepartment se base sur
