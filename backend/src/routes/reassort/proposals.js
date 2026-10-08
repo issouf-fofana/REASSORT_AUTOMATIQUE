@@ -14,6 +14,7 @@ const {
   getPendingProposal,
   startProposalValidation,
   validateProposalDepartment,
+  previewDepartmentSupplierGrouping,
   getProposalStatus,
   attachOrderAnomaliesToLines,
   checkSupplierEligibility,
@@ -697,6 +698,37 @@ router.post('/proposal/:id/validate', async (req, res) => {
   } catch (error) {
     console.error('Start validation error:', error);
     res.status(400).json({ success: false, message: error.message, details: error.body });
+  }
+});
+
+// POST /api/reassort/proposal/:id/preview-department-grouping - APERÇU pur (aucune écriture,
+// aucun appel RPOS d'envoi) de ce que produirait la validation d'un rayon : combien de commandes,
+// pour quels fournisseurs, combien d'articles chacune — mission "Logique de gestion des
+// fournisseurs et des commandes", demande explicite du 08/10/2026 : "quand je veux valider on doit
+// me dire que ça va créer deux commandes". Mêmes `decisions` que /validate-department, à appeler
+// juste avant pour que l'utilisateur confirme avant l'envoi réel.
+router.post('/proposal/:id/preview-department-grouping', async (req, res) => {
+  try {
+    const { decisions, department } = req.body;
+    if (!department || !Array.isArray(decisions)) {
+      return res.status(400).json({ success: false, message: 'department et decisions sont requis' });
+    }
+
+    // Même contrôle de périmètre que /validate-department.
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (currentUser && DEPARTMENT_SCOPED_ROLES.has(currentUser.role)) {
+      const scopedProposal = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { lines: { select: { id: true, department: true } } } });
+      const allowedLines = filterProposalLinesForUser(scopedProposal?.lines || [], currentUser);
+      const allowedDepartments = new Set(allowedLines.map((l) => l.department || 'Sans rayon'));
+      if (!allowedDepartments.has(department)) {
+        return res.status(403).json({ success: false, message: 'Ce rayon n\'est pas dans votre périmètre.' });
+      }
+    }
+
+    const preview = await previewDepartmentSupplierGrouping({ proposalId: req.params.id, department, decisions });
+    res.json({ success: true, data: preview });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 

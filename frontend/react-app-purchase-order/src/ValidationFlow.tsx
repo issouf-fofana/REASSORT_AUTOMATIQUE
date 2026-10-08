@@ -17,6 +17,24 @@ interface IneligibleLine {
   currentSuppliers: string;
 }
 
+// Aperçu du regroupement par fournisseur (mission "Logique de gestion des fournisseurs et des
+// commandes", 08/10/2026) — demande explicite : "quand je veux valider on doit me dire que ça va
+// créer deux commandes". Aucune écriture, aucun appel RPOS d'envoi : calculé depuis les données
+// déjà en base (resolveSupplierForArticle, résolu à la génération).
+interface SupplierGroupingPreview {
+  department: string;
+  orderCount: number;
+  orders: {
+    supplierId: string | null;
+    supplierName: string | null;
+    deliveryType: 'LC' | 'LD' | null;
+    articleCount: number;
+    articles: { ean: string; label: string | null; quantity: number }[];
+  }[];
+  unresolvedCount: number;
+  unresolved: { ean: string; label: string | null }[];
+}
+
 interface OrderStatusItem {
   department: string;
   status: string;
@@ -109,6 +127,8 @@ export function ValidationFlow({
   const shouldReloadOnCloseRef = useRef(false);
   const [checkingSuppliers, setCheckingSuppliers] = useState(false);
   const [ineligibleLines, setIneligibleLines] = useState<IneligibleLine[] | null>(null);
+  const [groupingPreview, setGroupingPreview] = useState<SupplierGroupingPreview | null>(null);
+  const [loadingGroupingPreview, setLoadingGroupingPreview] = useState(false);
 
   async function openConfirm() {
     const decisions = decisionsProvider();
@@ -139,6 +159,28 @@ export function ValidationFlow({
       setIneligibleLines([]);
     } finally {
       setCheckingSuppliers(false);
+    }
+
+    // Aperçu du regroupement par fournisseur (mission "Logique de gestion des fournisseurs et des
+    // commandes", 08/10/2026) : combien de commandes RPOS distinctes la validation va créer, pour
+    // quels fournisseurs — demande explicite "on doit me dire que ça va créer deux commandes".
+    // Seulement pour la validation par rayon (departmentValidation défini) : la validation globale
+    // n'a pas encore cet aperçu dédié.
+    if (departmentValidation) {
+      setGroupingPreview(null);
+      setLoadingGroupingPreview(true);
+      try {
+        const preview = await apiFetch<SupplierGroupingPreview>(`/reassort/proposal/${proposalId}/preview-department-grouping?${shopQueryParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decisions, department: departmentValidation }),
+        });
+        setGroupingPreview(preview);
+      } catch {
+        setGroupingPreview(null);
+      } finally {
+        setLoadingGroupingPreview(false);
+      }
     }
   }
 
@@ -276,12 +318,16 @@ export function ValidationFlow({
       // volume reste raisonnable pour une réponse HTTP classique.
       setProgressText(`Envoi des articles du rayon ${departmentValidation}...`);
       try {
+        // orders (pluriel, depuis le 08/10/2026 — mission "Logique de gestion des fournisseurs et
+        // des commandes") : un rayon peut maintenant produire PLUSIEURS commandes RPOS, une par
+        // fournisseur résolu (LC central + LD par fournisseur de repli) — remplace l'ancien `order`
+        // unique.
         const data = await apiFetch<{
-          order: { id: string; reference: string | null } | null;
+          orders: { supplierId: string | null; supplierName: string | null; deliveryType: 'LC' | 'LD' | null; order: { id: string; reference: string | null }; processed: number; failed: number; failedLines: { ean: string; label: string | null; reason: string }[]; rposOrderValidated: boolean | null }[];
           processed: number;
           failed: number;
           failedLines: { ean: string; label: string | null; reason: string }[];
-          rposOrderValidated: boolean | null;
+          anyFailedGroup: boolean;
           skippedIneligible: { ean: string; label: string | null; reason: string }[];
           totalRequested: number;
         }>(`/reassort/proposal/${proposalId}/validate-department?${shopQueryParam}`, {
@@ -300,21 +346,22 @@ export function ValidationFlow({
         });
         setCreateStepState('done');
         setSendStepState('done');
-        if (validateAfterCreate) setValidateStepState(data.rposOrderValidated ? 'done' : 'error');
+        const allValidated = data.orders.length > 0 && data.orders.every((o) => o.rposOrderValidated);
+        if (validateAfterCreate) setValidateStepState(allValidated ? 'done' : 'error');
         setDoneStepState('done');
         setProgressPct(100);
         setProgressBarClass('bg-success');
         setCanClose(true);
 
         const validationNote = validateAfterCreate
-          ? data.rposOrderValidated
-            ? " — commande validée sur RPOS (transmise à l'entrepôt)"
-            : ' — validation RPOS a échoué, commande restée "en préparation"'
-          : ' — commande laissée "en préparation" sur RPOS (non transmise à l\'entrepôt)';
-        // Récapitulatif "X articles commandés sur Y proposés" (spec du 28/09/2026, §6) :
-        // skippedIneligible (connus dès la génération, jamais envoyés à RPOS) + failedLines (rejetés
-        // par RPOS ou détectés par la re-vérification fraîche juste avant l'envoi) couvrent
-        // ensemble TOUS les articles du rayon non intégrés à la commande finale.
+          ? allValidated
+            ? " — commande(s) validée(s) sur RPOS (transmise(s) à l'entrepôt)"
+            : ' — validation RPOS a échoué pour au moins une commande, restée(s) "en préparation"'
+          : ' — commande(s) laissée(s) "en préparation" sur RPOS (non transmise(s) à l\'entrepôt)';
+        // Récapitulatif "X articles commandés sur Y proposés" : skippedIneligible (aucun fournisseur
+        // valide, connu dès la génération, jamais envoyé à RPOS) + failedLines (rejetés par RPOS ou
+        // détectés par la re-vérification fraîche juste avant l'envoi, toutes commandes confondues)
+        // couvrent ensemble tous les articles du rayon non intégrés à une commande.
         const nonIntegratedCount = (data.skippedIneligible?.length || 0) + (data.failed || 0);
         const hasPartialFailure = nonIntegratedCount > 0;
         const variant = hasPartialFailure ? 'warning' : 'success';
@@ -323,14 +370,25 @@ export function ValidationFlow({
           ? `<ul class="mb-0 mt-2 small">${nonIntegratedList.map((f) => `<li>${f.label || f.ean} — ${f.reason}</li>`).join('')}</ul>`
           : '';
         const summaryLine = hasPartialFailure
-          ? `<br><strong>${data.processed - data.failed} article(s) commandé(s) sur ${data.totalRequested} proposé(s)</strong> — ${nonIntegratedCount} article(s) non intégré(s) car non rattaché(s) au fournisseur central.`
+          ? `<br><strong>${data.processed - data.failed} article(s) commandé(s) sur ${data.totalRequested} proposé(s)</strong> — ${nonIntegratedCount} article(s) non intégré(s).`
+          : '';
+        // Une commande par fournisseur résolu, listées explicitement (demande explicite du
+        // 08/10/2026 : afficher le détail si plusieurs commandes ont été créées).
+        const ordersList = data.orders.length
+          ? `<ul class="mb-0 mt-2 small">${data.orders
+              .map(
+                (o) =>
+                  `<li><strong>${o.deliveryType}</strong> — ${o.supplierName} : commande <strong>${o.order?.reference || ''}</strong>, ${o.processed - o.failed} article(s) envoyé(s)${o.failed ? `, ${o.failed} échec(s)` : ''}</li>`,
+              )
+              .join('')}</ul>`
           : '';
         setResultHtml({
           variant,
           body:
-            `Commande <strong>${data.order?.reference || ''}</strong> créée sur RPOS pour le rayon <strong>${departmentValidation}</strong> — ${data.processed - data.failed} article(s) envoyé(s)` +
+            `<strong>${data.orders.length} commande${data.orders.length > 1 ? 's' : ''} créée${data.orders.length > 1 ? 's' : ''} sur RPOS</strong> pour le rayon <strong>${departmentValidation}</strong> — ${data.processed - data.failed} article(s) envoyé(s)` +
             validationNote +
             '.' +
+            ordersList +
             summaryLine +
             failedList,
         });
@@ -438,6 +496,33 @@ export function ValidationFlow({
                         <iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon> Seul le rayon{' '}
                         <strong>{departmentValidation}</strong> sera validé ({confirmData.count} article(s)). Les autres rayons de cette
                         proposition restent modifiables et pourront être validés séparément.
+                      </div>
+                    )}
+                    {loadingGroupingPreview && (
+                      <div className="text-muted small mt-2">
+                        <iconify-icon icon="solar:refresh-bold-duotone"></iconify-icon> Calcul des commandes à créer...
+                      </div>
+                    )}
+                    {!loadingGroupingPreview && groupingPreview && groupingPreview.orderCount > 0 && (
+                      <div className={`alert ${groupingPreview.orderCount > 1 ? 'alert-warning' : 'alert-info'} small mt-2 mb-0`}>
+                        <iconify-icon icon="solar:bill-list-bold-duotone"></iconify-icon>{' '}
+                        <strong>
+                          Ceci va créer {groupingPreview.orderCount} commande{groupingPreview.orderCount > 1 ? 's' : ''} distincte
+                          {groupingPreview.orderCount > 1 ? 's' : ''} sur RPOS :
+                        </strong>
+                        <ul className="mb-0 mt-1">
+                          {groupingPreview.orders.map((o) => (
+                            <li key={o.supplierId || 'none'}>
+                              <strong>{o.deliveryType}</strong> — {o.supplierName} : {o.articleCount} article(s)
+                            </li>
+                          ))}
+                        </ul>
+                        {groupingPreview.unresolvedCount > 0 && (
+                          <div className="mt-2">
+                            <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> {groupingPreview.unresolvedCount} article(s)
+                            sans fournisseur valide, exclu(s) de toute commande.
+                          </div>
+                        )}
                       </div>
                     )}
                     {checkingSuppliers && (

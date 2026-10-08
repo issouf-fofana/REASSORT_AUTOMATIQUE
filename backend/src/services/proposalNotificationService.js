@@ -363,12 +363,19 @@ async function notifyAdminsOfEndOfDayRecap(summaries) {
   }));
 }
 
-/** Une ligne <li> par commande RPOS créée (une par rayon, readme §11) — numéro, description, nombre
- * d'articles : toujours les valeurs réellement enregistrées, jamais une estimation ou un texte
- * généré par l'IA (cf. commentaire de tête de notifyShopUsersOfOrderCreated). */
+/** Une ligne <li> par commande RPOS créée — numéro, description, nombre d'articles : toujours les
+ * valeurs réellement enregistrées, jamais une estimation ou un texte généré par l'IA (cf.
+ * commentaire de tête de notifyShopUsersOfOrderCreated). Depuis le 08/10/2026 (mission "Logique de
+ * gestion des fournisseurs et des commandes"), un même rayon peut avoir PLUSIEURS commandes (une
+ * par fournisseur résolu, cf. ProposalOrder.supplierName/deliveryType) — le fournisseur/type de
+ * livraison est affiché pour distinguer "Rayon X — Fournisseur central (LC)" de "Rayon X — SATOCI
+ * (LD)" dans le même email, plutôt qu'une liste de rayons ambiguë si plusieurs partagent le même nom. */
 function orderSummaryHtml(orders) {
   return orders
-    .map((o) => `<li><strong>Commande ${o.rposOrderReference || o.rposOrderId}</strong> — ${o.department} : ${o.linesTotal - o.linesFailed} article(s) commandé(s)${o.linesFailed ? ` (${o.linesFailed} refusé(s) par RPOS)` : ''}</li>`)
+    .map((o) => {
+      const supplierLabel = o.supplierName ? ` — ${o.supplierName}${o.deliveryType ? ` (${o.deliveryType})` : ''}` : '';
+      return `<li><strong>Commande ${o.rposOrderReference || o.rposOrderId}</strong> — ${o.department}${supplierLabel} : ${o.linesTotal - o.linesFailed} article(s) commandé(s)${o.linesFailed ? ` (${o.linesFailed} refusé(s) par RPOS)` : ''}</li>`;
+    })
     .join('');
 }
 

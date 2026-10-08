@@ -1648,6 +1648,14 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
  * pour une réponse HTTP classique — évite de reproduire tout le mécanisme de polling de progression
  * pour un cas qui n'en a pas vraiment besoin.
  */
+/**
+ * Valide un rayon en créant UNE COMMANDE PAR FOURNISSEUR RÉSOLU (mission "Logique de gestion des
+ * fournisseurs et des commandes", 08/10/2026 — remplace l'ancien comportement "1 rayon = 1
+ * commande centrale, articles non-central exclus"). Un rayon avec des articles LC et LD produit
+ * maintenant plusieurs ProposalOrder (contrainte unique élargie à proposalId+department+supplierId,
+ * cf. schema.prisma) — chacune créée et envoyée indépendamment, jamais tout-ou-rien : l'échec
+ * d'une commande fournisseur n'empêche jamais les autres d'être créées.
+ */
 async function validateProposalDepartment({ proposalId, posId, shopId, userEmail, department, decisions, orderHeader, validateAfterCreate }) {
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
   if (!proposal) throw new Error('Proposition introuvable');
@@ -1657,11 +1665,12 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     throw new Error('Cette proposition a été rejetée ou a échoué, elle ne peut plus être validée.');
   }
 
-  const existingOrder = await prisma.proposalOrder.findUnique({
-    where: { proposalId_department: { proposalId, department } },
-  });
-  if (existingOrder) {
-    throw new Error(`Le rayon "${department}" a déjà été validé (commande RPOS ${existingOrder.rposOrderReference || existingOrder.rposOrderId || '—'}).`);
+  // Un rayon peut maintenant avoir plusieurs ProposalOrder (une par fournisseur) : "déjà validé"
+  // se vérifie sur la PRÉSENCE d'au moins une commande pour ce rayon, pas une clé unique simple.
+  const existingOrders = await prisma.proposalOrder.findMany({ where: { proposalId, department } });
+  if (existingOrders.length) {
+    const refs = existingOrders.map((o) => o.rposOrderReference || o.rposOrderId || '—').join(', ');
+    throw new Error(`Le rayon "${department}" a déjà été validé (commande(s) RPOS ${refs}).`);
   }
 
   const departmentLines = proposal.lines.filter((l) => (l.department || 'Sans rayon') === department);
@@ -1670,12 +1679,10 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
   const decisionByLineId = new Map((decisions || []).map((d) => [d.lineId, d]));
   const config = await getConfig(shopId);
 
-  // Séparation proposition/commandabilité (spec du 28/09/2026, §7) : TOUS les articles calculés
-  // restent dans la proposition et visibles à l'utilisateur, quel que soit leur rattachement
-  // fournisseur — seule la commande finale envoyée à RPOS exclut les non-commandables. Un article
-  // non commandable reste sélectionnable/visible à l'écran, mais n'est jamais transmis (§4).
-  const linesToOrder = [];
-  const skippedIneligible = [];
+  // TOUS les articles calculés restent dans la proposition et visibles à l'utilisateur (spec du
+  // 28/09/2026, §7). unresolvedLines = origin NONE (aucun fournisseur valide trouvé à la
+  // génération) : ces seuls articles restent réellement non commandables.
+  const candidateLines = [];
   for (const line of departmentLines) {
     const decision = decisionByLineId.get(line.id);
     const excluded = decision ? !!decision.excluded : false;
@@ -1688,76 +1695,96 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     });
 
     if (!excluded && quantity > 0) {
-      // supplierIneligible === true (calculé à la génération, §1) : article non commandable connu
-      // dès la génération — jamais ajouté à la commande. null (proposition générée avant ce champ)
-      // est traité comme "à vérifier", pas comme non commandable, pour ne jamais bloquer une
-      // commande légitime sur une simple absence de donnée historique — la re-vérification RPOS
-      // fraîche juste avant l'envoi (§5, plus bas) reste le vrai filet de sécurité dans ce cas.
-      if (line.supplierIneligible === true) {
-        skippedIneligible.push({ ean: line.ean, label: line.label, reason: 'Fournisseur central non renseigné.' });
-        continue;
-      }
-      linesToOrder.push({
+      candidateLines.push({
         lineId: line.id, productId: line.productId, quantity, orderingUnit: line.orderingUnit,
         department, ean: line.ean, label: line.label,
+        resolvedSupplierId: line.resolvedSupplierId, resolvedSupplierName: line.resolvedSupplierName, deliveryType: line.deliveryType,
       });
     }
   }
 
-  if (linesToOrder.length === 0 && skippedIneligible.length === 0) {
+  const { groups, unresolved } = groupLinesByResolvedSupplier(candidateLines);
+  const skippedIneligible = unresolved.map((l) => ({ ean: l.ean, label: l.label, reason: 'Aucun fournisseur valide trouvé pour cet article.' }));
+
+  if (candidateLines.length === 0) {
     throw new Error(`Aucun article sélectionné pour le rayon "${department}".`);
   }
-  if (linesToOrder.length === 0) {
-    throw new Error(`Les ${skippedIneligible.length} article(s) sélectionné(s) pour le rayon "${department}" ne sont pas rattachés au fournisseur central — aucune commande ne peut être créée.`);
+  if (groups.length === 0) {
+    throw new Error(`Les ${skippedIneligible.length} article(s) sélectionné(s) pour le rayon "${department}" n'ont aucun fournisseur valide — aucune commande ne peut être créée.`);
   }
 
   const leadDays = config.receptionLeadTimeDays ?? 1;
   const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
 
-  const proposalOrder = await prisma.proposalOrder.create({
-    data: { proposalId, department, linesTotal: linesToOrder.length, status: 'PENDING', expectedReceptionDate },
-  });
+  // Une commande RPOS PAR GROUPE (fournisseur), jamais tout-ou-rien : l'échec d'un groupe
+  // (ex: SATOCI injoignable) n'empêche jamais les autres (ex: central) d'être créés. Résultats
+  // agrégés pour la réponse finale, jamais fusionnés entre eux côté RPOS.
+  const createdOrders = [];
+  let totalProcessed = 0;
+  let totalFailed = 0;
+  let anyFailedGroup = false;
+  const allFailedLines = [];
 
-  let result;
-  try {
-    result = await createOrderForLines(posId, shopId, userEmail, department, linesToOrder, orderHeader, validateAfterCreate);
-  } catch (err) {
-    const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+  for (const group of groups) {
+    const proposalOrder = await prisma.proposalOrder.create({
+      data: {
+        proposalId, department, linesTotal: group.lines.length, status: 'PENDING', expectedReceptionDate,
+        supplierId: group.supplierId, supplierName: group.supplierName, deliveryType: group.deliveryType,
+      },
+    });
+
+    let result;
+    try {
+      result = await createOrderForLines(posId, shopId, userEmail, department, group.lines, orderHeader, validateAfterCreate, {
+        id: group.supplierId, name: group.supplierName, deliveryType: group.deliveryType,
+      });
+    } catch (err) {
+      const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+      await prisma.proposalOrder.update({
+        where: { id: proposalOrder.id },
+        data: { status: 'FAILED', linesFailed: group.lines.length, errorMessage: detail.slice(0, 500) },
+      });
+      console.error(`[validateProposalDepartment] Commande ${group.deliveryType} (${group.supplierName}) échouée pour le rayon ${department}:`, err.message);
+      totalFailed += group.lines.length;
+      anyFailedGroup = true;
+      continue;
+    }
+
+    const { order, processed, failed, failedLines, rposOrderValidated } = result;
+    const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
+    const failedLinesSummary = failedLines.length
+      ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
+      : null;
+
     await prisma.proposalOrder.update({
       where: { id: proposalOrder.id },
-      data: { status: 'FAILED', linesFailed: linesToOrder.length, errorMessage: detail.slice(0, 500) },
+      data: {
+        rposOrderId: order.id,
+        rposOrderReference: order.reference,
+        rposOrderValidated,
+        linesFailed: failed,
+        status: failed === group.lines.length ? 'FAILED' : 'DONE',
+        receptionStatus,
+        lastRposStatus: rposOrderValidated ? 2 : 1,
+        lastSyncedAt: new Date(),
+        errorMessage: failedLinesSummary,
+      },
     });
-    throw err;
+
+    createdOrders.push({ supplierId: group.supplierId, supplierName: group.supplierName, deliveryType: group.deliveryType, order, processed, failed, failedLines, rposOrderValidated });
+    totalProcessed += processed;
+    totalFailed += failed;
+    allFailedLines.push(...failedLines);
+    if (failed === group.lines.length) anyFailedGroup = true;
   }
-
-  const { order, processed, failed, failedLines, rposOrderValidated } = result;
-  const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
-  const failedLinesSummary = failedLines.length
-    ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
-    : null;
-
-  await prisma.proposalOrder.update({
-    where: { id: proposalOrder.id },
-    data: {
-      rposOrderId: order.id,
-      rposOrderReference: order.reference,
-      rposOrderValidated,
-      linesFailed: failed,
-      status: failed === linesToOrder.length ? 'FAILED' : 'DONE',
-      receptionStatus,
-      lastRposStatus: rposOrderValidated ? 2 : 1,
-      lastSyncedAt: new Date(),
-      errorMessage: failedLinesSummary,
-    },
-  });
 
   // Reste-t-il des rayons non validés ? Comparé aux rayons distincts de TOUTES les lignes de la
   // proposition ayant AU MOINS UN article à quantité > 0 (pas seulement celles de ce rayon) —
   // un rayon dont toutes les lignes ont quantitySuggested=0 (rien à commander) n'a jamais de
   // ProposalOrder possible et ne doit donc jamais bloquer indéfiniment le passage à VALIDATED
   // (demande du 26/09/2026 : cas réel trouvé — un rayon "ENTRETIEN/DROGUERIE" entièrement à 0).
-  // Inclut le rayon qu'on vient de traiter, exclu explicitement de la comparaison via son propre
-  // ProposalOrder déjà créé ci-dessus.
+  // Inclut le rayon qu'on vient de traiter, exclu explicitement de la comparaison via les
+  // ProposalOrder déjà créés ci-dessus.
   const allPendingDepartments = new Set(
     proposal.lines
       .filter((l) => {
@@ -1777,8 +1804,8 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     // TOUS ses ProposalOrder (pas seulement celui-ci) — même sémantique que l'ancien
     // runValidationInBackground pour ne rien casser des lectures existantes de Proposal.status.
     const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
-    const totalProcessed = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
-    const totalFailed = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    const totalProcessedAll = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailedAll = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
     const firstOrderWithId = allOrders.find((o) => o.rposOrderId);
     const anyValidated = allOrders.some((o) => o.rposOrderValidated === false) ? false : allOrders.some((o) => o.rposOrderValidated === true);
 
@@ -1788,25 +1815,28 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
         status: 'VALIDATED',
         validatedAt: new Date(),
         validatedBy: userEmail,
-        linesProcessed: totalProcessed,
-        linesFailed: totalFailed,
+        linesProcessed: totalProcessedAll,
+        linesFailed: totalFailedAll,
         rposOrderId: firstOrderWithId?.rposOrderId,
         rposOrderReference: firstOrderWithId?.rposOrderReference,
         rposOrderValidated: anyValidated,
       },
     });
 
-    // Alerte email avec bon(s) de commande PDF (tous rayons confondus) — même comportement final
-    // qu'une validation globale classique, déclenché une seule fois quand tout est terminé.
+    // Alerte email avec bon(s) de commande PDF (TOUTES les commandes, tous rayons ET tous
+    // fournisseurs confondus) — un seul email récapitulatif par cycle, déclenché une seule fois
+    // quand tout est terminé (décision validée le 07/10/2026 : "un seul email récapitulatif à la
+    // fin"). notifyShopUsersOfOrderCreated récupère déjà un PDF par commande RPOS distincte,
+    // donc plusieurs fournisseurs sur le même rayon y sont déjà couverts sans adaptation.
     try {
       const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
-      const createdOrders = await prisma.proposalOrder.findMany({
+      const allCreatedOrders = await prisma.proposalOrder.findMany({
         where: { proposalId, rposOrderId: { not: null } },
-        select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true },
+        select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true, supplierName: true, deliveryType: true },
       });
-      if (shop && createdOrders.length) {
+      if (shop && allCreatedOrders.length) {
         const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
-        await notifyShopUsersOfOrderCreated(shop, { id: proposalId }, createdOrders, { isAutoMode: false });
+        await notifyShopUsersOfOrderCreated(shop, { id: proposalId }, allCreatedOrders, { isAutoMode: false });
       }
     } catch (mailError) {
       console.error(`[validateProposalDepartment] Alerte email de commande créée échouée pour la proposition ${proposalId}:`, mailError.message);
@@ -1816,20 +1846,21 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     // appel global l'avait déjà mis dans cet état) — les compteurs globaux sont quand même
     // rafraîchis pour rester cohérents avec ce qu'affiche déjà l'UI existante (barre de progression).
     const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
-    const totalProcessed = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
-    const totalFailed = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    const totalProcessedAll = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailedAll = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
     await prisma.proposal.update({
       where: { id: proposalId },
-      data: { linesProcessed: totalProcessed, linesFailed: totalFailed },
+      data: { linesProcessed: totalProcessedAll, linesFailed: totalFailedAll },
     });
   }
 
-  // skippedIneligible (spec du 28/09/2026, §6) : articles écartés AVANT même la tentative d'envoi
-  // (connus dès la génération), distincts de failedLines (rejetés par RPOS, ou détectés par la
-  // re-vérification fraîche juste avant l'envoi dans createOrderForLines) — les deux ensemble
-  // couvrent tous les articles réellement non intégrés à la commande, pour le récapitulatif final.
+  // skippedIneligible : articles sans aucun fournisseur valide (origin NONE, connus dès la
+  // génération), distincts de allFailedLines (rejetés par RPOS, ou détectés par la re-vérification
+  // fraîche juste avant l'envoi dans createOrderForLines pour un groupe donné) — les deux ensemble
+  // couvrent tous les articles réellement non intégrés à une commande, pour le récapitulatif final.
   return {
-    department, order, processed, failed, failedLines, rposOrderValidated, allDepartmentsDone: !stillPending,
+    department, orders: createdOrders, allDepartmentsDone: !stillPending,
+    processed: totalProcessed, failed: totalFailed, failedLines: allFailedLines, anyFailedGroup,
     skippedIneligible,
     totalRequested: departmentLines.filter((l) => {
       const decision = decisionByLineId.get(l.id);
@@ -1913,44 +1944,138 @@ async function resolveSupplierForArticle(posId, shopId, product, { useHistory = 
   return { supplier: bestFallback, origin: 'FALLBACK', deliveryType: 'LD' };
 }
 
-async function createOrderForLines(posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate) {
+/**
+ * Regroupe des lignes de proposition par fournisseur RÉSOLU (ProposalLine.resolvedSupplierId/
+ * resolvedSupplierName/deliveryType, déjà calculés à la génération par resolveSupplierForArticle)
+ * — mission "Logique de gestion des fournisseurs et des commandes", 08/10/2026. 1 groupe = 1
+ * commande RPOS à venir. Remplace le blocage binaire "central ou rien" : un article résolu en
+ * HISTORY/FALLBACK forme son propre groupe (LD) au lieu d'être exclu.
+ *
+ * Utilisée à la fois pour l'APERÇU avant validation (previewDepartmentSupplierGrouping ci-dessous,
+ * jamais d'écriture) et pour la VALIDATION réelle (validateProposalDepartment, un ProposalOrder par
+ * groupe) — même logique de regroupement des deux côtés, pour que l'aperçu affiché à l'utilisateur
+ * corresponde exactement à ce qui sera réellement créé.
+ *
+ * @param {Array} lines - lignes à grouper, chacune portant ean/label/resolvedSupplierId/
+ *   resolvedSupplierName/deliveryType/quantitySuggested (ou quantity déjà résolue par l'appelant).
+ * @returns {{ groups: Array<{supplierId: string|null, supplierName: string|null, deliveryType: string|null, lines: Array}>, unresolved: Array }}
+ *   unresolved = lignes sans resolvedSupplierId (origin NONE, aucun fournisseur valide) — jamais
+ *   groupées, toujours écartées de toute commande, listées à part pour l'affichage.
+ */
+function groupLinesByResolvedSupplier(lines) {
+  const groups = new Map(); // clé = resolvedSupplierId (jamais null ici, cf. unresolved)
+  const unresolved = [];
+  for (const line of lines) {
+    if (!line.resolvedSupplierId) {
+      unresolved.push(line);
+      continue;
+    }
+    const key = line.resolvedSupplierId;
+    if (!groups.has(key)) {
+      groups.set(key, { supplierId: line.resolvedSupplierId, supplierName: line.resolvedSupplierName, deliveryType: line.deliveryType, lines: [] });
+    }
+    groups.get(key).lines.push(line);
+  }
+  // Ordre stable : LC (central) toujours en premier si présent, puis LD par ordre d'apparition —
+  // l'utilisateur s'attend à voir sa commande centrale habituelle en tête de l'aperçu.
+  const sortedGroups = [...groups.values()].sort((a, b) => (a.deliveryType === 'LC' ? -1 : b.deliveryType === 'LC' ? 1 : 0));
+  return { groups: sortedGroups, unresolved };
+}
+
+/**
+ * Aperçu PUR (aucune écriture, aucun appel RPOS d'envoi) de ce que produirait la validation d'un
+ * rayon : combien de commandes, pour quels fournisseurs, combien d'articles chacune — demande
+ * explicite du 08/10/2026 ("quand je veux valider on doit me dire que ça va créer deux commandes").
+ * Mêmes décisions (lineId -> {excluded, quantity}) que validateProposalDepartment, pour que l'aperçu
+ * corresponde exactement à ce qui sera réellement envoyé si l'utilisateur confirme juste après.
+ */
+async function previewDepartmentSupplierGrouping({ proposalId, department, decisions }) {
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
+  if (!proposal) throw new Error('Proposition introuvable');
+
+  const departmentLines = proposal.lines.filter((l) => (l.department || 'Sans rayon') === department);
+  if (!departmentLines.length) throw new Error(`Aucun article pour le rayon "${department}".`);
+
+  const decisionByLineId = new Map((decisions || []).map((d) => [d.lineId, d]));
+  const candidateLines = [];
+  for (const line of departmentLines) {
+    const decision = decisionByLineId.get(line.id);
+    const excluded = decision ? !!decision.excluded : false;
+    const quantity = decision && decision.quantity != null ? decision.quantity : line.quantitySuggested;
+    if (!excluded && quantity > 0) {
+      candidateLines.push({
+        lineId: line.id, ean: line.ean, label: line.label, quantity,
+        resolvedSupplierId: line.resolvedSupplierId, resolvedSupplierName: line.resolvedSupplierName, deliveryType: line.deliveryType,
+      });
+    }
+  }
+
+  const { groups, unresolved } = groupLinesByResolvedSupplier(candidateLines);
+  return {
+    department,
+    orderCount: groups.length,
+    orders: groups.map((g) => ({
+      supplierId: g.supplierId,
+      supplierName: g.supplierName,
+      deliveryType: g.deliveryType,
+      articleCount: g.lines.length,
+      articles: g.lines.map((l) => ({ ean: l.ean, label: l.label, quantity: l.quantity })),
+    })),
+    unresolvedCount: unresolved.length,
+    unresolved: unresolved.map((l) => ({ ean: l.ean, label: l.label })),
+  };
+}
+
+// targetSupplier optionnel { id, name, deliveryType } (mission "Logique de gestion des
+// fournisseurs et des commandes", 08/10/2026) : fournisseur RÉSOLU pour CE groupe de lignes
+// (central ou un fournisseur de repli, cf. groupLinesByResolvedSupplier) — remplace la résolution
+// systématique du central ci-dessous quand fourni. Omis = comportement historique (central).
+async function createOrderForLines(posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate, targetSupplier) {
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  const referenceSuffix = department ? ` — ${department}` : '';
+  // Suffixe de référence enrichi du fournisseur pour une commande non-centrale (mission 08/10/2026) :
+  // reprend la convention déjà observée en pratique sur une vraie commande RPOS de ce projet
+  // ("LD S2P 905350 BOULANGERIE") — permet de distinguer plusieurs commandes du même rayon dans
+  // l'historique RPOS sans ouvrir chacune.
+  const supplierSuffix = targetSupplier && targetSupplier.deliveryType === 'LD' ? ` — ${targetSupplier.name}` : '';
+  const referenceSuffix = department ? ` — ${department}${supplierSuffix}` : supplierSuffix;
 
-  // Sécurité avant création (spec du 28/09/2026, §5) : le filtrage fait dans
-  // validateProposalDepartment se base sur ProposalLine.supplierIneligible, calculé À LA
-  // GÉNÉRATION — un rattachement fournisseur a pu changer côté RPOS entre-temps (génération la
-  // nuit, validation plusieurs heures après). Re-vérifie ici avec un appel RPOS FRAIS, juste avant
-  // l'envoi réel, sur les seules lignes qui restent à ce stade (jamais toute la proposition) — ne
-  // fait jamais confiance au seul statut affiché côté UI. Un aléa réseau sur cette vérification ne
-  // doit jamais bloquer la commande (checkSupplierEligibility avale déjà ses propres erreurs par
-  // ligne) : au pire, une ligne non re-vérifiable passe et sera de toute façon rattrapée par le
-  // vrai refus RPOS plus bas (failedLines).
+  // Sécurité avant création (spec du 28/09/2026, §5 ; étendue le 08/10/2026 au fournisseur ciblé
+  // plutôt que toujours le central) : le filtrage fait dans validateProposalDepartment se base sur
+  // ProposalLine.resolvedSupplierId, calculé À LA GÉNÉRATION — un rattachement fournisseur a pu
+  // changer côté RPOS entre-temps (génération la nuit, validation plusieurs heures après).
+  // Re-vérifie ici avec un appel RPOS FRAIS, juste avant l'envoi réel, sur les seules lignes qui
+  // restent à ce stade (jamais toute la proposition) — ne fait jamais confiance au seul statut
+  // affiché côté UI. Un aléa réseau sur cette vérification ne doit jamais bloquer la commande
+  // (checkSupplierEligibility avale déjà ses propres erreurs par ligne) : au pire, une ligne non
+  // re-vérifiable passe et sera de toute façon rattrapée par le vrai refus RPOS plus bas (failedLines).
   // checkSupplierEligibility lit line.id (contrat historique, cf. supplier-check côté route) —
   // `lines` ici porte `lineId` (contrat de linesToOrder construit dans validateProposalDepartment) :
   // adapté ponctuellement plutôt que de faire diverger l'un des deux contrats déjà établis ailleurs.
-  const freshlyIneligible = await checkSupplierEligibility(posId, shopId, lines.map((l) => ({ ...l, id: l.lineId })));
+  const freshlyIneligible = await checkSupplierEligibility(posId, shopId, lines.map((l) => ({ ...l, id: l.lineId })), targetSupplier?.id);
   const freshlyIneligibleIds = new Set(freshlyIneligible.map((i) => i.lineId));
   const eligibleLines = lines.filter((l) => !freshlyIneligibleIds.has(l.lineId));
   const newlyIneligibleLines = lines.filter((l) => freshlyIneligibleIds.has(l.lineId));
 
-  // L'UUID RPOS du fournisseur "central" est PROPRE À CHAQUE MAGASIN (une entité fournisseur
-  // distincte par shop côté RPOS, confirmé par test direct le 15/09/2026) — jamais un ID unique
-  // valable partout. Résolu ici par son code stable (000000), plutôt que de faire confiance à
-  // orderHeader.supplierId envoyé par le frontend (qui ne peut connaître cet UUID par magasin sans
-  // dupliquer cette logique côté client). Repli sur orderHeader.supplierId uniquement si la
-  // résolution échoue, pour ne jamais bloquer totalement une commande sur un aléa réseau RPOS.
-  let supplierId = orderHeader.supplierId;
-  try {
-    const supplier = await rpos.getSupplierByCode(posId, shopId, SUPPLIER_CENTRAL_CODE);
-    if (supplier) supplierId = supplier.id;
-  } catch (err) {
-    console.warn(`[validateProposal] Résolution du fournisseur central échouée pour ${shopId}, repli sur supplierId fourni: ${err.message}`);
+  // L'UUID RPOS d'un fournisseur est PROPRE À CHAQUE MAGASIN (une entité fournisseur distincte par
+  // shop côté RPOS, confirmé par test direct le 15/09/2026) — jamais un ID unique valable partout.
+  // targetSupplier.id (résolu par le groupement, lui-même issu de product.suppliers du bon magasin)
+  // est donc déjà le bon UUID pour ce magasin — utilisé tel quel, sans re-résolution. Sans
+  // targetSupplier (comportement historique, compatibilité des appelants existants) : résout le
+  // central par son code stable, avec repli sur orderHeader.supplierId si la résolution échoue.
+  let supplierId = targetSupplier?.id || orderHeader.supplierId;
+  if (!targetSupplier) {
+    try {
+      const supplier = await rpos.getSupplierByCode(posId, shopId, SUPPLIER_CENTRAL_CODE);
+      if (supplier) supplierId = supplier.id;
+    } catch (err) {
+      console.warn(`[validateProposal] Résolution du fournisseur central échouée pour ${shopId}, repli sur supplierId fourni: ${err.message}`);
+    }
   }
 
   if (eligibleLines.length === 0) {
-    throw new Error(`Aucun article n'est rattaché au fournisseur central pour le rayon "${department}" (vérification RPOS juste avant l'envoi) — aucune commande créée.`);
+    const supplierLabel = targetSupplier ? targetSupplier.name : 'central';
+    throw new Error(`Aucun article n'est rattaché au fournisseur ${supplierLabel} pour le rayon "${department}" (vérification RPOS juste avant l'envoi) — aucune commande créée.`);
   }
 
   const order = await rpos.createSupplierOrder(posId, {
@@ -1971,12 +2096,13 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
   // sinon linesTotal ne correspondrait plus jamais à processed+failed.
   let processed = newlyIneligibleLines.length;
   let failed = newlyIneligibleLines.length;
-  // Détail des lignes refusées PAR RPOS LUI-MÊME (ex: article non rattaché au fournisseur central
+  // Détail des lignes refusées PAR RPOS LUI-MÊME (ex: article non rattaché au fournisseur ciblé
   // pour ce magasin, cf. 400 constaté le 24/09/2026 sur "PAIN ARABE DIET PQT X7") : jusqu'ici
   // seulement compté (`linesFailed`), jamais identifié — la commande se créait "avec succès" aux
   // yeux de l'utilisateur alors qu'un article manquait silencieusement dedans. Capturé ici pour
   // remonter jusqu'à l'UI un message explicite par article, pas juste un total.
-  const failedLines = newlyIneligibleLines.map((l) => ({ ean: l.ean, label: l.label, reason: 'Fournisseur central non renseigné (détecté juste avant l\'envoi).' }));
+  const failedSupplierLabel = targetSupplier ? targetSupplier.name : 'central';
+  const failedLines = newlyIneligibleLines.map((l) => ({ ean: l.ean, label: l.label, reason: `Fournisseur ${failedSupplierLabel} non renseigné (détecté juste avant l'envoi).` }));
   const LINE_CONCURRENCY = 5;
   await mapWithConcurrency(eligibleLines, LINE_CONCURRENCY, async (line) => {
     try {
@@ -2023,14 +2149,23 @@ async function createOrderForLines(posId, shopId, userEmail, department, lines, 
  * SUPPLIER_CENTRAL_CODE plutôt qu'à l'UUID résolu dynamiquement par magasin (getSupplierByCode),
  * pour ne faire qu'un seul appel RPOS par article au lieu de deux.
  */
-async function checkSupplierEligibility(posId, shopId, lines) {
+// targetSupplierId optionnel (mission "Logique de gestion des fournisseurs et des commandes",
+// 08/10/2026) : re-vérifie que l'article est toujours rattaché au fournisseur VISÉ pour cette
+// commande précise (central OU un fournisseur de repli résolu), plutôt que toujours le central
+// seul — un groupe LD (ex: SATOCI) doit être revérifié contre SATOCI, pas contre le central, sinon
+// toute commande LD serait rejetée à tort par cette vérification censée n'être qu'un filet de
+// sécurité. Repli sur le central (comportement historique) si targetSupplierId est omis, pour ne
+// jamais casser un appelant existant.
+async function checkSupplierEligibility(posId, shopId, lines, targetSupplierId) {
   const CONCURRENCY = 5;
   const ineligible = [];
   await mapWithConcurrency(lines, CONCURRENCY, async (line) => {
     try {
       const product = await rpos.getProductByEan(posId, shopId, line.ean);
       const suppliers = product?.suppliers || [];
-      const isLinked = suppliers.some((s) => s.code === SUPPLIER_CENTRAL_CODE);
+      const isLinked = targetSupplierId
+        ? suppliers.some((s) => s.id === targetSupplierId)
+        : suppliers.some((s) => s.code === SUPPLIER_CENTRAL_CODE);
       if (!isLinked) {
         ineligible.push({
           lineId: line.id,
@@ -2052,16 +2187,19 @@ async function checkSupplierEligibility(posId, shopId, lines) {
 
 async function runValidationInBackground({ proposalId, posId, shopId, userEmail, linesToOrder, orderHeader, validateAfterCreate, splitByDepartment, receptionLeadTimeDays }) {
   // Regroupe les lignes par rayon (ou un seul groupe "toutes lignes" si la séparation est
-  // désactivée), pour créer une commande fournisseur distincte par rayon (readme §11).
-  const groups = new Map();
+  // désactivée), PUIS par fournisseur résolu au sein de chaque rayon (mission "Logique de gestion
+  // des fournisseurs et des commandes", 08/10/2026) — une commande RPOS distincte par (rayon,
+  // fournisseur), jamais seulement par rayon : un rayon avec des articles LC et LD produit
+  // maintenant plusieurs ProposalOrder, exactement comme validateProposalDepartment (par-rayon).
+  const departmentGroups = new Map();
   if (splitByDepartment) {
     for (const line of linesToOrder) {
       const key = line.department || 'Sans rayon';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(line);
+      if (!departmentGroups.has(key)) departmentGroups.set(key, []);
+      departmentGroups.get(key).push(line);
     }
   } else {
-    groups.set(null, linesToOrder);
+    departmentGroups.set(null, linesToOrder);
   }
 
   let totalProcessed = 0;
@@ -2074,72 +2212,82 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
   const leadDays = receptionLeadTimeDays ?? 1;
   const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
 
-  for (const [department, lines] of groups) {
-    const proposalOrder = await prisma.proposalOrder.create({
-      data: {
-        proposalId, department: department || 'Toutes lignes', linesTotal: lines.length, status: 'PENDING',
-        expectedReceptionDate,
-      },
-    });
+  for (const [department, departmentLines] of departmentGroups) {
+    const { groups: supplierGroups, unresolved } = groupLinesByResolvedSupplier(departmentLines);
+    if (unresolved.length) {
+      console.warn(`[validateProposal] ${unresolved.length} article(s) du rayon ${department} sans fournisseur valide, écarté(s) de toute commande.`);
+      totalFailed += unresolved.length;
+    }
 
-    try {
-      const { order, processed, failed, failedLines, rposOrderValidated } = await createOrderForLines(
-        posId, shopId, userEmail, department, lines, orderHeader, validateAfterCreate
-      );
-
-      // Statut métier de réception initial : EN_ATTENTE_RECEPTION si transmise à l'entrepôt
-      // (validée sur RPOS), sinon COMMANDEE (créée mais encore "en préparation" côté RPOS).
-      const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
-
-      // Un ou plusieurs articles refusés PAR RPOS (mais pas tous : la commande existe quand même)
-      // ne doit jamais rester invisible pour l'utilisateur — la commande semblait "créée avec
-      // succès" alors qu'un article manquait dedans (constaté le 24/09/2026 avec "PAIN ARABE DIET
-      // PQT X7", non rattaché au fournisseur central sur RPOS pour ce magasin). Résumé lisible
-      // stocké sur errorMessage même quand status reste DONE (partiel, pas un échec total).
-      const failedLinesSummary = failedLines.length
-        ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
-        : null;
-
-      await prisma.proposalOrder.update({
-        where: { id: proposalOrder.id },
+    for (const group of supplierGroups) {
+      const proposalOrder = await prisma.proposalOrder.create({
         data: {
-          rposOrderId: order.id,
-          rposOrderReference: order.reference,
-          rposOrderValidated,
-          linesFailed: failed,
-          status: failed === lines.length ? 'FAILED' : 'DONE',
-          receptionStatus,
-          lastRposStatus: rposOrderValidated ? 2 : 1,
-          lastSyncedAt: new Date(),
-          errorMessage: failedLinesSummary,
+          proposalId, department: department || 'Toutes lignes', linesTotal: group.lines.length, status: 'PENDING',
+          expectedReceptionDate, supplierId: group.supplierId, supplierName: group.supplierName, deliveryType: group.deliveryType,
         },
       });
 
-      if (!firstOrder) firstOrder = order;
-      totalProcessed += processed;
-      totalFailed += failed;
-      overallValidated = overallValidated === false ? false : rposOrderValidated;
-    } catch (err) {
-      // err.body (réponse RPOS complète, ex: détail du champ en erreur) était jusqu'ici perdu — seul
-      // "-> 400" sans aucun détail apparaissait dans les logs, rendant tout échec de création de
-      // commande indiagnosticable (bug trouvé le 15/09/2026 : "0 article(s) envoyé(s), 1 échec(s)"
-      // sans savoir pourquoi RPOS avait refusé la commande).
-      const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
-      console.error(`[validateProposal] Échec de création de la commande pour le rayon ${department}: ${err.message} — ${detail}`);
-      await prisma.proposalOrder.update({
-        where: { id: proposalOrder.id },
-        data: { status: 'FAILED', linesFailed: lines.length, errorMessage: detail.slice(0, 500) },
-      });
-      totalFailed += lines.length;
-      overallValidated = false;
-    }
+      try {
+        const { order, processed, failed, failedLines, rposOrderValidated } = await createOrderForLines(
+          posId, shopId, userEmail, department, group.lines, orderHeader, validateAfterCreate,
+          { id: group.supplierId, name: group.supplierName, deliveryType: group.deliveryType },
+        );
 
-    // On rafraîchit la progression après chaque rayon traité, pas après chaque ligne, pour ne pas
-    // multiplier les écritures DB sur des propositions de plusieurs centaines de lignes.
-    await prisma.proposal.update({
-      where: { id: proposalId },
-      data: { linesProcessed: totalProcessed, linesFailed: totalFailed },
-    });
+        // Statut métier de réception initial : EN_ATTENTE_RECEPTION si transmise à l'entrepôt
+        // (validée sur RPOS), sinon COMMANDEE (créée mais encore "en préparation" côté RPOS).
+        const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
+
+        // Un ou plusieurs articles refusés PAR RPOS (mais pas tous : la commande existe quand même)
+        // ne doit jamais rester invisible pour l'utilisateur — la commande semblait "créée avec
+        // succès" alors qu'un article manquait dedans (constaté le 24/09/2026 avec "PAIN ARABE DIET
+        // PQT X7", non rattaché au fournisseur central sur RPOS pour ce magasin). Résumé lisible
+        // stocké sur errorMessage même quand status reste DONE (partiel, pas un échec total).
+        const failedLinesSummary = failedLines.length
+          ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
+          : null;
+
+        await prisma.proposalOrder.update({
+          where: { id: proposalOrder.id },
+          data: {
+            rposOrderId: order.id,
+            rposOrderReference: order.reference,
+            rposOrderValidated,
+            linesFailed: failed,
+            status: failed === group.lines.length ? 'FAILED' : 'DONE',
+            receptionStatus,
+            lastRposStatus: rposOrderValidated ? 2 : 1,
+            lastSyncedAt: new Date(),
+            errorMessage: failedLinesSummary,
+          },
+        });
+
+        if (!firstOrder) firstOrder = order;
+        totalProcessed += processed;
+        totalFailed += failed;
+        overallValidated = overallValidated === false ? false : rposOrderValidated;
+      } catch (err) {
+        // err.body (réponse RPOS complète, ex: détail du champ en erreur) était jusqu'ici perdu — seul
+        // "-> 400" sans aucun détail apparaissait dans les logs, rendant tout échec de création de
+        // commande indiagnosticable (bug trouvé le 15/09/2026 : "0 article(s) envoyé(s), 1 échec(s)"
+        // sans savoir pourquoi RPOS avait refusé la commande).
+        const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+        console.error(`[validateProposal] Échec de création de la commande ${group.deliveryType} (${group.supplierName}) pour le rayon ${department}: ${err.message} — ${detail}`);
+        await prisma.proposalOrder.update({
+          where: { id: proposalOrder.id },
+          data: { status: 'FAILED', linesFailed: group.lines.length, errorMessage: detail.slice(0, 500) },
+        });
+        totalFailed += group.lines.length;
+        overallValidated = false;
+      }
+
+      // On rafraîchit la progression après chaque commande traitée (plus après chaque rayon
+      // maintenant qu'un rayon peut en produire plusieurs), pas après chaque ligne, pour ne pas
+      // multiplier les écritures DB sur des propositions de plusieurs centaines de lignes.
+      await prisma.proposal.update({
+        where: { id: proposalId },
+        data: { linesProcessed: totalProcessed, linesFailed: totalFailed },
+      });
+    }
   }
 
   const order = firstOrder;
@@ -2970,4 +3118,6 @@ module.exports = {
   attachOrderAnomaliesToLines,
   checkSupplierEligibility,
   resolveSupplierForArticle,
+  previewDepartmentSupplierGrouping,
+  groupLinesByResolvedSupplier,
 };
