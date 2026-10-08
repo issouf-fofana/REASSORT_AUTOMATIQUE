@@ -13,43 +13,72 @@
   // N'affiche pas le widget sur la page de connexion (pas encore de compte utilisateur/magasin).
   if (window.location.pathname === '/login' || window.location.pathname.indexOf('auth-signin') !== -1) return;
 
+  // Restylé le 08/10/2026 (demande explicite : "applique le style sur cette vue aussi") pour
+  // reprendre la palette marine/ambre et le style bulles de chat déjà en place sur la page dédiée
+  // /ai-assistant (AiAssistant.tsx) — ce widget flottant utilisait encore le noir/blanc par défaut
+  // d'origine, jamais mis à jour en même temps que la page React.
   const CSS = `
     #aiw-toggle-btn {
       position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; border-radius: 50%;
-      background-color: #000000; color: #ffffff; border: none; box-shadow: 0 4px 16px rgba(0,0,0,.25);
-      z-index: 1050; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
-      cursor: pointer;
+      background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%); color: #F5A623; border: none;
+      box-shadow: 0 6px 20px rgba(27,42,74,.35);
+      z-index: 1050; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; padding: 0;
     }
-    #aiw-toggle-btn:hover { background-color: #222222; }
+    #aiw-toggle-btn:hover { background: linear-gradient(135deg, #22335c 0%, #35497a 100%); }
+    #aiw-toggle-btn img { width: 30px; height: 30px; object-fit: contain; }
     #aiw-window {
       position: fixed; bottom: 92px; right: 24px; width: 380px; max-width: 92vw; height: 520px;
-      max-height: 75vh; background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 8px;
-      box-shadow: 0 8px 32px rgba(0,0,0,.2); z-index: 1050; display: none; flex-direction: column;
+      max-height: 75vh; background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(27,42,74,.22); z-index: 1050; display: none; flex-direction: column;
       overflow: hidden;
     }
     #aiw-window.show { display: flex; }
-    #aiw-header { padding: .75rem 1rem; background-color: #000000; color: #ffffff; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-    #aiw-header .aiw-title { font-weight: 600; font-size: .95rem; }
+    #aiw-header { padding: .85rem 1rem; background-color: #1B2A4A; color: #ffffff; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    #aiw-header .aiw-title { font-weight: 600; font-size: .95rem; display: flex; align-items: center; gap: .5rem; }
+    #aiw-header .aiw-title img { width: 20px; height: 20px; object-fit: contain; }
     #aiw-header-actions { display: flex; align-items: center; gap: .5rem; }
-    #aiw-guide-btn { background: none; border: 1px solid #ffffff; color: #ffffff; font-size: .75rem; font-weight: 600; cursor: pointer; line-height: 1; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; text-decoration: none; }
-    #aiw-close-btn { background: none; border: none; color: #ffffff; font-size: 1.2rem; cursor: pointer; line-height: 1; }
+    #aiw-guide-btn { background: none; border: 1px solid rgba(255,255,255,.5); color: #ffffff; font-size: .75rem; font-weight: 600; cursor: pointer; line-height: 1; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; text-decoration: none; }
+    #aiw-guide-btn:hover { border-color: #F5A623; color: #F5A623; }
+    #aiw-close-btn { background: none; border: none; color: #ffffff; font-size: 1.2rem; cursor: pointer; line-height: 1; opacity: .85; }
+    #aiw-close-btn:hover { opacity: 1; }
     #aiw-context-bar { padding: .5rem .75rem; border-bottom: 1px solid #e5e5e5; flex-shrink: 0; }
     #aiw-shop-context { display: block; }
-    #aiw-messages { flex-grow: 1; overflow-y: auto; padding: .85rem; }
-    .aiw-turn { margin-bottom: 1rem; }
+    #aiw-messages { flex-grow: 1; overflow-y: auto; padding: .85rem; background-color: #FAFBFC; }
+    .aiw-turn { display: flex; flex-direction: column; gap: .45rem; margin-bottom: 1rem; }
     .aiw-turn:last-child { margin-bottom: 0; }
-    .aiw-question { font-weight: 600; font-size: .85rem; margin-bottom: .3rem; }
-    .aiw-answer { border-left: 2px solid #000000; padding: 0 .75rem; font-size: .85rem; line-height: 1.5; }
+    .aiw-question { align-self: flex-end; max-width: 85%; background-color: #1B2A4A; color: #ffffff; font-size: .85rem; padding: .55rem .8rem; border-radius: 14px; border-bottom-right-radius: 4px; }
+    .aiw-answer { align-self: flex-start; max-width: 85%; background-color: #F1F3F5; color: #1a1a1a; padding: .55rem .8rem; border-radius: 14px; border-bottom-left-radius: 4px; font-size: .85rem; line-height: 1.5; }
     .aiw-answer p { margin: 0 0 .4rem; }
     .aiw-answer p:last-child { margin-bottom: 0; }
     .aiw-md-list { margin: 0 0 .4rem; padding-left: 1.1rem; }
     .aiw-md-list li { margin-bottom: .25rem; }
     .aiw-stream-cursor { display: inline-block; animation: aiw-blink 1s step-end infinite; }
     @keyframes aiw-blink { 50% { opacity: 0; } }
+    /* Indicateur "en train de réfléchir" (même esprit que la page dédiée, version légère en CSS pur
+       puisque ce widget n'a pas de canvas/React) : halo marine qui pulse + point ambre. */
+    .aiw-thinking { display: inline-flex; align-items: center; gap: .45rem; color: #5B6B85; }
+    .aiw-thinking-dot { position: relative; width: 14px; height: 14px; flex-shrink: 0; }
+    .aiw-thinking-dot::before {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #2d4068 0%, #1B2A4A 70%);
+      animation: aiw-dot-pulse 1.4s ease-in-out infinite;
+    }
+    .aiw-thinking-dot::after {
+      content: ''; position: absolute; inset: -4px; border-radius: 50%;
+      border: 1.5px solid rgba(245,166,35,.45);
+      animation: aiw-dot-ring 1.4s ease-in-out infinite;
+    }
+    @keyframes aiw-dot-pulse { 0%, 100% { transform: scale(0.85); opacity: .85; } 50% { transform: scale(1); opacity: 1; } }
+    @keyframes aiw-dot-ring { 0%, 100% { transform: scale(0.9); opacity: .5; } 50% { transform: scale(1.2); opacity: 0; } }
     .aiw-empty-hint { color: #999999; text-align: center; padding: 1.5rem 1rem; font-size: .85rem; }
     #aiw-input-bar { padding: .6rem .75rem; border-top: 1px solid #e5e5e5; flex-shrink: 0; }
     #aiw-input-bar .form-control, #aiw-input-bar .btn { font-size: .85rem; }
+    #aiw-input-bar .form-control { border-radius: 999px 0 0 999px; }
+    #aiw-input-bar .btn { border-radius: 0 999px 999px 0; background-color: #1B2A4A; border-color: #1B2A4A; color: #ffffff; }
+    #aiw-input-bar .btn:hover:not(:disabled) { background-color: #14203a; border-color: #14203a; }
     #aiw-footer-link { text-align: center; padding: .4rem; font-size: .75rem; border-top: 1px solid #e5e5e5; flex-shrink: 0; }
+    #aiw-footer-link a { color: #1B2A4A; }
   `;
 
   function escapeHtml(str) {
@@ -124,12 +153,12 @@
     toggleBtn.id = 'aiw-toggle-btn';
     toggleBtn.type = 'button';
     toggleBtn.setAttribute('aria-label', 'Ouvrir l\'assistant IA');
-    toggleBtn.innerHTML = '<iconify-icon icon="solar:chat-round-dots-bold"></iconify-icon>';
+    toggleBtn.innerHTML = '<img src="/assets/images/logo-reassort.png" alt="">';
 
     const win = document.createElement('div');
     win.id = 'aiw-window';
     win.innerHTML =
-      '<div id="aiw-header"><span class="aiw-title">Assistant IA</span>' +
+      '<div id="aiw-header"><span class="aiw-title"><img src="/assets/images/logo-reassort.png" alt="">Assistant IA</span>' +
         '<div class="aiw-header-actions">' +
           '<a href="/ai-guide" id="aiw-guide-btn" aria-label="Ce que je peux vous demander" title="Ce que je peux vous demander">?</a>' +
           '<button type="button" id="aiw-close-btn" aria-label="Fermer">&times;</button>' +
@@ -237,9 +266,10 @@
       const emptyHint = messagesEl.querySelector('.aiw-empty-hint');
       if (emptyHint) emptyHint.remove();
 
+      const thinkingHtml = '<span class="aiw-thinking"><span class="aiw-thinking-dot"></span>Réflexion en cours...</span>';
       const turnEl = document.createElement('div');
       turnEl.className = 'aiw-turn';
-      turnEl.innerHTML = '<div class="aiw-question">' + escapeHtml(question) + '</div><div class="aiw-answer"><span class="aiw-stream-cursor">▍</span></div>';
+      turnEl.innerHTML = '<div class="aiw-question">' + escapeHtml(question) + '</div><div class="aiw-answer">' + thinkingHtml + '</div>';
       messagesEl.appendChild(turnEl);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       const answerEl = turnEl.querySelector('.aiw-answer');
@@ -261,7 +291,7 @@
         } catch (err) {
           lastErr = err;
           if (attempt === 1) {
-            answerEl.innerHTML = '<span class="aiw-stream-cursor">▍</span>';
+            answerEl.innerHTML = thinkingHtml;
           }
         }
       }

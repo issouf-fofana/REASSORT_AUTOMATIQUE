@@ -819,14 +819,17 @@ export function AiAssistant() {
           transition: background-color .15s ease, transform .15s ease;
         }
         .aia-hero-restart:hover { background-color: #F1F3F5; transform: rotate(45deg); }
-        /* Icône ronde marine/ambre au-dessus du titre, même esprit que la maquette (icône dans un
-           badge arrondi au-dessus du message de bienvenue). */
+        /* Badge rond marine au-dessus du titre, même esprit que la maquette (icône dans un badge
+           arrondi au-dessus du message de bienvenue) — logo Réassort Automatique (demande du
+           08/10/2026 : "pas le logo du template par défaut"), pas une icône générique de bulle de
+           chat sans rapport avec le produit. */
         .aia-hero-icon {
           width: 88px; height: 88px; border-radius: 24px; margin: 0 auto 1.1rem;
           background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%);
-          color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 2.5rem;
+          display: flex; align-items: center; justify-content: center;
           box-shadow: 0 10px 28px rgba(27,42,74,.25);
         }
+        .aia-hero-icon img { width: 56px; height: 56px; object-fit: contain; }
         .aia-hero-title { font-size: 2rem; font-weight: 700; color: #1B2A4A; margin-bottom: .5rem; letter-spacing: -.01em; }
         .aia-hero-subtitle { color: #5B6B85; font-size: 1rem; max-width: 480px; margin-left: auto; margin-right: auto; }
         .aia-hero-input { max-width: 640px; }
@@ -972,7 +975,7 @@ export function AiAssistant() {
                     <iconify-icon icon="solar:refresh-bold-duotone"></iconify-icon>
                   </button>
                   <div className="aia-hero-icon" aria-hidden="true">
-                    <iconify-icon icon="solar:chat-round-dots-bold-duotone"></iconify-icon>
+                    <img src="/assets/images/logo-reassort.png" alt="" />
                   </div>
                   <div className="aia-hero-title">
                     {userName ? `Bonjour ${firstName(userName)} !` : 'Assistant IA Réassort'}
