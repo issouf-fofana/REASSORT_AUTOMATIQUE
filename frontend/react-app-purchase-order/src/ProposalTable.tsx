@@ -197,6 +197,10 @@ function supplierEligibilityCellRenderer(params: any) {
 // Type de commande (LC = Livraison Centrale, LD = Livraison Directe), colonne séparée du badge
 // Commandable (demande explicite du 08/10/2026). Vide si non résolu (aucun fournisseur valide,
 // cf. supplierEligibilityCellRenderer ci-dessus) ou proposition générée avant ces champs.
+// Affiche le nom du fournisseur RÉSOLU directement pour une ligne LD (demande explicite du
+// 08/10/2026 : "tu peux afficher quel fournisseur va être rattaché au LD dans le tableau ?"),
+// jamais seulement au survol — le responsable doit voir d'un coup d'œil VERS QUI chaque article
+// non-central part, sans ouvrir chaque ligne.
 function deliveryTypeCellRenderer(params: any) {
   const l = params.data as ProposalLine;
   const wrap = document.createElement('div');
@@ -205,11 +209,16 @@ function deliveryTypeCellRenderer(params: any) {
     return wrap;
   }
   const isCentral = l.deliveryType === 'LC';
-  const title = isCentral
-    ? 'Livraison Centrale — fournisseur central'
-    : `Livraison Directe — fournisseur : ${l.resolvedSupplierName || l.currentSuppliers || ''}`;
-  const cls = isCentral ? 'reassort-info-badge' : 'bg-warning-subtle text-warning-emphasis';
-  wrap.innerHTML = `<span class="badge reassort-mini-badge ${cls}" title="${title}">${l.deliveryType}</span>`;
+  if (isCentral) {
+    wrap.innerHTML = '<span class="badge reassort-mini-badge reassort-info-badge" title="Livraison Centrale — fournisseur central">LC</span>';
+    return wrap;
+  }
+  const supplierName = l.resolvedSupplierName || l.currentSuppliers || '';
+  const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? "historique du magasin" : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : '';
+  wrap.innerHTML = `
+    <span class="badge reassort-mini-badge bg-warning-subtle text-warning-emphasis" title="Livraison Directe — résolu via ${originLabel} : ${supplierName}">LD</span>
+    <span class="small text-muted ms-1" title="${supplierName}">${supplierName}</span>
+  `;
   return wrap;
 }
 
@@ -487,13 +496,15 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           },
         },
         {
-          headerName: 'Type',
+          headerName: 'Type / Fournisseur',
           field: 'deliveryType',
-          width: 90,
+          width: 220,
           sortable: true,
           filter: false,
           cellRenderer: deliveryTypeCellRenderer,
-          valueGetter: (p: any) => p.data.deliveryType || '',
+          // Tri/filtre par fournisseur résolu si LD (pas juste "LD" générique), pour pouvoir
+          // regrouper visuellement les articles du même fournisseur en triant cette colonne.
+          valueGetter: (p: any) => (p.data.deliveryType === 'LD' ? `LD — ${p.data.resolvedSupplierName || ''}` : p.data.deliveryType || ''),
         },
         {
           colId: 'quantityProposed',
