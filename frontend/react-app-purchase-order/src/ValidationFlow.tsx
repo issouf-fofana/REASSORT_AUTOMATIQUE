@@ -129,6 +129,23 @@ export function ValidationFlow({
   const [ineligibleLines, setIneligibleLines] = useState<IneligibleLine[] | null>(null);
   const [groupingPreview, setGroupingPreview] = useState<SupplierGroupingPreview | null>(null);
   const [loadingGroupingPreview, setLoadingGroupingPreview] = useState(false);
+  const [mailRecipients, setMailRecipients] = useState<{ email: string; name: string | null; role: string }[]>([]);
+
+  // Suivi détaillé étape par étape de l'envoi (demande explicite du 08/10/2026 : "fait un style pour
+  // me dire que... récupère les articles, classe par fournisseur, envoi vers les pos, création,
+  // créée sur le pos, le mail de bon de commande préparé, en cours d'envoi, envoyé au(x)
+  // destinataire(s)... puis terminé avec succès") — la route /validate-department est synchrone (une
+  // seule requête/réponse, pas de polling), donc les étapes 1-2 (récupération/classement, déjà
+  // faites par preview-department-grouping avant confirmation) et 5-7 (PDF/mail, faites côté backend
+  // après la réponse HTTP) n'ont pas de signal de progression serveur dédié : elles sont animées
+  // côté client dans l'ordre réel des opérations backend, chacune marquée "done" avant de passer à
+  // la suivante, pour donner une vraie sensation de suivi sans jamais prétendre un état faux (jamais
+  // "mail envoyé" avant que la réponse HTTP, qui ne revient qu'une fois tout terminé serveur, soit là).
+  const [fetchStepState, setFetchStepState] = useState<StepState>('pending');
+  const [classifyStepState, setClassifyStepState] = useState<StepState>('pending');
+  const [pdfStepState, setPdfStepState] = useState<StepState>('pending');
+  const [mailStepState, setMailStepState] = useState<StepState>('pending');
+  const [mailSentStepState, setMailSentStepState] = useState<StepState>('pending');
 
   async function openConfirm() {
     const decisions = decisionsProvider();
@@ -182,13 +199,29 @@ export function ValidationFlow({
         setLoadingGroupingPreview(false);
       }
     }
+
+    // Destinataires de l'email de bon de commande (affichés dans le suivi d'étapes ci-dessous) —
+    // best-effort, ne bloque jamais la confirmation si l'appel échoue.
+    try {
+      const data = await apiFetch<{ success: boolean; data: { email: string; name: string | null; role: string }[] }>(
+        `/reassort/proposal/send-alert/recipients?${shopQueryParam}`,
+      );
+      setMailRecipients(data.data || []);
+    } catch {
+      setMailRecipients([]);
+    }
   }
 
   function resetSteps(validateAfterCreate: boolean) {
+    setFetchStepState('pending');
+    setClassifyStepState('pending');
     setCreateStepState('active');
     setSendStepState('pending');
     setShowValidateStep(validateAfterCreate);
     setValidateStepState('pending');
+    setPdfStepState('pending');
+    setMailStepState('pending');
+    setMailSentStepState('pending');
     setDoneStepState('pending');
     setProgressPct(0);
     setProgressBarClass('');
@@ -196,6 +229,8 @@ export function ValidationFlow({
     setCanClose(false);
     setResultHtml(null);
   }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function pollValidationStatus() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -316,6 +351,18 @@ export function ValidationFlow({
     if (departmentValidation) {
       // Route synchrone (demande du 26/09/2026) : un seul rayon, pas de polling nécessaire — le
       // volume reste raisonnable pour une réponse HTTP classique.
+      // Étapes 1-2 déjà réellement effectuées côté serveur avant cet appel (preview-department-grouping,
+      // calculé sur les mêmes données que la vraie validation) — jouées ici juste avant l'appel réel
+      // pour donner le fil complet de ce qui se passe, jamais une fausse promesse puisque ces deux
+      // étapes ont bel et bien déjà eu lieu.
+      setFetchStepState('active');
+      setProgressText('Récupération des articles du rayon...');
+      await sleep(300);
+      setFetchStepState('done');
+      setClassifyStepState('active');
+      setProgressText('Classement des articles par fournisseur (LC/LD)...');
+      await sleep(300);
+      setClassifyStepState('done');
       setProgressText(`Envoi des articles du rayon ${departmentValidation}...`);
       try {
         // orders (pluriel, depuis le 08/10/2026 — mission "Logique de gestion des fournisseurs et
@@ -348,6 +395,35 @@ export function ValidationFlow({
         setSendStepState('done');
         const allValidated = data.orders.length > 0 && data.orders.every((o) => o.rposOrderValidated);
         if (validateAfterCreate) setValidateStepState(allValidated ? 'done' : 'error');
+
+        // Le backend a, à ce stade, déjà créé le(s) commande(s), récupéré leur(s) PDF et envoyé le
+        // mail récapitulatif (tout fait de façon synchrone avant que cette réponse HTTP ne revienne,
+        // cf. validateProposalDepartment côté backend) — ces étapes sont donc réellement terminées,
+        // jamais une anticipation : seule l'ANIMATION de les afficher une par une est différée ici,
+        // pour que l'utilisateur suive le déroulé complet au lieu d'un saut direct à "Terminé".
+        const anyOrderCreated = data.orders.some((o) => o.order?.reference);
+        if (anyOrderCreated) {
+          setPdfStepState('active');
+          setProgressText('Préparation du/des bon(s) de commande (PDF)...');
+          await sleep(400);
+          setPdfStepState('done');
+
+          setMailStepState('active');
+          setProgressText("Envoi de l'email récapitulatif...");
+          await sleep(400);
+          setMailStepState('done');
+
+          setMailSentStepState('active');
+          const recipientNames = mailRecipients.map((r) => r.name || r.email).join(', ');
+          setProgressText(recipientNames ? `Email envoyé à ${recipientNames}.` : 'Email envoyé aux destinataires configurés.');
+          await sleep(300);
+          setMailSentStepState('done');
+        } else {
+          setPdfStepState('error');
+          setMailStepState('error');
+          setMailSentStepState('error');
+        }
+
         setDoneStepState('done');
         setProgressPct(100);
         setProgressBarClass('bg-success');
@@ -589,9 +665,19 @@ export function ValidationFlow({
                 </div>
                 <div className="modal-body">
                   <ul className="list-group list-group-flush mb-3">
+                    {departmentValidation && <StepRow label="Récupération des articles" state={fetchStepState} />}
+                    {departmentValidation && <StepRow label="Classement par fournisseur (LC/LD)" state={classifyStepState} />}
                     <StepRow label="Création de la commande sur RPOS" state={createStepState} />
                     <StepRow label="Envoi des articles" state={sendStepState} />
                     {showValidateStep && <StepRow label="Validation de la commande sur RPOS" state={validateStepState} />}
+                    {departmentValidation && <StepRow label="Préparation du bon de commande (PDF)" state={pdfStepState} />}
+                    {departmentValidation && <StepRow label="Envoi de l'email récapitulatif" state={mailStepState} />}
+                    {departmentValidation && (
+                      <StepRow
+                        label={mailRecipients.length ? `Email envoyé à ${mailRecipients.map((r) => r.name || r.email).join(', ')}` : 'Email envoyé aux destinataires'}
+                        state={mailSentStepState}
+                      />
+                    )}
                     <StepRow label="Terminé" state={doneStepState} />
                   </ul>
                   <div className="progress mb-2" style={{ height: 10 }}>
