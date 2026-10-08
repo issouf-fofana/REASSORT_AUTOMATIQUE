@@ -751,15 +751,15 @@ export function AiAssistant() {
         .aia-answer-action-btn.active {
           color: #F5A623;
         }
-        /* "L'assistant réfléchit..." (demande du 28/09/2026, remplacé par une vraie sphère de points
-           en rotation le 08/10/2026 — maquette fournie d'un indicateur plus visible/vivant, premier
-           essai en CSS pur jugé "pas bien fait" par comparaison à la démo). Tant que le premier
-           morceau de texte n'est pas encore arrivé (résolution de l'outil de données + latence avant
-           le 1er chunk LLM, qui peut prendre plusieurs secondes), turn.streamText reste vide et un
-           simple curseur clignotant seul paraissait trop discret, comme un gel plutôt qu'un
-           chargement en cours. ThinkingOrb (canvas, cf. components/ui/thinking-orb.tsx) dessine la
-           sphère elle-même ; ce halo CSS n'ajoute plus qu'un anneau pulsant discret autour, dans la
-           palette marine/ambre du site (jamais le noir/blanc de la démo d'origine). */
+        /* "L'assistant réfléchit..." (demande du 28/09/2026, passé par une sphère de points abstraite
+           le 08/10/2026 jugée "pas bien fait" / sans rapport avec le produit, puis remplacée par le
+           vrai logo Réassort Automatique qui tourne le 08/10/2026 — "il faut que ce soit le logo de
+           reassort"). Tant que le premier morceau de texte n'est pas encore arrivé (résolution de
+           l'outil de données + latence avant le 1er chunk LLM, qui peut prendre plusieurs secondes),
+           turn.streamText reste vide et un simple curseur clignotant seul paraissait trop discret,
+           comme un gel plutôt qu'un chargement en cours. ThinkingOrb (cf.
+           components/ui/thinking-orb.tsx) fait tourner le logo en 3D (CSS rotateY) dans un badge
+           marine ; cet anneau ajoute juste un halo ambre pulsant discret autour. */
         .aia-thinking { display: inline-flex; align-items: center; gap: .65rem; color: #5B6B85; font-size: .88rem; }
         .aia-thinking-orb-wrap { position: relative; width: 34px; height: 34px; flex-shrink: 0; }
         .aia-thinking-orb-ring {
@@ -768,8 +768,18 @@ export function AiAssistant() {
           animation: aia-orb-ring 1.6s ease-in-out infinite;
         }
         @keyframes aia-orb-ring { 0%, 100% { transform: scale(0.92); opacity: .55; } 50% { transform: scale(1.12); opacity: 0; } }
+        .aia-thinking-logo-wrap {
+          display: flex; align-items: center; justify-content: center; border-radius: 50%;
+          background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%);
+          box-shadow: 0 4px 12px rgba(27,42,74,.3); perspective: 120px;
+        }
+        .aia-thinking-logo-spin {
+          display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+          transform-style: preserve-3d; animation: aia-logo-spin 1.8s linear infinite;
+        }
+        @keyframes aia-logo-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
         @media (prefers-reduced-motion: reduce) {
-          .aia-thinking-orb-ring { animation: none; }
+          .aia-thinking-orb-ring, .aia-thinking-logo-spin { animation: none; }
         }
         /* Style "plus pro" demandé le 27/09/2026 (l'outline Bootstrap brut, bordure grise fine,
            paraissait basique) : fond plein gris clair discret plutôt qu'un simple contour, sans

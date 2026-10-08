@@ -55,22 +55,21 @@
     .aiw-md-list li { margin-bottom: .25rem; }
     .aiw-stream-cursor { display: inline-block; animation: aiw-blink 1s step-end infinite; }
     @keyframes aiw-blink { 50% { opacity: 0; } }
-    /* Indicateur "en train de réfléchir" (même esprit que la page dédiée, version légère en CSS pur
-       puisque ce widget n'a pas de canvas/React) : halo marine qui pulse + point ambre. */
-    .aiw-thinking { display: inline-flex; align-items: center; gap: .45rem; color: #5B6B85; }
-    .aiw-thinking-dot { position: relative; width: 14px; height: 14px; flex-shrink: 0; }
-    .aiw-thinking-dot::before {
-      content: ''; position: absolute; inset: 0; border-radius: 50%;
-      background: radial-gradient(circle at 35% 30%, #2d4068 0%, #1B2A4A 70%);
-      animation: aiw-dot-pulse 1.4s ease-in-out infinite;
+    /* Indicateur "en train de réfléchir" (même esprit que la page dédiée /ai-assistant) : le vrai
+       logo Réassort Automatique qui tourne en 3D dans un badge marine, pas une forme abstraite
+       (demande du 08/10/2026 : "il faut que ce soit le logo de reassort" — appliqué ici aussi, même
+       composant visuel que ThinkingOrb côté React, en CSS pur puisque ce widget est du JS natif). */
+    .aiw-thinking { display: inline-flex; align-items: center; gap: .5rem; color: #5B6B85; }
+    .aiw-thinking-logo-wrap {
+      position: relative; width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%);
+      box-shadow: 0 3px 10px rgba(27,42,74,.3); perspective: 90px;
     }
-    .aiw-thinking-dot::after {
-      content: ''; position: absolute; inset: -4px; border-radius: 50%;
-      border: 1.5px solid rgba(245,166,35,.45);
-      animation: aiw-dot-ring 1.4s ease-in-out infinite;
+    .aiw-thinking-logo-wrap img {
+      width: 15px; height: 15px; animation: aiw-logo-spin 1.8s linear infinite;
     }
-    @keyframes aiw-dot-pulse { 0%, 100% { transform: scale(0.85); opacity: .85; } 50% { transform: scale(1); opacity: 1; } }
-    @keyframes aiw-dot-ring { 0%, 100% { transform: scale(0.9); opacity: .5; } 50% { transform: scale(1.2); opacity: 0; } }
+    @keyframes aiw-logo-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
     .aiw-empty-hint { color: #999999; text-align: center; padding: 1.5rem 1rem; font-size: .85rem; }
     #aiw-input-bar { padding: .6rem .75rem; border-top: 1px solid #e5e5e5; flex-shrink: 0; }
     #aiw-input-bar .form-control, #aiw-input-bar .btn { font-size: .85rem; }
@@ -266,7 +265,7 @@
       const emptyHint = messagesEl.querySelector('.aiw-empty-hint');
       if (emptyHint) emptyHint.remove();
 
-      const thinkingHtml = '<span class="aiw-thinking"><span class="aiw-thinking-dot"></span>Réflexion en cours...</span>';
+      const thinkingHtml = '<span class="aiw-thinking"><span class="aiw-thinking-logo-wrap"><img src="/assets/images/logo-reassort.png" alt=""></span>Réflexion en cours...</span>';
       const turnEl = document.createElement('div');
       turnEl.className = 'aiw-turn';
       turnEl.innerHTML = '<div class="aiw-question">' + escapeHtml(question) + '</div><div class="aiw-answer">' + thinkingHtml + '</div>';
