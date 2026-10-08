@@ -289,6 +289,24 @@ function AnalyticsOverview({ data }: { data: AnalyticsData }) {
             <strong>{p.predictedQuantity}</strong>
           </span>
         </div>
+        {(() => {
+          // Affiche le résultat BRUT de la formule, avant le plafonnement à 0 (demande du
+          // 08/10/2026 : "il doit afficher le résultat des calculs et nous dire pourquoi il a pas
+          // pris" — un résultat négatif arrondi à 0 par Math.max(0, ...) côté backend
+          // (predictedQuantity = Math.max(0, Math.ceil(avgWeeklySales + safetyStock - stock -
+          // orderedQty))) paraissait incohérent sans voir ce calcul intermédiaire : l'utilisateur
+          // recalculait à la main et tombait sur un nombre négatif, sans explication affichée.
+          const rawResult = p.avgWeeklySales + p.safetyStock - p.currentStock - p.currentOrderedQuantity;
+          const wasCapped = rawResult < 0 && p.predictedQuantity === 0;
+          if (!wasCapped) return null;
+          return (
+            <div className="small text-muted mt-2">
+              Résultat du calcul avant arrondi : <strong>{rawResult.toFixed(1)}</strong> (négatif) → ramené à{' '}
+              <strong>0</strong> : on ne propose jamais de commander une quantité négative — le stock actuel plus les
+              commandes déjà en cours couvrent largement le besoin estimé.
+            </div>
+          );
+        })()}
       </div>
       <StockMovesSection stockMoves={data.stockMoves} />
     </div>
