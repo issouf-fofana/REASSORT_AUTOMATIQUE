@@ -471,6 +471,23 @@ body {
      background-color: #f5f5f5;
 }
 
+/* Bande marine sur les 300 premiers pixels dès le tout premier paint (demande du 08/10/2026 :
+   "quand il quitte la page A pour B, la sidebar ne doit pas bouger") : pendant le court instant
+   entre l'arrivée du HTML de la nouvelle page et l'exécution de layout.js/loading-overlay.js (qui
+   réinjectent la vraie sidebar), le fond body #f5f5f5 ci-dessus apparaissait brièvement en blanc/gris
+   derrière la sidebar native du navigateur pas encore peinte — un flash perceptible à chaque clic
+   sidebar. Ce dégradé pur CSS (zéro JS, donc actif dès le premier rendu) couvre cette fenêtre avec
+   la même couleur que .sidebar (#1B2A4A), pour qu'aucun flash ne soit visible avant que la vraie
+   sidebar ne prenne le relais visuellement au même endroit. Désactivé sous 768px (sidebar masquée
+   sur mobile, cf. règle .sidebar plus haut) pour ne pas peindre une bande marine inutile.
+   Cette bande n'implique aucune interaction : .sidebar (position fixed, z-index supérieur) et
+   #reassort-loading-overlay (cf. loading-overlay.js) se peignent toujours par-dessus normalement. */
+@media (min-width: 768px) {
+     body {
+          background: linear-gradient(to right, #1B2A4A 0, #1B2A4A 300px, #f5f5f5 300px);
+     }
+}
+
 /* ==========================================================================
    Passe de polish UX (demande du 21/09/2026 : "utilise impeccable" — garder
    noir/blanc/gris partout, mais un peu de couleur ciblée sur les indicateurs

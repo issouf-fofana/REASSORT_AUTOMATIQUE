@@ -15,10 +15,24 @@
 
   const style = document.createElement('style');
   style.textContent = `
+    /* left: 300px sur desktop (demande du 08/10/2026 : "la sidebar ne doit pas bouger" en
+       changeant de page) : cet écran plein écran masquait AUSSI la sidebar pendant sa
+       réinjection par layout.js (XHR synchrone), donc elle semblait disparaître puis
+       réapparaître à chaque navigation — alors que chaque page a déjà le même fond marine
+       (#1B2A4A, cf. .sidebar dans theme-override.css) à cet endroit précis, laissé visible
+       en dessous. Seule la zone de contenu (à droite de la sidebar) est couverte : la sidebar
+       elle-même reste visuellement immobile pendant le chargement, même si c'est toujours
+       techniquement un rechargement complet de page (pas une vraie navigation SPA, cf.
+       discussion du 08/10/2026 — solution légère retenue plutôt qu'un chantier de fusion des
+       ~19 apps en une seule SPA). left:0 en dessous de 768px : la sidebar est masquée sur
+       mobile (cf. theme-override.css), donc rien à préserver, l'écran reprend toute la largeur. */
     #reassort-loading-overlay {
       position: fixed; inset: 0; background-color: #1B2A4A; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
       transition: opacity .25s ease;
+    }
+    @media (min-width: 768px) {
+      #reassort-loading-overlay { left: 300px; }
     }
     #reassort-loading-overlay.hide { opacity: 0; pointer-events: none; }
     #reassort-loading-overlay img {
