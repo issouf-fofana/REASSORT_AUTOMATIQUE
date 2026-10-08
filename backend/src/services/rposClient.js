@@ -1036,12 +1036,18 @@ async function getSupplierOrderPdf(posId, rposOrderId) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function getSupplierOrders(posId, { shopId, pageSize = 50, page = 1, platformOnly = true }) {
+// isDeleted temporairement paramétrable (08/10/2026, script de test scripts/test-is-deleted.js) :
+// jamais vérifié si RPOS respecte vraiment is_deleted='true' pour retourner aussi les commandes
+// supprimées (aucun test ni commentaire trouvé dans l'historique du fichier) — certains filtres
+// RPOS sont silencieusement ignorés par l'API (ex: label_1__icontains), donc ne jamais supposer
+// qu'une valeur fonctionne sans vérification réelle. Retirer ce paramètre une fois le comportement
+// confirmé et figé dans le code appelant.
+async function getSupplierOrders(posId, { shopId, pageSize = 50, page = 1, platformOnly = true, isDeleted = 'false' }) {
   const params = {
     shop: shopId,
     page_size: pageSize,
     page,
-    is_deleted: 'false',
+    is_deleted: isDeleted,
     ordering: '-date',
   };
   if (platformOnly) {
