@@ -535,32 +535,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         // contexte au-dessus de la liste des rayons) — restent accessibles via le bouton "Colonnes"
         // (reassortAgGridToolbar) et via la colonne Article qui pointe déjà vers ArticleDetailModal.
         {
-          colId: 'lastPurchase',
-          headerName: 'Dernier achat',
-          width: 170,
-          hide: true,
-          sortable: false,
-          filter: false,
-          cellRenderer: lastPurchaseCellRenderer,
-          valueGetter: (p: any) => {
-            const el = document.querySelector(`.last-purchase-result[data-product-id="${p.data.productId}"]`);
-            return el ? el.textContent : '';
-          },
-        },
-        {
-          colId: 'lastSale',
-          headerName: 'Dernière vente',
-          width: 170,
-          hide: true,
-          sortable: false,
-          filter: false,
-          cellRenderer: lastSaleCellRenderer,
-          valueGetter: (p: any) => {
-            const el = document.querySelector(`.last-sale-result[data-product-id="${p.data.productId}"]`);
-            return el ? el.textContent : '';
-          },
-        },
-        {
           // CA HT de l'article sur la période d'analyse (spec §2) — ajouté le 28/09/2026, jamais
           // affiché avant (le backend ne le calculait même pas explicitement jusqu'à ce correctif).
           // Distinct de la colonne "% CA" juste après, calculée sur une fenêtre plus courte.
@@ -635,6 +609,38 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           headerTooltip: 'Quantité perdue en casse, péremption ou vol constatée sur la période analysée (mouvements RPOS isScrap).',
           valueFormatter: (p: any) => (p.value ? Number(p.value).toFixed(1) : '—'),
         },
+        // Colonnes déplacées en toute fin de tableau (demande explicite du 08/10/2026 : "affiche les
+        // autres colonnes à la fin") — Dernier achat/Dernière vente/Déjà commandé/Réf. commande,
+        // jusqu'ici au milieu du tableau malgré hide:true par défaut (apparaissaient là une fois
+        // affichées via le bouton "Colonnes", ou restaurées par une session précédente via
+        // COLUMN_STATE_STORAGE_KEY). Ordre inchangé entre elles, juste déplacé après les colonnes
+        // d'analyse ci-dessus.
+        {
+          colId: 'lastPurchase',
+          headerName: 'Dernier achat',
+          width: 170,
+          hide: true,
+          sortable: false,
+          filter: false,
+          cellRenderer: lastPurchaseCellRenderer,
+          valueGetter: (p: any) => {
+            const el = document.querySelector(`.last-purchase-result[data-product-id="${p.data.productId}"]`);
+            return el ? el.textContent : '';
+          },
+        },
+        {
+          colId: 'lastSale',
+          headerName: 'Dernière vente',
+          width: 170,
+          hide: true,
+          sortable: false,
+          filter: false,
+          cellRenderer: lastSaleCellRenderer,
+          valueGetter: (p: any) => {
+            const el = document.querySelector(`.last-sale-result[data-product-id="${p.data.productId}"]`);
+            return el ? el.textContent : '';
+          },
+        },
         {
           // Quantité déjà commandée/en transit (spec §2 : "quantité déjà commandée / en cours de
           // commande") — currentOrderedQuantity est déjà persisté (cumul RPOS + plateforme, cf.
@@ -686,7 +692,18 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         loadLastPurchasesAutomatically();
         requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
       },
+      // Corrigé le 08/10/2026 : "Dernier achat"/"Dernière vente" restaient bloqués sur
+      // "Chargement..." au premier affichage d'un rayon — loadLastPurchasesAutomatically()
+      // appelée juste après setGridOption('rowData', ...) (voir l'effet plus bas) s'exécutait AVANT
+      // qu'AG Grid n'ait fini de peindre les lignes dans le DOM (rendu asynchrone), donc
+      // querySelectorAll('.last-purchase-result') ne trouvait encore aucun span et ne faisait
+      // littéralement rien — jamais réessayé ensuite, sauf en changeant de page (onPaginationChanged
+      // ci-dessus, qui ne rattrape que les lignes de la page suivante, pas la première jamais
+      // chargée). onModelUpdated est le signal fiable d'AG Grid que le DOM reflète bien les données
+      // courantes (rowData, filtre ou tri changé) — appelé ici à chaque fois, donc aussi au tout
+      // premier rendu.
       onModelUpdated: () => {
+        loadLastPurchasesAutomatically();
         requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
       },
       onCellClicked: (e: any) => {
@@ -797,7 +814,12 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   }
 
   async function loadLastPurchasesAutomatically() {
-    const spans = Array.from(document.querySelectorAll<HTMLSpanElement>('.last-purchase-result'));
+    // Corrigé le 08/10/2026 : onModelUpdated (qui déclenche maintenant cette fonction) peut se
+    // déclencher plusieurs fois de suite (tri, filtre, pagination) — sans ce filtre, chaque
+    // déclenchement relançait un appel réseau pour TOUTES les lignes visibles, y compris celles déjà
+    // résolues (leur span garde la classe .last-purchase-result même une fois son texte rempli).
+    // Ne cible que les spans encore sur "Chargement..." (jamais encore résolus).
+    const spans = Array.from(document.querySelectorAll<HTMLSpanElement>('.last-purchase-result')).filter((s) => s.textContent === 'Chargement...');
     const CONCURRENCY = 5;
     let index = 0;
 
@@ -883,7 +905,10 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     if (filterModelToRestore && Object.keys(filterModelToRestore).length) {
       api.setFilterModel(filterModelToRestore);
     }
-    loadLastPurchasesAutomatically();
+    // loadLastPurchasesAutomatically() N'EST PLUS appelée ici directement (corrigé le 08/10/2026) :
+    // AG Grid peint les lignes de façon asynchrone, donc un appel immédiat après setGridOption ne
+    // trouvait encore aucun span dans le DOM — gérée maintenant par onModelUpdated (voir
+    // buildGridOptions ci-dessus), qui se déclenche de façon fiable une fois le rendu réellement fait.
     updateOrderTotal();
     return () => {
       if (gridApiRef.current) {
