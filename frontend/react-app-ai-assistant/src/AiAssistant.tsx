@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import { Copy, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiFetch } from './api/client';
 import { AIChatInput } from './components/ui/ai-chat-input';
+import { ThinkingOrb } from './components/ui/thinking-orb';
 
 interface Shop {
   id: string;
@@ -750,41 +751,25 @@ export function AiAssistant() {
         .aia-answer-action-btn.active {
           color: #F5A623;
         }
-        /* "L'assistant réfléchit..." (demande du 28/09/2026, remplacé par une animation d'orbe le
-           08/10/2026 — maquette fournie d'un indicateur plus visible/vivant) : tant que le premier
+        /* "L'assistant réfléchit..." (demande du 28/09/2026, remplacé par une vraie sphère de points
+           en rotation le 08/10/2026 — maquette fournie d'un indicateur plus visible/vivant, premier
+           essai en CSS pur jugé "pas bien fait" par comparaison à la démo). Tant que le premier
            morceau de texte n'est pas encore arrivé (résolution de l'outil de données + latence avant
            le 1er chunk LLM, qui peut prendre plusieurs secondes), turn.streamText reste vide et un
            simple curseur clignotant seul paraissait trop discret, comme un gel plutôt qu'un
-           chargement en cours. Orbe en CSS pur (pas de canvas/JS, contrairement à la maquette
-           d'origine) : un halo marine qui pulse en continu + 3 points ambre orbitant autour,
-           cohérent avec la palette marine/ambre du reste du site. */
+           chargement en cours. ThinkingOrb (canvas, cf. components/ui/thinking-orb.tsx) dessine la
+           sphère elle-même ; ce halo CSS n'ajoute plus qu'un anneau pulsant discret autour, dans la
+           palette marine/ambre du site (jamais le noir/blanc de la démo d'origine). */
         .aia-thinking { display: inline-flex; align-items: center; gap: .65rem; color: #5B6B85; font-size: .88rem; }
-        .aia-thinking-orb { position: relative; width: 22px; height: 22px; flex-shrink: 0; }
-        .aia-thinking-orb-core {
-          position: absolute; inset: 0; border-radius: 50%;
-          background: radial-gradient(circle at 35% 30%, #2d4068 0%, #1B2A4A 70%);
-          animation: aia-orb-pulse 1.6s ease-in-out infinite;
-        }
+        .aia-thinking-orb-wrap { position: relative; width: 34px; height: 34px; flex-shrink: 0; }
         .aia-thinking-orb-ring {
-          position: absolute; inset: -5px; border-radius: 50%;
-          border: 1.5px solid rgba(245,166,35,.45);
+          position: absolute; inset: -6px; border-radius: 50%;
+          border: 1.5px solid rgba(245,166,35,.4);
           animation: aia-orb-ring 1.6s ease-in-out infinite;
         }
-        .aia-thinking-orb-dot {
-          position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; border-radius: 50%;
-          background: #F5A623; margin: -2px;
-          animation: aia-orb-orbit 1.4s linear infinite;
-        }
-        .aia-thinking-orb-dot:nth-child(3) { animation-delay: -.47s; }
-        .aia-thinking-orb-dot:nth-child(4) { animation-delay: -.93s; }
-        @keyframes aia-orb-pulse { 0%, 100% { transform: scale(0.85); opacity: .85; } 50% { transform: scale(1); opacity: 1; } }
-        @keyframes aia-orb-ring { 0%, 100% { transform: scale(0.9); opacity: .5; } 50% { transform: scale(1.15); opacity: 0; } }
-        @keyframes aia-orb-orbit {
-          from { transform: rotate(0deg) translateX(13px) rotate(0deg); }
-          to { transform: rotate(360deg) translateX(13px) rotate(-360deg); }
-        }
+        @keyframes aia-orb-ring { 0%, 100% { transform: scale(0.92); opacity: .55; } 50% { transform: scale(1.12); opacity: 0; } }
         @media (prefers-reduced-motion: reduce) {
-          .aia-thinking-orb-core, .aia-thinking-orb-ring, .aia-thinking-orb-dot { animation: none; }
+          .aia-thinking-orb-ring { animation: none; }
         }
         /* Style "plus pro" demandé le 27/09/2026 (l'outline Bootstrap brut, bordure grise fine,
            paraissait basique) : fond plein gris clair discret plutôt qu'un simple contour, sans
@@ -837,10 +822,10 @@ export function AiAssistant() {
         /* Icône ronde marine/ambre au-dessus du titre, même esprit que la maquette (icône dans un
            badge arrondi au-dessus du message de bienvenue). */
         .aia-hero-icon {
-          width: 56px; height: 56px; border-radius: 16px; margin: 0 auto .9rem;
+          width: 88px; height: 88px; border-radius: 24px; margin: 0 auto 1.1rem;
           background: linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%);
-          color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 1.6rem;
-          box-shadow: 0 8px 20px rgba(27,42,74,.22);
+          color: #F5A623; display: flex; align-items: center; justify-content: center; font-size: 2.5rem;
+          box-shadow: 0 10px 28px rgba(27,42,74,.25);
         }
         .aia-hero-title { font-size: 2rem; font-weight: 700; color: #1B2A4A; margin-bottom: .5rem; letter-spacing: -.01em; }
         .aia-hero-subtitle { color: #5B6B85; font-size: 1rem; max-width: 480px; margin-left: auto; margin-right: auto; }
@@ -1042,11 +1027,9 @@ export function AiAssistant() {
                       <span className="aia-stream-live" dangerouslySetInnerHTML={{ __html: renderMarkdown(turn.streamText) }} />
                     ) : (
                       <span className="aia-thinking">
-                        <span className="aia-thinking-orb" aria-hidden="true">
+                        <span className="aia-thinking-orb-wrap" aria-hidden="true">
                           <span className="aia-thinking-orb-ring"></span>
-                          <span className="aia-thinking-orb-core"></span>
-                          <span className="aia-thinking-orb-dot"></span>
-                          <span className="aia-thinking-orb-dot"></span>
+                          <ThinkingOrb size={34} />
                         </span>
                         L'assistant réfléchit...
                       </span>
