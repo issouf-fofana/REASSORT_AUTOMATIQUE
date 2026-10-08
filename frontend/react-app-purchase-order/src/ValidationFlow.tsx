@@ -370,6 +370,15 @@ export function ValidationFlow({
       setProgressText('Classement des articles par fournisseur (LC/LD)...');
       await sleep(300);
       setClassifyStepState('done');
+      // L'appel HTTP ci-dessous est SYNCHRONE côté serveur : il ne revient qu'une fois la commande
+      // créée, les articles envoyés, le(s) PDF récupéré(s) ET le mail parti (cf.
+      // validateProposalDepartment). "Création"/"Envoi des articles" doivent donc rester actifs
+      // pendant TOUTE cette attente réelle (souvent plusieurs secondes) — sans ça elles passaient
+      // directement à "done" à la réponse, et PDF/mail s'enchaînaient ensuite en accéléré juste
+      // après, donnant l'impression que le mail partait "pendant que ça charge encore" plutôt qu'en
+      // toute dernière étape (constaté le 08/10/2026).
+      setCreateStepState('active');
+      setSendStepState('active');
       setProgressText(`Envoi des articles du rayon ${departmentValidation}...`);
       try {
         // orders (pluriel, depuis le 08/10/2026 — mission "Logique de gestion des fournisseurs et
