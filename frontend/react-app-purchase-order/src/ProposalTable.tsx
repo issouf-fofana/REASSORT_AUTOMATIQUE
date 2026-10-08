@@ -150,19 +150,20 @@ function avgSalesCellRenderer(params: any) {
 }
 
 // Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes", retour
-// explicite de l'utilisateur : "si il n'est pas rattaché au fournisseur central il faut dire qu'il
-// n'est pas rattaché au fournisseur central et la colonne commandable doit être là si l'article est
-// commandable sur RPOS ou pas") — DEUX informations distinctes, jamais mélangées dans le même badge :
+// explicite de l'utilisateur) — TROIS informations distinctes, jamais mélangées :
 //
-//   1. Rattachement au central (supplierIneligible) : "pas le central", une simple classification,
-//      jamais un jugement de commandabilité à elle seule.
+//   1. Rattachement au central (supplierIneligible) : une simple classification, jamais un
+//      jugement de commandabilité à elle seule.
 //   2. Commandable (ce renderer) : l'article a-t-il AU MOINS UN fournisseur réel côté RPOS,
 //      central ou non — vérité portée par currentSuppliers ('aucun' = vraiment aucun fournisseur
 //      RPOS, donc RPOS refusera la ligne quel que soit le fournisseur visé). resolvedSupplierId est
 //      une PRÉFÉRENCE de résolution (lequel utiliser si plusieurs), pas la source de vérité de la
 //      commandabilité — currentSuppliers reste la garantie réelle.
+//   3. Type de commande (deliveryTypeCellRenderer ci-dessous, colonne séparée) : LC/LD, jamais
+//      collé au badge Commandable — demande explicite du 08/10/2026 ("ajoute une colonne type de
+//      commande... la le commandable on verra bien").
 //
-// Bug corrigé ce jour : le badge affichait "Non commandable" pour un article qui AVAIT bien un
+// Bug corrigé le 08/10/2026 : le badge affichait "Non commandable" pour un article qui AVAIT bien un
 // fournisseur RPOS actif (ex: SANGEL CI), seulement parce qu'il n'était pas le central — confusion
 // entre les deux notions. "Non commandable" ne doit apparaître QUE si currentSuppliers === 'aucun'.
 function supplierEligibilityCellRenderer(params: any) {
@@ -180,15 +181,35 @@ function supplierEligibilityCellRenderer(params: any) {
     return wrap;
   }
 
-  // Un fournisseur existe côté RPOS : l'article EST commandable. Le badge central/non-central
-  // reste une précision à part, jamais ce qui décide "commandable" ou non.
-  if (!l.supplierIneligible) {
-    wrap.innerHTML = '<span class="badge reassort-mini-badge bg-success-subtle text-success" title="Rattaché au fournisseur central"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable</span>';
+  // Un fournisseur existe côté RPOS : l'article EST commandable, peu importe lequel (central ou
+  // non) — le type de commande (LC/LD) est affiché dans sa propre colonne, jamais ici.
+  const title = l.supplierIneligible
+    ? (() => {
+        const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? 'historique du magasin' : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : null;
+        const resolvedNote = originLabel ? ` — résolu via ${originLabel} : ${l.resolvedSupplierName || ''}` : '';
+        return `Non rattaché au fournisseur central${resolvedNote}. Fournisseur(s) : ${l.currentSuppliers}`;
+      })()
+    : 'Rattaché au fournisseur central';
+  wrap.innerHTML = `<span class="badge reassort-mini-badge bg-success-subtle text-success" title="${title}"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable</span>`;
+  return wrap;
+}
+
+// Type de commande (LC = Livraison Centrale, LD = Livraison Directe), colonne séparée du badge
+// Commandable (demande explicite du 08/10/2026). Vide si non résolu (aucun fournisseur valide,
+// cf. supplierEligibilityCellRenderer ci-dessus) ou proposition générée avant ces champs.
+function deliveryTypeCellRenderer(params: any) {
+  const l = params.data as ProposalLine;
+  const wrap = document.createElement('div');
+  if (!l.deliveryType) {
+    wrap.innerHTML = '<span class="text-muted">—</span>';
     return wrap;
   }
-  const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? 'historique du magasin' : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : null;
-  const resolvedNote = originLabel ? ` — résolu via ${originLabel} : ${l.resolvedSupplierName || ''}` : '';
-  wrap.innerHTML = `<span class="badge reassort-mini-badge bg-success-subtle text-success" title="Non rattaché au fournisseur central${resolvedNote} (${l.deliveryType || 'LD'}). Fournisseur(s) : ${l.currentSuppliers}"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> Commandable (${l.deliveryType || 'LD'})</span>`;
+  const isCentral = l.deliveryType === 'LC';
+  const title = isCentral
+    ? 'Livraison Centrale — fournisseur central'
+    : `Livraison Directe — fournisseur : ${l.resolvedSupplierName || l.currentSuppliers || ''}`;
+  const cls = isCentral ? 'reassort-info-badge' : 'bg-warning-subtle text-warning-emphasis';
+  wrap.innerHTML = `<span class="badge reassort-mini-badge ${cls}" title="${title}">${l.deliveryType}</span>`;
   return wrap;
 }
 
@@ -452,11 +473,27 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         {
           headerName: 'Commandable',
           field: 'supplierIneligible',
-          width: 150,
+          width: 140,
           sortable: true,
           filter: false,
           cellRenderer: supplierEligibilityCellRenderer,
-          valueGetter: (p: any) => (p.data.supplierIneligible === true ? 'Non' : p.data.supplierIneligible === false ? 'Oui' : ''),
+          // Corrigé le 08/10/2026 : "Oui"/"Non" doit refléter currentSuppliers (vrai statut RPOS),
+          // pas supplierIneligible seul (qui ne dit que "pas le central") — même source de vérité
+          // que supplierEligibilityCellRenderer, pour que le tri/filtre de cette colonne reste
+          // cohérent avec ce qui est réellement affiché.
+          valueGetter: (p: any) => {
+            if (p.data.supplierIneligible === null || p.data.supplierIneligible === undefined) return '';
+            return p.data.currentSuppliers && p.data.currentSuppliers !== 'aucun' ? 'Oui' : 'Non';
+          },
+        },
+        {
+          headerName: 'Type',
+          field: 'deliveryType',
+          width: 90,
+          sortable: true,
+          filter: false,
+          cellRenderer: deliveryTypeCellRenderer,
+          valueGetter: (p: any) => p.data.deliveryType || '',
         },
         {
           colId: 'quantityProposed',
