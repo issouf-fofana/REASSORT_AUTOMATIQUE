@@ -639,10 +639,17 @@ export function AiAssistant() {
         .aia-context-bar select, .aia-context-bar input { max-width: 220px; }
 
         #aia-chat-window { flex-grow: 1; overflow-y: auto; padding: 1.25rem; }
-        .aia-turn { margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid #f0f0f0; }
-        .aia-turn:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-        .aia-question { font-weight: 600; margin-bottom: .75rem; font-size: 1rem; }
-        .aia-answer { border-left: 3px solid #000000; padding: .25rem 1.25rem; line-height: 1.65; font-size: .93rem; }
+        /* Bulles de chat (demande du 08/10/2026, maquette fournie) : question alignée à droite dans
+           une bulle marine foncée, réponse alignée à gauche dans une bulle grise claire — remplace
+           l'ancien style "question en gras + réponse en bordure gauche", qui ne ressemblait pas à un
+           vrai fil de discussion. Palette marine/ambre du site conservée (jamais le noir strict de
+           la maquette d'origine). */
+        .aia-turn { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1.25rem; }
+        .aia-turn:last-child { margin-bottom: 0; }
+        .aia-bubble { max-width: 78%; padding: .7rem 1rem; border-radius: 16px; line-height: 1.55; font-size: .93rem; }
+        .aia-bubble-question { align-self: flex-end; background-color: #1B2A4A; color: #ffffff; border-bottom-right-radius: 4px; }
+        .aia-bubble-answer { align-self: flex-start; background-color: #F1F3F5; color: #1a1a1a; border-bottom-left-radius: 4px; }
+        .aia-bubble-answer.aia-bubble-error { background-color: #FBEAEA; color: #8a2f27; }
         .aia-answer p { margin: 0 0 .75rem; }
         .aia-answer p:last-child { margin-bottom: 0; }
         .aia-md-list { margin: .25rem 0 .75rem; padding-left: 1.4rem; }
@@ -743,17 +750,42 @@ export function AiAssistant() {
         .aia-answer-action-btn.active {
           color: #F5A623;
         }
-        /* "L'assistant réfléchit..." (demande du 28/09/2026 : "quand j'ai posé une question il doit
-           faire un truc qui montre que ça charge") — tant que le premier morceau de texte n'est pas
-           encore arrivé (résolution de l'outil de données + latence avant le 1er chunk LLM, qui peut
-           prendre plusieurs secondes), turn.streamText reste vide et seul un curseur clignotant SEUL
-           s'affichait : trop discret, ressemblait à un gel plutôt qu'à un chargement en cours. */
-        .aia-thinking { display: inline-flex; align-items: center; gap: .5rem; color: #6c757d; font-size: .9rem; }
-        .aia-thinking-dots { display: inline-flex; gap: .25rem; }
-        .aia-thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: #000000; animation: aia-thinking-bounce 1.2s ease-in-out infinite; }
-        .aia-thinking-dots span:nth-child(2) { animation-delay: .15s; }
-        .aia-thinking-dots span:nth-child(3) { animation-delay: .3s; }
-        @keyframes aia-thinking-bounce { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+        /* "L'assistant réfléchit..." (demande du 28/09/2026, remplacé par une animation d'orbe le
+           08/10/2026 — maquette fournie d'un indicateur plus visible/vivant) : tant que le premier
+           morceau de texte n'est pas encore arrivé (résolution de l'outil de données + latence avant
+           le 1er chunk LLM, qui peut prendre plusieurs secondes), turn.streamText reste vide et un
+           simple curseur clignotant seul paraissait trop discret, comme un gel plutôt qu'un
+           chargement en cours. Orbe en CSS pur (pas de canvas/JS, contrairement à la maquette
+           d'origine) : un halo marine qui pulse en continu + 3 points ambre orbitant autour,
+           cohérent avec la palette marine/ambre du reste du site. */
+        .aia-thinking { display: inline-flex; align-items: center; gap: .65rem; color: #5B6B85; font-size: .88rem; }
+        .aia-thinking-orb { position: relative; width: 22px; height: 22px; flex-shrink: 0; }
+        .aia-thinking-orb-core {
+          position: absolute; inset: 0; border-radius: 50%;
+          background: radial-gradient(circle at 35% 30%, #2d4068 0%, #1B2A4A 70%);
+          animation: aia-orb-pulse 1.6s ease-in-out infinite;
+        }
+        .aia-thinking-orb-ring {
+          position: absolute; inset: -5px; border-radius: 50%;
+          border: 1.5px solid rgba(245,166,35,.45);
+          animation: aia-orb-ring 1.6s ease-in-out infinite;
+        }
+        .aia-thinking-orb-dot {
+          position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; border-radius: 50%;
+          background: #F5A623; margin: -2px;
+          animation: aia-orb-orbit 1.4s linear infinite;
+        }
+        .aia-thinking-orb-dot:nth-child(3) { animation-delay: -.47s; }
+        .aia-thinking-orb-dot:nth-child(4) { animation-delay: -.93s; }
+        @keyframes aia-orb-pulse { 0%, 100% { transform: scale(0.85); opacity: .85; } 50% { transform: scale(1); opacity: 1; } }
+        @keyframes aia-orb-ring { 0%, 100% { transform: scale(0.9); opacity: .5; } 50% { transform: scale(1.15); opacity: 0; } }
+        @keyframes aia-orb-orbit {
+          from { transform: rotate(0deg) translateX(13px) rotate(0deg); }
+          to { transform: rotate(360deg) translateX(13px) rotate(-360deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .aia-thinking-orb-core, .aia-thinking-orb-ring, .aia-thinking-orb-dot { animation: none; }
+        }
         /* Style "plus pro" demandé le 27/09/2026 (l'outline Bootstrap brut, bordure grise fine,
            paraissait basique) : fond plein gris clair discret plutôt qu'un simple contour, sans
            bordure ni ombre — cohérent avec la palette noir/blanc/gris stricte du site (jamais de
@@ -998,8 +1030,8 @@ export function AiAssistant() {
             )}
             {turns.map((turn, i) => (
               <div className="aia-turn" key={i}>
-                <div className="aia-question">{turn.question}</div>
-                <div className="aia-answer">
+                <div className="aia-bubble aia-bubble-question">{turn.question}</div>
+                <div className={`aia-bubble aia-bubble-answer aia-answer${turn.error ? ' aia-bubble-error' : ''}`}>
                   {turn.streaming ? (
                     turn.streamText ? (
                       // Rendu markdown déjà pendant le streaming (demande du 30/09/2026 : "bien
@@ -1010,10 +1042,13 @@ export function AiAssistant() {
                       <span className="aia-stream-live" dangerouslySetInnerHTML={{ __html: renderMarkdown(turn.streamText) }} />
                     ) : (
                       <span className="aia-thinking">
-                        L'assistant réfléchit
-                        <span className="aia-thinking-dots">
-                          <span></span><span></span><span></span>
+                        <span className="aia-thinking-orb" aria-hidden="true">
+                          <span className="aia-thinking-orb-ring"></span>
+                          <span className="aia-thinking-orb-core"></span>
+                          <span className="aia-thinking-orb-dot"></span>
+                          <span className="aia-thinking-orb-dot"></span>
                         </span>
+                        L'assistant réfléchit...
                       </span>
                     )
                   ) : turn.error ? (
