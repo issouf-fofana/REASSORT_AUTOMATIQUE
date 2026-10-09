@@ -201,16 +201,32 @@ function extractGisement(question) {
  * Volontairement permissif (un faux positif ne fait que renvoyer 0 résultat, jamais une mauvaise
  * réponse) : mieux vaut tenter une recherche sur un nom mal découpé que de bloquer sur "précisez le
  * code EAN" pour une formulation aussi naturelle que "le prix de codys".
+ *
+ * Bug trouvé le 09/10/2026 en testant en conditions réelles : "quel est le prix de LA tomate
+ * roma ?" ne déclenchait AUCUNE recherche par nom (retombait sur "précisez le code EAN") — le
+ * déclencheur ne couvrait en réalité QUE "article"/"produit", jamais "prix de"/"stock de" malgré ce
+ * que ce commentaire prétendait depuis le 05/10/2026. Un déterminant (le/la/l'/du/de la/des) entre
+ * le déclencheur et le nom réel ("le prix de LA tomate roma") n'était pas non plus toléré. Second
+ * groupe de déclencheurs ajouté ci-dessous (prix/stock/combien coûte...), avec un déterminant
+ * optionnel avalé avant la capture.
  */
 const ARTICLE_NAME_TRIGGER_REGEX =
   /(?:article|produit|l'article|du produit)\s+(?!\d)([a-zàâäéèêëïîôöùûüç0-9][\w\s'àâäéèêëïîôöùûüç.,%+-]{1,60})(?:\s*[?.!]|$)/i;
+const ARTICLE_NAME_TRIGGER_REGEX_2 =
+  /(?:prix (?:de|du|d')|combien coûte|combien coute|stock (?:de|du|d'))\s+(?:le\s+|la\s+|l'\s*|les\s+|du\s+|de la\s+|des\s+|un\s+|une\s+)?(?!\d)([a-zàâäéèêëïîôöùûüç0-9][\w\s'àâäéèêëïîôöùûüç.,%+-]{1,60})(?:\s*[?.!]|$)/i;
+// Mots qui suivent "prix de"/"stock de" sans jamais désigner un article réel (ex: "le prix de
+// VENTE", "le prix ACTUEL") — déjà couverts par leurs propres mots-clés d'intention plus haut
+// (FALLBACK_INTENT_RULES), ARTICLE_NAME_TRIGGER_REGEX_2 les capturerait sinon à tort comme un nom
+// de produit et lancerait une recherche par nom vouée à ne rien trouver.
+const ARTICLE_NAME_FALSE_POSITIVES = new Set(['vente', 'ventes', 'achat', 'achats', 'actuel', 'actuelle', 'promo', 'promotion', 'revient', 'gros']);
 function extractArticleNameQuery(question) {
-  const match = (question || '').match(ARTICLE_NAME_TRIGGER_REGEX);
+  const match = (question || '').match(ARTICLE_NAME_TRIGGER_REGEX) || (question || '').match(ARTICLE_NAME_TRIGGER_REGEX_2);
   if (!match) return null;
   const captured = match[1].trim().replace(/\s+/g, ' ');
   // Un EAN capté comme "nom" (ex: "l'article 100144265") n'est pas un nom — extractEan s'en charge
   // déjà séparément et doit toujours primer sur ce chemin (vérifié en amont dans runSingleTool).
   if (/^\d+$/.test(captured)) return null;
+  if (ARTICLE_NAME_FALSE_POSITIVES.has(captured.toLowerCase())) return null;
   return captured.length >= 2 ? captured : null;
 }
 
