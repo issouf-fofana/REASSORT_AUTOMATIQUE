@@ -209,11 +209,22 @@ function extractGisement(question) {
  * le déclencheur et le nom réel ("le prix de LA tomate roma") n'était pas non plus toléré. Second
  * groupe de déclencheurs ajouté ci-dessous (prix/stock/combien coûte...), avec un déterminant
  * optionnel avalé avant la capture.
+ *
+ * Second bug trouvé le 09/10/2026, juste après le premier correctif, en testant en direct avec
+ * l'utilisateur : "le prix de vodka À HYPER HAYAT" et "vodka DANS LE MAG 035" capturaient le nom de
+ * magasin/l'emplacement comme s'il faisait partie du nom du produit ("vodka a hyper hayat", "vodka
+ * dans le mag 035") — la recherche RPOS ne trouvait alors évidemment rien, ce nom n'existe dans
+ * aucun catalogue. ARTICLE_NAME_STOP_REGEX coupe la capture dès qu'un connecteur de lieu apparaît
+ * (dans/à/au/chez/magasin/mag...), pour ne garder que le vrai nom de produit.
  */
 const ARTICLE_NAME_TRIGGER_REGEX =
   /(?:article|produit|l'article|du produit)\s+(?!\d)([a-zàâäéèêëïîôöùûüç0-9][\w\s'àâäéèêëïîôöùûüç.,%+-]{1,60})(?:\s*[?.!]|$)/i;
 const ARTICLE_NAME_TRIGGER_REGEX_2 =
   /(?:prix (?:de|du|d')|combien coûte|combien coute|stock (?:de|du|d'))\s+(?:le\s+|la\s+|l'\s*|les\s+|du\s+|de la\s+|des\s+|un\s+|une\s+)?(?!\d)([a-zàâäéèêëïîôöùûüç0-9][\w\s'àâäéèêëïîôöùûüç.,%+-]{1,60})(?:\s*[?.!]|$)/i;
+// Connecteur de lieu/magasin ("à hyper hayat", "dans le magasin 035", "au mag 110", "chez...") —
+// jamais une partie du nom de produit, toujours une précision de PÉRIMÈTRE déjà extraite séparément
+// par extractTargetShopReference. Coupe la capture du nom juste avant, plutôt que de l'avaler.
+const ARTICLE_NAME_STOP_REGEX = /\s+(?:dans|chez|au\s+magasin|au\s+mag\b|à\s+(?!la\b|l'|des\b)|a\s+(?=[A-ZÀ-Ü])).*/i;
 // Mots qui suivent "prix de"/"stock de" sans jamais désigner un article réel (ex: "le prix de
 // VENTE", "le prix ACTUEL") — déjà couverts par leurs propres mots-clés d'intention plus haut
 // (FALLBACK_INTENT_RULES), ARTICLE_NAME_TRIGGER_REGEX_2 les capturerait sinon à tort comme un nom
@@ -222,7 +233,7 @@ const ARTICLE_NAME_FALSE_POSITIVES = new Set(['vente', 'ventes', 'achat', 'achat
 function extractArticleNameQuery(question) {
   const match = (question || '').match(ARTICLE_NAME_TRIGGER_REGEX) || (question || '').match(ARTICLE_NAME_TRIGGER_REGEX_2);
   if (!match) return null;
-  const captured = match[1].trim().replace(/\s+/g, ' ');
+  const captured = match[1].replace(ARTICLE_NAME_STOP_REGEX, '').trim().replace(/\s+/g, ' ');
   // Un EAN capté comme "nom" (ex: "l'article 100144265") n'est pas un nom — extractEan s'en charge
   // déjà séparément et doit toujours primer sur ce chemin (vérifié en amont dans runSingleTool).
   if (/^\d+$/.test(captured)) return null;
