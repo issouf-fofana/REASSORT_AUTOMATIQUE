@@ -54,15 +54,30 @@ async function getUsageSummary({ days = 30, provider } = {}) {
   };
 }
 
-/** Usage total depuis toujours (pas de fenêtre de date) — pour la vue "global" demandée explicitement. */
+/** Usage total depuis toujours (pas de fenêtre de date) — pour la vue "global" demandée explicitement.
+ * dailyHistory ajouté le 09/10/2026 (demande : "je dois voir les détails par jour, mois... au lieu de
+ * voir globalement") — jusqu'ici calculé uniquement par getUsageSummary (fenêtre glissante de N
+ * jours), jamais pour la vue "Depuis toujours", qui ne remontait que des totaux agrégés sans détail
+ * temporel. Un `findMany` sur toute la table reste raisonnable ici (AiUsageLog ne grossit que d'un
+ * enregistrement par appel IA réussi, pas par token), même sans fenêtre de date. */
 async function getUsageAllTime({ provider } = {}) {
   const where = provider ? { provider } : {};
-  const agg = await prisma.aiUsageLog.aggregate({
-    where,
-    _count: true,
-    _sum: { promptTokens: true, completionTokens: true, totalTokens: true },
-    _min: { createdAt: true },
-  });
+  const [agg, logs] = await Promise.all([
+    prisma.aiUsageLog.aggregate({
+      where,
+      _count: true,
+      _sum: { promptTokens: true, completionTokens: true, totalTokens: true },
+      _min: { createdAt: true },
+    }),
+    prisma.aiUsageLog.findMany({ where, select: { totalTokens: true, createdAt: true } }),
+  ]);
+
+  const byDay = new Map();
+  for (const log of logs) {
+    const dayKey = log.createdAt.toISOString().slice(0, 10);
+    byDay.set(dayKey, (byDay.get(dayKey) || 0) + log.totalTokens);
+  }
+
   return {
     provider: provider || null,
     callCount: agg._count,
@@ -70,6 +85,7 @@ async function getUsageAllTime({ provider } = {}) {
     totalCompletionTokens: agg._sum.completionTokens || 0,
     totalTokens: agg._sum.totalTokens || 0,
     trackingSince: agg._min.createdAt,
+    dailyHistory: Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, tokens]) => ({ date, tokens })),
   };
 }
 

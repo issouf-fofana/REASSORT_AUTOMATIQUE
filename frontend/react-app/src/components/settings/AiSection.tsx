@@ -39,10 +39,96 @@ interface AiUsage {
   trackingSince?: string;
   byProvider: { provider: string; callCount: number; totalTokens: number }[];
   byContext: { context: string; callCount: number; totalTokens: number }[];
+  // Ajouté le 09/10/2026 (demande : "je dois voir les détails par jour, mois... au lieu de voir
+  // globalement") — une entrée par jour avec appel(s) IA, jamais interpolée pour les jours à zéro
+  // (cf. AiUsageDetailTable, qui regroupe par mois à la demande).
+  dailyHistory?: { date: string; tokens: number }[];
 }
 
 function formatTokenCount(n: number): string {
   return (n || 0).toLocaleString('fr-FR');
+}
+
+// Mois en français ("octobre 2026"), pour le regroupement mensuel de AiUsageDetailTable.
+const MONTH_LABELS = [
+  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+];
+
+function formatDayLabel(dateKey: string): string {
+  const d = new Date(dateKey + 'T00:00:00');
+  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-');
+  return `${MONTH_LABELS[parseInt(month, 10) - 1]} ${year}`;
+}
+
+// --- Détail jour/mois de la consommation (demande du 09/10/2026 : "je dois voir les détails par
+// jour, mois... au lieu de voir globalement") ---
+function AiUsageDetailTable({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
+  const [grouping, setGrouping] = useState<'day' | 'month'>('day');
+
+  if (!dailyHistory.length) return null;
+
+  // Le plus récent en premier (lecture naturelle : "qu'est-ce qui s'est passé récemment ?" avant de
+  // remonter dans le temps), inverse du tri chronologique renvoyé par le backend (utile, lui, pour
+  // tracer une courbe dans l'ordre).
+  const dayRows: [string, number][] = [...dailyHistory].reverse().map((d) => [d.date, d.tokens]);
+
+  const monthRows: [string, number][] = (() => {
+    const byMonth = new Map<string, number>();
+    for (const d of dailyHistory) {
+      const monthKey = d.date.slice(0, 7);
+      byMonth.set(monthKey, (byMonth.get(monthKey) || 0) + d.tokens);
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a));
+  })();
+
+  const rows = grouping === 'day' ? dayRows : monthRows;
+
+  return (
+    <div className="mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="small text-muted mb-0">Détail de la consommation</h6>
+        <div className="btn-group btn-group-sm" role="group">
+          <button
+            type="button"
+            className={`btn ${grouping === 'day' ? 'btn-dark' : 'btn-outline-secondary'}`}
+            onClick={() => setGrouping('day')}
+          >
+            Par jour
+          </button>
+          <button
+            type="button"
+            className={`btn ${grouping === 'month' ? 'btn-dark' : 'btn-outline-secondary'}`}
+            onClick={() => setGrouping('month')}
+          >
+            Par mois
+          </button>
+        </div>
+      </div>
+      <div className="table-responsive" style={{ maxHeight: 360, overflowY: 'auto' }}>
+        <table className="table table-sm table-hover mb-0">
+          <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fff' }}>
+            <tr>
+              <th>{grouping === 'day' ? 'Jour' : 'Mois'}</th>
+              <th className="text-end">Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([key, tokens]) => (
+              <tr key={key}>
+                <td>{grouping === 'day' ? formatDayLabel(key) : formatMonthLabel(key)}</td>
+                <td className="text-end">{formatTokenCount(tokens)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 // --- Carte "Clés API IA" ---
@@ -625,6 +711,7 @@ function AiUsageCard() {
             </div>
           </div>
         )}
+        {usage && !!usage.dailyHistory?.length && <AiUsageDetailTable dailyHistory={usage.dailyHistory} />}
       </div>
     </div>
   );
