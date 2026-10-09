@@ -37,7 +37,19 @@ async function getUsageSummary({ days = 30, provider } = {}) {
     byContext.set(ctxKey, c);
 
     const dayKey = log.createdAt.toISOString().slice(0, 10);
-    byDay.set(dayKey, (byDay.get(dayKey) || 0) + log.totalTokens);
+    // peakTimestamp/peakTokens ajoutés le 09/10/2026 (demande : "quand je mets le curseur sur la
+    // courbe je dois voir les détails, heure, minute, seconde... pas par jour figé") — pour CHAQUE
+    // jour du graphique, on retient l'appel IA individuel le plus coûteux en tokens de ce jour-là
+    // (pas juste le total du jour, déjà connu), avec son horodatage exact. Permet au survol d'un
+    // point du graphique principal d'afficher directement "le plus gros appel ce jour-là a eu lieu
+    // à 14:32:07" sans avoir à cliquer pour ouvrir le détail heure par heure.
+    const day = byDay.get(dayKey) || { tokens: 0, peakTokens: 0, peakTimestamp: null };
+    day.tokens += log.totalTokens;
+    if (log.totalTokens > day.peakTokens) {
+      day.peakTokens = log.totalTokens;
+      day.peakTimestamp = log.createdAt.toISOString();
+    }
+    byDay.set(dayKey, day);
   }
 
   return {
@@ -50,7 +62,9 @@ async function getUsageSummary({ days = 30, provider } = {}) {
     byProvider: Array.from(byProvider.values()).sort((a, b) => b.totalTokens - a.totalTokens),
     byContext: Array.from(byContext.values()).sort((a, b) => b.totalTokens - a.totalTokens),
     // Trié chronologiquement (pas par volume) : sert à tracer une courbe d'évolution jour par jour.
-    dailyHistory: Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, tokens]) => ({ date, tokens })),
+    dailyHistory: Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, d]) => ({ date, tokens: d.tokens, peakTimestamp: d.peakTimestamp, peakTokens: d.peakTokens })),
   };
 }
 
@@ -75,7 +89,13 @@ async function getUsageAllTime({ provider } = {}) {
   const byDay = new Map();
   for (const log of logs) {
     const dayKey = log.createdAt.toISOString().slice(0, 10);
-    byDay.set(dayKey, (byDay.get(dayKey) || 0) + log.totalTokens);
+    const day = byDay.get(dayKey) || { tokens: 0, peakTokens: 0, peakTimestamp: null };
+    day.tokens += log.totalTokens;
+    if (log.totalTokens > day.peakTokens) {
+      day.peakTokens = log.totalTokens;
+      day.peakTimestamp = log.createdAt.toISOString();
+    }
+    byDay.set(dayKey, day);
   }
 
   return {
@@ -85,7 +105,9 @@ async function getUsageAllTime({ provider } = {}) {
     totalCompletionTokens: agg._sum.completionTokens || 0,
     totalTokens: agg._sum.totalTokens || 0,
     trackingSince: agg._min.createdAt,
-    dailyHistory: Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, tokens]) => ({ date, tokens })),
+    dailyHistory: Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, d]) => ({ date, tokens: d.tokens, peakTimestamp: d.peakTimestamp, peakTokens: d.peakTokens })),
   };
 }
 

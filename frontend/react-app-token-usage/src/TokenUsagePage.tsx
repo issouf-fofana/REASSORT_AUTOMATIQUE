@@ -16,7 +16,11 @@ interface AiUsage {
   trackingSince?: string;
   byProvider: { provider: string; callCount: number; totalTokens: number }[];
   byContext: { context: string; callCount: number; totalTokens: number }[];
-  dailyHistory?: { date: string; tokens: number }[];
+  // peakTimestamp/peakTokens ajoutés le 09/10/2026 (demande : "quand je mets le curseur sur la
+  // courbe je dois voir les détails, heure, minute, seconde") — l'horodatage exact et le volume de
+  // l'appel IA le plus coûteux de ce jour, affichés directement dans l'infobulle au survol sans
+  // avoir à cliquer pour ouvrir le détail heure par heure.
+  dailyHistory?: { date: string; tokens: number; peakTimestamp: string | null; peakTokens: number }[];
 }
 
 function formatTokenCount(n: number): string {
@@ -102,6 +106,13 @@ function providerIcon(provider: string): string {
 
 function formatHourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}h`;
+}
+
+// Heure:minute:seconde exacte (demande du 09/10/2026 : "quand je mets le curseur sur la courbe je
+// dois voir les détails, heure, minute, seconde") — affichée dans l'infobulle de survol du
+// graphique principal, pas seulement au clic (modale heure par heure).
+function formatPreciseTime(isoTimestamp: string): string {
+  return new Date(isoTimestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 // --- Modale "détail heure par heure" (ouverte en cliquant un point du graphique) ---
@@ -223,7 +234,11 @@ function TokenUsageHourlyModal({
 }
 
 // --- Widget "Évolution" (carte dédiée, graphique seul) ---
-function TokenUsageChartCard({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
+function TokenUsageChartCard({
+  dailyHistory,
+}: {
+  dailyHistory: { date: string; tokens: number; peakTimestamp: string | null; peakTokens: number }[];
+}) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [drillDate, setDrillDate] = useState<string | null>(null);
   const [hourly, setHourly] = useState<{ hour: number; tokens: number }[] | null>(null);
@@ -256,6 +271,8 @@ function TokenUsageChartCard({ dailyHistory }: { dailyHistory: { date: string; t
     y: height - padding - (d.tokens / max) * (height - padding * 2),
     tokens: d.tokens,
     date: d.date,
+    peakTimestamp: d.peakTimestamp,
+    peakTokens: d.peakTokens,
   }));
 
   const smoothPath = coords.reduce((path, c, i) => {
@@ -372,7 +389,14 @@ function TokenUsageChartCard({ dailyHistory }: { dailyHistory: { date: string; t
                 zIndex: 1,
               }}
             >
-              <strong>{formatTokenCount(hovered.tokens)}</strong> tokens — {formatDayLabel(hovered.date)}
+              <div>
+                <strong>{formatTokenCount(hovered.tokens)}</strong> tokens — {formatDayLabel(hovered.date)}
+              </div>
+              {hovered.peakTimestamp && (
+                <div style={{ opacity: 0.85, fontSize: '0.78rem', marginTop: 2 }}>
+                  Pic : {formatPreciseTime(hovered.peakTimestamp)} ({formatTokenCount(hovered.peakTokens)} tokens en un appel)
+                </div>
+              )}
             </div>
           )}
         </div>
