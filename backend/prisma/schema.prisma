@@ -819,6 +819,10 @@ model ReceptionEvent {
   receptionStatus String // statut métier correspondant, pour lecture directe sans re-mapper
   observedAt      DateTime @default(now()) @map("observed_at")
 
+  // Ajouté le 09/10/2026 (même audit de scalabilité que ProposalLine) — volume plus faible ici
+  // (un événement par changement de statut de réception), mais ajouté par cohérence tant qu'on
+  // touche au schéma.
+  @@index([proposalOrderId])
   @@map("reception_events")
 }
 
@@ -1060,6 +1064,14 @@ model ProposalLine {
   trendCategory  String? @map("trend_category") // GROWING | DECLINING | STABLE | VOLATILE | UNKNOWN
   trendChangePct Float?  @map("trend_change_pct")
 
+  // Ajouté le 09/10/2026 (audit de scalabilité : "il faut pas que ça devienne lent de plus en
+  // plus" avec plus de magasins/utilisateurs) — ProposalLine est la table la plus volumineuse du
+  // système (une ligne par article proposé, par magasin, par génération) et était interrogée par
+  // proposalId/ean à plus de 30 endroits du code sans aucun index, donc en scan complet de table.
+  // Invisible avec peu de magasins/historique ; devient le principal facteur de ralentissement
+  // progressif à mesure que le volume grossit. L'index composite (proposalId, ean) couvre aussi les
+  // recherches sur proposalId seul (Postgres utilise la colonne de tête d'un index composite).
+  @@index([proposalId, ean])
   @@map("proposal_lines")
 }
 
@@ -1426,6 +1438,9 @@ model AiForecastLine {
   quantitySuggested Float   @map("quantity_suggested")
   reasoning         String? // courte justification renvoyée par le LLM, affichée à titre indicatif
 
+  // Ajouté le 09/10/2026 (même audit de scalabilité que ProposalLine) — volume plus faible ici
+  // (analyses IA à la demande), mais ajouté par cohérence tant qu'on touche au schéma.
+  @@index([runId])
   @@map("ai_forecast_lines")
 }
 
