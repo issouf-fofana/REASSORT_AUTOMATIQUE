@@ -67,6 +67,61 @@ function formatMonthLabel(monthKey: string): string {
 
 // --- Détail jour/mois de la consommation (demande du 09/10/2026 : "je dois voir les détails par
 // jour, mois... au lieu de voir globalement") ---
+// Graphique d'évolution (demande du 09/10/2026, suite au détail jour/mois ajouté juste avant :
+// "ajoute un graphique d'évolution aussi") — toujours par jour, même quand le tableau en dessous est
+// basculé sur "Par mois" : une courbe avec seulement 2-3 points mensuels serait peu lisible, alors
+// que le détail jour par jour montre la vraie tendance. SVG inline fait main (même approche que
+// buildLineChart dans AiAssistant.tsx) plutôt qu'une lib de graphiques, pour ne pas alourdir le
+// bundle de cette app pour un seul graphique simple.
+function AiUsageChart({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
+  if (dailyHistory.length < 2) return null;
+
+  const width = 720;
+  const height = 180;
+  const padding = 36;
+  const values = dailyHistory.map((d) => d.tokens);
+  const max = Math.max(...values, 1);
+  const stepX = (width - padding * 2) / Math.max(values.length - 1, 1);
+
+  const coords = dailyHistory.map((d, i) => ({
+    x: padding + i * stepX,
+    y: height - padding - (d.tokens / max) * (height - padding * 2),
+    tokens: d.tokens,
+    date: d.date,
+  }));
+
+  const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
+  const areaPoints = `${padding},${height - padding} ${points} ${width - padding},${height - padding}`;
+
+  const gridLines = [0, 0.5, 1].map((frac) => {
+    const y = padding + frac * (height - padding * 2);
+    return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} />;
+  });
+
+  return (
+    <div className="mt-3">
+      <h6 className="small text-muted mb-2">Évolution (par jour)</h6>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+        {gridLines}
+        <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.08} stroke="none" />
+        <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {coords.map((c) => (
+          <g key={c.date}>
+            <circle cx={c.x} cy={c.y} r={9} fill="transparent" style={{ cursor: 'pointer' }}>
+              <title>{`${formatDayLabel(c.date)} : ${formatTokenCount(c.tokens)} tokens`}</title>
+            </circle>
+            <circle cx={c.x} cy={c.y} r={2.5} fill="#1B2A4A" style={{ pointerEvents: 'none' }} />
+          </g>
+        ))}
+      </svg>
+      <div className="d-flex justify-content-between small text-muted mt-1">
+        <span>{formatDayLabel(dailyHistory[0].date)}</span>
+        <span>{formatDayLabel(dailyHistory[dailyHistory.length - 1].date)}</span>
+      </div>
+    </div>
+  );
+}
+
 function AiUsageDetailTable({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
   const [grouping, setGrouping] = useState<'day' | 'month'>('day');
 
@@ -711,6 +766,7 @@ function AiUsageCard() {
             </div>
           </div>
         )}
+        {usage && !!usage.dailyHistory?.length && <AiUsageChart dailyHistory={usage.dailyHistory} />}
         {usage && !!usage.dailyHistory?.length && <AiUsageDetailTable dailyHistory={usage.dailyHistory} />}
       </div>
     </div>
