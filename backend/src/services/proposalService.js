@@ -53,19 +53,36 @@ async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, d
     if (fileLines) return { lines: fileLines, source: 'file' };
   }
 
-  // select explicite (pas juste findMany() sans select) : sur les périodes longues (LAST_365_DAYS),
-  // un magasin à fort volume peut dépasser le million de lignes — le driver Rust/N-API de Prisma
-  // remonte alors "Failed to convert rust String into napi string" de façon intermittente pendant
-  // la sérialisation du résultat (bug connu au-delà d'un certain volume de texte cumulé). Ne
-  // récupérer que les champs réellement utilisés par mappedDbLines ci-dessous réduit nettement le
-  // volume sérialisé (id/rposPosId/rposShopId/syncedAt/receiptId répétés inutilement sur chaque
-  // ligne ne servent à rien ici).
-  const dbLines = await prisma.salesLine.findMany({
-    where: { rposShopId: shopId, date: { gte: new Date(dateStart), lt: new Date(dateEnd) } },
-    select: { ean: true, label: true, date: true, quantity: true, revenueExclTax: true, revenueInclTax: true },
-  });
+  // Agrégé par (article, jour) directement en SQL depuis le 09/10/2026 (audit de scalabilité : "il
+  // faut pas que ça devienne lent de plus en plus" — chantier n°1, reporté puis repris en version
+  // allégée) — auparavant un `findMany` SANS agrégation ramenait UNE LIGNE PAR VENTE INDIVIDUELLE
+  // (select explicite déjà en place pour limiter les colonnes, mais pas les lignes elles-mêmes) :
+  // sur LAST_365_DAYS, un magasin à fort volume pouvait dépasser le million de lignes transférées,
+  // avec un bug Prisma connu au-delà d'un certain volume ("Failed to convert rust String into napi
+  // string", cf. commentaire historique ci-dessous conservé pour mémoire). Le calcul en aval
+  // (computeParetoFromLines) n'a besoin que du total PAR JOUR par article (daily_history,
+  // weekday_factors, lissage exponentiel) — jamais de la ligne de vente individuelle — donc cette
+  // agrégation journalière ne change RIEN au résultat final, juste au volume transporté : un
+  // magasin qui vend 50 fois le même article un jour donné ramène maintenant 1 ligne pour ce
+  // (article, jour) au lieu de 50. label_1 : on garde le dernier libellé vu par jour (comportement
+  // identique à l'ancien `.map` ligne à ligne, qui prenait simplement le libellé de chaque ligne).
+  const dbDailyRows = await prisma.$queryRaw`
+    SELECT
+      ean,
+      (array_agg(label ORDER BY date DESC))[1] AS label,
+      date_trunc('day', date) AS day,
+      MIN(date) AS "minDate",
+      SUM(quantity) AS quantity,
+      SUM(revenue_excl_tax) AS "revenueExclTax",
+      SUM(revenue_incl_tax) AS "revenueInclTax"
+    FROM sales_lines
+    WHERE rpos_shop_id = ${shopId}
+      AND date >= ${new Date(dateStart)}
+      AND date < ${new Date(dateEnd)}
+    GROUP BY ean, date_trunc('day', date)
+  `;
 
-  if (dbLines.length === 0) {
+  if (dbDailyRows.length === 0) {
     const rposLines = await rpos.getProductLinesForPeriod(posId, shopId, dateStart, dateEnd);
     return { lines: rposLines, source: 'rpos' };
   }
@@ -74,12 +91,23 @@ async function getSalesLinesForPeriod(posId, shopId, shopReference, dateStart, d
   // du CA TTC magasin (shopTotalRevenueInclTax) tombait systématiquement à 0 pour toute génération
   // basée sur la base locale — la quasi-totalité des cas en pratique — au lieu du vrai TTC déjà
   // stocké en base (SalesLine.revenueInclTax, alimenté par salesBackfillService/salesSyncJob).
-  const mappedDbLines = dbLines.map((l) => ({ ean: l.ean, label_1: l.label, quantity: l.quantity, total_excl_tax: l.revenueExclTax, total_incl_tax: l.revenueInclTax, date: l.date.toISOString() }));
+  // SUM(...)::numeric remonté par $queryRaw en chaîne de caractères (comportement standard du driver
+  // pg pour NUMERIC/bigint) — Number(...) explicite pour repasser en flottant comme computeParetoFromLines
+  // l'attend (toFloat() y est de toute façon appliqué, mais autant repartir d'un vrai number ici).
+  const mappedDbLines = dbDailyRows.map((l) => ({
+    ean: l.ean,
+    label_1: l.label,
+    quantity: Number(l.quantity),
+    total_excl_tax: Number(l.revenueExclTax),
+    total_incl_tax: l.revenueInclTax !== null ? Number(l.revenueInclTax) : null,
+    date: new Date(l.day).toISOString(),
+  }));
 
   // Couverture réelle vs période demandée : la première vente locale dans la fenêtre peut être
   // largement postérieure à dateStart si le backfill initial n'a jamais couvert le début de la
-  // période (cas constaté). Un simple sondage de la borne min suffit, sans lire toute la table.
-  const earliestLocal = dbLines.reduce((min, l) => (l.date < min ? l.date : min), dbLines[0].date);
+  // période (cas constaté). minDate calculé directement par la requête SQL ci-dessus (MIN(date)
+  // par groupe), on en prend le minimum global ici plutôt que de relire toute la table.
+  const earliestLocal = dbDailyRows.reduce((min, l) => (l.minDate < min ? l.minDate : min), dbDailyRows[0].minDate);
   const requestedStart = new Date(dateStart);
   const gapHours = (earliestLocal.getTime() - requestedStart.getTime()) / (60 * 60 * 1000);
 
