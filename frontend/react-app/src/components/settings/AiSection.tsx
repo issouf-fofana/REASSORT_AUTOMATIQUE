@@ -106,8 +106,15 @@ function AiUsageHourlyModal({
     tokens: h.tokens,
     hour: h.hour,
   }));
-  const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
-  const areaPoints = coords.length ? `${padding},${height - padding} ${points} ${width - padding},${height - padding}` : '';
+  const smoothPath = coords.length
+    ? coords.reduce((path, c, i) => {
+        if (i === 0) return `M ${c.x},${c.y}`;
+        const prev = coords[i - 1];
+        const midX = (prev.x + c.x) / 2;
+        return `${path} C ${midX},${prev.y} ${midX},${c.y} ${c.x},${c.y}`;
+      }, '')
+    : '';
+  const smoothAreaPath = coords.length ? `${smoothPath} L ${width - padding},${height - padding} L ${padding},${height - padding} Z` : '';
 
   return (
     <>
@@ -141,12 +148,18 @@ function AiUsageHourlyModal({
                     <div className="text-center text-muted small py-4">Aucun appel IA enregistré ce jour-là.</div>
                   ) : (
                     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+                      <defs>
+                        <linearGradient id="aiUsageHourlyGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#1B2A4A" stopOpacity={0.22} />
+                          <stop offset="100%" stopColor="#1B2A4A" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
                       {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
                         const y = padding + frac * (height - padding * 2);
                         return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />;
                       })}
-                      <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.1} stroke="none" />
-                      <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={smoothAreaPath} fill="url(#aiUsageHourlyGradient)" stroke="none" />
+                      <path d={smoothPath} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
                       {coords.map((c) => (
                         <g key={c.hour}>
                           {/* Étiquette de donnée visible en permanence sur le pic — pas seulement au survol
@@ -201,22 +214,45 @@ function AiUsageChart({ dailyHistory }: { dailyHistory: { date: string; tokens: 
 
   if (dailyHistory.length < 2) return null;
 
-  const width = 720;
-  const height = 220;
+  const width = 760;
+  const height = 240;
   const padding = 40;
+  const leftPadding = 60;
   const values = dailyHistory.map((d) => d.tokens);
   const max = Math.max(...values, 1);
-  const stepX = (width - padding * 2) / Math.max(values.length - 1, 1);
+  const stepX = (width - leftPadding - padding) / Math.max(values.length - 1, 1);
 
   const coords = dailyHistory.map((d, i) => ({
-    x: padding + i * stepX,
+    x: leftPadding + i * stepX,
     y: height - padding - (d.tokens / max) * (height - padding * 2),
     tokens: d.tokens,
     date: d.date,
   }));
 
-  const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
-  const areaPoints = `${padding},${height - padding} ${points} ${width - padding},${height - padding}`;
+  // Courbe lissée en spline cubique (demande du 09/10/2026, maquette fournie : "je veux ce style" —
+  // un style de dashboard pro avec une courbe arrondie, pas des segments droits entre points) :
+  // chaque segment passe par deux points de contrôle horizontaux à mi-chemin entre les points voisins
+  // (cardinal spline simplifiée), qui produit des courbes lisses à travers des données irrégulières
+  // sans jamais dépasser les valeurs réelles aux points eux-mêmes (contrairement à une spline de
+  // Catmull-Rom non contrainte, qui peut dépasser la valeur en présence d'un pic brutal).
+  const smoothPath = coords.length
+    ? coords.reduce((path, c, i) => {
+        if (i === 0) return `M ${c.x},${c.y}`;
+        const prev = coords[i - 1];
+        const midX = (prev.x + c.x) / 2;
+        return `${path} C ${midX},${prev.y} ${midX},${c.y} ${c.x},${c.y}`;
+      }, '')
+    : '';
+  const smoothAreaPath = coords.length
+    ? `${smoothPath} L ${width - padding},${height - padding} L ${leftPadding},${height - padding} Z`
+    : '';
+
+  // Repères de l'axe Y (demande : "je veux ce style", maquette avec $200k/$150k/.../$0 à gauche) —
+  // mêmes fractions que les lignes de grille en pointillés, converties en valeur de tokens.
+  const yAxisTicks = [1, 0.75, 0.5, 0.25, 0].map((frac) => ({
+    y: padding + (1 - frac) * (height - padding * 2),
+    value: Math.round(max * frac),
+  }));
 
   // Pics locaux (demande explicite : "ajoute les étiquette de donné") — toutes les valeurs
   // n'affichent pas leur chiffre en permanence (ça surchargerait vite le graphique au-delà de ~15
@@ -265,12 +301,25 @@ function AiUsageChart({ dailyHistory }: { dailyHistory: { date: string; tokens: 
           style={{ width: '100%', height: 'auto', overflow: 'visible' }}
           onMouseLeave={() => setHoverIdx(null)}
         >
-          {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-            const y = padding + frac * (height - padding * 2);
-            return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />;
-          })}
-          <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.1} stroke="none" />
-          <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+          <defs>
+            {/* Dégradé vers transparent (demande du 09/10/2026, maquette fournie : "je veux ce
+                style") — remplace l'aplat uni précédent par un fondu, comme le vert de la
+                maquette, mais en marine pour rester dans la palette du site. */}
+            <linearGradient id="aiUsageAreaGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#1B2A4A" stopOpacity={0.22} />
+              <stop offset="100%" stopColor="#1B2A4A" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          {yAxisTicks.map((tick) => (
+            <g key={tick.y}>
+              <line x1={leftPadding} y1={tick.y} x2={width - padding} y2={tick.y} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />
+              <text x={leftPadding - 10} y={tick.y + 4} textAnchor="end" fontSize="11" fill="#9aa4b2">
+                {formatTokenCount(tick.value)}
+              </text>
+            </g>
+          ))}
+          <path d={smoothAreaPath} fill="url(#aiUsageAreaGradient)" stroke="none" />
+          <path d={smoothPath} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
           {hovered && <line x1={hovered.x} y1={padding} x2={hovered.x} y2={height - padding} stroke="#1B2A4A" strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />}
           {coords.map((c, i) => (
             <g key={c.date}>
@@ -894,12 +943,35 @@ function AiUsageCard() {
     <div className="card mt-3">
       <div className="card-header d-flex justify-content-between align-items-center">
         <h5 className="card-title mb-0">Consommation de tokens</h5>
-        <select className="form-select form-select-sm" style={{ width: 'auto' }} value={period} onChange={(e) => setPeriod(e.target.value)}>
-          <option value="7">7 derniers jours</option>
-          <option value="30">30 derniers jours</option>
-          <option value="90">90 derniers jours</option>
-          <option value="all">Depuis toujours</option>
-        </select>
+        {/* Pilules de période groupées (demande du 09/10/2026, maquette fournie : "je veux ce
+            style") — remplace le <select> natif par des boutons, plus proche du sélecteur
+            7d/30d/90d de la maquette ; "Depuis toujours" en 4e pilule, pas dans la maquette mais
+            utile ici (déjà existant avant ce restyle). */}
+        <div className="btn-group btn-group-sm" role="group" style={{ backgroundColor: '#F1F3F5', borderRadius: 999, padding: 3 }}>
+          {[
+            { value: '7', label: '7j' },
+            { value: '30', label: '30j' },
+            { value: '90', label: '90j' },
+            { value: 'all', label: 'Tout' },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className="btn"
+              style={{
+                borderRadius: 999,
+                border: 'none',
+                padding: '.3rem .85rem',
+                fontWeight: 600,
+                backgroundColor: period === opt.value ? '#1B2A4A' : 'transparent',
+                color: period === opt.value ? '#fff' : '#5B6B85',
+              }}
+              onClick={() => setPeriod(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="card-body">
         <div className="alert alert-light border small mb-3">
