@@ -2657,7 +2657,14 @@ async function getAdminDashboard(shopIdFilter = null) {
   // un historique complet).
   const dashboardWindowStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  const [pendingCounts, validatedProposals, allValidatedLines, openImprovements, predictionOutcomes] = await Promise.all([
+  // Seuils par défaut (configService.js DEFAULTS) utilisés tels quels pour ce calcul agrégé multi-
+  // magasins : la config précise diffère parfois d'un magasin à l'autre, mais interroger getConfig
+  // par magasin ici (N+1) ralentirait ce tableau de bord pour un gain de précision marginal sur un
+  // indicateur de TENDANCE globale, pas une mesure exacte par magasin.
+  const DEFAULT_SAFETY_STOCK_RATIO = 0.5;
+  const DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER = 1.5;
+
+  const [pendingCounts, validatedProposals, perShopLineStats, openImprovements, predictionOutcomes] = await Promise.all([
     prisma.proposal.groupBy({
       by: ['rposShopId'],
       where: { rposShopId: { in: shopIds }, status: 'GENERATED' },
@@ -2668,20 +2675,52 @@ async function getAdminDashboard(shopIdFilter = null) {
       select: { rposShopId: true, validatedAt: true, rposOrderReference: true },
       orderBy: { validatedAt: 'desc' },
     }),
-    prisma.proposalLine.findMany({
-      where: { proposal: { rposShopId: { in: shopIds }, status: 'VALIDATED', validatedAt: { gte: dashboardWindowStart } } },
-      select: {
-        proposal: { select: { rposShopId: true } },
-        wasExcluded: true,
-        excludedOutOfScope: true,
-        quantitySuggested: true,
-        quantityValidated: true,
-        daysUntilStockout: true,
-        avgWeeklySales: true,
-        quantityAiOriginal: true,
-        actualSalesQuantity: true,
-      },
-    }),
+    // Audit de scalabilité du 09/10/2026 ("il faut pas que ça devienne lent de plus en plus" avec
+    // plus de magasins/utilisateurs) : chargeait auparavant TOUTES les lignes validées de TOUS les
+    // magasins en mémoire Node (potentiellement des millions de lignes avec beaucoup de magasins/
+    // d'historique), pour les additionner une par une en JavaScript. Un seul agrégat SQL par
+    // magasin fait maintenant ce calcul directement dans Postgres (COUNT/SUM conditionnels, via
+    // FILTER) — jamais plus qu'une ligne de résultat par magasin transférée au serveur Node, quel
+    // que soit le nombre de lignes réellement agrégées. Les seuils de surstock/rupture sont ceux
+    // par défaut (DEFAULT_SAFETY_STOCK_RATIO/DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER déclarés ci-
+    // dessus), injectés en paramètres de requête plutôt qu'en dur dans le SQL — mêmes valeurs que
+    // le calcul JS remplacé, comportement identique.
+    shopIds.length
+      ? prisma.$queryRaw`
+          SELECT
+            p.rpos_shop_id AS "rposShopId",
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope) AS total,
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded AND pl.quantity_validated = pl.quantity_suggested) AS unchanged,
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded AND pl.quantity_validated IS DISTINCT FROM pl.quantity_suggested) AS modified,
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND pl.was_excluded) AS rejected,
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded AND pl.days_until_stockout IS NOT NULL) AS "stockoutEligible",
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded AND pl.days_until_stockout IS NOT NULL AND pl.days_until_stockout <= 0) AS stockout,
+            COUNT(*) FILTER (WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded AND pl.avg_weekly_sales IS NOT NULL AND pl.quantity_validated IS NOT NULL) AS "overstockEligible",
+            COUNT(*) FILTER (
+              WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded
+                AND pl.avg_weekly_sales IS NOT NULL AND pl.quantity_validated IS NOT NULL
+                AND pl.avg_weekly_sales * (1 + ${DEFAULT_SAFETY_STOCK_RATIO}) > 0
+                AND pl.quantity_validated > pl.avg_weekly_sales * (1 + ${DEFAULT_SAFETY_STOCK_RATIO}) * ${DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER}
+            ) AS overstock,
+            COUNT(*) FILTER (
+              WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded
+                AND pl.quantity_ai_original IS NOT NULL AND pl.quantity_validated IS NOT NULL AND pl.actual_sales_quantity IS NOT NULL
+                AND pl.quantity_ai_original IS DISTINCT FROM pl.quantity_validated
+            ) AS "shadowCorrected",
+            COUNT(*) FILTER (
+              WHERE NOT pl.excluded_out_of_scope AND NOT pl.was_excluded
+                AND pl.quantity_ai_original IS NOT NULL AND pl.quantity_validated IS NOT NULL AND pl.actual_sales_quantity IS NOT NULL
+                AND pl.quantity_ai_original IS DISTINCT FROM pl.quantity_validated
+                AND ABS(pl.quantity_ai_original - pl.actual_sales_quantity) < ABS(pl.quantity_validated - pl.actual_sales_quantity)
+            ) AS "shadowAiRight"
+          FROM proposal_lines pl
+          JOIN proposals p ON p.id = pl."proposalId"
+          WHERE p.rpos_shop_id = ANY(${shopIds})
+            AND p.status = 'VALIDATED'
+            AND p.validated_at >= ${dashboardWindowStart}
+          GROUP BY p.rpos_shop_id
+        `
+      : Promise.resolve([]),
     // Constats du Conseiller d'amélioration (§44-46, AI Center) : les plus prioritaires d'abord,
     // pour donner une vraie vue "santé du système IA" sur ce même tableau de bord plutôt que de
     // laisser cette information isolée sur la page Améliorations IA.
@@ -2720,14 +2759,10 @@ async function getAdminDashboard(shopIdFilter = null) {
     validatedByShop.get(p.rposShopId).push(p);
   }
 
-  // Seuils par défaut (configService.js DEFAULTS) utilisés tels quels pour ce calcul agrégé multi-
-  // magasins : la config précise diffère parfois d'un magasin à l'autre, mais interroger getConfig
-  // par magasin ici (N+1) ralentirait ce tableau de bord pour un gain de précision marginal sur un
-  // indicateur de TENDANCE globale, pas une mesure exacte par magasin (cf. commentaire
-  // dashboardWindowStart ci-dessus, même logique).
-  const DEFAULT_SAFETY_STOCK_RATIO = 0.5;
-  const DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER = 1.5;
-
+  // perShopLineStats vient maintenant déjà agrégé par Postgres (une ligne par magasin, cf. la
+  // requête SQL ci-dessus) — plus de boucle JS sur chaque ligne individuelle. $queryRaw renvoie les
+  // COUNT(...) en BigInt : convertis explicitement en Number (jamais assez grand pour dépasser
+  // Number.MAX_SAFE_INTEGER sur ce volume de lignes, même avec beaucoup de magasins).
   let totalLines = 0;
   let unchangedLines = 0;
   let modifiedLines = 0;
@@ -2744,70 +2779,29 @@ async function getAdminDashboard(shopIdFilter = null) {
   let aiShadowAiRight = 0;
   const perShopLines = new Map();
 
-  // Toutes les lignes d'une proposition validée, exclues comprises (§23 : taux d'acceptation,
-  // de modification ET de rejet — jusqu'ici seule "acceptation sans modification" était calculée
-  // sous le nom historique "conformité", le rejet et la modification n'étaient jamais distingués).
-  for (const line of allValidatedLines) {
-    // Une ligne exclue par le filtrage de sécurité par périmètre de rayon (Rayonniste/Chef de
-    // département validant hors de son rayon assigné, cf. routes/reassort/proposals.js) ne reflète
-    // aucune décision humaine sur CETTE ligne — l'inclure fausserait le taux de rejet métier avec
-    // du bruit purement lié aux permissions. Exclue du dénominateur entier, pas seulement du rejet.
-    if (line.excludedOutOfScope) continue;
+  for (const row of perShopLineStats) {
+    const bucket = {
+      total: Number(row.total),
+      unchanged: Number(row.unchanged),
+      modified: Number(row.modified),
+      rejected: Number(row.rejected),
+      stockout: Number(row.stockout),
+      stockoutEligible: Number(row.stockoutEligible),
+      overstock: Number(row.overstock),
+      overstockEligible: Number(row.overstockEligible),
+    };
+    perShopLines.set(row.rposShopId, bucket);
 
-    const shopId = line.proposal.rposShopId;
-    if (!perShopLines.has(shopId)) {
-      perShopLines.set(shopId, {
-        total: 0, unchanged: 0, modified: 0, rejected: 0,
-        stockout: 0, stockoutEligible: 0, overstock: 0, overstockEligible: 0,
-      });
-    }
-    const bucket = perShopLines.get(shopId);
-
-    totalLines += 1;
-    bucket.total += 1;
-
-    if (line.wasExcluded) {
-      rejectedLines += 1;
-      bucket.rejected += 1;
-      continue; // une ligne rejetée n'a pas de quantité validée à comparer, ni de risque rupture/surstock à mesurer
-    }
-
-    if (line.quantityValidated === line.quantitySuggested) {
-      unchangedLines += 1;
-      bucket.unchanged += 1;
-    } else {
-      modifiedLines += 1;
-      bucket.modified += 1;
-    }
-    if (line.daysUntilStockout !== null && line.daysUntilStockout !== undefined) {
-      stockoutEligible += 1;
-      bucket.stockoutEligible += 1;
-      if (line.daysUntilStockout <= 0) {
-        stockoutLines += 1;
-        bucket.stockout += 1;
-      }
-    }
-    if (line.avgWeeklySales !== null && line.avgWeeklySales !== undefined && line.quantityValidated !== null) {
-      overstockEligible += 1;
-      bucket.overstockEligible += 1;
-      const theoreticalNeed = line.avgWeeklySales * (1 + DEFAULT_SAFETY_STOCK_RATIO);
-      if (theoreticalNeed > 0 && line.quantityValidated > theoreticalNeed * DEFAULT_OVERSTOCK_THRESHOLD_MULTIPLIER) {
-        overstockLines += 1;
-        bucket.overstock += 1;
-      }
-    }
-
-    if (
-      line.quantityAiOriginal !== null && line.quantityAiOriginal !== undefined &&
-      line.quantityValidated !== null && line.quantityValidated !== undefined &&
-      line.actualSalesQuantity !== null && line.actualSalesQuantity !== undefined &&
-      line.quantityAiOriginal !== line.quantityValidated
-    ) {
-      aiShadowCorrected += 1;
-      const aiError = Math.abs(line.quantityAiOriginal - line.actualSalesQuantity);
-      const humanError = Math.abs(line.quantityValidated - line.actualSalesQuantity);
-      if (aiError < humanError) aiShadowAiRight += 1;
-    }
+    totalLines += bucket.total;
+    unchangedLines += bucket.unchanged;
+    modifiedLines += bucket.modified;
+    rejectedLines += bucket.rejected;
+    stockoutLines += bucket.stockout;
+    stockoutEligible += bucket.stockoutEligible;
+    overstockLines += bucket.overstock;
+    overstockEligible += bucket.overstockEligible;
+    aiShadowCorrected += Number(row.shadowCorrected);
+    aiShadowAiRight += Number(row.shadowAiRight);
   }
 
   // MAE (erreur absolue moyenne), biais (erreur moyenne signée : positif = l'IA sous-estime en
