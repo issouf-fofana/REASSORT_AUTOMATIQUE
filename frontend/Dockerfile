@@ -90,6 +90,15 @@ RUN npm ci
 COPY react-app-purchase-list/ .
 RUN npm run build
 
+# Stage de build de Consommation de tokens, extraite de Paramètres > Config IA (09/10/2026, demande
+# explicite : "mettre cette partie à part" — page dédiée, servie sous /token-usage).
+FROM node:20-alpine AS token-usage-builder
+WORKDIR /app
+COPY react-app-token-usage/package*.json ./
+RUN npm ci
+COPY react-app-token-usage/ .
+RUN npm run build
+
 # Stage de build de Proposition de commande migrée vers React (bascule complète le 24/09/2026 :
 # génération, envoi RPOS, historique de la semaine, analytics — servie sous /purchase-order,
 # purchase-order.html devenu purchase-order.old.html).
@@ -207,6 +216,10 @@ COPY --from=user-guide-builder /app/dist /usr/share/nginx/html/user-guide-app
 # Résultat du build React (Historique des commandes), servi sous /purchase-list-app/ par une règle
 # nginx dédiée (voir nginx.conf).
 COPY --from=purchase-list-builder /app/dist /usr/share/nginx/html/purchase-list-app
+
+# Résultat du build React (Consommation de tokens), servi sous /token-usage-app/ par une règle
+# nginx dédiée (voir nginx.conf).
+COPY --from=token-usage-builder /app/dist /usr/share/nginx/html/token-usage-app
 
 # Résultat du build React (Proposition de commande), servi sous /purchase-order-app/ par une règle
 # nginx dédiée (voir nginx.conf).

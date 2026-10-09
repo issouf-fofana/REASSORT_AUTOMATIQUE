@@ -171,6 +171,18 @@
                          <span class="sidebar-text">Destinataires email</span>
                     </a>
                </li>
+               <!-- Consommation de tokens, extraite de Paramètres > Config IA (09/10/2026, demande
+                    explicite : "mettre cette partie à part, supprimer de l'autre côté") — page dédiée,
+                    même visibilité ADMIN-only que les deux liens ci-dessus (masqué par défaut,
+                    révélé par reassort-auth.js). -->
+               <li class="nav-item" id="menu-item-token-usage" data-nav-item="token-usage.html" data-collapse-group="admin" style="display:none;">
+                    <a href="/token-usage" class="nav-link d-flex align-items-center">
+                         <span class="sidebar-icon">
+                              <iconify-icon icon="solar:bolt-bold-duotone" class="icon icon-xs me-2"></iconify-icon>
+                         </span>
+                         <span class="sidebar-text">Consommation de tokens</span>
+                    </a>
+               </li>
                <!-- Sous-en-tête interne (pas sidebar-heading : pas un nouveau groupe PILOTAGE/
                     RÉASSORT/ADMINISTRATION, juste une séparation visuelle entre "Utilisateurs" et les
                     6 liens de config technique ci-dessous — demande du 16/09/2026 : "j'ai l'impression
