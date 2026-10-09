@@ -67,18 +67,143 @@ function formatMonthLabel(monthKey: string): string {
 
 // --- Détail jour/mois de la consommation (demande du 09/10/2026 : "je dois voir les détails par
 // jour, mois... au lieu de voir globalement") ---
+function formatHourLabel(hour: number): string {
+  return `${String(hour).padStart(2, '0')}h`;
+}
+
+// Détail heure par heure d'UN jour, ouvert en cliquant un point du graphique par jour (demande du
+// 09/10/2026 : "je veux voir quelle heure il a consommé beaucoup") — même esprit de graphique que
+// AiUsageChart (aire + courbe + étiquettes), mais sur 24 points fixes au lieu d'un nombre de jours
+// variable. Chargé à la demande (un seul jour à la fois), jamais précalculé pour toute la période.
+function AiUsageHourlyModal({
+  date,
+  hourlyHistory,
+  totalTokens,
+  callCount,
+  loading,
+  error,
+  onClose,
+}: {
+  date: string;
+  hourlyHistory: { hour: number; tokens: number }[] | null;
+  totalTokens: number | null;
+  callCount: number | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const width = 720;
+  const height = 220;
+  const padding = 40;
+  const hasData = !!hourlyHistory && hourlyHistory.some((h) => h.tokens > 0);
+  const max = hasData ? Math.max(...hourlyHistory!.map((h) => h.tokens), 1) : 1;
+  const stepX = hourlyHistory ? (width - padding * 2) / Math.max(hourlyHistory.length - 1, 1) : 0;
+  const peakHour = hasData ? hourlyHistory!.reduce((best, h) => (h.tokens > best.tokens ? h : best)) : null;
+
+  const coords = (hourlyHistory || []).map((h, i) => ({
+    x: padding + i * stepX,
+    y: height - padding - (h.tokens / max) * (height - padding * 2),
+    tokens: h.tokens,
+    hour: h.hour,
+  }));
+  const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
+  const areaPoints = coords.length ? `${padding},${height - padding} ${points} ${width - padding},${height - padding}` : '';
+
+  return (
+    <>
+      <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
+        <div className="modal-dialog modal-lg modal-dialog-centered" role="document">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Détail heure par heure — {formatDayLabel(date)}</h5>
+              <button type="button" className="btn-close" onClick={onClose}></button>
+            </div>
+            <div className="modal-body">
+              {loading && <div className="text-center text-muted py-4">Chargement...</div>}
+              {error && <div className="alert alert-danger small">{error}</div>}
+              {!loading && !error && hourlyHistory && (
+                <>
+                  <div className="row text-center mb-3">
+                    <div className="col">
+                      <div className="fs-5 fw-semibold">{formatTokenCount(totalTokens || 0)}</div>
+                      <div className="small text-muted">Total tokens ce jour</div>
+                    </div>
+                    <div className="col">
+                      <div className="fs-5 fw-semibold">{formatTokenCount(callCount || 0)}</div>
+                      <div className="small text-muted">Appels</div>
+                    </div>
+                    <div className="col">
+                      <div className="fs-5 fw-semibold">{peakHour ? formatHourLabel(peakHour.hour) : '—'}</div>
+                      <div className="small text-muted">Heure la plus active</div>
+                    </div>
+                  </div>
+                  {!hasData ? (
+                    <div className="text-center text-muted small py-4">Aucun appel IA enregistré ce jour-là.</div>
+                  ) : (
+                    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+                      {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+                        const y = padding + frac * (height - padding * 2);
+                        return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />;
+                      })}
+                      <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.1} stroke="none" />
+                      <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+                      {coords.map((c) => (
+                        <g key={c.hour}>
+                          {/* Étiquette de donnée visible en permanence sur le pic — pas seulement au survol
+                              (demande explicite : "ajoute les étiquette de donné"). */}
+                          {c.hour === peakHour?.hour && c.tokens > 0 && (
+                            <text x={c.x} y={c.y - 12} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1B2A4A">
+                              {formatTokenCount(c.tokens)}
+                            </text>
+                          )}
+                          <circle cx={c.x} cy={c.y} r={10} fill="transparent" style={{ cursor: 'default' }}>
+                            <title>{`${formatHourLabel(c.hour)} : ${formatTokenCount(c.tokens)} tokens`}</title>
+                          </circle>
+                          <circle cx={c.x} cy={c.y} r={c.tokens > 0 ? 3 : 1.5} fill="#1B2A4A" style={{ pointerEvents: 'none' }} />
+                        </g>
+                      ))}
+                    </svg>
+                  )}
+                  {hasData && (
+                    <div className="d-flex justify-content-between small text-muted mt-1">
+                      <span>00h</span>
+                      <span>23h</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop fade show"></div>
+    </>
+  );
+}
+
 // Graphique d'évolution (demande du 09/10/2026, suite au détail jour/mois ajouté juste avant :
-// "ajoute un graphique d'évolution aussi") — toujours par jour, même quand le tableau en dessous est
-// basculé sur "Par mois" : une courbe avec seulement 2-3 points mensuels serait peu lisible, alors
-// que le détail jour par jour montre la vraie tendance. SVG inline fait main (même approche que
-// buildLineChart dans AiAssistant.tsx) plutôt qu'une lib de graphiques, pour ne pas alourdir le
-// bundle de cette app pour un seul graphique simple.
+// "ajoute un graphique d'évolution aussi" puis "ajoute les étiquette de donné... je veux voir quelle
+// heure il a consommé beaucoup... on doit tout voir sur le graphique", maquette fournie — aire
+// lisse, grille en pointillés, étiquettes de donnée sur les pics, tooltip au survol). Toujours par
+// jour, même quand le tableau en dessous est basculé sur "Par mois" : une courbe avec seulement 2-3
+// points mensuels serait peu lisible. Cliquer un point ouvre le détail heure par heure de CE jour
+// (AiUsageHourlyModal) — répond à "quelle heure" sans un axe horaire illisible sur toute la période.
+// SVG inline fait main (même approche que buildLineChart dans AiAssistant.tsx) plutôt qu'une lib de
+// graphiques, pour ne pas alourdir le bundle de cette app pour un seul graphique.
 function AiUsageChart({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [drillDate, setDrillDate] = useState<string | null>(null);
+  const [hourly, setHourly] = useState<{ hour: number; tokens: number }[] | null>(null);
+  const [hourlyTotal, setHourlyTotal] = useState<number | null>(null);
+  const [hourlyCalls, setHourlyCalls] = useState<number | null>(null);
+  const [hourlyLoading, setHourlyLoading] = useState(false);
+  const [hourlyError, setHourlyError] = useState<string | null>(null);
+
   if (dailyHistory.length < 2) return null;
 
   const width = 720;
-  const height = 180;
-  const padding = 36;
+  const height = 220;
+  const padding = 40;
   const values = dailyHistory.map((d) => d.tokens);
   const max = Math.max(...values, 1);
   const stepX = (width - padding * 2) / Math.max(values.length - 1, 1);
@@ -93,31 +218,118 @@ function AiUsageChart({ dailyHistory }: { dailyHistory: { date: string; tokens: 
   const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
   const areaPoints = `${padding},${height - padding} ${points} ${width - padding},${height - padding}`;
 
-  const gridLines = [0, 0.5, 1].map((frac) => {
-    const y = padding + frac * (height - padding * 2);
-    return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} />;
-  });
+  // Pics locaux (demande explicite : "ajoute les étiquette de donné") — toutes les valeurs
+  // n'affichent pas leur chiffre en permanence (ça surchargerait vite le graphique au-delà de ~15
+  // jours), seulement le maximum global ET les points plus hauts que leurs deux voisins immédiats,
+  // qui sont précisément les "j'ai consommé beaucoup ce jour-là" que l'utilisateur veut repérer d'un
+  // coup d'œil.
+  const maxTokens = Math.max(...values);
+  const isNotablePeak = (i: number) => {
+    if (values[i] === 0) return false;
+    if (values[i] === maxTokens) return true;
+    const prev = i > 0 ? values[i - 1] : -Infinity;
+    const next = i < values.length - 1 ? values[i + 1] : -Infinity;
+    return values[i] > prev && values[i] > next;
+  };
+
+  async function openHourly(date: string) {
+    setDrillDate(date);
+    setHourly(null);
+    setHourlyError(null);
+    setHourlyLoading(true);
+    try {
+      const data = await apiFetch<{ hourlyHistory: { hour: number; tokens: number }[]; totalTokens: number; callCount: number }>(
+        `/reassort/ai-usage/hourly?date=${encodeURIComponent(date)}`,
+      );
+      setHourly(data.hourlyHistory);
+      setHourlyTotal(data.totalTokens);
+      setHourlyCalls(data.callCount);
+    } catch (err) {
+      setHourlyError((err as Error).message);
+    } finally {
+      setHourlyLoading(false);
+    }
+  }
+
+  const hovered = hoverIdx !== null ? coords[hoverIdx] : null;
 
   return (
     <div className="mt-3">
-      <h6 className="small text-muted mb-2">Évolution (par jour)</h6>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-        {gridLines}
-        <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.08} stroke="none" />
-        <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {coords.map((c) => (
-          <g key={c.date}>
-            <circle cx={c.x} cy={c.y} r={9} fill="transparent" style={{ cursor: 'pointer' }}>
-              <title>{`${formatDayLabel(c.date)} : ${formatTokenCount(c.tokens)} tokens`}</title>
-            </circle>
-            <circle cx={c.x} cy={c.y} r={2.5} fill="#1B2A4A" style={{ pointerEvents: 'none' }} />
-          </g>
-        ))}
-      </svg>
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="small text-muted mb-0">Évolution (par jour)</h6>
+        <span className="small text-muted">Cliquez un point pour voir le détail heure par heure</span>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ width: '100%', height: 'auto', overflow: 'visible' }}
+          onMouseLeave={() => setHoverIdx(null)}
+        >
+          {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+            const y = padding + frac * (height - padding * 2);
+            return <line key={frac} x1={padding} y1={y} x2={width - padding} y2={y} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />;
+          })}
+          <polygon points={areaPoints} fill="#1B2A4A" fillOpacity={0.1} stroke="none" />
+          <polyline points={points} fill="none" stroke="#1B2A4A" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+          {hovered && <line x1={hovered.x} y1={padding} x2={hovered.x} y2={height - padding} stroke="#1B2A4A" strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />}
+          {coords.map((c, i) => (
+            <g key={c.date}>
+              {isNotablePeak(i) && (
+                <text x={c.x} y={c.y - 12} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1B2A4A">
+                  {formatTokenCount(c.tokens)}
+                </text>
+              )}
+              <circle
+                cx={c.x}
+                cy={c.y}
+                r={10}
+                fill="transparent"
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHoverIdx(i)}
+                onClick={() => openHourly(c.date)}
+              >
+                <title>{`${formatDayLabel(c.date)} : ${formatTokenCount(c.tokens)} tokens — cliquer pour le détail par heure`}</title>
+              </circle>
+              <circle cx={c.x} cy={c.y} r={hoverIdx === i ? 4.5 : 2.5} fill="#1B2A4A" style={{ pointerEvents: 'none' }} />
+            </g>
+          ))}
+        </svg>
+        {hovered && (
+          <div
+            className="small"
+            style={{
+              position: 'absolute',
+              left: `${(hovered.x / width) * 100}%`,
+              top: `${(hovered.y / height) * 100}%`,
+              transform: 'translate(-50%, -130%)',
+              backgroundColor: '#1B2A4A',
+              color: '#fff',
+              padding: '4px 8px',
+              borderRadius: 6,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          >
+            <strong>{formatTokenCount(hovered.tokens)}</strong> tokens — {formatDayLabel(hovered.date)}
+          </div>
+        )}
+      </div>
       <div className="d-flex justify-content-between small text-muted mt-1">
         <span>{formatDayLabel(dailyHistory[0].date)}</span>
         <span>{formatDayLabel(dailyHistory[dailyHistory.length - 1].date)}</span>
       </div>
+      {drillDate && (
+        <AiUsageHourlyModal
+          date={drillDate}
+          hourlyHistory={hourly}
+          totalTokens={hourlyTotal}
+          callCount={hourlyCalls}
+          loading={hourlyLoading}
+          error={hourlyError}
+          onClose={() => setDrillDate(null)}
+        />
+      )}
     </div>
   );
 }

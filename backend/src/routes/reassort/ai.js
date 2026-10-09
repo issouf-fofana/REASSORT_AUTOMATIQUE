@@ -809,6 +809,21 @@ router.get('/ai-usage', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/reassort/ai-usage/hourly - détail heure par heure d'UN jour précis (demande du
+// 09/10/2026 : "je veux voir quelle heure il a consommé beaucoup") — déclenché en cliquant un point
+// du graphique par jour côté frontend, plutôt qu'un axe horaire sur toute la période (illisible au-
+// delà de quelques jours). ?date=YYYY-MM-DD requis.
+router.get('/ai-usage/hourly', requireAdmin, async (req, res) => {
+  try {
+    const { date, provider } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'date (YYYY-MM-DD) requise' });
+    const data = await aiUsageService.getUsageByHour({ date, provider: provider || undefined });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/error-reports - journal des erreurs API 5xx réellement survenues (demande du
 // 21/09/2026 : "il faut loger les erreurs... il est vide or j'ai des erreurs") — déjà capturées
 // automatiquement en base par le hook global (server.js), mais jamais consultables depuis l'UI

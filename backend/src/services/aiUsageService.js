@@ -89,4 +89,36 @@ async function getUsageAllTime({ provider } = {}) {
   };
 }
 
-module.exports = { getUsageSummary, getUsageAllTime };
+/**
+ * Détail heure par heure de la consommation sur UN jour précis (demande du 09/10/2026 : "je veux
+ * voir quelle heure il a consommé beaucoup" — le graphique principal reste par jour, cliquer sur un
+ * point ouvre ce détail plutôt que de surcharger le graphique principal d'un axe horaire illisible
+ * sur plusieurs semaines/mois). `date` au format YYYY-MM-DD, interprété en UTC comme dailyHistory
+ * (createdAt.toISOString().slice(0,10) ailleurs dans ce fichier) pour rester cohérent avec le
+ * regroupement par jour déjà affiché.
+ */
+async function getUsageByHour({ date, provider } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+    throw new Error('date au format YYYY-MM-DD requise');
+  }
+  const dayStart = new Date(`${date}T00:00:00.000Z`);
+  const dayEnd = new Date(`${date}T23:59:59.999Z`);
+  const where = { createdAt: { gte: dayStart, lte: dayEnd }, ...(provider ? { provider } : {}) };
+
+  const logs = await prisma.aiUsageLog.findMany({ where, select: { totalTokens: true, createdAt: true } });
+
+  const byHour = new Array(24).fill(0);
+  for (const log of logs) {
+    byHour[log.createdAt.getUTCHours()] += log.totalTokens;
+  }
+
+  return {
+    date,
+    provider: provider || null,
+    callCount: logs.length,
+    totalTokens: logs.reduce((s, l) => s + l.totalTokens, 0),
+    hourlyHistory: byHour.map((tokens, hour) => ({ hour, tokens })),
+  };
+}
+
+module.exports = { getUsageSummary, getUsageAllTime, getUsageByHour };
