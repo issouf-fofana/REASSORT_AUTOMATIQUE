@@ -993,7 +993,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // commandes ont été proposées par le magasin 035", "quelles commandes ont été validées par le
   // magasin X" — un ADMIN/SUPERVISOR doit pouvoir cibler n'importe quel magasin de son périmètre
   // nommément, pas seulement celui de la session en cours).
-  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders']);
+  // getArticleDetails/searchArticlesByName ajoutés le 09/10/2026 (bug réel observé en conversation :
+  // "le prix de vodka dans le mag 035" ignorait complètement le magasin ciblé, la recherche portait
+  // toujours sur le magasin de la session en cours — même classe de bug déjà corrigée pour
+  // getArticleStock le 29/09/2026, jamais étendue à la recherche par nom/EAN).
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
   let effectiveShopId = rposShopId;
   // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
   // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
@@ -1049,19 +1053,21 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   try {
     switch (toolName) {
       case 'getArticleDetails':
-        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         // Pas d'EAN mais un nom probable dans la question ("quel est le prix de codys") : recherche
         // par libellé partiel plutôt que de bloquer sur "précisez le code EAN" (demande du
-        // 05/10/2026) — cf. resolveArticleByName ci-dessous.
-        if (!ean && articleNameQuery) return resolveArticleByName(posId, rposShopId, articleNameQuery, user);
+        // 05/10/2026) — cf. resolveArticleByName ci-dessous. effectivePosId/effectiveShopId (pas
+        // posId/rposShopId) depuis le 09/10/2026 : un magasin ciblé explicitement ("le prix de
+        // vodka dans le mag 035") doit être cherché DANS CE magasin, jamais celui de la session.
+        if (!ean && articleNameQuery) return resolveArticleByName(effectivePosId, effectiveShopId, articleNameQuery, user);
         if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN ou le nom de l\'article pour obtenir sa fiche complète (emplacement, prix, promo...).' } };
-        return { toolName, toolResult: await tools.getArticleDetails(posId, rposShopId, ean) };
+        return { toolName, toolResult: await tools.getArticleDetails(effectivePosId, effectiveShopId, ean) };
       case 'searchArticlesByName':
         // Choisi directement par le LLM de repli (filet n°3) quand aucune règle déterministe
         // n'a identifié getArticleDetails via mots-clés — même résolution que ci-dessus.
-        if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         if (!articleNameQuery) return { toolName, toolResult: { found: false, message: 'Précisez le nom ou le code EAN de l\'article recherché.' } };
-        return resolveArticleByName(posId, rposShopId, articleNameQuery, user);
+        return resolveArticleByName(effectivePosId, effectiveShopId, articleNameQuery, user);
       case 'getArticlesByGisement':
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         // Aucun nom de gisement précisé ("chaque gisement", "mes gisements") : bascule sur un
