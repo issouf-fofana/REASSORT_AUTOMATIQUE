@@ -38,6 +38,68 @@ function formatMonthLabel(monthKey: string): string {
   return `${MONTH_LABELS[parseInt(month, 10) - 1]} ${year}`;
 }
 
+// Libellés français des usages réels (demande du 09/10/2026 : "il faut bien affiché les terme au
+// lieu des nom des fonction... met les theme en français") — un par valeur de `context` passée à
+// recordAiUsage() dans le code backend (aiForecastService.js, chatbotService.js,
+// featureRequestService.js, improvementService.js). Tout contexte non listé (ex: les `test-*`
+// laissés par des essais manuels pendant le développement) retombe sur le nom technique brut plutôt
+// que de planter ou d'afficher un libellé inventé/faux.
+const CONTEXT_LABELS: Record<string, string> = {
+  'ai-forecast-batch': 'Prévision de commande (génération)',
+  'ai-forecast-realtime': 'Prévision de commande (à la demande)',
+  'ai-forecast-realtime-stream': 'Prévision de commande (streaming)',
+  'chatbot-answer': 'Réponse de l\'Assistant IA',
+  'chatbot-intent-routing': 'Détection d\'intention (Assistant IA)',
+  'chatbot-date-resolution': 'Résolution de date (Assistant IA)',
+  'chatbot-feature-tracking': 'Suivi des demandes d\'évolution (Assistant IA)',
+  'feature-request-similarity': 'Regroupement des demandes d\'évolution',
+  'improvement-enrichment': 'Enrichissement des améliorations IA',
+};
+
+function formatContextLabel(context: string): string {
+  return CONTEXT_LABELS[context] || (context === '(non renseigné)' ? context : context);
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  gemini: 'Google Gemini',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic (Claude)',
+  nvidia: 'NVIDIA NIM',
+};
+
+function formatProviderLabel(provider: string): string {
+  return PROVIDER_LABELS[provider] || provider;
+}
+
+// Icône par usage (même esprit que PROVIDER_LABELS) — purement décoratif, aide à repérer la ligne
+// d'un coup d'œil dans le style "plus pro" demandé.
+const CONTEXT_ICONS: Record<string, string> = {
+  'ai-forecast-batch': 'solar:cart-large-bold-duotone',
+  'ai-forecast-realtime': 'solar:cart-check-bold-duotone',
+  'ai-forecast-realtime-stream': 'solar:cart-check-bold-duotone',
+  'chatbot-answer': 'solar:chat-round-dots-bold-duotone',
+  'chatbot-intent-routing': 'solar:routing-2-bold-duotone',
+  'chatbot-date-resolution': 'solar:calendar-bold-duotone',
+  'chatbot-feature-tracking': 'solar:lightbulb-bold-duotone',
+  'feature-request-similarity': 'solar:layers-bold-duotone',
+  'improvement-enrichment': 'solar:magic-stick-3-bold-duotone',
+};
+
+function contextIcon(context: string): string {
+  return CONTEXT_ICONS[context] || 'solar:code-bold-duotone';
+}
+
+const PROVIDER_ICONS: Record<string, string> = {
+  gemini: 'solar:stars-bold-duotone',
+  openai: 'solar:atom-bold-duotone',
+  anthropic: 'solar:chat-square-code-bold-duotone',
+  nvidia: 'solar:cpu-bolt-bold-duotone',
+};
+
+function providerIcon(provider: string): string {
+  return PROVIDER_ICONS[provider] || 'solar:server-bold-duotone';
+}
+
 function formatHourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}h`;
 }
@@ -389,32 +451,62 @@ function TokenUsageDetailCard({ dailyHistory }: { dailyHistory: { date: string; 
 }
 
 // --- Widgets "Par fournisseur" / "Par usage" (cartes dédiées) ---
-function TokenUsageBreakdownCard({ title, rows }: { title: string; rows: { label: string; callCount: number; totalTokens: number }[] }) {
+// Restylé le 09/10/2026 (demande explicite : "met les theme en français et fais un style plus pro
+// et jolie") — remplace le tableau brut (en-têtes "Appels"/"Tokens" génériques, noms de fonction
+// bruts type "chatbot-date-resolution") par une liste de lignes avec icône, libellé français, et une
+// barre de proportion visualisant la part de chaque usage/fournisseur dans le total de la carte —
+// plus parlant qu'une colonne de chiffres à comparer mentalement.
+function TokenUsageBreakdownCard({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: { key: string; label: string; icon: string; callCount: number; totalTokens: number }[];
+}) {
+  const maxTokens = Math.max(...rows.map((r) => r.totalTokens), 1);
+  const sorted = [...rows].sort((a, b) => b.totalTokens - a.totalTokens);
+
   return (
     <div className="card h-100">
       <div className="card-body">
-        <h5 className="card-title">{title}</h5>
+        <h5 className="card-title mb-3">{title}</h5>
         {!rows.length ? (
           <div className="text-center text-muted small py-3">Aucune donnée.</div>
         ) : (
-          <table className="table table-sm mb-0">
-            <thead>
-              <tr>
-                <th></th>
-                <th className="text-end">Appels</th>
-                <th className="text-end">Tokens</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.label}>
-                  <td>{r.label}</td>
-                  <td className="text-end">{r.callCount}</td>
-                  <td className="text-end">{formatTokenCount(r.totalTokens)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="d-flex flex-column gap-3">
+            {sorted.map((r) => (
+              <div key={r.key}>
+                <div className="d-flex align-items-center gap-2 mb-1">
+                  <span
+                    style={{
+                      width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                      background: 'linear-gradient(135deg, #1B2A4A 0%, #2d4068 100%)',
+                      color: '#F5A623', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
+                    }}
+                  >
+                    <iconify-icon icon={r.icon}></iconify-icon>
+                  </span>
+                  <span className="fw-semibold small flex-grow-1" style={{ color: '#1B2A4A' }}>
+                    {r.label}
+                  </span>
+                  <span className="small text-muted">{r.callCount} appel{r.callCount > 1 ? 's' : ''}</span>
+                  <span className="small fw-semibold" style={{ minWidth: 80, textAlign: 'right' }}>
+                    {formatTokenCount(r.totalTokens)}
+                  </span>
+                </div>
+                <div style={{ height: 6, borderRadius: 999, backgroundColor: '#F1F3F5', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${Math.max(2, (r.totalTokens / maxTokens) * 100)}%`,
+                      borderRadius: 999,
+                      background: 'linear-gradient(90deg, #1B2A4A 0%, #F5A623 100%)',
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -533,13 +625,25 @@ export function TokenUsagePage() {
               <div className="col-md-6">
                 <TokenUsageBreakdownCard
                   title="Par fournisseur"
-                  rows={usage.byProvider.map((p) => ({ label: p.provider, callCount: p.callCount, totalTokens: p.totalTokens }))}
+                  rows={usage.byProvider.map((p) => ({
+                    key: p.provider,
+                    label: formatProviderLabel(p.provider),
+                    icon: providerIcon(p.provider),
+                    callCount: p.callCount,
+                    totalTokens: p.totalTokens,
+                  }))}
                 />
               </div>
               <div className="col-md-6">
                 <TokenUsageBreakdownCard
                   title="Par usage"
-                  rows={usage.byContext.map((c) => ({ label: c.context, callCount: c.callCount, totalTokens: c.totalTokens }))}
+                  rows={usage.byContext.map((c) => ({
+                    key: c.context,
+                    label: formatContextLabel(c.context),
+                    icon: contextIcon(c.context),
+                    callCount: c.callCount,
+                    totalTokens: c.totalTokens,
+                  }))}
                 />
               </div>
             </div>
