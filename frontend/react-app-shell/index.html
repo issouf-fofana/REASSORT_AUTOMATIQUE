@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/assets/images/favicon-reassort.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Réassort Automatique</title>
+
+    <link type="text/css" href="/assets/volt/css/volt.css" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/theme-override.css?v=2026-10-01-2" rel="stylesheet" />
+    <link type="text/css" href="/assets/css/notch-nav.css?v=2026-09-27-12" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/iconify-icon@1/dist/iconify-icon.min.js"></script>
+
+    <!-- backend-config.js injecte window.REASSORT_BACKEND_URL au runtime (docker-entrypoint.sh) —
+         requis avant le script de garde ci-dessous, qui construit REASSORT_API_BASE à partir de
+         cette valeur (même ordre que reassort-auth.js sur les 19 autres pages). -->
+    <script src="/assets/js/config.js"></script>
+    <script src="/assets/js/backend-config.js"></script>
+
+    <!-- Garde d'authentification inline, NON-MODULE, exécutée AVANT le bundle React (socle de la
+         fusion SPA, cf. plan de migration 12/10/2026, section "garde d'auth") — reproduction
+         STRICTE de assets/js/reassort-auth.js : même clés localStorage, même redirection
+         synchrone si aucun token, pour que les pages non encore migrées (chargées séparément,
+         chacune avec sa propre copie de reassort-auth.js) et cette SPA restent interchangeables
+         côté session utilisateur. Contrairement aux 19 autres pages, où le #root reste vide le
+         temps que React démarre normalement, ICI le conteneur racine doit rester MASQUÉ jusqu'à
+         ce que le AuthProvider React confirme un utilisateur valide — jamais de flash de contenu
+         protégé avant cette confirmation (cf. shared/auth/AuthProvider.tsx). -->
+    <script>
+      (function () {
+        window.REASSORT_API_BASE = (window.REASSORT_BACKEND_URL || (window.location.protocol + '//' + window.location.hostname + ':3001')) + '/api';
+
+        window.reassortGetToken = function () {
+          return localStorage.getItem('reassort_token');
+        };
+        window.reassortGetUser = function () {
+          try {
+            return JSON.parse(localStorage.getItem('reassort_user') || 'null');
+          } catch (e) {
+            return null;
+          }
+        };
+        window.reassortLogout = function () {
+          localStorage.removeItem('reassort_token');
+          localStorage.removeItem('reassort_user');
+          window.location.href = '/login';
+        };
+        window.REASSORT_SINGLE_SHOP_ROLES = ['STORE', 'DIRECTOR', 'DEPARTMENT_HEAD', 'SHELF_STOCKER'];
+        window.reassortIsSingleShopRole = function (role) {
+          return window.REASSORT_SINGLE_SHOP_ROLES.indexOf(role) !== -1;
+        };
+        window.reassortFetch = async function (path, options) {
+          options = options || {};
+          options.headers = Object.assign({}, options.headers, {
+            Authorization: 'Bearer ' + window.reassortGetToken(),
+          });
+          const res = await fetch(window.REASSORT_API_BASE + path, options);
+          if (res.status === 401) {
+            window.reassortLogout();
+            throw new Error('Session expirée, veuillez vous reconnecter.');
+          }
+          return res;
+        };
+
+        // Exception explicite pour /login (cf. plan, point 1.3) : seule route de la SPA où
+        // l'absence de token est attendue, jamais une redirection vers elle-même.
+        if (!window.reassortGetToken() && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      })();
+    </script>
+  </head>
+  <body data-page-title="Réassort Automatique">
+    <script src="/assets/js/loading-overlay.js"></script>
+
+    <!-- #root masqué par défaut (opacity:0, pas display:none pour laisser React calculer son layout
+         normalement) — révélé uniquement par AuthProvider une fois un utilisateur confirmé, cf.
+         shared/auth/AuthProvider.tsx. Remplace le mécanisme XHR synchrone layout.js des 19 autres
+         pages : ici la sidebar/topbar/notch sont de vrais composants React montés PAR l'app elle-
+         même, plus jamais injectés via un partiel HTML chargé en XHR bloquant. -->
+    <div id="root" style="opacity: 0;"></div>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

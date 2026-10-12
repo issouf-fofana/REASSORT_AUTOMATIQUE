@@ -9,6 +9,17 @@ RUN npm ci
 COPY react-app/ .
 RUN npm run build
 
+# Stage de build du socle de la SPA unifiée (fusion progressive des apps React, cf. plan de
+# migration /home/youssef/.claude/plans/pure-singing-willow.md, 12/10/2026) — première étape : une
+# seule route de test (/user-guide-next, cf. nginx.conf) en coexistence avec les 19 apps
+# existantes, aucune route de production encore basculée vers ce bundle.
+FROM node:20-alpine AS shell-builder
+WORKDIR /app
+COPY react-app-shell/package*.json ./
+RUN npm ci
+COPY react-app-shell/ .
+RUN npm run build
+
 # Stage de build de la page Ventes synchronisées migrée vers React (troisième page migrée, projet
 # Vite séparé même raison que ci-dessus).
 FROM node:20-alpine AS sales-history-builder
@@ -180,6 +191,10 @@ RUN rm -f /usr/share/nginx/html/nginx.conf
 # Résultat du build React (page Paramètres), servi sous /settings-app/ par une règle nginx dédiée
 # (voir nginx.conf) — jamais mélangé avec les pages HTML classiques du COPY . ci-dessus.
 COPY --from=react-builder /app/dist /usr/share/nginx/html/settings-app
+
+# Résultat du build du socle de la SPA unifiée, servi sous /app-assets/ (voir nginx.conf) —
+# UNIQUEMENT la route de test /user-guide-next pour l'instant, cf. plan de migration.
+COPY --from=shell-builder /app/dist /usr/share/nginx/html/app-assets
 
 # Résultat du build React (Ventes synchronisées), servi sous /sales-history-app/ par une règle
 # nginx dédiée (voir nginx.conf).
