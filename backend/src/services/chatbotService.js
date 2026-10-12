@@ -1337,12 +1337,25 @@ function splitCompoundQuestion(question) {
  * ce contrat sans navigateur disponible pour vérifier le rendu réel. toolResult reste donc toujours
  * l'objet de l'outil PRINCIPAL comme avant ; le secondaire n'est utilisé que dans le texte du prompt
  * (cf. buildChatbotPrompt) pour que le LLM réponde aussi au second volet de la question.
+ *
+ * Bug trouvé le 12/10/2026 en testant en conditions réelles : "comment a évolué le stock de
+ * 100693713 et pourquoi il y a du surstock ?" répondait uniquement sur le surstock GÉNÉRAL du
+ * magasin (getOverstockArticles), sans aucun rapport avec l'article demandé — jamais le stock de
+ * CET article. Cause : `primary` était calculé sur la PHRASE ENTIÈRE, où detectIntent() retombe sur
+ * la première règle de FALLBACK_INTENT_RULES qui matche n'importe où dans le texte (ici "surstock",
+ * placée avant "stock de" dans la liste) — l'ordre des mots dans la phrase n'avait aucune influence,
+ * seul l'ordre arbitraire des règles dans le tableau décidait. Sur une question composée,
+ * l'intention PRINCIPALE doit toujours venir du PREMIER segment (c'est lui que l'utilisateur pose
+ * en premier), jamais de la phrase entière où un mot-clé du second segment peut l'emporter.
  */
 async function runToolForQuestion(rposShopId, question, options = {}) {
-  const primary = await runSingleTool(rposShopId, question, options);
-  if (!primary.toolName) return primary;
-
   const segments = splitCompoundQuestion(question);
+  // Question composée : l'intention principale se résout UNIQUEMENT sur le premier segment, jamais
+  // sur la phrase entière (cf. bug du 12/10/2026 ci-dessus) — sinon un mot-clé du second segment
+  // peut usurper l'intention principale selon l'ordre arbitraire des règles, pas l'ordre réel des
+  // mots dans la question.
+  const primary = await runSingleTool(rposShopId, segments ? segments[0] : question, options);
+  if (!primary.toolName) return primary;
   if (!segments) return primary;
 
   const [firstSegment, secondSegment] = segments;

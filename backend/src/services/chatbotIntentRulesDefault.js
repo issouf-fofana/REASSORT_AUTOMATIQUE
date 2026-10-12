@@ -69,7 +69,14 @@ const FALLBACK_INTENT_RULES = [
   // simple liste/le résumé de la proposition.
   { keywords: ['pourquoi cette quantité', 'pourquoi cette quantite', 'pourquoi cette qté', 'pourquoi commander autant', 'explique cette quantité', 'explique cette quantite', 'justifie cette quantité', 'justifie cette quantite'], tool: 'explainProposalQuantity' },
   { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
-  { keywords: ['vente', 'ventes', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
+  // "vendue"/"vendues" ajoutés le 12/10/2026 (bug trouvé en testant en conditions réelles :
+  // "quelles quantités de X ont été vendues entre le 1er et le 10 octobre" ne matchait AUCUNE règle
+  // — "vente"/"ventes" ne couvrent jamais le participe passé féminin "vendue(s)", et "combien
+  // vendu(s)" exige "combien" en tête, absent ici. La question tombait alors sur le filet LLM de
+  // repli, qui a bien choisi getSalesHistory mais sans jamais transmettre la plage de dates précisée
+  // (pas de params.dateRangeStart/End dans son schéma — cf. detectIntentViaLlm), d'où une réponse
+  // "les données ne contiennent pas le détail sur cette période" alors que la donnée existe bien.
+  { keywords: ['vente', 'ventes', 'vendue', 'vendues', 'quantité vendue', 'quantite vendue', 'quantités vendues', 'quantites vendues', 'évolution', 'combien vendu', 'combien vendus', 'combien on a vendu', 'tendance', 'ca se vend comment', 'comment ca vend'], tool: 'getSalesHistory' },
   // "son stock"/"le stock" ajoutés le 27/09/2026 (bug trouvé via une question à deux volets : "le CA
   // de cet article et son stock est à combien ?" — le segment isolé "son stock est à combien" ne
   // matchait aucun mot-clé existant, tous exigeant "stock de/actuel/disponible" explicite).
