@@ -171,6 +171,11 @@ const KEYS = {
   // /api/app-version) : affiché même sur /login, avant toute connexion, même raisonnement que
   // SITE_LOGO_BASE64/SITE_FAVICON_BASE64 ci-dessus.
   APP_VERSION: 'APP_VERSION',
+  // Notes de mise à jour affichées en pop-up à la connexion/au prochain chargement de page quand
+  // la version change (demande du 13/10/2026 : "les user quand ils vont se connecter ils doivent
+  // voir la notif... avec les correctifs") — texte libre multi-lignes, une entrée de changelog par
+  // ligne, édité en même temps que APP_VERSION depuis Paramètres > Réassort.
+  APP_VERSION_NOTES: 'APP_VERSION_NOTES',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -320,6 +325,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   // réel mesuré une fois ai-forecast-batch repassé à son coût normal.
   [KEYS.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS]: () => '2000000',
   [KEYS.APP_VERSION]: () => '1.0.0',
+  [KEYS.APP_VERSION_NOTES]: () => '',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',

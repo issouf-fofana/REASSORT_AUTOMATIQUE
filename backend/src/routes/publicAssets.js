@@ -101,13 +101,18 @@ registerSiteImageRoutes({
   notConfiguredMessage: 'Aucun favicon personnalisé configuré',
 });
 
-// Numéro de version affiché dans la sidebar (demande du 13/10/2026) — même raisonnement que
-// site-logo/site-favicon ci-dessus : lecture PUBLIQUE (affiché même sur /login, avant connexion),
-// écriture réservée ADMIN depuis Paramètres > Réassort.
+// Numéro de version + notes de mise à jour affichés dans la sidebar et en pop-up à la connexion
+// (demande du 13/10/2026) — même raisonnement que site-logo/site-favicon ci-dessus : lecture
+// PUBLIQUE (affiché même sur /login, avant connexion), écriture réservée ADMIN depuis
+// Paramètres > Réassort. notes est un texte libre multi-lignes (une entrée de changelog par
+// ligne), jamais du HTML — affiché tel quel, jamais interprété comme balisage, côté shell.
 router.get('/app-version', async (req, res) => {
   try {
-    const version = await systemConfig.getValue(systemConfig.KEYS.APP_VERSION);
-    res.json({ success: true, data: { version } });
+    const [version, notes] = await Promise.all([
+      systemConfig.getValue(systemConfig.KEYS.APP_VERSION),
+      systemConfig.getValue(systemConfig.KEYS.APP_VERSION_NOTES),
+    ]);
+    res.json({ success: true, data: { version, notes } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -115,11 +120,14 @@ router.get('/app-version', async (req, res) => {
 
 router.put('/app-version', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { version } = req.body;
+    const { version, notes } = req.body;
     if (!version || typeof version !== 'string' || !version.trim()) {
       return res.status(400).json({ success: false, message: 'Numéro de version requis.' });
     }
-    await systemConfig.setValue(systemConfig.KEYS.APP_VERSION, version.trim());
+    await Promise.all([
+      systemConfig.setValue(systemConfig.KEYS.APP_VERSION, version.trim()),
+      systemConfig.setValue(systemConfig.KEYS.APP_VERSION_NOTES, typeof notes === 'string' ? notes : ''),
+    ]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

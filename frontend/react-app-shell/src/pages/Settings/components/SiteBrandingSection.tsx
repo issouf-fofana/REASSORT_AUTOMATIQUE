@@ -162,25 +162,30 @@ function ImageUploadCard({ config }: { config: ImageSlotConfig }) {
   );
 }
 
-// Numéro de version affiché dans la sidebar (demande du 13/10/2026 : "je veux que ça soit
-// dynamique... V1.0.0, V1.0.1... je met à jour la valeur sur le UI dans les config"). Texte libre
-// mis à jour manuellement depuis cette page — aucun calcul automatique, l'ADMIN décide quand et à
-// quelle valeur passer après avoir vérifié qu'une mise à jour est stable (demande explicite : "ne
-// fait pas à chaque push sinon il va gonfler... si je suis sûr que c'est bon je met à jour la
-// valeur"). Route publique en lecture (GET /api/app-version, cf. publicAssets.js — affichée même
+// Numéro de version + notes de mise à jour, affichés dans la sidebar et en pop-up à la connexion
+// de chaque utilisateur quand la version change (demande du 13/10/2026 : "je veux que ça soit
+// dynamique... je met à jour la valeur sur le UI dans les config" puis "les user quand ils vont se
+// connecter ils doivent voir la notif... avec les correctifs"). Texte libre mis à jour manuellement
+// depuis cette page — aucun calcul automatique, l'ADMIN décide quand et à quelle valeur passer
+// après avoir vérifié qu'une mise à jour est stable ("ne fait pas à chaque push sinon il va
+// gonfler"). Route publique en lecture (GET /api/app-version, cf. publicAssets.js — affichée même
 // sur /login, avant connexion), écriture réservée ADMIN (PUT, même routeur).
 function AppVersionCard() {
   const [current, setCurrent] = useState<string | null>(null);
+  const [currentNotes, setCurrentNotes] = useState('');
   const [draft, setDraft] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   async function load() {
     try {
-      const data = await apiFetch<{ version: string }>('/app-version');
+      const data = await apiFetch<{ version: string; notes: string | null }>('/app-version');
       setCurrent(data.version);
       setDraft(data.version);
+      setCurrentNotes(data.notes || '');
+      setNotesDraft(data.notes || '');
     } catch (err) {
       setError((err as Error).message);
     }
@@ -191,8 +196,10 @@ function AppVersionCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const dirty = draft.trim() !== current || notesDraft !== currentNotes;
+
   async function handleSave() {
-    if (!draft.trim() || draft.trim() === current) return;
+    if (!draft.trim() || !dirty) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -200,9 +207,9 @@ function AppVersionCard() {
       await apiFetch('/app-version', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: draft.trim() }),
+        body: JSON.stringify({ version: draft.trim(), notes: notesDraft }),
       });
-      setSuccess('Version mise à jour — visible dans la sidebar de tous les utilisateurs au prochain chargement de page.');
+      setSuccess('Version mise à jour — chaque utilisateur verra une pop-up avec ces notes à sa prochaine connexion/rechargement de page.');
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -218,11 +225,14 @@ function AppVersionCard() {
       <h6 className="mb-1">Numéro de version</h6>
       <div className="alert alert-light border small mb-3">
         Affiché sous le logo dans la sidebar, sur toutes les pages du site. Mis à jour manuellement
-        ici quand une nouvelle version est prête — jamais automatique.
+        ici quand une nouvelle version est prête — jamais automatique. Les notes ci-dessous
+        s'affichent en pop-up à chaque utilisateur qui n'a pas encore vu cette version précise
+        (une ligne par correctif/nouveauté, texte brut, pas de mise en forme).
       </div>
       {error && <div className="alert alert-danger small">{error}</div>}
       {success && <div className="alert alert-success small">{success}</div>}
-      <div className="d-flex align-items-center gap-2" style={{ maxWidth: 320 }}>
+      <div className="mb-3" style={{ maxWidth: 420 }}>
+        <label className="form-label small text-muted mb-1">Numéro</label>
         <input
           type="text"
           className="form-control form-control-sm"
@@ -231,15 +241,26 @@ function AppVersionCard() {
           placeholder="ex: 1.0.1"
           disabled={saving}
         />
-        <button
-          type="button"
-          className="btn btn-sm btn-dark flex-shrink-0"
-          onClick={handleSave}
-          disabled={saving || !draft.trim() || draft.trim() === current}
-        >
-          {saving ? 'Enregistrement...' : 'Enregistrer'}
-        </button>
       </div>
+      <div className="mb-3" style={{ maxWidth: 420 }}>
+        <label className="form-label small text-muted mb-1">Notes de version (une ligne par correctif)</label>
+        <textarea
+          className="form-control form-control-sm"
+          rows={5}
+          value={notesDraft}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          placeholder={"Correction de la sidebar\nNouveau style de la barre notch\nCloche de notification fonctionnelle"}
+          disabled={saving}
+        />
+      </div>
+      <button
+        type="button"
+        className="btn btn-sm btn-dark"
+        onClick={handleSave}
+        disabled={saving || !draft.trim() || !dirty}
+      >
+        {saving ? 'Enregistrement...' : 'Enregistrer'}
+      </button>
     </div>
   );
 }
