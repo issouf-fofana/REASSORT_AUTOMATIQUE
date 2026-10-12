@@ -36,20 +36,26 @@
       return;
     }
 
-    dropdown.innerHTML = '<a href="/ai-improvements" class="text-center text-primary fw-bold border-bottom border-light py-3 d-block">' +
+    // /ai-quality#tab-improvements : la vraie route de la page Qualité & IA, onglet Améliorations
+    // IA (cf. le gestionnaire de clic du toast plus bas dans ce fichier, déjà correct) — /ai-
+    // improvements n'a jamais existé, resté incohérent depuis la création de ce menu (jamais
+    // remarqué : la cloche était jusqu'ici purement décorative sur toutes les pages, aucun clic
+    // réel sur ces liens avant le 12/10/2026, bug signalé après l'avoir rendue fonctionnelle).
+    var improvementsUrl = '/ai-quality#tab-improvements';
+    dropdown.innerHTML = '<a href="' + improvementsUrl + '" class="text-center text-primary fw-bold border-bottom border-light py-3 d-block">' +
       items.length + ' constat(s) à relancer</a>' +
       '<div style="max-height: 320px; overflow-y: auto;">' +
       items.slice(0, 8).map(function (it) {
-        return '<a href="/ai-improvements" class="dropdown-item border-bottom border-light py-2 small">' +
-          '<div class="d-flex justify-content-between gap-2">' +
-          '<span class="fw-semibold">' + esc(it.title) + '</span>' +
+        return '<a href="' + improvementsUrl + '" class="dropdown-item border-bottom border-light py-2 small text-wrap">' +
+          '<div class="d-flex justify-content-between align-items-start gap-2">' +
+          '<span class="fw-semibold" style="flex: 1 1 auto; min-width: 0;">' + esc(it.title) + '</span>' +
           '<span class="badge bg-warning-subtle text-warning flex-shrink-0">' + (PRIORITY_LABEL[it.priority] || it.priority) + '</span>' +
           '</div>' +
           '<div class="text-muted">Ouvert depuis ' + it.ageDays + ' jour(s), sans action</div>' +
           '</a>';
       }).join('') +
       '</div>' +
-      (items.length > 8 ? '<a href="/ai-improvements" class="text-center small py-2 d-block border-top">Voir tout (' + items.length + ')</a>' : '');
+      (items.length > 8 ? '<a href="' + improvementsUrl + '" class="text-center small py-2 d-block border-top">Voir tout (' + items.length + ')</a>' : '');
   }
 
   async function loadStaleImprovements() {
