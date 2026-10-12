@@ -14,6 +14,10 @@
          (ex: UserGuide.tsx) — oublié à la création initiale du shell, ajouté le 12/10/2026 lors du
          portage du vrai contenu de la première page migrée. -->
     <script src="/assets/js/reassort-toast.js"></script>
+    <!-- Contenu statique du Guide du projet (gros objet de données, réutilisé tel quel plutôt que
+         recopié en TypeScript) — requis par pages/ProjectGuide/ProjectGuide.tsx via
+         window.PROJECT_GUIDE_CONTENT. -->
+    <script src="/assets/js/project-guide-content.js"></script>
 
     <!-- backend-config.js injecte window.REASSORT_BACKEND_URL au runtime (docker-entrypoint.sh) —
          requis avant le script de garde ci-dessous, qui construit REASSORT_API_BASE à partir de

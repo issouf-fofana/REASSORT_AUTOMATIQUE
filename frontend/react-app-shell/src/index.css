@@ -1,0 +1,23 @@
+/* Tailwind utilisé UNIQUEMENT par la barre d'onglets "pilule" animée (NotchTabBar) — le reste du
+   shell reste en Bootstrap/Volt classique (cf. Sidebar/Topbar). CRITIQUE : contrairement à
+   react-app-project-guide (app isolée où elle était la SEULE page du bundle), ce fichier est
+   chargé dans le bundle COMMUN à toutes les routes de la SPA — @import "tailwindcss" standard
+   inclurait la couche "base" (préflight : *{margin:0;padding:0;box-sizing:border-box}, html{...}),
+   qui écraserait Bootstrap/Volt sur TOUTES les pages, pas seulement celles avec des onglets (bug
+   trouvé en préparant la migration de /project-guide, 12/10/2026, avant même d'être déployé —
+   inspection du CSS compilé de l'app isolée d'origine a confirmé le préflight global). N'importe
+   donc QUE "theme" (tokens/variables) et "utilities" (classes bg-*, p-*, rounded-*...), jamais
+   "base" — les classes utilitaires Tailwind restent utilisables partout dans le shell, mais aucun
+   reset ne s'applique en dehors de ce qui est explicitement stylé par une classe Tailwind. */
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+.reassort-tabs-root {
+  font-family: inherit;
+}
+
+.reassort-tabs-root *,
+.reassort-tabs-root *::before,
+.reassort-tabs-root *::after {
+  box-sizing: border-box;
+}
