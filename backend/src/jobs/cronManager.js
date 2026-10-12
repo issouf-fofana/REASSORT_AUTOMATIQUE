@@ -11,6 +11,7 @@ const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
 const { runImprovementWatchdog } = require('./improvementWatchdogJob');
 const { runProposalReminder } = require('./proposalReminderJob');
 const { runEndOfDayValidationRecap } = require('./endOfDayValidationRecapJob');
+const { runTokenUsageWatchdog } = require('./tokenUsageWatchdogJob');
 const { createJobLock } = require('../utils/concurrency');
 const { trackJobRun } = require('../services/jobHealthService');
 
@@ -25,6 +26,7 @@ let currentPredictionOutcomeTask = null;
 let currentImprovementWatchdogTask = null;
 let currentProposalReminderTask = null;
 let currentEndOfDayValidationRecapTask = null;
+let currentTokenUsageWatchdogTask = null;
 
 // Un verrou par job : si une exécution précédente dépasse son intervalle planifié (cycle chargé
 // sur beaucoup de magasins), le déclenchement suivant est ignoré plutôt que de tourner en même
@@ -40,6 +42,7 @@ const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
 const improvementWatchdogLock = createJobLock('Chien de garde améliorations IA');
 const proposalReminderLock = createJobLock('Relance des propositions en attente');
 const endOfDayValidationRecapLock = createJobLock('Récap de fin de journée');
+const tokenUsageWatchdogLock = createJobLock('Chien de garde consommation de tokens');
 
 /** true si la valeur stockée pour cette clé d'activation vaut "true" (chaîne, cf. systemConfig). */
 async function isJobEnabled(enabledKey) {
@@ -370,6 +373,37 @@ async function startOrRestartEndOfDayValidationRecapJob() {
   console.log(`⏰ Récap de fin de journée planifié: ${cronSchedule}`);
 }
 
+/** (Re)programme le chien de garde de consommation de tokens IA (demande du 12/10/2026, suite à un
+ * pic réel de 36,9M tokens en une journée découvert seulement après coup) — alerte les ADMIN par
+ * email si le total des dernières 24h dépasse TOKEN_USAGE_ALERT_THRESHOLD_TOKENS. */
+async function startOrRestartTokenUsageWatchdogJob() {
+  if (currentTokenUsageWatchdogTask) {
+    currentTokenUsageWatchdogTask.stop();
+    currentTokenUsageWatchdogTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.TOKEN_USAGE_ALERT_ENABLED))) {
+    console.log('⏸️  Chien de garde consommation de tokens désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.TOKEN_USAGE_ALERT_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), chien de garde consommation de tokens non planifié`);
+    return;
+  }
+
+  currentTokenUsageWatchdogTask = cron.schedule(cronSchedule, () => {
+    tokenUsageWatchdogLock(async () => {
+      console.log('[cron] Vérification de la consommation de tokens IA...');
+      await trackJobRun('tokenUsageWatchdog', runTokenUsageWatchdog);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Chien de garde consommation de tokens planifié: ${cronSchedule}`);
+}
+
 module.exports = {
   startOrRestartNightlyJob,
   startOrRestartReceptionSyncJob,
@@ -382,4 +416,5 @@ module.exports = {
   startOrRestartImprovementWatchdogJob,
   startOrRestartProposalReminderJob,
   startOrRestartEndOfDayValidationRecapJob,
+  startOrRestartTokenUsageWatchdogJob,
 };

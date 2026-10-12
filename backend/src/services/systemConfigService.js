@@ -157,6 +157,13 @@ const KEYS = {
   // existe déjà). Off par défaut, même raison que CHATBOT_LLM_FALLBACK_ENABLED : coût et latence d'un
   // appel LLM supplémentaire à chaque question hors périmètre, à activer explicitement.
   CHATBOT_FEATURE_TRACKING_ENABLED: 'CHATBOT_FEATURE_TRACKING_ENABLED',
+  // Alerte de dépassement de consommation de tokens IA (demande du 12/10/2026, suite à un pic réel
+  // de 36,9M tokens en une seule journée découvert seulement après coup sur la page Consommation de
+  // tokens) : job quotidien qui compare le total des dernières 24h à TOKEN_USAGE_ALERT_THRESHOLD_TOKENS
+  // et alerte les ADMIN par email en cas de dépassement — cf. tokenUsageWatchdogJob.js.
+  TOKEN_USAGE_ALERT_ENABLED: 'TOKEN_USAGE_ALERT_ENABLED',
+  TOKEN_USAGE_ALERT_CRON: 'TOKEN_USAGE_ALERT_CRON',
+  TOKEN_USAGE_ALERT_THRESHOLD_TOKENS: 'TOKEN_USAGE_ALERT_THRESHOLD_TOKENS',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -294,6 +301,17 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
   [KEYS.END_OF_DAY_VALIDATION_RECAP_ENABLED]: () => 'true',
   [KEYS.IMPROVEMENTS_ENABLED]: () => 'true',
+  // Actif par défaut (coût nul en soi, juste une lecture d'AiUsageLog + email si dépassement) —
+  // contrairement à AI_QUANTITY_ADJUSTMENT_ENABLED ci-dessous, ce job ne consomme pas de tokens.
+  [KEYS.TOKEN_USAGE_ALERT_ENABLED]: () => 'true',
+  // 7h10, juste après l'évaluation des prédictions (7h) et avant le chien de garde améliorations IA
+  // (7h30) — assez tôt pour alerter sur la conso de la veille avant le début d'activité du jour.
+  [KEYS.TOKEN_USAGE_ALERT_CRON]: () => process.env.TOKEN_USAGE_ALERT_CRON || '10 7 * * *',
+  // Seuil arbitraire de départ (demande du 12/10/2026, suite à un pic réel de 36,9M tokens/jour) :
+  // largement au-dessus d'une journée normale observée (quelques centaines de milliers de tokens),
+  // mais bien en dessous d'un pic comme celui du 25/09 — à ajuster depuis Paramètres selon l'usage
+  // réel mesuré une fois ai-forecast-batch repassé à son coût normal.
+  [KEYS.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS]: () => '2000000',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',

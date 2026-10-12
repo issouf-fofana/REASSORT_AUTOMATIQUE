@@ -382,6 +382,10 @@ router.put('/system-config', requireAdmin, async (req, res) => {
       const { startOrRestartProposalReminderJob } = require('../../jobs/cronManager');
       await startOrRestartProposalReminderJob();
     }
+    if ([systemConfig.KEYS.TOKEN_USAGE_ALERT_CRON, systemConfig.KEYS.TOKEN_USAGE_ALERT_ENABLED].includes(key)) {
+      const { startOrRestartTokenUsageWatchdogJob } = require('../../jobs/cronManager');
+      await startOrRestartTokenUsageWatchdogJob();
+    }
 
     res.json({ success: true, data: { key, value: systemConfig.SENSITIVE_KEYS.has(key) ? '••••••••' : value } });
   } catch (error) {
