@@ -11,7 +11,7 @@ declare global {
     reassortGetUser: () => ReassortUser | null;
     reassortLogout: () => void;
     reassortIsSingleShopRole: (role: string) => boolean;
-    reassortConfirm?: (message: string, options?: { danger?: boolean; okLabel?: string; cancelLabel?: string }) => Promise<boolean>;
+    reassortConfirm: (message: string, options?: { danger?: boolean; okLabel?: string; cancelLabel?: string }) => Promise<boolean>;
     reassortToast: (message: string, type?: 'success' | 'error' | 'info', onClick?: () => void) => void;
     REASSORT_BACKEND_URL?: string;
   }

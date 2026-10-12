@@ -15,6 +15,7 @@ import { SalesHistory } from '../pages/SalesHistory/SalesHistory';
 import { PurchaseList } from '../pages/PurchaseList/PurchaseList';
 import { OrderAnomalies } from '../pages/OrderAnomalies/OrderAnomalies';
 import { SignIn } from '../pages/Login/SignIn';
+import { Settings } from '../pages/Settings/Settings';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -47,6 +48,7 @@ export function AppRoutes() {
         <Route path="/sales-history" element={<SalesHistory />} />
         <Route path="/purchase-list" element={<PurchaseList />} />
         <Route path="/order-anomalies" element={<AdminGuard><OrderAnomalies /></AdminGuard>} />
+        <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
       </Route>
     </Routes>
   );
