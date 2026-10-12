@@ -6,10 +6,19 @@ import { ProjectGuide } from '../pages/ProjectGuide/ProjectGuide';
 import { AiGuide } from '../pages/AiGuide/AiGuide';
 import { FeatureRequests } from '../pages/FeatureRequests/FeatureRequests';
 import { MailRecipients } from '../pages/MailRecipients/MailRecipients';
+import { SalesAnalysis } from '../pages/SalesAnalysis/SalesAnalysis';
+import { AiMastery } from '../pages/AiMastery/AiMastery';
+import { AiPredictions } from '../pages/AiPredictions/AiPredictions';
+import { TokenUsagePage } from '../pages/TokenUsage/TokenUsagePage';
+import { UsersPage } from '../pages/UsersList/UsersPage';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
 // garde-fou cosmétique que les pages non-SPA — la vraie sécurité reste le backend).
+//
+// Vague 2 : /sales-analysis et /ai-predictions accessibles à tout utilisateur authentifié (pas
+// d'AdminGuard, comme dans leurs App.tsx d'origine) ; /ai-mastery, /token-usage et /users-list
+// réservées ADMIN.
 export function AppRoutes() {
   return (
     <Routes>
@@ -19,6 +28,11 @@ export function AppRoutes() {
         <Route path="/ai-guide" element={<AiGuide />} />
         <Route path="/feature-requests" element={<AdminGuard><FeatureRequests /></AdminGuard>} />
         <Route path="/mail-recipients" element={<AdminGuard><MailRecipients /></AdminGuard>} />
+        <Route path="/sales-analysis" element={<SalesAnalysis />} />
+        <Route path="/ai-mastery" element={<AdminGuard><AiMastery /></AdminGuard>} />
+        <Route path="/ai-predictions" element={<AiPredictions />} />
+        <Route path="/token-usage" element={<AdminGuard><TokenUsagePage /></AdminGuard>} />
+        <Route path="/users-list" element={<AdminGuard><UsersPage /></AdminGuard>} />
       </Route>
     </Routes>
   );

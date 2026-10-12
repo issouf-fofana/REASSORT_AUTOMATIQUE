@@ -19,6 +19,16 @@
          window.PROJECT_GUIDE_CONTENT. -->
     <script src="/assets/js/project-guide-content.js"></script>
 
+    <!-- Vague 2 (12/10/2026) : AG Grid (users-list, ai-predictions) + sélecteur de magasin global
+         (sales-analysis) + panneau "Recommandation IA" (ai-predictions) — scripts vanilla
+         autonomes, sans dépendance aux partiels sidebar/topbar, repris tels quels. -->
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
+    <script src="/assets/js/ag-grid-setup.js"></script>
+    <script src="/assets/js/ag-grid-locale-fr.js"></script>
+    <script src="/assets/js/ag-grid-toolbar.js"></script>
+    <script src="/assets/js/global-shop-selector.js"></script>
+    <script src="/assets/js/ai-recommendation-panel.js"></script>
+
     <!-- backend-config.js injecte window.REASSORT_BACKEND_URL au runtime (docker-entrypoint.sh) —
          requis avant le script de garde ci-dessous, qui construit REASSORT_API_BASE à partir de
          cette valeur (même ordre que reassort-auth.js sur les 19 autres pages). -->
