@@ -1,14 +1,31 @@
-/* Tailwind utilisé UNIQUEMENT par la barre d'onglets "pilule" animée (NotchTabBar) — le reste du
-   shell reste en Bootstrap/Volt classique (cf. Sidebar/Topbar). CRITIQUE : contrairement à
-   react-app-project-guide (app isolée où elle était la SEULE page du bundle), ce fichier est
-   chargé dans le bundle COMMUN à toutes les routes de la SPA — @import "tailwindcss" standard
-   inclurait la couche "base" (préflight : *{margin:0;padding:0;box-sizing:border-box}, html{...}),
-   qui écraserait Bootstrap/Volt sur TOUTES les pages, pas seulement celles avec des onglets (bug
-   trouvé en préparant la migration de /project-guide, 12/10/2026, avant même d'être déployé —
-   inspection du CSS compilé de l'app isolée d'origine a confirmé le préflight global). N'importe
-   donc QUE "theme" (tokens/variables) et "utilities" (classes bg-*, p-*, rounded-*...), jamais
-   "base" — les classes utilitaires Tailwind restent utilisables partout dans le shell, mais aucun
-   reset ne s'applique en dehors de ce qui est explicitement stylé par une classe Tailwind. */
+/* Tailwind utilisé UNIQUEMENT par la barre d'onglets "pilule" animée (NotchTabBar) et l'écran de
+   connexion (SignIn/DotMap) — le reste du shell reste en Bootstrap/Volt classique (cf.
+   Sidebar/Topbar). CRITIQUE : contrairement à react-app-project-guide (app isolée où elle était la
+   SEULE page du bundle), ce fichier est chargé dans le bundle COMMUN à toutes les routes de la SPA
+   — @import "tailwindcss" standard inclurait la couche "base" (préflight :
+   *{margin:0;padding:0;box-sizing:border-box}, html{...}), qui écraserait Bootstrap/Volt sur TOUTES
+   les pages, pas seulement celles qui utilisent Tailwind (bug trouvé en préparant la migration de
+   /project-guide, 12/10/2026, avant même d'être déployé). N'importe donc QUE "theme"
+   (tokens/variables) et "utilities" (classes bg-*, p-*, rounded-*...), jamais "base".
+   Second piège trouvé le 12/10/2026 (round 2, EN PRODUCTION cette fois) : même sans "base", la
+   couche "utilities" génère par défaut des classes utilitaires pour TOUT nom de classe rencontré
+   n'importe où dans le projet (scan automatique Tailwind v4) — y compris des noms déjà utilisés
+   par Bootstrap/Volt pour un tout autre usage (.collapse, .fixed, .flex, .table, .relative,
+   .absolute, .visible, .invisible...). Exemple réel : Sidebar.tsx utilisait la classe Bootstrap
+   ".collapse" (display:none tant que .show n'est pas posé) — Tailwind générait AUSSI ".collapse"
+   (sa propre utilité, visibility:collapse, pensée pour les lignes de <table>) dans le même bundle,
+   et sa règle gagnait silencieusement, vidant visuellement la sidebar sur TOUTES les pages migrées
+   (jamais une seule, contrairement à ce qu'un premier diagnostic avait cru — cf. historique Git).
+   Tenté de restreindre le scan Tailwind via @source (limiter la génération aux seuls fichiers qui
+   utilisent réellement Tailwind) — sans effet observé à la compilation (.collapse toujours généré
+   dans le CSS de sortie malgré @source not/@source explicites, syntaxe Tailwind v4.3 pas fiable
+   sur ce point, abandonné). Correctif retenu à la place : ne JAMAIS utiliser, dans du JSX
+   Bootstrap/Volt, un nom de classe qui coïncide avec une utilité Tailwind générée globalement
+   (.collapse, .fixed, .block, .hidden, .relative, .static, .absolute, .visible, .invisible, .flex,
+   .grid, .contents, .inline — liste vérifiée le 12/10/2026 par inspection du CSS compilé). Seule
+   exception sans risque : .table (Bootstrap n'y définit aucun display, Tailwind y met
+   display:table — identique au display par défaut du navigateur pour <table>, collision
+   neutre). */
 @import "tailwindcss/theme" layer(theme);
 @import "tailwindcss/utilities" layer(utilities);
 

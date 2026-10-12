@@ -39,6 +39,17 @@ const COLLAPSIBLE_GROUPS: Record<string, string> = {
 // overflow-y:auto, qui suffit seule) et vide visuellement la sidebar (bug trouvé le 12/10/2026,
 // capture utilisateur : sidebar bleu marine entièrement vide sur /feature-requests et
 // /mail-recipients).
+//
+// Pas de classe "collapse" non plus (12/10/2026, round 2 du même bug visuel — persistait sur TOUTES
+// les pages migrées après le fix data-simplebar) : Tailwind génère sa PROPRE classe utilitaire
+// .collapse { visibility: collapse } (pensée pour les lignes de <table>), qui entre en collision
+// directe avec la classe .collapse de Bootstrap/Volt (display:none tant que .show n'est pas posé).
+// Les deux coexistent dans le bundle du shell (contrairement aux 19 apps isolées, jamais de
+// Tailwind là où Volt est utilisé) — confirmé via `grep .collapse` sur le CSS compilé
+// (`.collapse{visibility:collapse}`, la règle Tailwind, pas celle de Volt). Sans conséquence ici :
+// .collapse sans son JS Bootstrap (jamais chargé dans le shell, cf. Topbar.tsx) ne pilotait de
+// toute façon aucun comportement réel — d-lg-block (display:block !important) suffit seul à garder
+// la sidebar visible.
 export function Sidebar() {
   const { user } = useAuth();
   const location = useLocation();
@@ -53,7 +64,7 @@ export function Sidebar() {
   }
 
   return (
-    <nav id="sidebarMenu" className="sidebar d-lg-block bg-gray-800 text-white collapse">
+    <nav id="sidebarMenu" className="sidebar d-lg-block bg-gray-800 text-white">
       <div className="sidebar-inner px-4 pt-3">
         <div className="sidebar-brand d-flex flex-column align-items-center justify-content-center py-3">
           <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" height={40} />
