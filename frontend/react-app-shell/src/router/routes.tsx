@@ -19,6 +19,7 @@ import { Settings } from '../pages/Settings/Settings';
 import { AiQuality } from '../pages/AiQuality/AiQuality';
 import { AiAssistantPage } from '../pages/AiAssistant/AiAssistantPage';
 import { PurchaseOrderPage } from '../pages/PurchaseOrder/PurchaseOrderPage';
+import { Dashboard } from '../pages/Dashboard/Dashboard';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -42,6 +43,13 @@ import { PurchaseOrderPage } from '../pages/PurchaseOrder/PurchaseOrderPage';
 // interne concurrente via <Link>/navigate() pendant qu'elle gère son propre état. /purchase-order
 // (le plus complexe de la vague, ?shop=&sector=&dept=) migrée selon le même principe — pas
 // d'AdminGuard, aucun window.location.href vers une autre route dans son code.
+//
+// Vague 5 (dernière) : / (Tableau de bord), pas d'AdminGuard. Seule page qui n'a pu être portée
+// strictement verbatim : ses 3 navigations internes vers d'autres routes de la SPA
+// (TodayProposalsCard → /purchase-order, 2 liens → /purchase-list et /ai-quality#tab-corrections)
+// utilisaient window.location.href/<a href>, converties en navigate()/<Link> — sinon elles
+// auraient provoqué un rechargement complet de page malgré la fusion, l'exact problème que ce
+// chantier corrige.
 export function AppRoutes() {
   return (
     <Routes>
@@ -64,6 +72,7 @@ export function AppRoutes() {
         <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
         <Route path="/ai-assistant" element={<AiAssistantPage />} />
         <Route path="/purchase-order" element={<PurchaseOrderPage />} />
+        <Route path="/" element={<Dashboard />} />
       </Route>
     </Routes>
   );
