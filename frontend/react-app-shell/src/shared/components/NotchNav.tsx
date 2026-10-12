@@ -118,7 +118,14 @@ export function NotchNav({ onToggleNav }: { onToggleNav: () => void }) {
   return (
     // Île noire compacte et centrée (logo | page active | actions), sticky pour rester visible au
     // scroll (montée hors du flux de <main class="content"> qui défile).
+    //
+    // id="notch-nav-slot" : global-shop-selector.js détecte le mode notch via
+    // btn.closest('#notch-nav-slot') (jamais une prop/classe) pour afficher la seule référence du
+    // magasin plutôt que "NOM (référence)" (trop long pour cette barre compacte) — sans cet id,
+    // le bouton affichait le nom complet comme en mode sidebar classique (bug signalé le
+    // 12/10/2026, capture utilisateur : "CASH IVOIRE..." au lieu du numéro de magasin).
     <div
+      id="notch-nav-slot"
       onMouseEnter={openMenu}
       onMouseLeave={scheduleClose}
       className="reassort-notch-root sticky top-0 z-[100] flex w-full items-start justify-center px-2"
