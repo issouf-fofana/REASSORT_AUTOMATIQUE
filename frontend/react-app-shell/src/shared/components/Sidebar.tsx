@@ -80,7 +80,14 @@ export function Sidebar() {
                             className={`nav-link d-flex align-items-center${entry.id === activeId ? ' active' : ''}`}
                           >
                             <span className="sidebar-icon">
-                              <Icon className="icon icon-xs me-2" size={16} />
+                              {/* 20px = 1.25rem, exactement la valeur que .icon.icon-xs (volt.css)
+                                  fixe en CSS pour `height` SEUL (jamais `width`) — un vrai <svg>
+                                  d'origine suit son ratio naturel sans largeur fixée, mais
+                                  lucide-react pose toujours width/height=24 par défaut sinon, ce qui
+                                  écrase la largeur réelle et casse le ratio/l'alignement (bug visuel
+                                  trouvé le 12/10/2026). Carré 20x20 explicite plutôt que "1em"
+                                  (dépendrait du font-size hérité, non garanti égal à 1.25rem ici). */}
+                              <Icon className="icon icon-xs me-2" width={20} height={20} />
                             </span>
                             <span className="sidebar-text" title={entry.label}>{entry.label}</span>
                           </Link>
