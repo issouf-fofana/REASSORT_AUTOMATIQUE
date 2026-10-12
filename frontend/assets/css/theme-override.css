@@ -224,10 +224,16 @@ a:not(.sidebar *),
      color: #ffffff !important;
      font-weight: 600;
 }
+/* fill: #ffffff !important retiré le 13/10/2026 (bug signalé, capture : icône "Destinataires
+   email" en bloc blanc plein au lieu d'une enveloppe) : les 19 pages non-SPA utilisent des SVG
+   fill="currentColor" (icônes pleines, type Heroicons), où ce fill suit déjà color sans règle
+   séparée — mais le shell SPA utilise lucide-react (icônes en contour, fill="none" explicite), où
+   ce fill !important écrasait l'attribut SVG et remplissait toute la forme en blanc plein au lieu
+   de laisser le contour seul visible. color seul suffit dans les deux cas : fill="currentColor"
+   (pages non-SPA) et stroke="currentColor" (lucide) suivent tous les deux color automatiquement. */
 .sidebar .nav-item.active > .nav-link .sidebar-icon,
 .sidebar .nav-item.active > .nav-link svg {
      color: #ffffff !important;
-     fill: #ffffff !important;
 }
 
 /* Sidebar par sections (demande du 14/09/2026, pliage ajouté le 16/09/2026) : intitulés de section
