@@ -74,7 +74,12 @@ const FALLBACK_INTENT_RULES = [
   // + un mot de quantité désigne un besoin d'EXPLICATION précise (appel IA en direct), jamais la
   // simple liste/le résumé de la proposition.
   { keywords: ['pourquoi cette quantité', 'pourquoi cette quantite', 'pourquoi cette qté', 'pourquoi commander autant', 'explique cette quantité', 'explique cette quantite', 'justifie cette quantité', 'justifie cette quantite'], tool: 'explainProposalQuantity' },
-  { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander'], tool: 'getCurrentProposal' },
+  { keywords: ['proposition', 'proposition en attente', 'proposition du jour', 'proposition de commande', 'quoi commander', 'que dois-je commander', 'quest ce que je dois commander', 'a commander', 'periode de couverture', 'période de couverture', 'periode couverte', 'période couverte', 'quelle periode porte', 'quelle période porte', 'sur combien de jours', 'horizon de la commande', 'horizon de commande'], tool: 'getCurrentProposal' },
+  // getLastSoldArticle ajouté le 12/10/2026 (demande d'évolution réelle du 05/10/2026, "Consultation
+  // du dernier article vendu en temps réel" — aucun outil n'existait avant). Placé AVANT
+  // getSalesHistory (mot-clé "vente"/"ventes" plus générique juste en dessous) pour que "dernier
+  // article vendu" ne soit jamais absorbé par la règle de ventes générique.
+  { keywords: ['dernier article vendu', 'dernier produit vendu', 'dernière vente', 'derniere vente', 'qu\'est-ce qui vient d\'être vendu', 'qu est ce qui vient d etre vendu', 'quel a été le dernier article', 'quel a ete le dernier article'], tool: 'getLastSoldArticle' },
   // "vendue"/"vendues" ajoutés le 12/10/2026 (bug trouvé en testant en conditions réelles :
   // "quelles quantités de X ont été vendues entre le 1er et le 10 octobre" ne matchait AUCUNE règle
   // — "vente"/"ventes" ne couvrent jamais le participe passé féminin "vendue(s)", et "combien

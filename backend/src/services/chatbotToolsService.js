@@ -21,7 +21,7 @@
  *              présenté comme actuel (voir "source"/"status" ci-dessous).
  *
  *   LOCAL (PostgreSQL, jamais RPOS) : getRevenue, getRevenueAllShops, getRevenueTrendAllShops,
- *     getSalesHistory, getParetoArticles, getDataAvailability, getCurrentProposal,
+ *     getSalesHistory, getLastSoldArticle, getParetoArticles, getDataAvailability, getCurrentProposal,
  *     explainProposalQuantity, getStockoutRisks(+AllShops), getOverstockArticles(+AllShops),
  *     getPredictionAccuracy(+AllShops), getOrders, getOrderAnomalies(+AllShops),
  *     getPendingProposalsAllShops, getSilentShops, getShopUsers, getDlvArticles, getArticleDlvStatus.
@@ -746,6 +746,57 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department, dateRan
 }
 
 /**
+ * getLastSoldArticle() — le dernier article vendu dans ce magasin, tous articles confondus
+ * (demande d'évolution réelle du 05/10/2026, "Consultation du dernier article vendu en temps
+ * réel" — aucun outil n'existait pour cette question avant le 12/10/2026, chantier identifié en
+ * passation). Lit SalesLine (local, synchronisé toutes les 15 minutes par défaut —
+ * SALES_SYNC_CRON — donc PAS un vrai temps réel seconde par seconde, mais largement suffisant pour
+ * "le dernier article vendu aujourd'hui" en usage normal). Jamais RPOS live ici : une requête RPOS
+ * directe sur les tickets de caisse n'existe pas dans ce client, et la fraîcheur à 15 minutes près
+ * est honnêtement signalée via lastSyncAt plutôt que présentée comme une vraie donnée temps réel.
+ */
+async function getLastSoldArticle(rposShopId) {
+  const rawLine = await prisma.salesLine.findFirst({
+    where: { rposShopId },
+    orderBy: { date: 'desc' },
+    select: { date: true, ean: true, label: true, quantity: true, revenueExclTax: true, receiptId: true },
+  });
+  if (!rawLine) return { found: false, message: 'Aucune vente synchronisée pour ce magasin.', isNormalNegative: true };
+
+  // Écarte un article générique/poids libre (ex: "FRUITS & LEGUMES") si c'est la toute dernière
+  // ligne — jamais présenté comme "le dernier article vendu", sa quantité n'a pas de sens en
+  // unités. Cherche alors la dernière ligne NON générique, sans limite de date (le dernier VRAI
+  // article vendu, même si plus ancien que la dernière ligne générique).
+  const [filtered] = await filterGenericArticleLines(rposShopId, [rawLine]);
+  let line = filtered;
+  if (!line) {
+    const candidates = await prisma.salesLine.findMany({
+      where: { rposShopId },
+      orderBy: { date: 'desc' },
+      take: 50,
+      select: { date: true, ean: true, label: true, quantity: true, revenueExclTax: true, receiptId: true },
+    });
+    const genuine = await filterGenericArticleLines(rposShopId, candidates);
+    line = genuine[0] || null;
+  }
+  if (!line) return { found: false, message: 'Aucune vente d\'article identifiable (hors articles génériques/poids libre) trouvée pour ce magasin.', isNormalNegative: true };
+
+  return {
+    found: true,
+    ean: line.ean,
+    label: line.label,
+    quantity: line.quantity,
+    revenueExclTax: line.revenueExclTax,
+    soldAt: line.date.toISOString(),
+    receiptId: line.receiptId || null,
+    source: 'local',
+    // Signale honnêtement que cette donnée vient de la synchro locale (cadence SALES_SYNC_CRON,
+    // 15 min par défaut), jamais présentée comme une lecture RPOS live à l'instant T.
+    dataFreshnessNote: 'Donnée issue de la dernière synchronisation locale des ventes, pas une lecture en direct de la caisse.',
+  };
+}
+
+/**
  * getCurrentProposal() — la proposition en attente de validation pour ce magasin.
  *
  * departmentBreakdown ajouté le 06/10/2026 (demande explicite : "combien de commandes on été
@@ -788,6 +839,12 @@ async function getCurrentProposal(rposShopId, { department } = {}) {
     articleCount: lines.length,
     totalArticleCount: proposal.lines.length,
     departmentBreakdown,
+    // coverageDays/coverageSource ajoutés le 12/10/2026 (demande d'évolution réelle du 06/10/2026,
+    // "Indiquer la période de couverture du réassort suggéré") — même règle que
+    // explainProposalQuantity ci-dessous et le calcul classique (computeQuantityToOrder,
+    // proposalService.js) : le délai de réception réglé pour ce magasin s'il existe, sinon 7 jours.
+    coverageDays: proposal.receptionLeadTimeDaysUsed || 7,
+    coverageSource: proposal.receptionLeadTimeDaysUsed ? 'reception_lead_time' : 'default_7_days',
     lines: lines.slice(0, 200),
   };
 }
@@ -861,6 +918,12 @@ async function explainProposalQuantity(rposShopId, ean) {
       stockUsed: liveLine.stockAtGeneration,
       stockSource,
       stockQueriedAt,
+      // coverageDays ajouté le 12/10/2026 (demande d'évolution réelle du 06/10/2026, "Indiquer la
+      // période de couverture du réassort suggéré") — même règle que le calcul classique
+      // (computeQuantityToOrder, proposalService.js) : le délai de réception réglé pour ce magasin
+      // s'il existe, sinon 7 jours par défaut. Jamais une seconde logique divergente.
+      coverageDays: proposal.receptionLeadTimeDaysUsed || 7,
+      coverageSource: proposal.receptionLeadTimeDaysUsed ? 'reception_lead_time' : 'default_7_days',
     };
   } catch (err) {
     // IA indisponible (clé API, timeout...) : honnête sur l'échec plutôt que de faire planter toute
@@ -1062,24 +1125,45 @@ async function getParetoArticles(posId, rposShopId, { thresholdPct, department, 
 }
 
 /** getPredictionAccuracy() — précision réelle des prédictions passées pour ce magasin (KPI §23). */
-async function getPredictionAccuracy(rposShopId, { days = 90 } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+// dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (chantier identifié en passation : seuls
+// getRevenue/getStockMoveHistory/getSalesHistory savaient consommer une vraie plage bornée,
+// getPredictionAccuracy n'exprimait encore qu'un `days` glissant depuis maintenant) — même pattern
+// que getStockMoveHistory/getSalesHistory : une plage explicite prime toujours sur `days`.
+async function getPredictionAccuracy(rposShopId, { days = 90, dateRangeStart, dateRangeEnd } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
   const outcomes = await prisma.aIPredictionOutcome.findMany({
-    where: { prediction: { rposShopId }, evaluatedAt: { gte: dateStart } },
+    where: { prediction: { rposShopId }, evaluatedAt: { gte: dateStart, lte: dateEnd } },
     select: { percentageError: true, forecastError: true, actualSales: true, predictedQuantity: true },
   });
+
+  const periodLabel = hasExplicitRange
+    ? `du ${dateStart.toISOString().slice(0, 10)} au ${dateEnd.toISOString().slice(0, 10)}`
+    : `sur les ${days} derniers jours`;
 
   const withPct = outcomes.filter((o) => o.percentageError !== null);
   // isNormalNegative (bug constaté le 05/10/2026 : "quelle est la précision de l'IA ?" répondait
   // correctement "0 prédiction évaluée" PUIS ajoutait "en phase de développement sur ce point",
   // contradictoire — la fonctionnalité existe et vient de répondre, il n'y a juste aucune donnée à
   // évaluer sur cette fenêtre) — réponse négative normale et complète, pas une lacune du système.
-  if (!withPct.length) return { found: false, message: `Aucune prédiction évaluée sur les ${days} derniers jours pour ce magasin.`, isNormalNegative: true };
+  if (!withPct.length) {
+    return {
+      found: false,
+      days,
+      dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+      dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
+      message: `Aucune prédiction évaluée ${periodLabel} pour ce magasin.`,
+      isNormalNegative: true,
+    };
+  }
 
   const avgAbsError = withPct.reduce((s, o) => s + Math.abs(o.percentageError), 0) / withPct.length;
   return {
     found: true,
     days,
+    dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
     evaluatedPredictions: withPct.length,
     averageAbsolutePercentageError: Math.round(avgAbsError * 1000) / 10, // en %
     accuracyPct: Math.round((1 - avgAbsError) * 1000) / 10,
@@ -1433,13 +1517,20 @@ const TOP_GISEMENTS_CONCURRENCY = 8;
  * ni tous les articles vendus — seulement l'échantillon des meilleures ventes, en confiance que le
  * Pareto 80/20 y capture l'essentiel du signal utile pour un classement de gisements.
  */
-async function getTopGisements(posId, shopId, { days = 30 } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+// dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (même chantier que getPredictionAccuracy
+// ci-dessus) — plage explicite toujours prioritaire sur `days`.
+async function getTopGisements(posId, shopId, { days = 30, dateRangeStart, dateRangeEnd } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+  const periodLabel = hasExplicitRange
+    ? `du ${dateStart.toISOString().slice(0, 10)} au ${dateEnd.toISOString().slice(0, 10)}`
+    : `sur les ${days} derniers jours`;
   const lines = await prisma.salesLine.findMany({
-    where: { rposShopId: shopId, date: { gte: dateStart } },
+    where: { rposShopId: shopId, date: { gte: dateStart, lte: dateEnd } },
     select: { ean: true, revenueExclTax: true, quantity: true },
   });
-  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur les ${days} derniers jours.` };
+  if (!lines.length) return { found: false, message: `Aucune vente enregistrée ${periodLabel}.` };
 
   // Écarte les articles génériques/poids libre agrégés au niveau d'un rayon entier (ex: "FRUITS &
   // LEGUMES", "CHARCUTERIE PESEE") avant l'agrégation par EAN — cf. filterGenericArticleLines
@@ -1484,6 +1575,8 @@ async function getTopGisements(posId, shopId, { days = 30 } = {}) {
   return {
     found: true,
     days,
+    dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
     sampleSize: topArticles.length,
     note: `Classement basé sur les ${topArticles.length} meilleures ventes du magasin, pas la totalité des articles.`,
     gisements,
@@ -2004,6 +2097,7 @@ module.exports = {
   getRevenue,
   getRevenueAllShops,
   getSalesHistory,
+  getLastSoldArticle,
   getCurrentProposal,
   explainProposalQuantity,
   getStockoutRisks,

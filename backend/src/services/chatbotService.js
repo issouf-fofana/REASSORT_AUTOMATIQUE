@@ -23,7 +23,7 @@ const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
 ]);
@@ -654,6 +654,7 @@ const TOOL_CATALOG = [
   { name: 'getRevenue', description: 'Chiffre d\'affaires (CA) du magasin, d\'un rayon ou d\'un article, sur une date ou période.', params: { date: 'date ISO aaaa-mm-jj, optionnel', department: 'rayon, optionnel', ean: 'code EAN article, optionnel' } },
   { name: 'getRevenueAllShops', description: 'Classement du CA de TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "le CA de tous les magasins", "chiffre d\'affaires de chaque magasin", jamais pour une question sur UN seul magasin précis.', params: { date: 'date ISO aaaa-mm-jj, optionnel' } },
   { name: 'getSalesHistory', description: 'Historique/évolution des ventes (quantités, tendance) sur les derniers jours, du magasin ou d\'un article.', params: { ean: 'code EAN article, optionnel', days: 'nombre de jours, optionnel (défaut 30)', department: 'rayon, optionnel' } },
+  { name: 'getLastSoldArticle', description: 'Le DERNIER article vendu dans le magasin, tous articles confondus (ex: "quel est le dernier article vendu ?", "qu\'est-ce qui vient d\'être vendu ?") — jamais pour un article précis, utiliser getArticleDetails/getSalesHistory dans ce cas.', params: {} },
   { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'searchArticlesByName', description: 'Recherche un ou plusieurs articles par nom/libellé partiel (ex: "codys", "coca cola") quand aucun code EAN n\'est identifiable dans la question — utiliser PLUTÔT que getArticleDetails avec tool: null dans ce cas précis.', params: { query: 'nom ou libellé partiel de l\'article, OBLIGATOIRE' } },
   { name: 'getArticlesByGisement', description: 'Liste tous les articles rangés dans un gisement précis (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS", "ACCESSOIRES DE CUISINE") — à ne pas confondre avec le rayon/département (classification produit). Utile pour "quels articles sont dans tel gisement", "tops ventes par gisement/emplacement".', params: { gisement: 'nom ou code approximatif du gisement recherché, OBLIGATOIRE' } },
@@ -942,16 +943,18 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // constaté le 05/10/2026). Quand une vraie plage est détectée, elle prime sur tout le reste
   // (date/days/naturalRange ci-dessous ne sont plus évalués pour la détection de période).
   // Limité aux outils qui savent déjà consommer une vraie plage à deux bornes (dateRangeStart/
-  // dateRangeEnd) — getPredictionAccuracy/getTopGisements ne savent encore exprimer qu'un `days`
-  // glissant, les étendre à une plage est un chantier séparé. Déclaré ici (plutôt que juste avant
-  // son premier usage plus bas) car réutilisé par le signal de plage textuel ci-dessous.
+  // dateRangeEnd). Déclaré ici (plutôt que juste avant son premier usage plus bas) car réutilisé par
+  // le signal de plage textuel ci-dessous.
   // getStockMoveHistory ajouté le 06/10/2026 (bug réel : "mouvement sur l'article X du 4 au
   // 5/09/2026" ignorait la plage et répondait sur les 14 derniers jours glissants — cf.
   // chatbotToolsService.js, dateRangeStart/dateRangeEnd).
   // getSalesHistory ajouté le 12/10/2026 (bug réel : "quelles quantités de X ont été vendues entre
   // le 1er et le 10 octobre" ne pouvait être honoré qu'en approximant avec `days`, cette fonction
   // vient d'être étendue pour accepter une vraie plage bornée, cf. chatbotToolsService.js).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory']);
+  // getPredictionAccuracy/getTopGisements ajoutés le 12/10/2026 (chantier identifié en passation,
+  // même extension que getSalesHistory ci-dessus — aucun bug réel signalé dessus pour l'instant,
+  // mais le même piège se serait reproduit sur toute question avec une plage explicite).
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1100,11 +1103,28 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // classement TOP gisements (getTopGisements) plutôt que de bloquer sur "précisez lequel" —
         // répond réellement à l'intention de la question plutôt que de forcer une reformulation
         // (demande du 18/09/2026).
-        if (!gisementQuery) return { toolName: 'getTopGisements', toolResult: await tools.getTopGisements(posId, rposShopId, { days: daysQuery || 30 }) };
+        if (!gisementQuery) {
+          return {
+            toolName: 'getTopGisements',
+            toolResult: await tools.getTopGisements(posId, rposShopId, {
+              days: daysQuery || 30,
+              dateRangeStart: effectiveDateRange?.start || null,
+              dateRangeEnd: effectiveDateRange?.end || null,
+            }),
+          };
+        }
         return { toolName, toolResult: await tools.getArticlesByGisement(posId, rposShopId, gisementQuery, { days: daysQuery || 30 }) };
       case 'getTopGisements':
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-        return { toolName, toolResult: await tools.getTopGisements(posId, rposShopId, { days: daysQuery || 30 }) };
+        // dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (chantier identifié en passation).
+        return {
+          toolName,
+          toolResult: await tools.getTopGisements(posId, rposShopId, {
+            days: daysQuery || 30,
+            dateRangeStart: effectiveDateRange?.start || null,
+            dateRangeEnd: effectiveDateRange?.end || null,
+          }),
+        };
       case 'getPriceChangeHistory':
         if (!ean) return { toolName, toolResult: { found: false, message: 'Précisez le code EAN de l\'article pour consulter son historique de prix.' } };
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
@@ -1172,7 +1192,15 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       case 'getPredictionAccuracy':
         // Même bug que getSalesHistory (days ignoré) : "la fiabilité de l'IA ce mois-ci" retombait
         // silencieusement sur le défaut de l'outil (90 jours) sans jamais utiliser daysQuery.
-        return { toolName, toolResult: await tools.getPredictionAccuracy(rposShopId, { days: daysQuery || 90 }) };
+        // dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (chantier identifié en passation).
+        return {
+          toolName,
+          toolResult: await tools.getPredictionAccuracy(rposShopId, {
+            days: daysQuery || 90,
+            dateRangeStart: effectiveDateRange?.start || null,
+            dateRangeEnd: effectiveDateRange?.end || null,
+          }),
+        };
       case 'getOrders':
         // Idem : "mes commandes du mois dernier" ignorait daysQuery et retombait sur le défaut (14j).
         return { toolName, toolResult: await tools.getOrders(rposShopId, { days: daysQuery || 14 }) };
@@ -1273,6 +1301,8 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
             dateRangeEnd: effectiveDateRange?.end || null,
           }),
         };
+      case 'getLastSoldArticle':
+        return { toolName, toolResult: await tools.getLastSoldArticle(rposShopId) };
       case 'getArticleStock': {
         if (!ean) return { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
         const stockResult = await tools.getArticleStock(effectiveShopId, ean, effectivePosId);
