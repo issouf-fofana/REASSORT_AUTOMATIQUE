@@ -512,6 +512,18 @@ export function AiAssistant() {
     if (finalResult) {
       const isNewConversation = !currentConversationId;
       setCurrentConversationId(finalResult.conversationId);
+      // Bug trouvé le 12/10/2026 ("une nouvelle conversation il n'y a pas de conversation id dans
+      // l'URL") : openConversation() met bien ?conversation=<id> dans l'URL en rouvrant une
+      // conversation existante (cf. plus haut), mais rien ne le faisait pour une conversation NÉE
+      // ici, au premier message envoyé sans en avoir ouvert une — l'URL restait /ai-assistant nue
+      // même après la création réelle de la conversation côté serveur, impossible à retrouver par
+      // lien direct ou après un rafraîchissement (même bug de fond que celui corrigé le 05/10/2026
+      // pour openConversation, jamais étendu à ce second point d'entrée).
+      if (isNewConversation) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('conversation', finalResult.conversationId);
+        window.history.pushState({}, '', url);
+      }
       if (isNewConversation) loadConversations();
       else setConversations((prev) => [...prev]);
 
