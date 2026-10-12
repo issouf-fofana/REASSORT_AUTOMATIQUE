@@ -24,6 +24,13 @@ interface MailRecipientsData {
 const MARINE = '#1B2A4A';
 const MARINE_SOFT = '#eef1f6';
 const ACCENT = '#ff6c2f';
+// Gris neutre pour l'état "sans destinataire" (12/10/2026, demande explicite : "les couleur j'aime
+// pas ca fait trop ia" — le rouge vif d'alerte utilisé initialement sur CHAQUE magasin sans
+// destinataire, soit la grande majorité de la grille au premier chargement, donnait un rendu
+// criard/générique plutôt qu'une vraie alerte ponctuelle). Un magasin sans destinataire reste un
+// état neutre/par défaut à ce stade du déploiement, pas une erreur — le gris le signale sans
+// transformer toute la page en tableau d'alertes rouges.
+const NEUTRAL = '#9099a8';
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -223,8 +230,8 @@ export function MailRecipients() {
         .mr-mini-avatar:first-child { margin-left: 0; }
         .mr-mini-more { background: #eef1f6; color: #6b7280; }
 
-        .mr-empty-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 600; color: #c0392b; }
-        .mr-empty-dot { width: 6px; height: 6px; border-radius: 50%; background: #c0392b; flex-shrink: 0; }
+        .mr-empty-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 500; color: ${NEUTRAL}; }
+        .mr-empty-dot { width: 6px; height: 6px; border-radius: 50%; background: #c7cdd6; flex-shrink: 0; }
 
         .mr-modal-backdrop { position: fixed; inset: 0; background: rgba(15,20,35,0.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 1000; }
         .mr-modal { background: #fff; border-radius: 14px; max-width: 540px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
@@ -275,7 +282,7 @@ export function MailRecipients() {
               <span className="mr-stat-value">{stats.totalShops}</span>
               <span className="mr-stat-label">Magasins suivis</span>
             </div>
-            <div className="mr-stat-card" style={{ ['--mr-accent' as string]: stats.shopsWithoutRecipient > 0 ? '#c0392b' : '#2f9e44' }}>
+            <div className="mr-stat-card" style={{ ['--mr-accent' as string]: stats.shopsWithoutRecipient > 0 ? NEUTRAL : MARINE }}>
               <span className="mr-stat-value">{stats.shopsWithoutRecipient}</span>
               <span className="mr-stat-label">Magasins sans destinataire</span>
             </div>
@@ -333,7 +340,7 @@ export function MailRecipients() {
                     type="button"
                     key={s.shop.reference}
                     className="mr-shop-card"
-                    style={{ ['--mr-card-accent' as string]: hasRecipients ? MARINE : '#c0392b' }}
+                    style={{ ['--mr-card-accent' as string]: hasRecipients ? ACCENT : '#e2e5ea' }}
                     onClick={() => setOpenShopRef(s.shop.reference)}
                   >
                     <div className="mr-shop-ref">{s.shop.reference}</div>
