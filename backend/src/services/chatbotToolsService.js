@@ -633,8 +633,17 @@ async function getRevenueAllShops(allowedShopIds, { date, days = 1 } = {}) {
  * l'UI) sommait silencieusement les ventes de TOUT le magasin, produisant un total incohérent avec
  * le rayon affiché à l'utilisateur.
  */
-async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+// dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (bug trouvé en conditions réelles : "quelles
+// quantités de X ont été vendues entre le 1er et le 10 octobre" ne pouvait être honoré qu'en
+// approximant avec `days`, cette fonction ne connaissait qu'une fenêtre glissante depuis
+// maintenant — jamais une vraie plage bornée dans le passé, contrairement à getRevenue/
+// getStockMoveHistory qui le permettent déjà). Même pattern que getStockMoveHistory : une plage
+// explicite prime toujours sur `days`, qui reste le comportement par défaut si aucune plage n'est
+// fournie.
+async function getSalesHistory(rposShopId, { ean, days = 30, department, dateRangeStart, dateRangeEnd } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
 
   let eanFilter = ean ? [ean] : null;
   if (!ean && department) {
@@ -650,7 +659,7 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
   }
 
   const rawLines = await prisma.salesLine.findMany({
-    where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart } },
+    where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart, lte: dateEnd } },
     select: { date: true, quantity: true, revenueExclTax: true, ean: true, label: true, receiptId: true },
     orderBy: { date: 'asc' },
   });
@@ -697,14 +706,20 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
   // tort "fonctionnalité pas encore disponible, système en développement" alors que c'est une vraie
   // réponse honnête et complète : aucune vente synchronisée pour cet article sur cette période).
   // Même principe que getOrders/getStockMoveHistory déjà corrigés pour ce piège.
+  const periodLabel = hasExplicitRange
+    ? `du ${dateStart.toISOString().slice(0, 10)} au ${dateEnd.toISOString().slice(0, 10)}`
+    : `sur les ${days} derniers jours`;
+
   if (!lines.length) {
     const scope = ean ? `l'article ${ean}` : department ? `le rayon "${department}"` : 'ce magasin';
     return {
       found: false,
       days,
+      dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+      dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
       ean: ean || null,
       department: department || null,
-      message: `Aucune vente enregistrée pour ${scope} sur les ${days} derniers jours.`,
+      message: `Aucune vente enregistrée pour ${scope} ${periodLabel}.`,
       isNormalNegative: true,
     };
   }
@@ -712,6 +727,8 @@ async function getSalesHistory(rposShopId, { ean, days = 30, department } = {}) 
   return {
     found: true,
     days,
+    dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
     ean: ean || null,
     department: department || null,
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),

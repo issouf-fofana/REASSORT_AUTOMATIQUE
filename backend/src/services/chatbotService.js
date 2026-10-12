@@ -919,13 +919,16 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // constaté le 05/10/2026). Quand une vraie plage est détectée, elle prime sur tout le reste
   // (date/days/naturalRange ci-dessous ne sont plus évalués pour la détection de période).
   // Limité aux outils qui savent déjà consommer une vraie plage à deux bornes (dateRangeStart/
-  // dateRangeEnd) — getSalesHistory/getPredictionAccuracy/getTopGisements ne savent encore exprimer
-  // qu'un `days` glissant, les étendre à une plage est un chantier séparé. Déclaré ici (plutôt que
-  // juste avant son premier usage plus bas) car réutilisé par le signal de plage textuel ci-dessous.
+  // dateRangeEnd) — getPredictionAccuracy/getTopGisements ne savent encore exprimer qu'un `days`
+  // glissant, les étendre à une plage est un chantier séparé. Déclaré ici (plutôt que juste avant
+  // son premier usage plus bas) car réutilisé par le signal de plage textuel ci-dessous.
   // getStockMoveHistory ajouté le 06/10/2026 (bug réel : "mouvement sur l'article X du 4 au
   // 5/09/2026" ignorait la plage et répondait sur les 14 derniers jours glissants — cf.
   // chatbotToolsService.js, dateRangeStart/dateRangeEnd).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops']);
+  // getSalesHistory ajouté le 12/10/2026 (bug réel : "quelles quantités de X ont été vendues entre
+  // le 1er et le 10 octobre" ne pouvait être honoré qu'en approximant avec `days`, cette fonction
+  // vient d'être étendue pour accepter une vraie plage bornée, cf. chatbotToolsService.js).
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1236,7 +1239,17 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // resolveDateRange) — "les ventes des 7 derniers jours" retournait en réalité 30 jours de
         // ventes sans jamais le signaler. Aligné sur les autres cases (getRevenueTrendAllShops,
         // getTopGisements, getRevenueAllShops) qui utilisaient déjà `daysQuery || <défaut>`.
-        return { toolName, toolResult: await tools.getSalesHistory(rposShopId, { ean, days: daysQuery || 30, department }) };
+        // dateRangeStart/dateRangeEnd ajoutés le 12/10/2026 (bug réel : "quantités vendues entre le
+        // 1er et le 10 octobre" ignorait la plage et approximait avec `days`) — même transmission
+        // que getStockMoveHistory ci-dessus.
+        return {
+          toolName,
+          toolResult: await tools.getSalesHistory(rposShopId, {
+            ean, days: daysQuery || 30, department,
+            dateRangeStart: effectiveDateRange?.start || null,
+            dateRangeEnd: effectiveDateRange?.end || null,
+          }),
+        };
       case 'getArticleStock': {
         if (!ean) return { toolName, toolResult: await tools.getStoreStock(rposShopId, { department }) };
         const stockResult = await tools.getArticleStock(effectiveShopId, ean, effectivePosId);
