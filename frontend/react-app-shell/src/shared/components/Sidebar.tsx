@@ -83,7 +83,11 @@ export function Sidebar() {
       <div className="sidebar-inner px-4 pt-3">
         <div className="sidebar-brand d-flex flex-column align-items-center justify-content-center py-3">
           <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" height={40} />
-          <small className="text-white-50 mt-1" style={{ fontSize: '0.7rem' }}>v1.0.0</small>
+          {/* __APP_VERSION__ injecté au build (vite.config.ts) depuis VERSION à la racine du dépôt
+              — incrémenté automatiquement à chaque commit (scripts/git-hooks/pre-commit), jamais
+              codé en dur ici (demande explicite du 13/10/2026 : "je veux que ça soit dynamique
+              quand j'envoie une nouvelle mise à jour"). */}
+          <small className="text-white-50 mt-1" style={{ fontSize: '0.7rem' }}>v{__APP_VERSION__}</small>
         </div>
         <ul className="nav flex-column pt-3 pt-md-0">
           {NAV_GROUPS.map((group) => {
