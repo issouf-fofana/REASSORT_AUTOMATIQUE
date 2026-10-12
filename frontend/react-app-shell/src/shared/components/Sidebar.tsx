@@ -106,10 +106,16 @@ export function Sidebar() {
                     visibleEntries.map((entry) => {
                       const Icon = entry.icon;
                       return (
-                        <li className="nav-item" key={entry.id}>
+                        <li className={`nav-item${entry.id === activeId ? ' active' : ''}`} key={entry.id}>
+                          {/* La surbrillance ambre (theme-override.css: .sidebar .nav-item.active >
+                              .nav-link) cible .nav-item.active, PAS .nav-link.active — classe posée
+                              au mauvais endroit depuis la création de ce composant (bug signalé le
+                              12/10/2026 : "il faut qu'il soit en surbrillance jaune... comme avant"),
+                              jamais remarqué car le lien restait quand même visuellement
+                              identifiable par sa position dans le menu. */}
                           <Link
                             to={entry.href}
-                            className={`nav-link d-flex align-items-center${entry.id === activeId ? ' active' : ''}`}
+                            className="nav-link d-flex align-items-center"
                           >
                             <span className="sidebar-icon">
                               {/* 20px = 1.25rem, exactement la valeur que .icon.icon-xs (volt.css)
