@@ -19,6 +19,7 @@ declare global {
     reassortOnActiveShopChange: (cb: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void) => void;
     reassortSetActiveShop: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void;
     reassortRenderShopSelector?: () => void;
+    reassortRenderNotificationsBell?: () => void;
     reassortReportError?: (message: string, stack?: string) => void;
     openAiRecommendationPanel?: (item: Record<string, unknown>) => void;
     hideLoadingOverlay?: () => void;

@@ -167,13 +167,24 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
+  let started = false;
+  function start() {
     const user = window.reassortGetUser && window.reassortGetUser();
     if (!user || user.role !== 'ADMIN') return;
-    // layout.js injecte la topbar de façon synchrone avant DOMContentLoaded (cf. son propre
-    // commentaire), donc #page-header-notifications-dropdown existe déjà à ce stade.
+    if (!document.getElementById('page-header-notifications-dropdown')) return;
     loadStaleImprovements();
     checkNewCriticalImprovements();
-    setInterval(checkNewCriticalImprovements, POLL_INTERVAL_MS);
-  });
+    if (!started) {
+      started = true;
+      setInterval(checkNewCriticalImprovements, POLL_INTERVAL_MS);
+    }
+  }
+
+  // Exposée pour le shell SPA (12/10/2026, NotchNav.tsx/Topbar.tsx) : #page-header-notifications-
+  // dropdown y est un élément React monté APRÈS DOMContentLoaded (déjà passé au chargement de ce
+  // script), contrairement aux 19 pages non-SPA où layout.js l'injecte de façon synchrone AVANT cet
+  // event — même raisonnement que window.reassortRenderShopSelector (global-shop-selector.js).
+  window.reassortRenderNotificationsBell = start;
+
+  document.addEventListener('DOMContentLoaded', start);
 })();

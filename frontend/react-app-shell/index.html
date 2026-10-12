@@ -39,12 +39,18 @@
          n'expose un vrai clic dessus (bug signalé le 12/10/2026 : "quand je clique sur magasin ya
          rien"), car reassortMakeShopPickerSearchable restait jusque-là appelé en best-effort
          (`if (window.reassortMakeShopPickerSearchable)`) sans jamais être réellement exercé en
-         conditions réelles. Chargés ici, PAS pour réintroduire data-bs-toggle ailleurs dans le shell
-         (Topbar.tsx reste en state React pur, cf. son propre commentaire) — seul ce composant précis
-         en a besoin, et bootstrap.min.js n'auto-initialise jamais rien sans un appel JS explicite ou
-         un attribut data-bs-* présent dans le markup, donc aucun risque de collision avec React. -->
+         conditions réelles. bootstrap.min.js n'auto-initialise jamais rien sans un appel JS explicite
+         ou un attribut data-bs-* présent dans le markup, donc aucun risque de collision avec React —
+         la cloche de notification (data-bs-toggle="dropdown", Topbar.tsx/NotchNav.tsx) en profite
+         aussi depuis ce même ajout, le menu de déconnexion reste cependant en state React pur
+         (jamais de raison de le migrer, cf. son propre commentaire). -->
     <script src="/assets/volt/vendor/@popperjs/core/dist/umd/popper.min.js"></script>
     <script src="/assets/volt/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+    <!-- Cloche de notification (window.reassortRenderNotificationsBell) — jamais chargée dans le
+         shell depuis sa création, désactivée dans NotchNav.tsx faute de point d'accroche au bon
+         moment (signalé le 12/10/2026). Expose son propre rattrapage comme global-shop-selector.js
+         (reassortRenderShopSelector), appelé par Topbar.tsx/NotchNav.tsx après leur montage. -->
+    <script src="/assets/js/notifications-bell.js"></script>
     <!-- Sélecteur de magasin cherchable (window.reassortMakeShopPickerSearchable) — déclaré
          optionnel depuis la vague 2 mais jamais réellement chargé jusqu'ici (silencieusement inopérant
          sur /purchase-list, /sales-history...) : ajouté maintenant car /purchase-order (vague 4) en

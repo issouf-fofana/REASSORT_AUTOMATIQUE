@@ -20,6 +20,15 @@ export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () 
   const suffix = user ? (user.rposShopName || ROLE_LABELS[user.role] || user.role || '') : '';
   const displayName = user ? user.name + (suffix ? ' — ' + suffix : '') : '';
 
+  // Cloche de notification (notifications-bell.js) — jamais portée ici depuis la création du shell
+  // ("notifications... seront ajoutés dans une étape suivante", jamais revisité — signalé par
+  // l'utilisateur le 12/10/2026 après l'avoir trouvée désactivée dans NotchNav.tsx). Rattrapage
+  // identique à window.reassortRenderShopSelector : le script cherche son point d'accroche sur
+  // DOMContentLoaded, déjà passé au moment où React monte cet élément.
+  useEffect(() => {
+    window.reassortRenderNotificationsBell?.();
+  }, []);
+
   // Dropdown géré en state React pur, PAS data-bs-toggle (bug trouvé le 12/10/2026, "déconnexion
   // ne marche pas sur cette page" — le shell ne charge jamais bootstrap.min.js, contrairement aux
   // 19 autres pages ; data-bs-toggle="dropdown" reste alors totalement inerte, le menu ne s'ouvre
@@ -63,6 +72,24 @@ export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () 
             </div>
           </div>
           <ul className="navbar-nav align-items-center">
+            <li className="nav-item dropdown">
+              <a
+                className="nav-link text-dark dropdown-toggle"
+                href="#"
+                role="button"
+                id="page-header-notifications-dropdown"
+                data-bs-toggle="dropdown"
+                aria-haspopup="true"
+                aria-expanded="false"
+              >
+                <svg className="icon icon-sm text-gray-900" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"></path>
+                </svg>
+              </a>
+              {/* notifications-bell.js cherche .dropdown-menu comme frère de
+                  #page-header-notifications-dropdown et écrit son innerHTML lui-même. */}
+              <div className="dropdown-menu dropdown-menu-lg dropdown-menu-end mt-2 py-0" aria-labelledby="page-header-notifications-dropdown" />
+            </li>
             <li className={`nav-item dropdown ms-lg-3${open ? ' show' : ''}`} ref={menuRef}>
               <a
                 className="nav-link dropdown-toggle pt-1 px-0"

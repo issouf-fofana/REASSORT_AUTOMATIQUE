@@ -95,8 +95,12 @@ export function NotchNav({ onToggleNav }: { onToggleNav: () => void }) {
   // Même rattrapage que l'ancienne topbar Volt (cf. layout.js) : global-shop-selector.js tente son
   // premier rendu avant que ce composant ne soit monté, donc avant que #global-shop-selector-btn
   // n'existe — on le redéclenche une fois que ce bouton existe réellement dans le DOM.
+  // window.reassortRenderNotificationsBell : même raisonnement pour la cloche de notification
+  // (notifications-bell.js, 12/10/2026 — jamais réellement fonctionnelle avant ce correctif,
+  // signalé par l'utilisateur après l'avoir trouvée désactivée dans ce composant).
   useEffect(() => {
     window.reassortRenderShopSelector?.();
+    window.reassortRenderNotificationsBell?.();
   }, []);
 
   // Petit délai à la sortie de la souris (pas à l'entrée) : passer du bouton central au mega-menu
@@ -173,14 +177,14 @@ export function NotchNav({ onToggleNav }: { onToggleNav: () => void }) {
 
         <div className="h-5 w-px shrink-0 bg-[#2A3E66]" />
 
-        {/* Magasin (global-shop-selector.js), utilisateur/déconnexion — même id que topbar.html pour
-            que ce script existant continue de fonctionner sans modification. Cloche de notification
-            volontairement OMISE ici (contrairement à l'original) : notifications-bell.js cherche
-            #page-header-notifications-dropdown sur DOMContentLoaded, déjà passé au moment où React
-            monte ce composant dans le shell — jamais de rattrapage prévu dans ce script contrairement
-            à global-shop-selector.js (reassortRenderShopSelector), donc resterait inerte si ajouté
-            tel quel ; la Topbar classique du shell n'a pas non plus de cloche fonctionnelle
-            actuellement, pas une régression propre à ce composant. */}
+        {/* Magasin (global-shop-selector.js) et cloche de notification (notifications-bell.js) —
+            mêmes id que topbar.html pour que ces scripts existants continuent de fonctionner sans
+            modification. Rendue fonctionnelle le 12/10/2026 (window.reassortRenderNotificationsBell,
+            cf. useEffect plus haut + notifications-bell.js) : jusque-là désactivée dans ce composant
+            car le script ne trouvait jamais son point d'accroche, monté par React après
+            DOMContentLoaded. data-bs-toggle="dropdown" fonctionne réellement depuis l'ajout de
+            bootstrap.min.js dans index.html (12/10/2026, correctif du clic inopérant sur le
+            sélecteur de magasin). */}
         <div className="flex shrink-0 items-center gap-3">
           <div className="flex flex-col items-end leading-tight max-w-[160px]">
             <div id="page-shop-context" style={{ display: 'none' }} className="text-[11px] text-zinc-400 truncate max-w-[160px]" />
@@ -188,18 +192,28 @@ export function NotchNav({ onToggleNav }: { onToggleNav: () => void }) {
           </div>
 
           <div className="relative">
-            <button
-              type="button"
+            <a
+              href="#"
+              role="button"
+              id="page-header-notifications-dropdown"
+              data-bs-toggle="dropdown"
               aria-haspopup="true"
               aria-expanded="false"
-              disabled
-              title="Notifications (bientôt disponible dans ce mode)"
               data-radius
               style={radius('9999px')}
-              className="relative flex size-6 items-center justify-center rounded-full text-zinc-500 outline-none cursor-default"
+              className="relative flex size-6 items-center justify-center rounded-full text-zinc-300 hover:bg-[#2A3E66] hover:text-zinc-50 outline-none"
             >
               <Bell className="size-4" />
-            </button>
+            </a>
+            {/* notifications-bell.js cherche .dropdown-menu comme frère de
+                #page-header-notifications-dropdown et écrit son innerHTML lui-même — laissé vide
+                ici, jamais dupliqué. */}
+            <div
+              data-radius
+              style={radius('0.75rem')}
+              className="dropdown-menu dropdown-menu-end mt-2 py-0 hidden w-80 rounded-xl bg-white p-0 text-sm text-zinc-900 shadow-lg"
+              aria-labelledby="page-header-notifications-dropdown"
+            />
           </div>
 
           <div className="flex items-center gap-2 border-l border-[#2A3E66] pl-3">

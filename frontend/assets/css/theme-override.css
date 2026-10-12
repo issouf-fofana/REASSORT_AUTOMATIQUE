@@ -325,8 +325,10 @@ a:not(.sidebar *),
 .shop-picker-button {
      cursor: pointer;
 }
+/* Marine (#1B2A4A), pas noir strict — cohérent avec la palette marine/ambre du reste du site
+   (demande explicite du 12/10/2026, signalé sur la modale de sélection de magasin). */
 .shop-picker-modal .modal-header {
-     background-color: #000000;
+     background-color: #1B2A4A;
 }
 .shop-picker-modal .modal-header .modal-title {
      color: #ffffff !important;
