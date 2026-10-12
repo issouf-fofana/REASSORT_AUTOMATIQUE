@@ -10,6 +10,7 @@ import type { ReassortUser } from '../api/client';
 // diverger de celle du script inline.
 interface AuthContextValue {
   user: ReassortUser | null;
+  isAdmin: boolean;
   logout: () => void;
   isSingleShopRole: (role: string) => boolean;
 }
@@ -37,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthContextValue = {
     user,
+    isAdmin: user?.role === 'ADMIN',
     logout: window.reassortLogout,
     isSingleShopRole: window.reassortIsSingleShopRole,
   };
