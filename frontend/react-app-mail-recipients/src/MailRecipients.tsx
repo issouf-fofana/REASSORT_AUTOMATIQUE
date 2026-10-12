@@ -50,6 +50,10 @@ export function MailRecipients() {
   // par personne") — désactive la case le temps de l'appel pour éviter un double-clic qui enverrait
   // deux requêtes concurrentes sur le même compte.
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  // Magasin ouvert dans le panneau de détail (demande du 12/10/2026, "grille de carte... quand je
+  // clique j'ai les personnes du magasin") : la grille ne montre plus les destinataires directement,
+  // seulement un compte — le détail (liste réelle, cases à cocher) s'ouvre au clic sur une carte.
+  const [openShopRef, setOpenShopRef] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -111,6 +115,18 @@ export function MailRecipients() {
     );
   });
 
+  const openShop = data?.shops.find((s) => s.shop.reference === openShopRef) || null;
+
+  // Fermeture au clavier (Échap), cohérent avec le comportement attendu d'une modale.
+  useEffect(() => {
+    if (!openShopRef) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpenShopRef(null);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openShopRef]);
+
   // Indicateurs résumant l'état global d'un coup d'œil (demande du 12/10/2026, "fais un style pro
   // pour ici") : combien de magasins restent sans aucun destinataire, combien de comptes au total
   // reçoivent réellement des alertes — invisible dans la version précédente sans compter soi-même
@@ -131,12 +147,12 @@ export function MailRecipients() {
     };
   }, [data]);
 
-  function renderUserChip(user: RecipientUser) {
+  function renderUserChip(user: RecipientUser, variant: 'inline' | 'block' = 'inline') {
     const disabled = !user.mailAlertsEnabled;
     return (
       <label
         key={user.id}
-        className="mr-chip"
+        className={variant === 'block' ? 'mr-chip-block' : 'mr-chip'}
         style={{
           opacity: savingIds.has(user.id) ? 0.6 : 1,
           backgroundColor: disabled ? '#fbeae7' : MARINE_SOFT,
@@ -192,21 +208,41 @@ export function MailRecipients() {
         .mr-filter-toggle { display: flex; align-items: center; gap: 7px; font-size: 0.85rem; color: #4b5563; white-space: nowrap; cursor: pointer; user-select: none; }
         .mr-filter-toggle input { accent-color: ${MARINE}; width: 15px; height: 15px; cursor: pointer; }
 
-        .mr-table-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
-        .mr-table { width: 100%; border-collapse: collapse; }
-        .mr-table thead th { text-align: left; font-size: 0.72rem; font-weight: 700; color: #6b7280; letter-spacing: 0.02em; padding: 11px 20px; background: #fafbfc; border-bottom: 1px solid #eef0f3; }
-        .mr-table tbody tr { border-bottom: 1px solid #f1f2f5; transition: background-color .1s; }
-        .mr-table tbody tr:last-child { border-bottom: none; }
-        .mr-table tbody tr:hover { background: #fafbfc; }
-        .mr-table td { padding: 13px 20px; vertical-align: middle; }
-        .mr-shop-ref { font-weight: 700; color: ${MARINE}; font-size: 0.85rem; }
-        .mr-shop-name { font-size: 0.8rem; color: #6b7280; }
+        .mr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+        .mr-shop-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .12s; position: relative; overflow: hidden; }
+        .mr-shop-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; background: var(--mr-card-accent, #d8dce3); }
+        .mr-shop-card:hover { border-color: #c7cce0; box-shadow: 0 4px 14px rgba(27,42,74,0.08); transform: translateY(-1px); }
+        .mr-shop-card:focus-visible { outline: 2px solid ${MARINE}; outline-offset: 2px; }
+        .mr-shop-ref { font-weight: 700; color: ${MARINE}; font-size: 0.88rem; margin-bottom: 2px; }
+        .mr-shop-name { font-size: 0.78rem; color: #6b7280; margin-bottom: 12px; min-height: 2.2em; }
 
-        .mr-empty-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 600; color: #c0392b; background: #fbeae7; border: 1px solid #f0c4bc; padding: 4px 10px; border-radius: 6px; }
+        .mr-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .mr-recipient-count { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 600; color: ${MARINE}; }
+        .mr-recipient-avatars { display: flex; }
+        .mr-mini-avatar { width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 0.6rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; margin-left: -8px; }
+        .mr-mini-avatar:first-child { margin-left: 0; }
+        .mr-mini-more { background: #eef1f6; color: #6b7280; }
+
+        .mr-empty-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 600; color: #c0392b; }
         .mr-empty-dot { width: 6px; height: 6px; border-radius: 50%; background: #c0392b; flex-shrink: 0; }
+
+        .mr-modal-backdrop { position: fixed; inset: 0; background: rgba(15,20,35,0.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 1000; }
+        .mr-modal { background: #fff; border-radius: 14px; max-width: 540px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
+        .mr-modal-head { padding: 20px 24px 16px; border-bottom: 1px solid #eef0f3; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .mr-modal-head h3 { font-size: 1.05rem; font-weight: 700; color: ${MARINE}; margin: 0 0 3px; }
+        .mr-modal-head p { font-size: 0.82rem; color: #6b7280; margin: 0; }
+        .mr-modal-close { background: none; border: none; color: #9099a8; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px; flex-shrink: 0; }
+        .mr-modal-close:hover { color: #26303f; }
+        .mr-modal-body { padding: 18px 24px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 
         .mr-chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px; border-radius: 20px; border: 1px solid; cursor: pointer; font-size: 0.8rem; line-height: 1.2; transition: filter .1s; }
         .mr-chip:hover { filter: brightness(0.97); }
+        .mr-chip-block { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; border: 1px solid; cursor: pointer; transition: filter .1s; width: 100%; }
+        .mr-chip-block:hover { filter: brightness(0.97); }
+        .mr-chip-block .mr-chip-checkbox { width: 15px; height: 15px; }
+        .mr-chip-block .mr-chip-avatar { width: 30px; height: 30px; font-size: 0.7rem; }
+        .mr-chip-block .mr-chip-name { font-size: 0.85rem; }
+        .mr-chip-block .mr-chip-email { font-size: 0.74rem; }
         .mr-chip-checkbox { width: 13px; height: 13px; accent-color: ${ACCENT}; cursor: pointer; flex-shrink: 0; }
         .mr-chip-avatar { width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 0.62rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .mr-chip-text { display: flex; flex-direction: column; line-height: 1.25; }
@@ -263,7 +299,7 @@ export function MailRecipients() {
               {data.admins.length === 0 ? (
                 <span className="text-muted small">Aucun administrateur actif.</span>
               ) : (
-                data.admins.map(renderUserChip)
+                data.admins.map((a) => renderUserChip(a))
               )}
             </div>
           </div>
@@ -284,41 +320,75 @@ export function MailRecipients() {
             </label>
           </div>
 
-          <div className="mr-table-card">
-            <table className="mr-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 260 }}>Magasin</th>
-                  <th>Destinataires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredShops.map((s) => (
-                  <tr key={s.shop.reference}>
-                    <td>
-                      <div className="mr-shop-ref">{s.shop.reference}</div>
-                      <div className="mr-shop-name">{s.shop.name}</div>
-                    </td>
-                    <td>
-                      {s.recipients.length === 0 ? (
+          {filteredShops.length === 0 ? (
+            <div className="mr-no-result">Aucun résultat pour ce filtre.</div>
+          ) : (
+            <div className="mr-grid">
+              {filteredShops.map((s) => {
+                const hasRecipients = s.recipients.length > 0;
+                const visibleAvatars = s.recipients.slice(0, 3);
+                const extraCount = s.recipients.length - visibleAvatars.length;
+                return (
+                  <button
+                    type="button"
+                    key={s.shop.reference}
+                    className="mr-shop-card"
+                    style={{ ['--mr-card-accent' as string]: hasRecipients ? MARINE : '#c0392b' }}
+                    onClick={() => setOpenShopRef(s.shop.reference)}
+                  >
+                    <div className="mr-shop-ref">{s.shop.reference}</div>
+                    <div className="mr-shop-name">{s.shop.name}</div>
+                    <div className="mr-card-footer">
+                      {hasRecipients ? (
+                        <>
+                          <span className="mr-recipient-count">
+                            <iconify-icon icon="solar:users-group-rounded-bold-duotone" style={{ fontSize: 16 }}></iconify-icon>
+                            {s.recipients.length} destinataire{s.recipients.length > 1 ? 's' : ''}
+                          </span>
+                          <div className="mr-recipient-avatars">
+                            {visibleAvatars.map((r) => (
+                              <span key={r.id} className="mr-mini-avatar" style={{ backgroundColor: r.mailAlertsEnabled ? avatarColor(r.name) : '#c0392b' }}>
+                                {initials(r.name)}
+                              </span>
+                            ))}
+                            {extraCount > 0 && <span className="mr-mini-avatar mr-mini-more">+{extraCount}</span>}
+                          </div>
+                        </>
+                      ) : (
                         <span className="mr-empty-badge">
                           <span className="mr-empty-dot" />
                           Aucun destinataire
                         </span>
-                      ) : (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{s.recipients.map(renderUserChip)}</div>
                       )}
-                    </td>
-                  </tr>
-                ))}
-                {filteredShops.length === 0 && (
-                  <tr>
-                    <td colSpan={2} className="mr-no-result">Aucun résultat pour ce filtre.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {openShop && (
+            <div className="mr-modal-backdrop" onClick={() => setOpenShopRef(null)}>
+              <div className="mr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Destinataires du magasin ${openShop.shop.reference}`}>
+                <div className="mr-modal-head">
+                  <div>
+                    <h3>{openShop.shop.reference} — {openShop.shop.name}</h3>
+                    <p>{openShop.recipients.length} destinataire{openShop.recipients.length > 1 ? 's' : ''} d'alerte email</p>
+                  </div>
+                  <button type="button" className="mr-modal-close" onClick={() => setOpenShopRef(null)} aria-label="Fermer">
+                    <iconify-icon icon="solar:close-circle-linear"></iconify-icon>
+                  </button>
+                </div>
+                <div className="mr-modal-body">
+                  {openShop.recipients.length === 0 ? (
+                    <span className="text-muted small">Aucun compte rattaché à ce magasin ne reçoit d'alerte email pour l'instant.</span>
+                  ) : (
+                    openShop.recipients.map((r) => renderUserChip(r, 'block'))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>
