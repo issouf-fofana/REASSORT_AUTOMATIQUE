@@ -162,6 +162,43 @@ function buildArticleSummary(line, shopConfig, shopActivity) {
   };
 }
 
+// Champs de buildArticleSummary qui sont TOUJOURS identiques pour tous les articles d'un même lot
+// (communs au magasin, jamais par article : safetyStockRatio/receptionLeadTimeDays viennent de
+// shopConfig, shopActivityStatus/shopMonthsSinceLastActivity/shopHadActivityBeyondSampleWindow
+// d'une seule sonde shopActivity partagée — cf. analyzeArticlesBatch). Les répéter 40 fois dans le
+// JSON du lot (demande du 12/10/2026 : "ce projet consomme beaucoup de token... comment réduire
+// cette consommation ?") ne change rien à l'information reçue par le LLM, juste son coût en
+// tokens — ai-forecast-batch représentait 81% de la consommation mensuelle mesurée (AiUsageLog),
+// cette redondance en étant une part significative sur les gros lots de 40 articles.
+const SHARED_BATCH_FIELDS = ['safetyStockRatio', 'receptionLeadTimeDays', 'shopActivityStatus', 'shopMonthsSinceLastActivity', 'shopHadActivityBeyondSampleWindow'];
+
+/**
+ * Sépare les champs communs à tout le lot (identiques sur chaque article, cf. SHARED_BATCH_FIELDS)
+ * du reste, pour ne les transmettre qu'UNE SEULE FOIS au LLM au lieu de les répéter par article.
+ * Ne retire un champ que s'il est RÉELLEMENT identique sur tous les articles du lot (toujours vrai
+ * en usage normal, ces valeurs viennent d'une seule source par lot) — sinon on le laisse tel quel
+ * sur chaque article plutôt que de supprimer silencieusement une variation réelle qu'on n'explique
+ * pas ailleurs, ce qui ferait perdre une information plutôt que de la factoriser.
+ */
+function splitSharedBatchContext(articles) {
+  if (!articles.length) return { sharedContext: {}, strippedArticles: articles };
+
+  const sharedContext = {};
+  for (const field of SHARED_BATCH_FIELDS) {
+    const firstValue = articles[0][field];
+    const allSame = articles.every((a) => a[field] === firstValue || (Number.isNaN(a[field]) && Number.isNaN(firstValue)));
+    if (allSame) sharedContext[field] = firstValue;
+  }
+
+  const strippedArticles = articles.map((a) => {
+    const copy = { ...a };
+    for (const field of Object.keys(sharedContext)) delete copy[field];
+    return copy;
+  });
+
+  return { sharedContext, strippedArticles };
+}
+
 /**
  * Construit le prompt à partir du template configurable (Paramètres > IA, SystemConfig), pour
  * permettre à un admin d'ajuster les consignes données au LLM sans redéploiement. Remplace les
@@ -169,10 +206,14 @@ function buildArticleSummary(line, shopConfig, shopActivity) {
  */
 async function buildPrompt(shopReference, shopName, articles) {
   const template = await systemConfig.getValue(systemConfig.KEYS.AI_ANALYSIS_PROMPT_TEMPLATE);
+  const { sharedContext, strippedArticles } = splitSharedBatchContext(articles);
+  const sharedContextBlock = Object.keys(sharedContext).length
+    ? `Contexte du magasin (commun à TOUS les articles ci-dessous, ne pas chercher ces champs sur chaque article) :\n${JSON.stringify(sharedContext, null, 2)}\n\n`
+    : '';
   return template
     .replace(/\{\{shopReference\}\}/g, shopReference || '')
     .replace(/\{\{shopName\}\}/g, shopName || '')
-    .replace(/\{\{articles\}\}/g, JSON.stringify(articles, null, 2));
+    .replace(/\{\{articles\}\}/g, sharedContextBlock + JSON.stringify(strippedArticles, null, 2));
 }
 
 // Variante du prompt pour l'analyse en direct d'UN SEUL article (panneau "Analyser", clic
