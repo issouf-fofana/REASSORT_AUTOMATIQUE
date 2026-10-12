@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import { NotchTabBar } from '../../../shared/components/NotchTabBar';
 import { ReassortConfigSection } from './ReassortConfigSection';
@@ -37,15 +38,19 @@ function tabFromHash(): TabId {
  * Le routage par hash (#tab-xxx) reste compatible avec les liens de la sidebar.
  */
 export function SettingsTabs() {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash());
 
+  // location.hash (React Router) plutôt que l'event natif hashchange : un <Link to="/settings#..."/>
+  // cliqué depuis la sidebar alors qu'on est DÉJÀ sur /settings passe par history.pushState en
+  // interne, qui NE DÉCLENCHE PAS hashchange (seule une affectation directe à window.location.hash,
+  // ou le bouton précédent/suivant du navigateur, le fait) — bug trouvé le 12/10/2026 : cliquer un
+  // sous-lien Paramètres depuis la sidebar changeait l'URL mais jamais l'onglet affiché. location
+  // (fournie par React Router, qui re-render ce composant à chaque navigation interne, hash compris)
+  // est la source fiable ici, l'event natif reste utile pour le bouton précédent/suivant.
   useEffect(() => {
-    function onHashChange() {
-      setActiveTab(tabFromHash());
-    }
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+    setActiveTab(tabFromHash());
+  }, [location]);
 
   function selectTab(id: TabId) {
     window.location.hash = '#' + id;

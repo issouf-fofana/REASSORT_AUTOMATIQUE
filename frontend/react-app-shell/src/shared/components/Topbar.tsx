@@ -15,7 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
   STORE: 'Magasin',
 };
 
-export function Topbar({ title }: { title: string }) {
+export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () => void }) {
   const { user, logout } = useAuth();
   const suffix = user ? (user.rposShopName || ROLE_LABELS[user.role] || user.role || '') : '';
   const displayName = user ? user.name + (suffix ? ' — ' + suffix : '') : '';
@@ -43,6 +43,21 @@ export function Topbar({ title }: { title: string }) {
       <div className="container-fluid px-0">
         <div className="d-flex justify-content-between w-100">
           <div className="d-flex align-items-center" style={{ minWidth: 0, flex: '1 1 auto' }}>
+            {/* Masquer/afficher la sidebar (reprend #sidebar-visibility-btn de topbar.html) — jamais
+                porté dans le shell jusqu'ici (bug trouvé le 12/10/2026, signalé par l'utilisateur).
+                d-none d-lg-inline-block : sur mobile la sidebar est déjà masquée par Volt, rien à
+                basculer, même comportement que l'original. */}
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary d-none d-lg-inline-block me-2 flex-shrink-0"
+              title="Masquer/afficher le menu latéral"
+              aria-label="Masquer/afficher le menu latéral"
+              onClick={onToggleNav}
+            >
+              <svg className="icon icon-xs" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"></path>
+              </svg>
+            </button>
             <div className="d-none d-md-block text-truncate" style={{ minWidth: 0 }}>
               <h4 className="fw-bold text-uppercase mb-0 text-gray-800 text-truncate">{title}</h4>
             </div>

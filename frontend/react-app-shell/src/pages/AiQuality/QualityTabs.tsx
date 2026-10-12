@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ImprovementsTab } from './components/ImprovementsTab';
 import { CorrectionsTab } from './components/CorrectionsTab';
 import { ErrorLogTab } from './components/ErrorLogTab';
@@ -28,16 +29,16 @@ function tabFromHash(): TabId {
  * d'origine), pas masquée au profit de sous-liens sidebar.
  */
 export function QualityTabs() {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash());
   const [decisionLogVisited, setDecisionLogVisited] = useState(activeTab === 'tab-decision-log');
 
+  // location.hash (React Router) plutôt que l'event natif hashchange — même correctif que
+  // SettingsTabs.tsx (12/10/2026) : un <Link to="/ai-quality#..."/> cliqué depuis /ai-quality ne
+  // déclenche jamais hashchange (seule une affectation directe à window.location.hash le fait).
   useEffect(() => {
-    function onHashChange() {
-      setActiveTab(tabFromHash());
-    }
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+    setActiveTab(tabFromHash());
+  }, [location]);
 
   function selectTab(id: TabId) {
     window.location.hash = '#' + id;

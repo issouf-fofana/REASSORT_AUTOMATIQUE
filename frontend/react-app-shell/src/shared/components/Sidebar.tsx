@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { NAV_GROUPS, activeEntryId } from '../nav/navConfig';
 import { useAuth } from '../auth/AuthProvider';
@@ -62,6 +62,21 @@ export function Sidebar() {
     setGroupCollapsed(group, !isGroupCollapsed(group));
     forceRender((n) => n + 1);
   }
+
+  // Déplie automatiquement le groupe contenant la page active si jamais il était replié — reprend
+  // isCurrentPage de initCollapsibleSidebarSections (layout-collapsible.js) : sans ça, un groupe
+  // replié par défaut (reassort/admin, cf. COLLAPSE_KEY_PREFIX ci-dessus) reste replié même en
+  // arrivant directement sur une de ses pages via un lien externe/un favori, masquant tous ses
+  // sous-liens (bug trouvé le 12/10/2026, capture utilisateur sur /settings#tab-files : la sidebar
+  // n'affichait ni "Réassort" ni "Administration", groupes jamais dépliés manuellement avant).
+  useEffect(() => {
+    const activeGroup = NAV_GROUPS.find((g) => g.entries.some((e) => e.id === activeId));
+    const collapseKey = activeGroup ? COLLAPSIBLE_GROUPS[activeGroup.label] : undefined;
+    if (collapseKey && isGroupCollapsed(collapseKey)) {
+      setGroupCollapsed(collapseKey, false);
+      forceRender((n) => n + 1);
+    }
+  }, [activeId]);
 
   return (
     <nav id="sidebarMenu" className="sidebar d-lg-block bg-gray-800 text-white">
