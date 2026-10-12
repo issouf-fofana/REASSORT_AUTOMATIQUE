@@ -223,6 +223,41 @@
     window.reassortReportError = send;
   })();
 
+  // Préchargement au survol des liens de la sidebar (demande du 12/10/2026 : "quand je clique ça
+  // charge tout, ce n'est pas bon" — chaque page de la sidebar est une app React/Vite INDÉPENDANTE
+  // servie comme une page distincte par nginx, pas une SPA avec routeur interne ; transformer ça en
+  // vraie navigation sans rechargement serait un chantier d'architecture majeur, hors de portée
+  // d'un correctif ponctuel). Palliatif qui réduit la latence perçue sans toucher à l'architecture :
+  // dès que le curseur survole un lien de la sidebar, on lance un fetch() de la page cible en
+  // arrière-plan — au clic réel (souvent quelques centaines de ms plus tard, le temps de déplacer
+  // la souris), la réponse est déjà en route ou déjà arrivée, donc la navigation réelle du
+  // navigateur réutilise ce qui a déjà transité sur le réseau au lieu de repartir de zéro.
+  // Respecte volontairement le réglage "no-cache, no-store, must-revalidate" des pages HTML (cf.
+  // nginx.conf, choix explicite contre un bug de déploiement déjà rencontré) : ce prefetch ne
+  // modifie aucun cache, il se contente de faire l'aller-retour réseau plus tôt.
+  (function initSidebarPrefetch() {
+    const prefetched = new Set();
+    const PREFETCH_HOVER_DELAY_MS = 80; // évite de précharger chaque lien juste survolé en passant
+    document.querySelectorAll('.sidebar a[href^="/"]').forEach(function (link) {
+      let hoverTimer = null;
+      link.addEventListener('mouseenter', function () {
+        const href = link.getAttribute('href');
+        if (!href || prefetched.has(href)) return;
+        hoverTimer = setTimeout(function () {
+          prefetched.add(href);
+          fetch(href, { credentials: 'same-origin' }).catch(function () {
+            // Un échec de préchargement (hors ligne, lien cassé...) ne doit jamais empêcher la
+            // navigation réelle au clic — le navigateur retentera normalement à ce moment-là.
+            prefetched.delete(href);
+          });
+        }, PREFETCH_HOVER_DELAY_MS);
+      });
+      link.addEventListener('mouseleave', function () {
+        if (hoverTimer) clearTimeout(hoverTimer);
+      });
+    });
+  })();
+
   // Sidebar/topbar injectées, page prête à s'afficher : retire l'écran de chargement (cf.
   // loading-overlay.js, chargé avant ce script dans chaque page). Un léger délai laisse le temps
   // au navigateur de peindre le DOM injecté avant de révéler la page, pour éviter un flash brut.
