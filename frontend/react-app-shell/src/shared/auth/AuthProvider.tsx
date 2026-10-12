@@ -31,9 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Révèle #root une fois l'auth confirmée — tant que ce composant n'a pas monté, le conteneur
   // reste à opacity:0 (posé par index.html), jamais de flash de contenu protégé avant ce point.
+  //
+  // window.hideLoadingOverlay() (loading-overlay.js) n'est normalement appelé QUE par layout.js/
+  // layout-collapsible.js, jamais chargés dans le shell — sans cet appel ici, l'écran de chargement
+  // plein écran restait affiché jusqu'à son filet de sécurité de 4 secondes (LOADING_OVERLAY_MAX_MS)
+  // sur CHAQUE page migrée, masquant tout contenu déjà prêt pendant ce délai (régression trouvée le
+  // 12/10/2026 lors d'un audit Chrome headless post-déploiement : le corps de la page contenait déjà
+  // le bon contenu, mais restait invisible derrière l'écran de chargement pendant 4s à chaque
+  // navigation). Appelé ici au même moment que la révélation de #root — le bon point du cycle de
+  // vie React pour les deux (auth confirmée = plus besoin de masquer quoi que ce soit).
   useEffect(() => {
     const root = document.getElementById('root');
     if (root) root.style.opacity = '1';
+    window.hideLoadingOverlay?.();
   }, []);
 
   const value: AuthContextValue = {
