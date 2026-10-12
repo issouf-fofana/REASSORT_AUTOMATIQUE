@@ -17,6 +17,7 @@ const JOB_LABELS: Record<string, string> = {
   improvementWatchdog: "Chien de garde améliorations IA",
   proposalReminder: 'Relance des propositions en attente',
   endOfDayValidationRecap: 'Récap de fin de journée',
+  tokenUsageWatchdog: 'Chien de garde consommation de tokens',
 };
 
 interface JobHealth {
@@ -247,6 +248,9 @@ interface SystemConfigData {
   PROPOSAL_REMINDER_ENABLED?: string;
   END_OF_DAY_VALIDATION_RECAP_CRON?: string;
   END_OF_DAY_VALIDATION_RECAP_ENABLED?: string;
+  TOKEN_USAGE_ALERT_CRON?: string;
+  TOKEN_USAGE_ALERT_ENABLED?: string;
+  TOKEN_USAGE_ALERT_THRESHOLD_TOKENS?: string;
 }
 
 export function SchedulingSection() {
@@ -257,6 +261,8 @@ export function SchedulingSection() {
   const [predictionOutcomeCron, setPredictionOutcomeCron] = useState('0 * * * *');
   const [proposalReminderCron, setProposalReminderCron] = useState('0 10 * * *');
   const [endOfDayRecapCron, setEndOfDayRecapCron] = useState('30 16 * * *');
+  const [tokenUsageAlertCron, setTokenUsageAlertCron] = useState('10 7 * * *');
+  const [tokenUsageAlertThreshold, setTokenUsageAlertThreshold] = useState('2000000');
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -268,6 +274,8 @@ export function SchedulingSection() {
         setPredictionOutcomeCron(d.PREDICTION_OUTCOME_CRON || '0 * * * *');
         setProposalReminderCron(d.PROPOSAL_REMINDER_CRON || '0 10 * * *');
         setEndOfDayRecapCron(d.END_OF_DAY_VALIDATION_RECAP_CRON || '30 16 * * *');
+        setTokenUsageAlertCron(d.TOKEN_USAGE_ALERT_CRON || '10 7 * * *');
+        setTokenUsageAlertThreshold(d.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS || '2000000');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -464,6 +472,60 @@ export function SchedulingSection() {
             />
             <div className="form-text">
               Exemple : "30 16 * * *" = tous les jours à 16h30 (défaut).
+            </div>
+          </div>
+        </CronJobCard>
+
+        <CronJobCard
+          icon="solar:danger-triangle-bold-duotone"
+          title="Chien de garde consommation de tokens"
+          enabledConfigKey="TOKEN_USAGE_ALERT_ENABLED"
+          enabledInitial={config.TOKEN_USAGE_ALERT_ENABLED !== 'false'}
+          intro="<strong>À quoi ça sert :</strong> chaque jour, ce job compare la consommation de tokens IA (chatbot, prévisions...) des dernières 24h au seuil configuré ci-dessous, et envoie un email aux administrateurs en cas de dépassement — avec le détail de quel usage (prévision, chatbot...) en est responsable. Permet de réagir à un pic de consommation en heures plutôt qu'en le découvrant plusieurs jours plus tard sur la page Consommation de tokens."
+          onSave={async () => {
+            await saveSystemConfigKey('TOKEN_USAGE_ALERT_CRON', tokenUsageAlertCron);
+            await saveSystemConfigKey('TOKEN_USAGE_ALERT_THRESHOLD_TOKENS', tokenUsageAlertThreshold);
+          }}
+          onRunNow={async () => {
+            const d = await apiFetch<{ totalTokens: number; callCount: number; threshold: number; overThreshold: boolean; notified: boolean }>(
+              '/reassort/run-token-usage-watchdog',
+              { method: 'POST' }
+            );
+            if (d.overThreshold) {
+              return `Terminé : ${d.totalTokens.toLocaleString('fr-FR')} tokens sur les dernières 24h (seuil ${d.threshold.toLocaleString('fr-FR')}) — ${d.notified ? 'alerte envoyée aux administrateurs.' : "échec d'envoi de l'alerte, voir les logs."}`;
+            }
+            return `Terminé : ${d.totalTokens.toLocaleString('fr-FR')} tokens sur les dernières 24h, en dessous du seuil (${d.threshold.toLocaleString('fr-FR')}) — aucune alerte envoyée.`;
+          }}
+          runLabel="Vérifier la consommation maintenant"
+        >
+          <div className="mb-3">
+            <label className="form-label fw-semibold">Expression cron</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="10 7 * * *"
+              style={{ maxWidth: 300 }}
+              value={tokenUsageAlertCron}
+              onChange={(e) => setTokenUsageAlertCron(e.target.value)}
+            />
+            <div className="form-text">
+              Exemple : "10 7 * * *" = tous les jours à 7h10 (défaut), juste après l'évaluation des prédictions.
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="form-label fw-semibold">Seuil d'alerte (tokens sur 24h)</label>
+            <input
+              type="number"
+              className="form-control"
+              min={0}
+              step={100000}
+              style={{ maxWidth: 220 }}
+              value={tokenUsageAlertThreshold}
+              onChange={(e) => setTokenUsageAlertThreshold(e.target.value)}
+            />
+            <div className="form-text">
+              Exemple : 2 000 000 (défaut) — à ajuster selon votre consommation normale observée sur la page
+              Consommation de tokens.
             </div>
           </div>
         </CronJobCard>

@@ -123,6 +123,19 @@ router.post('/run-end-of-day-validation-recap', requireAdmin, async (req, res) =
   }
 });
 
+// POST /api/reassort/run-token-usage-watchdog - déclenche manuellement la vérification de
+// consommation de tokens IA (ADMIN, pour les tests — s'exécute normalement à 7h10 automatiquement).
+router.post('/run-token-usage-watchdog', requireAdmin, async (req, res) => {
+  try {
+    const { runTokenUsageWatchdog } = require('../../jobs/tokenUsageWatchdogJob');
+    const result = await runTokenUsageWatchdog();
+    res.json({ success: true, message: 'Vérification de consommation de tokens exécutée', data: result });
+  } catch (error) {
+    console.error('Manual token usage watchdog error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/sales-backfill - démarre (ou reprend, si un run existe déjà pour ce magasin
 // et cette période exacte) une récupération historique volumineuse de l'historique de vente d'un
 // magasin, découpée en tranches persistées avec reprise automatique (ADMIN). Ne bloque pas : le
