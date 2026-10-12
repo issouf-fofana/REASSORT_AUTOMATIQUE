@@ -164,6 +164,13 @@ const KEYS = {
   TOKEN_USAGE_ALERT_ENABLED: 'TOKEN_USAGE_ALERT_ENABLED',
   TOKEN_USAGE_ALERT_CRON: 'TOKEN_USAGE_ALERT_CRON',
   TOKEN_USAGE_ALERT_THRESHOLD_TOKENS: 'TOKEN_USAGE_ALERT_THRESHOLD_TOKENS',
+  // Numéro de version affiché dans la sidebar (demande du 13/10/2026 : "je veux que ça soit
+  // dynamique... V1.0.0, V1.0.1... je met à jour la valeur sur le UI dans les config"). Texte libre
+  // (pas de validation de format imposée) — l'ADMIN décide quand et à quelle valeur l'incrémenter,
+  // jamais un calcul automatique côté serveur. Servi publiquement (cf. routes/publicAssets.js, GET
+  // /api/app-version) : affiché même sur /login, avant toute connexion, même raisonnement que
+  // SITE_LOGO_BASE64/SITE_FAVICON_BASE64 ci-dessus.
+  APP_VERSION: 'APP_VERSION',
 };
 
 // Clés dont la valeur ne doit jamais être renvoyée en clair par l'API une fois enregistrée
@@ -312,6 +319,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   // mais bien en dessous d'un pic comme celui du 25/09 — à ajuster depuis Paramètres selon l'usage
   // réel mesuré une fois ai-forecast-batch repassé à son coût normal.
   [KEYS.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS]: () => '2000000',
+  [KEYS.APP_VERSION]: () => '1.0.0',
   // Off par défaut (contrairement aux autres jobs) : impact fort sur le comportement et le coût,
   // à activer explicitement plutôt que par défaut au premier déploiement.
   [KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED]: () => 'false',

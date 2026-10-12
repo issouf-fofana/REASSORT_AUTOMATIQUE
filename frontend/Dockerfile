@@ -15,14 +15,6 @@ RUN npm run build
 # existantes, aucune route de production encore basculée vers ce bundle.
 FROM node:20-alpine AS shell-builder
 WORKDIR /app
-# APP_VERSION (13/10/2026) : le fichier VERSION vit à la racine du dépôt, HORS du contexte de build
-# de ce service (`build: ./frontend` dans docker-compose.yml) — inatteignable par un simple COPY
-# depuis l'intérieur de ce Dockerfile. Reçu en build-arg à la place (passé par
-# docker-compose.yml/l'outil de déploiement, qui lui a accès au fichier au niveau du dépôt complet)
-# et réexposé comme variable d'env lue par vite.config.ts au build (fallback sur VITE_APP_VERSION,
-# lu via import.meta.env, si jamais le fichier VERSION n'est plus présent au build-time local).
-ARG APP_VERSION=0.0.0-dev
-ENV VITE_APP_VERSION=$APP_VERSION
 COPY react-app-shell/package*.json ./
 RUN npm ci
 COPY react-app-shell/ .

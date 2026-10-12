@@ -70,17 +70,7 @@ services:
       - "pos18-prod-prosuma.prosuma.pos:172.26.50.1"
 
   frontend:
-    build:
-      context: ./frontend
-      # APP_VERSION (13/10/2026) : lu depuis le fichier VERSION à la racine du dépôt (ce fichier
-      # docker-compose.yml, lui, EST à la racine — contrairement au contexte de build ci-dessus,
-      # limité à ./frontend) et transmis en build-arg au Dockerfile (stage shell-builder), qui
-      # l'expose à son tour comme VITE_APP_VERSION pour vite.config.ts. ${VERSION} est substitué
-      # par docker compose depuis le fichier .env à la racine (cf. .env, généré/mis à jour par
-      # scripts/sync-version-env.sh — docker compose ne peut PAS lire un fichier arbitraire comme
-      # VERSION directement, seulement .env ou des variables shell déjà exportées).
-      args:
-        APP_VERSION: ${VERSION:-0.0.0-dev}
+    build: ./frontend
     ports:
       - "8080:80"
     restart: unless-stopped

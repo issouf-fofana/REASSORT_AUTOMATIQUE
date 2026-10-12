@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { NAV_GROUPS, activeEntryId } from '../nav/navConfig';
 import { useAuth } from '../auth/AuthProvider';
+import { useAppVersion } from '../hooks/useAppVersion';
 
 // Reproduit le markup/visuel de assets/partials/sidebar.html (classes Volt : .sidebar, .nav-link,
 // .sidebar-heading...) en composant React — remplace l'injection XHR synchrone de layout.js pour
@@ -55,6 +56,7 @@ export function Sidebar() {
   const location = useLocation();
   const activeId = activeEntryId(NAV_GROUPS, location.pathname, location.hash);
   const [, forceRender] = useState(0);
+  const appVersion = useAppVersion();
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -83,11 +85,12 @@ export function Sidebar() {
       <div className="sidebar-inner px-4 pt-3">
         <div className="sidebar-brand d-flex flex-column align-items-center justify-content-center py-3">
           <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" height={40} />
-          {/* __APP_VERSION__ injecté au build (vite.config.ts) depuis VERSION à la racine du dépôt
-              — incrémenté automatiquement à chaque commit (scripts/git-hooks/pre-commit), jamais
-              codé en dur ici (demande explicite du 13/10/2026 : "je veux que ça soit dynamique
-              quand j'envoie une nouvelle mise à jour"). */}
-          <small className="text-white-50 mt-1" style={{ fontSize: '0.7rem' }}>v{__APP_VERSION__}</small>
+          {/* Lue depuis SystemConfig (useAppVersion, GET /api/app-version) — modifiable depuis
+              Paramètres > Réassort (SiteBrandingSection.tsx), jamais codée en dur ni recalculée
+              automatiquement (demande explicite du 13/10/2026 : "si je suis sûr que c'est bon je
+              met à jour la valeur sur le UI dans les config"). Rien affiché tant que la valeur
+              n'est pas encore revenue du serveur, plutôt qu'un flash "v1.0.0" visiblement faux. */}
+          {appVersion && <small className="text-white-50 mt-1" style={{ fontSize: '0.7rem' }}>v{appVersion}</small>}
         </div>
         <ul className="nav flex-column pt-3 pt-md-0">
           {NAV_GROUPS.map((group) => {

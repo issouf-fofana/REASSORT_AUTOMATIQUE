@@ -162,6 +162,88 @@ function ImageUploadCard({ config }: { config: ImageSlotConfig }) {
   );
 }
 
+// Numéro de version affiché dans la sidebar (demande du 13/10/2026 : "je veux que ça soit
+// dynamique... V1.0.0, V1.0.1... je met à jour la valeur sur le UI dans les config"). Texte libre
+// mis à jour manuellement depuis cette page — aucun calcul automatique, l'ADMIN décide quand et à
+// quelle valeur passer après avoir vérifié qu'une mise à jour est stable (demande explicite : "ne
+// fait pas à chaque push sinon il va gonfler... si je suis sûr que c'est bon je met à jour la
+// valeur"). Route publique en lecture (GET /api/app-version, cf. publicAssets.js — affichée même
+// sur /login, avant connexion), écriture réservée ADMIN (PUT, même routeur).
+function AppVersionCard() {
+  const [current, setCurrent] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const data = await apiFetch<{ version: string }>('/app-version');
+      setCurrent(data.version);
+      setDraft(data.version);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSave() {
+    if (!draft.trim() || draft.trim() === current) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await apiFetch('/app-version', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: draft.trim() }),
+      });
+      setSuccess('Version mise à jour — visible dans la sidebar de tous les utilisateurs au prochain chargement de page.');
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (current === null && !error) return null;
+
+  return (
+    <div className="mb-0">
+      <h6 className="mb-1">Numéro de version</h6>
+      <div className="alert alert-light border small mb-3">
+        Affiché sous le logo dans la sidebar, sur toutes les pages du site. Mis à jour manuellement
+        ici quand une nouvelle version est prête — jamais automatique.
+      </div>
+      {error && <div className="alert alert-danger small">{error}</div>}
+      {success && <div className="alert alert-success small">{success}</div>}
+      <div className="d-flex align-items-center gap-2" style={{ maxWidth: 320 }}>
+        <input
+          type="text"
+          className="form-control form-control-sm"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="ex: 1.0.1"
+          disabled={saving}
+        />
+        <button
+          type="button"
+          className="btn btn-sm btn-dark flex-shrink-0"
+          onClick={handleSave}
+          disabled={saving || !draft.trim() || draft.trim() === current}
+        >
+          {saving ? 'Enregistrement...' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SiteBrandingSection() {
   return (
     <div className="card mb-3">
@@ -176,6 +258,8 @@ export function SiteBrandingSection() {
         {SLOTS.map((config) => (
           <ImageUploadCard key={config.key} config={config} />
         ))}
+        <hr className="my-4" />
+        <AppVersionCard />
       </div>
     </div>
   );
