@@ -33,6 +33,12 @@ const COLLAPSIBLE_GROUPS: Record<string, string> = {
   'Administration': 'admin',
 };
 
+// Pas de data-simplebar ici : [data-simplebar] (volt.css) pose position:fixed + flex-wrap:wrap
+// directement sur l'élément, en attendant que simplebar.min.js construise sa structure de wrapper
+// divs — jamais chargé dans le shell. Sans ce JS, cette CSS écrase .sidebar (position:fixed;
+// overflow-y:auto, qui suffit seule) et vide visuellement la sidebar (bug trouvé le 12/10/2026,
+// capture utilisateur : sidebar bleu marine entièrement vide sur /feature-requests et
+// /mail-recipients).
 export function Sidebar() {
   const { user } = useAuth();
   const location = useLocation();
@@ -47,7 +53,7 @@ export function Sidebar() {
   }
 
   return (
-    <nav id="sidebarMenu" className="sidebar d-lg-block bg-gray-800 text-white collapse" data-simplebar>
+    <nav id="sidebarMenu" className="sidebar d-lg-block bg-gray-800 text-white collapse">
       <div className="sidebar-inner px-4 pt-3">
         <div className="sidebar-brand d-flex flex-column align-items-center justify-content-center py-3">
           <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" height={40} />
