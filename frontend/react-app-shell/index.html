@@ -28,6 +28,15 @@
     <script src="/assets/js/ag-grid-toolbar.js"></script>
     <script src="/assets/js/global-shop-selector.js"></script>
     <script src="/assets/js/ai-recommendation-panel.js"></script>
+    <!-- ApexCharts (vague 4, 12/10/2026) : requis par ProductAnalyticsModal.tsx (/purchase-order),
+         même version CDN que l'ancienne app isolée. -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js"></script>
+    <!-- Sélecteur de magasin cherchable (window.reassortMakeShopPickerSearchable) — déclaré
+         optionnel depuis la vague 2 mais jamais réellement chargé jusqu'ici (silencieusement inopérant
+         sur /purchase-list, /sales-history...) : ajouté maintenant car /purchase-order (vague 4) en
+         a un usage réel et visible. Script autonome (opère sur le <select> qu'on lui passe), sans
+         dépendance aux partiels sidebar/topbar. -->
+    <script src="/assets/js/shop-picker.js"></script>
 
     <!-- backend-config.js injecte window.REASSORT_BACKEND_URL au runtime (docker-entrypoint.sh) —
          requis avant le script de garde ci-dessous, qui construit REASSORT_API_BASE à partir de

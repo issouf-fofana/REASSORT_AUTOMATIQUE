@@ -20,5 +20,9 @@ declare global {
     reassortSetActiveShop: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void;
     reassortReportError?: (message: string, stack?: string) => void;
     openAiRecommendationPanel?: (item: Record<string, unknown>) => void;
+    // ApexCharts (CDN, /purchase-order uniquement) : typé `any` comme AG Grid ci-dessus — jamais
+    // importé comme dépendance npm, pas de vrais types sans ajouter une dépendance uniquement pour
+    // le typage.
+    ApexCharts: new (el: HTMLElement, options: any) => { render: () => void; destroy: () => void; updateOptions: (options: any) => void };
   }
 }

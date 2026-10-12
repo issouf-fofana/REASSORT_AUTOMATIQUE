@@ -18,6 +18,7 @@ import { SignIn } from '../pages/Login/SignIn';
 import { Settings } from '../pages/Settings/Settings';
 import { AiQuality } from '../pages/AiQuality/AiQuality';
 import { AiAssistantPage } from '../pages/AiAssistant/AiAssistantPage';
+import { PurchaseOrderPage } from '../pages/PurchaseOrder/PurchaseOrderPage';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -39,7 +40,8 @@ import { AiAssistantPage } from '../pages/AiAssistant/AiAssistantPage';
 // (window.history.pushState/URLSearchParams pour #tab-xxx et ?conversation=<id>) fonctionne déjà
 // tel quel à l'intérieur d'un <BrowserRouter>, tant que la page ne déclenche jamais de navigation
 // interne concurrente via <Link>/navigate() pendant qu'elle gère son propre état. /purchase-order
-// (le plus complexe de la vague, ?shop=&sector=&dept=) reste à faire séparément.
+// (le plus complexe de la vague, ?shop=&sector=&dept=) migrée selon le même principe — pas
+// d'AdminGuard, aucun window.location.href vers une autre route dans son code.
 export function AppRoutes() {
   return (
     <Routes>
@@ -61,6 +63,7 @@ export function AppRoutes() {
         <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
         <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
         <Route path="/ai-assistant" element={<AiAssistantPage />} />
+        <Route path="/purchase-order" element={<PurchaseOrderPage />} />
       </Route>
     </Routes>
   );
