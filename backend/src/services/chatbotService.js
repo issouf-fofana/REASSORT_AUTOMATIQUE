@@ -862,6 +862,29 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
     }
   }
 
+  // Filet de sécurité n°2ter (demande explicite du 12/10/2026 : "il ne tient pas compte de
+  // l'historique... si je lui demande des infos sur un article au début et en bas je pose une
+  // question sans code article il doit savoir que c'est le même article") : généralise les filets
+  // n°2/2bis ci-dessus, qui n'activaient la continuation que pour un mot de départ précis ("et/
+  // aussi/sinon/donc") ou un signal de date explicite — toute autre formulation de relance sans EAN
+  // ni mot-clé reconnu restait hors de portée, alors que la conversation précédente portait déjà sur
+  // UN article précis. Dès que le dernier tour porte sur un outil scopé à un article
+  // (ARTICLE_SCOPED_TOOLS) ET qu'un EAN est réellement récupérable depuis l'historique (même logique
+  // que la réutilisation d'EAN plus bas), on réutilise ce même outil par défaut — la question de
+  // suivi est alors traitée comme portant sur ce même article, jamais sur un périmètre plus large.
+  // Volontairement le DERNIER filet déterministe (juste avant le LLM) : ne doit jamais prendre le
+  // dessus sur un vrai mot-clé reconnu ailleurs (ex: "quel est le CA du magasin ?" après avoir parlé
+  // d'un article reste bien une question sur TOUT le magasin, car "CA" matche sa propre règle avant
+  // d'arriver ici).
+  if (!toolName && conversationHistory && conversationHistory.length) {
+    const lastTurn = conversationHistory[conversationHistory.length - 1];
+    if (lastTurn.toolUsed && ARTICLE_SCOPED_TOOLS.has(lastTurn.toolUsed)) {
+      for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        if (extractEan(conversationHistory[i].question)) { toolName = lastTurn.toolUsed; break; }
+      }
+    }
+  }
+
   // Filet de sécurité n°3 : function-calling par LLM (cf. detectIntentViaLlm), dernier recours
   // avant d'abandonner — uniquement si aucune règle déterministe ci-dessus n'a rien trouvé du tout.
   // isSmallTalk() exclu explicitement (bug constaté le 06/10/2026 en prod : "salut" prenait 10-12s
