@@ -50,6 +50,16 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { listAnomalies } = require('./orderAnomalyService');
 const aiForecastService = require('./aiForecastService');
 
+// Arrondit une vente moyenne hebdomadaire à 1 décimale (demande du 12/10/2026, bug observé en
+// conditions réelles : le chatbot recopiait "2,26" directement depuis avgWeeklySales transmis sans
+// arrondi au LLM — ce champ est un total de ventes divisé par un nombre de semaines d'historique,
+// jamais un entier). Appliqué à chaque outil qui expose avgWeeklySales, cohérent avec
+// weeksOfCoverage (getOverstockArticles) déjà arrondi de la même façon. null/undefined restent
+// tels quels : une absence de donnée ne doit jamais devenir 0 par ce passage.
+function roundWeeklySales(v) {
+  return v === null || v === undefined ? v : Math.round(v * 10) / 10;
+}
+
 // Seuil "article générique" identique à excludeGenericArticlesBelowPrice (configService.js,
 // utilisé par proposalService.js) : un article dont le prix de vente RPOS est en dessous n'est pas
 // un vrai produit vendable individuellement (agrégat de rayon type "FRUITS & LEGUMES", "CHARCUTERIE
@@ -232,7 +242,7 @@ async function getArticleStock(rposShopId, ean, posId) {
           department: fallbackLine.department,
           sector: fallbackLine.sector,
           stock: fallbackLine.stockAtGeneration,
-          avgWeeklySales: fallbackLine.avgWeeklySales,
+          avgWeeklySales: roundWeeklySales(fallbackLine.avgWeeklySales),
           daysUntilStockout: fallbackLine.daysUntilStockout,
           quantitySuggested: fallbackLine.quantitySuggested,
           aiAdjusted: fallbackLine.aiAdjusted,
@@ -268,7 +278,7 @@ async function getArticleStock(rposShopId, ean, posId) {
       department: line.department,
       sector: line.sector,
       stock: line.stockAtGeneration,
-      avgWeeklySales: line.avgWeeklySales,
+      avgWeeklySales: roundWeeklySales(line.avgWeeklySales),
       daysUntilStockout: line.daysUntilStockout,
       quantitySuggested: line.quantitySuggested,
       aiAdjusted: line.aiAdjusted,
@@ -340,7 +350,7 @@ async function getArticleStockAllShops(allowedShopIds, ean) {
         if (line) {
           return {
             ...base, found: true, label: line.label, stock: line.stockAtGeneration,
-            avgWeeklySales: line.avgWeeklySales, daysUntilStockout: line.daysUntilStockout,
+            avgWeeklySales: roundWeeklySales(line.avgWeeklySales), daysUntilStockout: line.daysUntilStockout,
             source: 'local_fallback', status: 'rpos_error', rposError: err.message,
             lastSyncAt: proposal.generatedAt ? proposal.generatedAt.toISOString() : null,
           };
@@ -356,7 +366,7 @@ async function getArticleStockAllShops(allowedShopIds, ean) {
     if (!line) return { ...base, found: false, status: 'not_found' };
     return {
       ...base, found: true, label: line.label, stock: line.stockAtGeneration,
-      avgWeeklySales: line.avgWeeklySales, daysUntilStockout: line.daysUntilStockout,
+      avgWeeklySales: roundWeeklySales(line.avgWeeklySales), daysUntilStockout: line.daysUntilStockout,
       source: 'local_fallback', status: 'success',
       lastSyncAt: proposal.generatedAt ? proposal.generatedAt.toISOString() : null,
     };
@@ -873,7 +883,11 @@ async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = 6, depart
 
   const overstocked = lines
     .filter((l) => l.avgWeeklySales > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage)
-    .map((l) => ({ ...l, weeksOfCoverage: Math.round(((l.stockAtGeneration || 0) / l.avgWeeklySales) * 10) / 10 }))
+    .map((l) => ({
+      ...l,
+      avgWeeklySales: roundWeeklySales(l.avgWeeklySales),
+      weeksOfCoverage: Math.round(((l.stockAtGeneration || 0) / l.avgWeeklySales) * 10) / 10,
+    }))
     .sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage)
     .slice(0, 50);
 
