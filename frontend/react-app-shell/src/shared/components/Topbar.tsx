@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 
 // Reproduit le markup/visuel essentiel de assets/partials/topbar.html (titre de page + menu
@@ -19,6 +20,24 @@ export function Topbar({ title }: { title: string }) {
   const suffix = user ? (user.rposShopName || ROLE_LABELS[user.role] || user.role || '') : '';
   const displayName = user ? user.name + (suffix ? ' — ' + suffix : '') : '';
 
+  // Dropdown géré en state React pur, PAS data-bs-toggle (bug trouvé le 12/10/2026, "déconnexion
+  // ne marche pas sur cette page" — le shell ne charge jamais bootstrap.min.js, contrairement aux
+  // 19 autres pages ; data-bs-toggle="dropdown" reste alors totalement inerte, le menu ne s'ouvre
+  // jamais). Volontairement pas de nouvelle dépendance au JS Bootstrap ici : cohérent avec l'esprit
+  // "vraie SPA React" du shell, où l'interactivité est gérée par React, pas par un script jQuery-like
+  // externe à synchroniser avec le cycle de vie des composants.
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [open]);
+
   return (
     <nav className="navbar navbar-top navbar-expand navbar-dashboard navbar-dark ps-0 pe-2 pb-0">
       <div className="container-fluid px-0">
@@ -29,14 +48,17 @@ export function Topbar({ title }: { title: string }) {
             </div>
           </div>
           <ul className="navbar-nav align-items-center">
-            <li className="nav-item dropdown ms-lg-3">
+            <li className={`nav-item dropdown ms-lg-3${open ? ' show' : ''}`} ref={menuRef}>
               <a
                 className="nav-link dropdown-toggle pt-1 px-0"
                 href="#"
                 role="button"
-                data-bs-toggle="dropdown"
                 aria-haspopup="true"
-                aria-expanded="false"
+                aria-expanded={open}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }}
               >
                 <div className="media d-flex align-items-center">
                   <span
@@ -50,7 +72,7 @@ export function Topbar({ title }: { title: string }) {
                   </div>
                 </div>
               </a>
-              <div className="dropdown-menu dashboard-dropdown dropdown-menu-end mt-2 py-1">
+              <div className={`dropdown-menu dashboard-dropdown dropdown-menu-end mt-2 py-1${open ? ' show' : ''}`}>
                 <a
                   className="dropdown-item d-flex align-items-center text-danger"
                   href="#"
