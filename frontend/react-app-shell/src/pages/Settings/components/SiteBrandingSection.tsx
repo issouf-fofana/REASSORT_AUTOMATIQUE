@@ -200,6 +200,18 @@ function AppVersionCard() {
 
   async function handleSave() {
     if (!draft.trim() || !dirty) return;
+    // Garde-fou (13/10/2026) : la pop-up se déclenche dès que la version change, notes vides ou
+    // pas — un enregistrement du numéro AVANT d'avoir tapé les notes (ex: numéro d'abord, notes
+    // dans un second temps sans re-cliquer Enregistrer) envoie silencieusement une pop-up vide à
+    // tous les utilisateurs, sans second rattrapage possible pour cette version précise (chaque
+    // compte ne la revoit plus une fois vue). Confirmation explicite si les notes sont vides,
+    // jamais bloquant pour le cas où aucune note n'est réellement voulue.
+    if (!notesDraft.trim()) {
+      const ok = await window.reassortConfirm(
+        'Les notes de version sont vides — chaque utilisateur verra une pop-up sans détail des correctifs. Enregistrer quand même ?',
+      );
+      if (!ok) return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(null);
