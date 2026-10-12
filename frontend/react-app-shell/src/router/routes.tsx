@@ -16,6 +16,8 @@ import { PurchaseList } from '../pages/PurchaseList/PurchaseList';
 import { OrderAnomalies } from '../pages/OrderAnomalies/OrderAnomalies';
 import { SignIn } from '../pages/Login/SignIn';
 import { Settings } from '../pages/Settings/Settings';
+import { AiQuality } from '../pages/AiQuality/AiQuality';
+import { AiAssistantPage } from '../pages/AiAssistant/AiAssistantPage';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -29,7 +31,15 @@ import { Settings } from '../pages/Settings/Settings';
 // par magasin/rayon côté backend, pas d'AdminGuard, comme leurs App.tsx d'origine) ;
 // /order-anomalies réservée ADMIN. /login est un cas à part : rendue SANS <AppLayout/> (pas de
 // sidebar/topbar sur l'écran de connexion) et c'est la seule route de la SPA où la garde d'auth
-// inline de index.html n'exige pas de token (cf. plan, section "garde d'auth").
+// inline de index.html n'exige pas de token (cf. plan, section "garde d'auth"). /settings garde son
+// routage par onglets en window.location.hash (#tab-xxx), déjà fonctionnel tel quel dans la SPA.
+//
+// Vague 4 : /ai-quality (AdminGuard, même routage par hash que /settings) et /ai-assistant (pas
+// d'AdminGuard) migrées sans refactor useSearchParams — leur état d'URL manuel
+// (window.history.pushState/URLSearchParams pour #tab-xxx et ?conversation=<id>) fonctionne déjà
+// tel quel à l'intérieur d'un <BrowserRouter>, tant que la page ne déclenche jamais de navigation
+// interne concurrente via <Link>/navigate() pendant qu'elle gère son propre état. /purchase-order
+// (le plus complexe de la vague, ?shop=&sector=&dept=) reste à faire séparément.
 export function AppRoutes() {
   return (
     <Routes>
@@ -49,6 +59,8 @@ export function AppRoutes() {
         <Route path="/purchase-list" element={<PurchaseList />} />
         <Route path="/order-anomalies" element={<AdminGuard><OrderAnomalies /></AdminGuard>} />
         <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
+        <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
+        <Route path="/ai-assistant" element={<AiAssistantPage />} />
       </Route>
     </Routes>
   );

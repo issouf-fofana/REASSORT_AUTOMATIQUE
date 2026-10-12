@@ -15,8 +15,10 @@ declare global {
     AG_GRID_LOCALE_FR: Record<string, string>;
     reassortAgGridToolbar: (gridApi: any, containerEl: HTMLElement) => void;
     reassortMakeShopPickerSearchable?: (select: HTMLSelectElement) => void;
-    reassortGetActiveShop?: () => { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null;
-    reassortOnActiveShopChange?: (cb: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void) => void;
+    reassortGetActiveShop: () => { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null;
+    reassortOnActiveShopChange: (cb: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void) => void;
+    reassortSetActiveShop: (shop: { id: string; reference: string; name: string; posId?: string; posLabel?: string } | null) => void;
+    reassortReportError?: (message: string, stack?: string) => void;
     openAiRecommendationPanel?: (item: Record<string, unknown>) => void;
   }
 }

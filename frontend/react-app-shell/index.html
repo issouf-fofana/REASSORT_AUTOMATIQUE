@@ -85,6 +85,47 @@
         if (!window.reassortGetToken() && window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
+
+        // Rapport d'erreur client (Conseiller d'amélioration IA) — repris de
+        // layout.js/layout-collapsible.js (initClientErrorReporting), requis par AiAssistant.tsx
+        // (vague 4, 12/10/2026) via window.reassortReportError. Script autonome, aucune dépendance
+        // aux partiels sidebar/topbar jamais chargés dans le shell.
+        (function initClientErrorReporting() {
+          if (!window.fetch || !window.REASSORT_API_BASE) return;
+          var seen = new Map();
+          var sent = 0;
+          function shouldSend(key) {
+            var now = Date.now();
+            if (seen.get(key) && now - seen.get(key) < 60000) return false;
+            if (sent >= 20) return false;
+            seen.set(key, now);
+            return true;
+          }
+          function send(message, stack) {
+            try {
+              var token = localStorage.getItem('reassort_token');
+              if (!token) return;
+              var page = window.location.pathname;
+              if (!shouldSend(page + '|' + String(message).slice(0, 200))) return;
+              sent += 1;
+              fetch(window.REASSORT_API_BASE + '/reassort/error-reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                body: JSON.stringify({ page: page, message: String(message).slice(0, 1000), stack: String(stack || '').slice(0, 2000) }),
+                keepalive: true,
+              }).catch(function () {});
+            } catch (e) {}
+          }
+          window.addEventListener('error', function (e) {
+            if (String(e.filename || '').indexOf('/error-reports') !== -1) return;
+            send(e.message || 'Erreur JS inconnue', e.error && e.error.stack);
+          });
+          window.addEventListener('unhandledrejection', function (e) {
+            var reason = e.reason;
+            send((reason && (reason.message || String(reason))) || 'Promesse rejetée non capturée', reason && reason.stack);
+          });
+          window.reassortReportError = send;
+        })();
       })();
     </script>
   </head>
