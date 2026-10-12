@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
+import { CompactDropdown } from '../../shared/components/CompactDropdown';
 import { DepartmentListView } from './DepartmentListView';
 import { ProposalHeader } from './ProposalHeader';
 import { GenerationFlow } from './GenerationFlow';
@@ -749,24 +750,22 @@ export function PurchaseOrder() {
             </div>
             <div className="d-flex gap-2 align-items-center flex-wrap">
               <label className="small text-muted mb-0">Génération</label>
-              <select
-                className="form-select form-select-sm"
-                style={{ minWidth: 260 }}
+              {/* CompactDropdown plutôt qu'un <select> natif (12/10/2026, signalé avec capture :
+                  "ce style n'est pas bon... un truc plus petit") — le panneau natif s'étirait sur
+                  toute la largeur disponible avec le bleu de surbrillance par défaut du navigateur,
+                  aucun contrôle CSS possible dessus. Date complète en 1ère ligne, statut +
+                  "dernière" en sous-ligne, plus lisible qu'une seule ligne dense. */}
+              <CompactDropdown
+                minWidth={240}
                 disabled={history.length === 0}
                 value={selectedGenerationId}
-                onChange={(e) => handleGenerationSelect(e.target.value)}
-              >
-                {history.length === 0 ? (
-                  <option value="">—</option>
-                ) : (
-                  history.map((p, i) => (
-                    <option value={p.id} key={p.id}>
-                      {new Date(p.generatedAt).toLocaleString('fr-FR')} ({p.status})
-                      {i === 0 ? ' — dernière' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
+                onChange={handleGenerationSelect}
+                options={history.map((p, i) => ({
+                  value: p.id,
+                  label: new Date(p.generatedAt).toLocaleString('fr-FR'),
+                  sublabel: p.status + (i === 0 ? ' — dernière' : ''),
+                }))}
+              />
               {proposal?.weeklyPlanId && (
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setWeeklyPlanHistoryOpen(true)}>
                   <iconify-icon icon="solar:history-bold-duotone" className="align-middle"></iconify-icon> Historique de la semaine
