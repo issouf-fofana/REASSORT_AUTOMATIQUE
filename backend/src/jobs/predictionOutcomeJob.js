@@ -55,7 +55,12 @@ async function evaluatePrediction(prediction) {
     ? proposalLine.quantitySuggested
     : null;
 
-  const { forecastError, absoluteError, percentageError } = computeErrors(prediction.predictedQuantity, actualSales);
+  // Comparer aux ventes réelles la prévision de vente (predictedWeeklyDemand), pas la quantité à
+  // commander (predictedQuantity) : cette dernière inclut volontairement le stock de sécurité et
+  // le rattrapage du stock/des commandes en cours, donc toujours bien supérieure aux ventes
+  // attendues — la comparer aux ventes réelles gonflait artificiellement l'erreur mesurée (bug
+  // constaté : WAPE > 3000% sur des prédictions par ailleurs cohérentes).
+  const { forecastError, absoluteError, percentageError } = computeErrors(prediction.predictedWeeklyDemand, actualSales);
 
   return prisma.aIPredictionOutcome.create({
     data: {
