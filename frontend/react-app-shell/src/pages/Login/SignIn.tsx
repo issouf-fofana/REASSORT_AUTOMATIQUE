@@ -17,6 +17,21 @@ export function SignIn() {
   const [isHovered, setIsHovered] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Léger déplacement du texte/logo vers le curseur (demande du 13/10/2026 : "fais en sorte que si
+  // je passe le curseur les texte bouge") — distinct de l'effet magnétique des points de DotMap,
+  // ici juste un décalage doux (quelques pixels) du bloc texte entier, proportionnel à la position
+  // du curseur dans le panneau par rapport à son centre.
+  const [parallax, setParallax] = useState({ x: 0, y: 0 });
+
+  function handlePanelMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width - 0.5;
+    const relY = (e.clientY - rect.top) / rect.height - 0.5;
+    setParallax({ x: relX * 16, y: relY * 16 });
+  }
+  function handlePanelMouseLeave() {
+    setParallax({ x: 0, y: 0 });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,18 +69,27 @@ export function SignIn() {
           13/10/2026 : "supprime l'image et fais une animation là quand je fais passer le
           curseur"). DotMap.tsx déjà corrigé pour s'adapter proportionnellement à la taille réelle
           du panneau (cf. son propre commentaire d'en-tête). */}
-      <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100">
+      <div
+        className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100"
+        onMouseMove={handlePanelMouseMove}
+        onMouseLeave={handlePanelMouseLeave}
+      >
         <DotMap />
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 md:p-10 pointer-events-none">
+        <motion.div
+          className="absolute inset-0 flex flex-col items-center justify-center p-6 md:p-10 pointer-events-none"
+          animate={{ x: parallax.x, y: parallax.y }}
+          transition={{ type: 'spring' as const, stiffness: 80, damping: 15 }}
+        >
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.5 }}
             className="mb-4"
           >
-            <div className="h-16 w-16 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-11 w-11 object-contain" />
-            </div>
+            {/* Logo seul, sans badge/fond (demande du 13/10/2026 : "fais avec le logo noir sans
+                fond") — brightness-0 force le rendu du PNG en noir plein quelle que soit sa
+                couleur source. */}
+            <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain brightness-0" />
           </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: -20 }}
@@ -91,7 +115,7 @@ export function SignIn() {
           >
             Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
           </motion.p>
-        </div>
+        </motion.div>
       </div>
 
       {/* Panneau droit : formulaire de connexion. Revenu au style d'origine du 13/10/2026
