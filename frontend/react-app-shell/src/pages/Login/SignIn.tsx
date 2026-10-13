@@ -128,7 +128,7 @@ export function SignIn() {
                     type={isPasswordVisible ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Entrez votre mot de passe"
+                    placeholder="••••••••"
                     required
                     className="flex h-12 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 pr-12 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
                   />
