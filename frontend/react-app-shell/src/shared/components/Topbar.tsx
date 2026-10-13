@@ -25,7 +25,15 @@ export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () 
   // l'utilisateur le 12/10/2026 après l'avoir trouvée désactivée dans NotchNav.tsx). Rattrapage
   // identique à window.reassortRenderShopSelector : le script cherche son point d'accroche sur
   // DOMContentLoaded, déjà passé au moment où React monte cet élément.
+  // Sélecteur de magasin global (global-shop-selector.js) — jamais porté dans Topbar.tsx depuis la
+  // création du shell (même oubli que la cloche ci-dessus, cf. commentaire en tête de fichier
+  // "seront ajoutés dans une étape suivante", jamais revisité). Bug trouvé le 13/10/2026 : un
+  // compte SUPERVISOR n'avait alors aucun moyen de changer de magasin sur la sidebar classique
+  // (le bouton existait déjà sur NotchNav.tsx, pas ici). Mêmes id que topbar.html/NotchNav.tsx pour
+  // que le script vanilla existant fonctionne sans modification ; rattrapage identique à la cloche,
+  // ce composant monte après le DOMContentLoaded sur lequel le script comptait initialement.
   useEffect(() => {
+    window.reassortRenderShopSelector?.();
     window.reassortRenderNotificationsBell?.();
   }, []);
 
@@ -72,6 +80,15 @@ export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () 
             </div>
           </div>
           <ul className="navbar-nav align-items-center">
+            <li className="nav-item d-flex align-items-center me-lg-2">
+              <div id="page-shop-context" style={{ display: 'none' }} className="text-truncate" />
+              <button
+                type="button"
+                id="global-shop-selector-btn"
+                style={{ display: 'none' }}
+                className="btn btn-sm btn-outline-secondary text-truncate"
+              />
+            </li>
             <li className="nav-item dropdown">
               <a
                 className="nav-link text-dark dropdown-toggle"
