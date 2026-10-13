@@ -67,16 +67,6 @@ export function SignIn() {
               scale: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
             }}
           />
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6, duration: 0.5 }}
-            className="mb-4"
-          >
-            <div className="h-16 w-16 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-11 w-11 object-contain" />
-            </div>
-          </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
