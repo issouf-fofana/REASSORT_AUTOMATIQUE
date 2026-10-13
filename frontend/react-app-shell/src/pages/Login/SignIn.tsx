@@ -116,7 +116,7 @@ export function SignIn() {
           {/* Logo déplacé du panneau gauche vers ici (demande du 13/10/2026 : "il faut mettre
               dans le côté de droite où y'a le Bienvenue en haut") — toujours sans badge/fond,
               brightness-0 pour le rendu en noir plein. */}
-          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-10 w-10 object-contain brightness-0 mb-3" />
+          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain brightness-0 mb-4" />
           <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
           <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
 
