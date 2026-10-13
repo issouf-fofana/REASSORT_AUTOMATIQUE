@@ -1563,7 +1563,15 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const searchByNameNote = toolName === 'searchArticlesByName' && toolResult.found
       ? `\n\nIMPORTANT pour cette réponse : ${toolResult.articles.length} articles différents correspondent au nom recherché ("${toolResult.query}") — ne choisis JAMAIS un seul article au hasard ni ne suppose lequel l'utilisateur veut. Liste TOUTES les variantes trouvées (nom complet et code à côté, prix si pertinent pour la question), puis termine ta réponse par une question explicite lui demandant de préciser laquelle il veut dire (ex: "Tu parles du Codys 25CL ou du 50CL ?"). Ne réponds à la question initiale (prix, stock...) qu'une fois l'article précisé dans un message suivant.`
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}`;
+    // Stock négatif (bug constaté le 13/10/2026 : "quel est le stock de l'article X" avec un stock
+    // RPOS réel de -50 faisait répondre "donnée non disponible", alors que found:true et stock:-50
+    // sont bien présents dans le JSON — un stock négatif est une vraie donnée valide (ventes
+    // enregistrées au-delà du stock réassorti, écart réel), jamais une absence de donnée.
+    const hasNegativeStockField = /"stock"\s*:\s*-\d/.test(JSON.stringify(toolResult));
+    const negativeStockNote = hasNegativeStockField
+      ? '\n\nIMPORTANT : un champ "stock" négatif est une vraie donnée valide, PAS une donnée manquante ni une erreur — ne dis JAMAIS que le stock "n\'est pas renseigné" ou "non disponible" dans ce cas. Un stock négatif signifie que l\'article est en rupture avec un écart réel (des ventes ont été enregistrées au-delà du stock théorique disponible) : annonce la valeur telle quelle (ex: "le stock est de -50, l\'article est en rupture avec un écart de 50 unités").'
+      : '';
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}${negativeStockNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
