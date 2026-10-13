@@ -85,8 +85,8 @@ export function Topbar({ title, onToggleNav }: { title: string; onToggleNav: () 
               <button
                 type="button"
                 id="global-shop-selector-btn"
-                style={{ display: 'none' }}
-                className="btn btn-sm btn-outline-secondary text-truncate"
+                style={{ display: 'none', border: 'none', background: 'none' }}
+                className="btn btn-sm text-truncate fw-medium text-gray-800"
               />
             </li>
             <li className="nav-item dropdown">

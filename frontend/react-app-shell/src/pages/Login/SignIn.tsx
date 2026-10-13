@@ -110,8 +110,7 @@ export function SignIn() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ex: admin@reassort.local ou alien"
                   required
-                  autoFocus
-                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B2A4A] focus-visible:ring-offset-2"
+                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
                 />
               </div>
 
@@ -127,7 +126,7 @@ export function SignIn() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Entrez votre mot de passe"
                     required
-                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B2A4A] focus-visible:ring-offset-2"
+                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
                   />
                   <button
                     type="button"
