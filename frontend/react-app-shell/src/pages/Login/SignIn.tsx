@@ -72,7 +72,7 @@ export function SignIn() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.7, duration: 0.5 }}
-              className="text-4xl font-bold mb-2 text-center text-zinc-900"
+              className="text-3xl md:text-4xl font-bold mb-2 text-center text-zinc-900 whitespace-nowrap"
             >
               Réassort Automatique
             </motion.h2>
@@ -88,7 +88,7 @@ export function SignIn() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.8, duration: 0.5 }}
-              className="text-base text-center text-zinc-600 max-w-md"
+              className="text-base text-center text-zinc-600 max-w-lg"
             >
               Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
             </motion.p>
