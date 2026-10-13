@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Eye, EyeOff, ArrowRight, TriangleAlert } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../shared/lib/utils';
+import { DotMap } from './components/DotMap';
 
 // Adapté du composant "Travel Connect Sign In" (21st.dev, demande du 25/09/2026). Palette passée
 // de bleu/indigo à noir/blanc/gris strict, puis à marine/ambre (13/10/2026) pour suivre le reste du
@@ -48,25 +49,14 @@ export function SignIn() {
         transition={{ duration: 0.5 }}
         className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
-      {/* Panneau gauche : illustration petite et contenue sur fond uni clair (demande du
-          13/10/2026 : "l'image est trop gros, je veux que ce soit comme ça" — modèle fourni avec
-          une illustration isolée en haut, pas une photo plein cadre). Remplace le fond bg-cover
-          plein panneau (image étirée/rognée, effet "poster") par un fond clair uni + l'image en
-          object-contain à taille modeste, avec la même légère animation de zoom en boucle. */}
+      {/* Panneau gauche : animation canvas interactive (points connectés, réagissent au survol
+          du curseur par répulsion magnétique) à la place de l'image statique (demande du
+          13/10/2026 : "supprime l'image et fais une animation là quand je fais passer le
+          curseur"). DotMap.tsx déjà corrigé pour s'adapter proportionnellement à la taille réelle
+          du panneau (cf. son propre commentaire d'en-tête). */}
       <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100">
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 md:p-10">
-          <motion.img
-            src="/assets/images/Tiny-man.jpg"
-            alt=""
-            className="w-full max-w-xs rounded-xl shadow-lg mb-8 object-contain"
-            initial={{ scale: 1, opacity: 0, y: -10 }}
-            animate={{ scale: [1, 1.04, 1], opacity: 1, y: 0 }}
-            transition={{
-              opacity: { delay: 0.3, duration: 0.5 },
-              y: { delay: 0.3, duration: 0.5 },
-              scale: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
-            }}
-          />
+        <DotMap />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 md:p-10 pointer-events-none">
           <motion.h2
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
