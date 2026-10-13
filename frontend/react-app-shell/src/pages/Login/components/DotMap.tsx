@@ -14,12 +14,26 @@ export function DotMap() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  const routes: { start: RoutePoint; end: RoutePoint; color: string }[] = [
-    { start: { x: 100, y: 150, delay: 0 }, end: { x: 200, y: 80, delay: 2 }, color: '#3f3f46' },
-    { start: { x: 200, y: 80, delay: 2 }, end: { x: 260, y: 120, delay: 4 }, color: '#3f3f46' },
-    { start: { x: 50, y: 50, delay: 1 }, end: { x: 150, y: 180, delay: 3 }, color: '#3f3f46' },
-    { start: { x: 280, y: 60, delay: 0.5 }, end: { x: 180, y: 180, delay: 2.5 }, color: '#3f3f46' },
+  // Coordonnées en fraction (0-1) de la largeur/hauteur réelles du canvas, converties en pixels au
+  // moment du dessin (generateRoutes ci-dessous) — corrige le motif de lignes figé en haut à gauche
+  // du panneau une fois celui-ci agrandi en quasi plein écran (demande du 13/10/2026 : "il faut
+  // changer l'animation de gauche"), les anciennes coordonnées fixes (ex: x: 100, y: 150) restaient
+  // pensées pour la taille d'origine du panneau (~320×200px) et ne scalaient jamais avec lui.
+  const routeFractions: { start: { fx: number; fy: number; delay: number }; end: { fx: number; fy: number; delay: number }; color: string }[] = [
+    { start: { fx: 0.15, fy: 0.5, delay: 0 }, end: { fx: 0.4, fy: 0.22, delay: 2 }, color: '#3f3f46' },
+    { start: { fx: 0.4, fy: 0.22, delay: 2 }, end: { fx: 0.58, fy: 0.4, delay: 4 }, color: '#3f3f46' },
+    { start: { fx: 0.08, fy: 0.15, delay: 1 }, end: { fx: 0.3, fy: 0.62, delay: 3 }, color: '#3f3f46' },
+    { start: { fx: 0.68, fy: 0.18, delay: 0.5 }, end: { fx: 0.42, fy: 0.62, delay: 2.5 }, color: '#3f3f46' },
+    { start: { fx: 0.58, fy: 0.4, delay: 4 }, end: { fx: 0.8, fy: 0.55, delay: 6 }, color: '#3f3f46' },
   ];
+
+  function generateRoutes(width: number, height: number): { start: RoutePoint; end: RoutePoint; color: string }[] {
+    return routeFractions.map((r) => ({
+      start: { x: r.start.fx * width, y: r.start.fy * height, delay: r.start.delay },
+      end: { x: r.end.fx * width, y: r.end.fy * height, delay: r.end.delay },
+      color: r.color,
+    }));
+  }
 
   function generateDots(width: number, height: number): Dot[] {
     const dots: Dot[] = [];
@@ -63,6 +77,7 @@ export function DotMap() {
     if (!ctx) return;
 
     const dots = generateDots(dimensions.width, dimensions.height);
+    const routes = generateRoutes(dimensions.width, dimensions.height);
     let animationFrameId: number;
     let startTime = Date.now();
 
