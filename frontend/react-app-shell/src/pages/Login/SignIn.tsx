@@ -42,62 +42,58 @@ export function SignIn() {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-zinc-100 p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-4xl overflow-hidden rounded-2xl flex bg-white shadow-xl"
-      >
-        {/* Panneau gauche : carte animée + logo Réassort Automatique */}
-        <div className="hidden md:block w-1/2 h-[600px] relative overflow-hidden border-r border-zinc-100">
-          <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
-            <DotMap />
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 z-10 pointer-events-none">
-              <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6, duration: 0.5 }}
-                className="mb-6"
-              >
-                <div className="h-20 w-20 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-                  <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain" />
-                </div>
-              </motion.div>
-              <motion.h2
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.7, duration: 0.5 }}
-                className="text-3xl font-bold mb-1 text-center text-zinc-900"
-              >
-                Réassort Automatique
-              </motion.h2>
-              <motion.p
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.75, duration: 0.5 }}
-                className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3"
-              >
-                Piloté par l'intelligence artificielle
-              </motion.p>
-              <motion.p
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.8, duration: 0.5 }}
-                className="text-sm text-center text-zinc-600 max-w-xs"
-              >
-                Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
-              </motion.p>
-            </div>
+    <div className="h-screen w-screen flex bg-white">
+      {/* Panneau gauche : carte animée + logo Réassort Automatique. Plein écran (demande du
+          13/10/2026 : "c'est petit", référence fournie par l'utilisateur en h-screen w-screen,
+          deux panneaux flex-1 sans carte flottante) — remplace l'ancienne carte centrée de taille
+          fixe (max-w-5xl, h-[600px]) par une mise en page qui occupe tout l'écran. */}
+      <div className="hidden md:block flex-1 relative overflow-hidden border-r border-zinc-100">
+        <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
+          <DotMap />
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 z-10 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6, duration: 0.5 }}
+              className="mb-6"
+            >
+              <div className="h-20 w-20 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
+                <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain" />
+              </div>
+            </motion.div>
+            <motion.h2
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7, duration: 0.5 }}
+              className="text-3xl font-bold mb-1 text-center text-zinc-900"
+            >
+              Réassort Automatique
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.75, duration: 0.5 }}
+              className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3"
+            >
+              Piloté par l'intelligence artificielle
+            </motion.p>
+            <motion.p
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8, duration: 0.5 }}
+              className="text-sm text-center text-zinc-600 max-w-xs"
+            >
+              Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
+            </motion.p>
           </div>
         </div>
+      </div>
 
-        {/* Panneau droit : formulaire de connexion. h-[600px] même valeur que le panneau gauche
-            (demande du 13/10/2026 : "le style est décalé") — sans hauteur explicite ici, ce
-            panneau ne prenait que la hauteur de son propre contenu (court, un formulaire de 2
-            champs), plus petite que les 600px fixes du panneau gauche, ce qui cassait l'alignement
-            des deux colonnes dans la carte flex. */}
-        <div className="w-full md:w-1/2 md:h-[600px] p-8 md:p-10 flex flex-col justify-center bg-white">
+      {/* Panneau droit : formulaire de connexion, plein écran lui aussi. max-w-md sur le contenu
+          (pas sur le panneau entier) pour garder un formulaire lisible plutôt qu'étiré sur toute
+          la largeur du panneau. */}
+      <div className="flex-1 flex items-center justify-center bg-white p-8">
+        <div className="w-full max-w-md">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
             <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
@@ -175,7 +171,7 @@ export function SignIn() {
             </form>
           </motion.div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Popup d'erreur de connexion (demande du 25/09/2026 : "quand ya erreur ... on m'affiche un
           pop up") — remplace l'ancien bandeau discret inséré dans le formulaire, qui pouvait passer
