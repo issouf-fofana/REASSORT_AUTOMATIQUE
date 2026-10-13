@@ -47,13 +47,13 @@ export function SignIn() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-5xl h-[650px] overflow-hidden rounded-2xl flex bg-white shadow-xl"
+        className="w-full max-w-5xl overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
-      {/* Panneau gauche : carte animée + logo Réassort Automatique. Carte centrée aux mêmes
-          dimensions que le modèle 21st.dev fourni par l'utilisateur (demande du 13/10/2026 :
-          "garde le style actuel, je veux les mêmes dimensions") — revient sur le plein écran
-          h-screen/w-screen tenté juste avant, qui n'était pas ce que le modèle montrait non plus
-          (c'est une carte de taille fixe raisonnable, pas étirée sur tout l'écran). */}
+      {/* Panneau gauche : carte animée + logo Réassort Automatique. Dimensions reprises du modèle
+          fourni par l'utilisateur (demande du 13/10/2026 : "fait les même dimension que lui") :
+          max-w-5xl, PAS de hauteur fixe (la carte prend la hauteur naturelle de son contenu, comme
+          le modèle — flexbox étire les deux panneaux à la même hauteur par défaut, inutile de la
+          forcer en dur). */}
       <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100">
         <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
           <DotMap />
