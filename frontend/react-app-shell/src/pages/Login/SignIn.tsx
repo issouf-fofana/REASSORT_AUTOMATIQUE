@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Eye, EyeOff, ArrowRight, TriangleAlert } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { cn } from '../../shared/lib/utils';
 
 // Adapté du composant "Travel Connect Sign In" (21st.dev, demande du 25/09/2026). Palette passée
 // de bleu/indigo à noir/blanc/gris strict, puis à marine/ambre (13/10/2026) pour suivre le reste du
@@ -13,7 +12,6 @@ export function SignIn() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isHovered, setIsHovered] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -41,151 +39,104 @@ export function SignIn() {
   }
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-zinc-100 p-4 md:p-8">
+    <div className="min-h-screen w-full flex items-center justify-center bg-zinc-100 p-4 md:p-8">
+      {/* Fond marine plein panneau avec illustration + formulaire en carte blanche superposée
+          (demande du 13/10/2026 : "supprime le formulaire actuel et refait ce style" — modèle à
+          fond coloré plein cadre, titre "Welcome!" en grand blanc, champs blancs arrondis avec
+          icône). Remplace le split gauche/droite précédent par un seul panneau marine, illustration
+          en haut, carte formulaire blanche centrée en dessous. */}
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
+        className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-[#1B2A4A] shadow-xl px-8 py-12 md:px-14 md:py-16 flex flex-col items-center"
       >
-      {/* Panneau gauche : illustration petite et contenue sur fond uni clair (demande du
-          13/10/2026 : "l'image est trop gros, je veux que ce soit comme ça" — modèle fourni avec
-          une illustration isolée en haut, pas une photo plein cadre). Remplace le fond bg-cover
-          plein panneau (image étirée/rognée, effet "poster") par un fond clair uni + l'image en
-          object-contain à taille modeste, avec la même légère animation de zoom en boucle. */}
-      <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100">
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-12">
-          <motion.img
-            src="/assets/images/Tiny-man.jpg"
-            alt=""
-            className="w-full max-w-xs rounded-xl shadow-lg mb-8 object-contain"
-            initial={{ scale: 1, opacity: 0, y: -10 }}
-            animate={{ scale: [1, 1.04, 1], opacity: 1, y: 0 }}
-            transition={{
-              opacity: { delay: 0.3, duration: 0.5 },
-              y: { delay: 0.3, duration: 0.5 },
-              scale: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
-            }}
-          />
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6, duration: 0.5 }}
-            className="mb-4"
-          >
-            <div className="h-16 w-16 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-11 w-11 object-contain" />
-            </div>
-          </motion.div>
-          <motion.h2
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7, duration: 0.5 }}
-            className="text-2xl md:text-3xl font-bold mb-2 text-center text-zinc-900 whitespace-nowrap"
-          >
-            Réassort Automatique
-          </motion.h2>
-          <motion.p
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.75, duration: 0.5 }}
-            className="text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-3"
-          >
-            Piloté par l'intelligence artificielle
-          </motion.p>
-          <motion.p
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8, duration: 0.5 }}
-            className="text-sm text-center text-zinc-600 max-w-sm"
-          >
-            Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
-          </motion.p>
-        </div>
-      </div>
-
-      {/* Panneau droit : formulaire de connexion. Revenu au style d'origine du 13/10/2026
-          (commit bb4b67f, juste après le passage en marine/ambre) — demande du 13/10/2026 :
-          "reviens sur le style de début pour le formulaire", après plusieurs itérations
-          (icônes, modèle sign-up-page) qui ne convenaient pas. */}
-      <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-          <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
-          <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
-
-          <form className="space-y-5" onSubmit={handleSubmit}>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-1">
-                Email ou identifiant réseau
-              </label>
-              <input
-                id="email"
-                type="text"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="ex: admin@reassort.local ou alien"
-                required
-                className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-1">
-                Mot de passe
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={isPasswordVisible ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
-                />
-                <button
-                  type="button"
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-700"
-                  onClick={() => setIsPasswordVisible(!isPasswordVisible)}
-                >
-                  {isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <motion.div
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-              onHoverStart={() => setIsHovered(true)}
-              onHoverEnd={() => setIsHovered(false)}
-              className="pt-2"
-            >
-              <button
-                type="submit"
-                disabled={submitting}
-                className={cn(
-                  'w-full relative overflow-hidden bg-[#1B2A4A] hover:bg-[#24355e] text-white py-2.5 rounded-lg transition-all duration-300 inline-flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-50 disabled:pointer-events-none',
-                  isHovered ? 'shadow-lg shadow-zinc-300' : '',
-                )}
-              >
-                <span className="flex items-center justify-center">
-                  {submitting ? 'Connexion...' : 'Se connecter'}
-                  {!submitting && <ArrowRight className="ml-2 h-4 w-4" />}
-                </span>
-                {isHovered && !submitting && (
-                  <motion.span
-                    initial={{ left: '-100%' }}
-                    animate={{ left: '100%' }}
-                    transition={{ duration: 1, ease: 'easeInOut' }}
-                    className="absolute top-0 bottom-0 left-0 w-20 bg-gradient-to-r from-transparent via-white/25 to-transparent"
-                    style={{ filter: 'blur(8px)' }}
-                  />
-                )}
-              </button>
-            </motion.div>
-          </form>
+        <motion.img
+          src="/assets/images/Tiny-man.jpg"
+          alt=""
+          className="w-full max-w-[200px] rounded-xl shadow-lg mb-6 object-contain"
+          initial={{ scale: 1, opacity: 0, y: -10 }}
+          animate={{ scale: [1, 1.04, 1], opacity: 1, y: 0 }}
+          transition={{
+            opacity: { delay: 0.2, duration: 0.5 },
+            y: { delay: 0.2, duration: 0.5 },
+            scale: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
+          }}
+        />
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.5 }}
+          className="flex items-center gap-3 mb-2"
+        >
+          <div className="h-10 w-10 rounded-full bg-white flex items-center justify-center shadow overflow-hidden flex-shrink-0">
+            <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-7 w-7 object-contain" />
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold text-white">Bienvenue !</h1>
         </motion.div>
-      </div>
+        <motion.p
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35, duration: 0.5 }}
+          className="text-sm text-zinc-200 mb-8 text-center max-w-sm"
+        >
+          Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
+        </motion.p>
+
+        <motion.form
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4, duration: 0.5 }}
+          className="w-full max-w-sm space-y-3"
+          onSubmit={handleSubmit}
+        >
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <input
+              id="email"
+              type="text"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email ou identifiant réseau"
+              required
+              className="w-full h-12 rounded-full bg-white pl-11 pr-4 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none shadow-sm"
+            />
+          </div>
+
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <rect x="5" y="11" width="14" height="9" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0v4" />
+            </svg>
+            <input
+              id="password"
+              type={isPasswordVisible ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mot de passe"
+              required
+              className="w-full h-12 rounded-full bg-white pl-11 pr-11 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none shadow-sm"
+            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-0 flex items-center pr-4 text-zinc-400 hover:text-zinc-600"
+              onClick={() => setIsPasswordVisible(!isPasswordVisible)}
+            >
+              {isPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full h-12 rounded-full bg-[#ff6c2f] hover:bg-[#e85f27] text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2 mt-2"
+          >
+            {submitting ? 'Connexion...' : 'Se connecter'}
+            {!submitting && <ArrowRight className="h-4 w-4" />}
+          </button>
+        </motion.form>
       </motion.div>
 
       {/* Popup d'erreur de connexion (demande du 25/09/2026 : "quand ya erreur ... on m'affiche un
