@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
 import { Copy, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiFetch } from '../../shared/api/client';
+import { consumeSseStream } from '../../shared/lib/sseStream';
+import { renderAiMarkdown } from '../../shared/lib/aiMarkdown';
 import { AIChatInput } from './components/ai-chat-input';
 import { ThinkingOrb } from './components/thinking-orb';
 
@@ -96,17 +96,8 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
-// Remplace l'ancien parseur maison (markdownLiteToHtml, gras/italique/listes à puces seulement) par
-// `marked` (30/09/2026, demande "bien formaté comme les autres sites") : titres, listes numérotées,
-// tableaux, blocs de code, tout le markdown standard. `breaks: true` conserve le même comportement
-// que l'ancien parseur pour un simple retour à la ligne (pas besoin d'un double saut de ligne pour
-// que l'IA structure sa réponse). DOMPurify sanitise le HTML produit avant dangerouslySetInnerHTML —
-// le texte vient d'une IA, jamais garanti inoffensif.
-marked.setOptions({ breaks: true });
-function renderMarkdown(text: string): string {
-  if (!text) return '';
-  return DOMPurify.sanitize(marked.parse(text, { async: false }));
-}
+// renderMarkdown déplacé dans shared/lib/aiMarkdown.ts (13/10/2026, extrait pour être réutilisé
+// tel quel par FloatingAiWidget.tsx) — renommé renderAiMarkdown à l'import, voir en-tête du fichier.
 
 // Couleur d'accent bleue réservée à ces graphiques du chatbot (demande explicite du 28/09/2026,
 // après confirmation : le reste du site reste noir/blanc/gris strict, seuls ces graphiques en
@@ -234,33 +225,8 @@ function buildVisualFromToolResult(toolResult: ToolResult | null | undefined, wa
   return '';
 }
 
-async function consumeSseStream(res: Response, onEvent: (eventName: string, data: any) => void) {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split('\n\n');
-    buffer = events.pop()!;
-    for (const eventBlock of events) {
-      const lines = eventBlock.split('\n');
-      let eventName = 'message';
-      let dataStr = '';
-      for (const line of lines) {
-        if (line.startsWith('event:')) eventName = line.slice(6).trim();
-        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
-      }
-      if (!dataStr) continue;
-      try {
-        onEvent(eventName, JSON.parse(dataStr));
-      } catch {
-        // événement mal formé ignoré
-      }
-    }
-  }
-}
+// consumeSseStream déplacé dans shared/lib/sseStream.ts (13/10/2026, extrait pour être réutilisé
+// tel quel par FloatingAiWidget.tsx) — voir l'import en en-tête du fichier.
 
 const SUGGESTIONS_HIDDEN_KEY = 'aia-suggestions-hidden';
 
@@ -393,7 +359,7 @@ export function AiAssistant() {
         }
         newTurns.push({
           question: userMsg ? userMsg.content : '',
-          answerHtml: assistantMsg ? renderMarkdown(assistantMsg.content) + visualHtml : '',
+          answerHtml: assistantMsg ? renderAiMarkdown(assistantMsg.content) + visualHtml : '',
           answerText: assistantMsg?.content,
         });
       }
@@ -486,13 +452,13 @@ export function AiAssistant() {
       if (finalResult) {
         next[turnIndex] = {
           question: q,
-          answerHtml: renderMarkdown(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult, !!finalResult.wantsVisual),
+          answerHtml: renderAiMarkdown(finalResult.answer) + buildVisualFromToolResult(finalResult.toolResult, !!finalResult.wantsVisual),
           answerText: finalResult.answer,
         };
       } else if (lastErr?.name === 'AbortError') {
         next[turnIndex] = {
           question: q,
-          answerHtml: renderMarkdown(streamedAnswer),
+          answerHtml: renderAiMarkdown(streamedAnswer),
           answerText: streamedAnswer,
           interrupted: true,
         };
@@ -558,7 +524,7 @@ export function AiAssistant() {
       if (!lastAssistant) return;
       setTurns((prev) => {
         if (turnIndex >= prev.length || prev[turnIndex].question !== question) return prev;
-        const newHtml = renderMarkdown(lastAssistant.content);
+        const newHtml = renderAiMarkdown(lastAssistant.content);
         if (prev[turnIndex].answerHtml.includes(newHtml) || newHtml.length <= prev[turnIndex].answerHtml.length) return prev;
         const next = [...prev];
         next[turnIndex] = { ...next[turnIndex], answerHtml: newHtml, answerText: lastAssistant.content };
@@ -1049,7 +1015,7 @@ export function AiAssistant() {
                       // (::after sur .aia-stream-live) plutôt qu'un <span> séparé, pour ne jamais
                       // casser une balise HTML tronquée en milieu de flux (ex: un <strong> ouvert
                       // par marked sur un morceau de texte pas encore complet).
-                      <span className="aia-stream-live" dangerouslySetInnerHTML={{ __html: renderMarkdown(turn.streamText) }} />
+                      <span className="aia-stream-live" dangerouslySetInnerHTML={{ __html: renderAiMarkdown(turn.streamText) }} />
                     ) : (
                       <span className="aia-thinking">
                         <span className="aia-thinking-orb-wrap" aria-hidden="true">
