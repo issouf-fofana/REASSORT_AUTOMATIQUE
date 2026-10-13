@@ -80,17 +80,6 @@ export function SignIn() {
           animate={{ x: parallax.x, y: parallax.y }}
           transition={{ type: 'spring' as const, stiffness: 80, damping: 15 }}
         >
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6, duration: 0.5 }}
-            className="mb-4"
-          >
-            {/* Logo seul, sans badge/fond (demande du 13/10/2026 : "fais avec le logo noir sans
-                fond") — brightness-0 force le rendu du PNG en noir plein quelle que soit sa
-                couleur source. */}
-            <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain brightness-0" />
-          </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -124,6 +113,10 @@ export function SignIn() {
           (icônes, modèle sign-up-page) qui ne convenaient pas. */}
       <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+          {/* Logo déplacé du panneau gauche vers ici (demande du 13/10/2026 : "il faut mettre
+              dans le côté de droite où y'a le Bienvenue en haut") — toujours sans badge/fond,
+              brightness-0 pour le rendu en noir plein. */}
+          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-10 w-10 object-contain brightness-0 mb-3" />
           <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
           <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
 
