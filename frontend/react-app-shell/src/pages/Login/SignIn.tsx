@@ -92,8 +92,12 @@ export function SignIn() {
           </div>
         </div>
 
-        {/* Panneau droit : formulaire de connexion */}
-        <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
+        {/* Panneau droit : formulaire de connexion. h-[600px] même valeur que le panneau gauche
+            (demande du 13/10/2026 : "le style est décalé") — sans hauteur explicite ici, ce
+            panneau ne prenait que la hauteur de son propre contenu (court, un formulaire de 2
+            champs), plus petite que les 600px fixes du panneau gauche, ce qui cassait l'alignement
+            des deux colonnes dans la carte flex. */}
+        <div className="w-full md:w-1/2 md:h-[600px] p-8 md:p-10 flex flex-col justify-center bg-white">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
             <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
