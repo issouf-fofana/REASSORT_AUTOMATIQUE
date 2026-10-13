@@ -54,7 +54,7 @@ export function SignIn() {
           plein panneau (image étirée/rognée, effet "poster") par un fond clair uni + l'image en
           object-contain à taille modeste, avec la même légère animation de zoom en boucle. */}
       <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100">
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-12">
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 md:p-10">
           <motion.img
             src="/assets/images/Tiny-man.jpg"
             alt=""
@@ -89,7 +89,7 @@ export function SignIn() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75, duration: 0.5 }}
-            className="text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-3"
+            className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3 text-center"
           >
             Piloté par l'intelligence artificielle
           </motion.p>
@@ -97,7 +97,7 @@ export function SignIn() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.8, duration: 0.5 }}
-            className="text-sm text-center text-zinc-600 max-w-sm"
+            className="text-sm text-center text-zinc-600 max-w-md"
           >
             Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
           </motion.p>
