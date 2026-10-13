@@ -4,11 +4,12 @@ import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../shared/lib/utils';
 import { DotMap } from './components/DotMap';
 
-// Adapté du composant "Travel Connect Sign In" (21st.dev, demande du 25/09/2026) : palette
-// bleu/indigo -> noir/blanc/gris strict (contrainte du site, cf. THEME_SYSTEM.md), bouton "Login
-// with Google" retiré (aucun SSO Google sur cette plateforme), formulaire branché sur la vraie
-// logique de connexion de auth-signin.html d'origine (POST /auth/login, stockage
-// reassort_token/reassort_user, redirection /) au lieu d'un console.log de démo.
+// Adapté du composant "Travel Connect Sign In" (21st.dev, demande du 25/09/2026). Palette passée
+// de bleu/indigo à noir/blanc/gris strict, puis à marine/ambre (13/10/2026) pour suivre le reste du
+// site (cf. theme-override.css, --bs-primary #1B2A4A) — cette page était restée sur l'ancienne
+// palette noire lors de ce changement global. Bouton "Login with Google" retiré (aucun SSO Google
+// sur cette plateforme), formulaire branché sur la vraie logique de connexion de auth-signin.html
+// d'origine (POST /auth/login, stockage reassort_token/reassort_user, redirection /).
 export function SignIn() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [email, setEmail] = useState('');
@@ -59,7 +60,7 @@ export function SignIn() {
                 transition={{ delay: 0.6, duration: 0.5 }}
                 className="mb-6"
               >
-                <div className="h-20 w-20 rounded-full bg-zinc-950 flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
+                <div className="h-20 w-20 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
                   <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain" />
                 </div>
               </motion.div>
@@ -110,7 +111,7 @@ export function SignIn() {
                   placeholder="ex: admin@reassort.local ou alien"
                   required
                   autoFocus
-                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-2"
+                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B2A4A] focus-visible:ring-offset-2"
                 />
               </div>
 
@@ -126,7 +127,7 @@ export function SignIn() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Entrez votre mot de passe"
                     required
-                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-2"
+                    className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B2A4A] focus-visible:ring-offset-2"
                   />
                   <button
                     type="button"
@@ -149,7 +150,7 @@ export function SignIn() {
                   type="submit"
                   disabled={submitting}
                   className={cn(
-                    'w-full relative overflow-hidden bg-zinc-950 hover:bg-zinc-800 text-white py-2.5 rounded-lg transition-all duration-300 inline-flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-50 disabled:pointer-events-none',
+                    'w-full relative overflow-hidden bg-[#1B2A4A] hover:bg-[#24355e] text-white py-2.5 rounded-lg transition-all duration-300 inline-flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-50 disabled:pointer-events-none',
                     isHovered ? 'shadow-lg shadow-zinc-300' : '',
                   )}
                 >
@@ -194,8 +195,8 @@ export function SignIn() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100">
-                  <TriangleAlert className="h-5 w-5 text-zinc-800" />
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[#ff6c2f]/10">
+                  <TriangleAlert className="h-5 w-5 text-[#ff6c2f]" />
                 </div>
                 <div className="flex-1 pt-1">
                   <h3 className="text-sm font-semibold text-zinc-900">Connexion impossible</h3>
@@ -205,7 +206,7 @@ export function SignIn() {
               <button
                 type="button"
                 onClick={() => setError(null)}
-                className="mt-5 w-full rounded-lg bg-zinc-950 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
+                className="mt-5 w-full rounded-lg bg-[#1B2A4A] py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#24355e]"
               >
                 Réessayer
               </button>
