@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eye, EyeOff, ArrowRight, TriangleAlert } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, TriangleAlert, Mail, Lock } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../shared/lib/utils';
 
@@ -115,22 +115,31 @@ export function SignIn() {
                 <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-1">
                   Email ou identifiant réseau
                 </label>
-                <input
-                  id="email"
-                  type="text"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ex: admin@reassort.local ou alien"
-                  required
-                  className="flex h-12 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
-                />
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                  <input
+                    id="email"
+                    type="text"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="ex: admin@reassort.local ou alien"
+                    required
+                    className="flex h-12 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-11 pr-4 py-3 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
+                  />
+                </div>
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-1">
-                  Mot de passe
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
+                    Mot de passe
+                  </label>
+                  <button type="button" className="text-xs font-medium text-[#1B2A4A] hover:underline">
+                    Mot de passe oublié ?
+                  </button>
+                </div>
                 <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
                   <input
                     id="password"
                     type={isPasswordVisible ? 'text' : 'password'}
@@ -138,7 +147,7 @@ export function SignIn() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
-                    className="flex h-12 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 pr-12 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
+                    className="flex h-12 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-11 pr-12 py-3 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
                   />
                   <button
                     type="button"
