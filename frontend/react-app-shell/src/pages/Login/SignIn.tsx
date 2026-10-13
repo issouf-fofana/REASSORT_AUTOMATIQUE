@@ -48,36 +48,40 @@ export function SignIn() {
         transition={{ duration: 0.5 }}
         className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
-      {/* Panneau gauche : photo animée (Ken Burns, léger zoom en boucle) + logo Réassort
-          Automatique. Remplace le canvas DotMap (demande du 13/10/2026 : "il faut mettre l'image à
-          la place c'est mieux", "fait en sorte que l'image soit animée aussi") — image statique
-          Tiny-man.jpg avec une animation CSS/Framer Motion de zoom doux en boucle plutôt qu'une
-          image totalement figée, voile sombre dégradé pour garder le texte lisible par-dessus. */}
-      <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100">
-        <motion.div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: "url('/assets/images/Tiny-man.jpg')" }}
-          initial={{ scale: 1 }}
-          animate={{ scale: 1.08 }}
-          transition={{ duration: 18, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/40" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-12 z-10 pointer-events-none">
+      {/* Panneau gauche : illustration petite et contenue sur fond uni clair (demande du
+          13/10/2026 : "l'image est trop gros, je veux que ce soit comme ça" — modèle fourni avec
+          une illustration isolée en haut, pas une photo plein cadre). Remplace le fond bg-cover
+          plein panneau (image étirée/rognée, effet "poster") par un fond clair uni + l'image en
+          object-contain à taille modeste, avec la même légère animation de zoom en boucle. */}
+      <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100 bg-gradient-to-br from-zinc-50 to-zinc-100">
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-12">
+          <motion.img
+            src="/assets/images/Tiny-man.jpg"
+            alt=""
+            className="w-full max-w-xs rounded-xl shadow-lg mb-8 object-contain"
+            initial={{ scale: 1, opacity: 0, y: -10 }}
+            animate={{ scale: [1, 1.04, 1], opacity: 1, y: 0 }}
+            transition={{
+              opacity: { delay: 0.3, duration: 0.5 },
+              y: { delay: 0.3, duration: 0.5 },
+              scale: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
+            }}
+          />
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.5 }}
-            className="mb-8"
+            className="mb-4"
           >
-            <div className="h-24 w-24 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-black/40 overflow-hidden">
-              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain" />
+            <div className="h-16 w-16 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
+              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-11 w-11 object-contain" />
             </div>
           </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7, duration: 0.5 }}
-            className="text-3xl md:text-4xl font-bold mb-2 text-center text-white whitespace-nowrap"
+            className="text-2xl md:text-3xl font-bold mb-2 text-center text-zinc-900 whitespace-nowrap"
           >
             Réassort Automatique
           </motion.h2>
@@ -85,7 +89,7 @@ export function SignIn() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75, duration: 0.5 }}
-            className="text-sm font-semibold uppercase tracking-widest text-zinc-200 mb-5"
+            className="text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-3"
           >
             Piloté par l'intelligence artificielle
           </motion.p>
@@ -93,7 +97,7 @@ export function SignIn() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.8, duration: 0.5 }}
-            className="text-base text-center text-zinc-100 max-w-lg"
+            className="text-sm text-center text-zinc-600 max-w-sm"
           >
             Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
           </motion.p>
