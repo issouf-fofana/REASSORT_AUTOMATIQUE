@@ -42,37 +42,37 @@ export function SignIn() {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-zinc-100 p-4">
+    <div className="h-screen w-screen flex items-center justify-center bg-zinc-100 p-4 md:p-8">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-6xl overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
+        className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
-      {/* Panneau gauche : carte animée + logo Réassort Automatique. Dimensions reprises du modèle
-          fourni par l'utilisateur (demande du 13/10/2026 : "fait les même dimension que lui") :
-          max-w-5xl, PAS de hauteur fixe (la carte prend la hauteur naturelle de son contenu, comme
-          le modèle — flexbox étire les deux panneaux à la même hauteur par défaut, inutile de la
-          forcer en dur). */}
+      {/* Panneau gauche : carte animée + logo Réassort Automatique. Carte quasi plein écran
+          (demande du 13/10/2026 : "fait comme il faut agrandir", "donner de l'espace comme les
+          autres") — h-screen sur le conteneur extérieur et h-full sur la carte, au lieu d'une
+          hauteur qui suivait juste le contenu du formulaire (restait petite même en grand écran).
+          Textes agrandis pour respirer à la même échelle que le panneau droit ("Bienvenue"). */}
       <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100">
         <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
           <DotMap />
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 z-10 pointer-events-none">
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-12 z-10 pointer-events-none">
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.6, duration: 0.5 }}
-              className="mb-6"
+              className="mb-8"
             >
-              <div className="h-20 w-20 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-                <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-14 w-14 object-contain" />
+              <div className="h-24 w-24 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
+                <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain" />
               </div>
             </motion.div>
             <motion.h2
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.7, duration: 0.5 }}
-              className="text-3xl font-bold mb-1 text-center text-zinc-900"
+              className="text-4xl font-bold mb-2 text-center text-zinc-900"
             >
               Réassort Automatique
             </motion.h2>
@@ -80,7 +80,7 @@ export function SignIn() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.75, duration: 0.5 }}
-              className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3"
+              className="text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-5"
             >
               Piloté par l'intelligence artificielle
             </motion.p>
@@ -88,7 +88,7 @@ export function SignIn() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.8, duration: 0.5 }}
-              className="text-sm text-center text-zinc-600 max-w-sm"
+              className="text-base text-center text-zinc-600 max-w-md"
             >
               Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
             </motion.p>
@@ -97,10 +97,10 @@ export function SignIn() {
       </div>
 
       {/* Panneau droit : formulaire de connexion. */}
-      <div className="w-full md:w-1/2 p-8 md:p-14 flex flex-col justify-center bg-white">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-            <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
-            <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
+      <div className="w-full md:w-1/2 p-8 md:p-16 flex flex-col justify-center bg-white">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="w-full max-w-md mx-auto">
+            <h1 className="text-3xl md:text-4xl font-bold mb-2 text-zinc-900">Bienvenue</h1>
+            <p className="text-zinc-500 mb-10 text-base">Connectez-vous à votre compte</p>
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               <div>
