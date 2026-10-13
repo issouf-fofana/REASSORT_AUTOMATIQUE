@@ -116,13 +116,13 @@ export function SignIn() {
           {/* Logo déplacé du panneau gauche vers ici (demande du 13/10/2026 : "il faut mettre
               dans le côté de droite où y'a le Bienvenue en haut") — toujours sans badge/fond,
               brightness-0 pour le rendu en noir plein. */}
-          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain brightness-0 mb-4" />
-          <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
-          <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
+          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-20 w-20 object-contain brightness-0 mb-6" />
+          <h1 className="text-3xl md:text-4xl font-bold mb-2 text-zinc-900">Bienvenue</h1>
+          <p className="text-zinc-500 text-base mb-10">Connectez-vous à votre compte</p>
 
-          <form className="space-y-5" onSubmit={handleSubmit}>
+          <form className="space-y-6" onSubmit={handleSubmit}>
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-1">
+              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-2">
                 Email ou identifiant réseau
               </label>
               <input
@@ -132,12 +132,12 @@ export function SignIn() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ex: admin@reassort.local ou alien"
                 required
-                className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
+                className="flex h-12 w-full rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-1">
+              <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-2">
                 Mot de passe
               </label>
               <div className="relative">
@@ -148,11 +148,11 @@ export function SignIn() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="flex h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 pr-10 text-sm text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
+                  className="flex h-12 w-full rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 pr-12 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-[#1B2A4A]"
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-700"
+                  className="absolute inset-y-0 right-0 flex items-center pr-4 text-zinc-500 hover:text-zinc-700"
                   onClick={() => setIsPasswordVisible(!isPasswordVisible)}
                 >
                   {isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -171,7 +171,7 @@ export function SignIn() {
                 type="submit"
                 disabled={submitting}
                 className={cn(
-                  'w-full relative overflow-hidden bg-[#1B2A4A] hover:bg-[#24355e] text-white py-2.5 rounded-lg transition-all duration-300 inline-flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-50 disabled:pointer-events-none',
+                  'w-full relative overflow-hidden bg-[#1B2A4A] hover:bg-[#24355e] text-white h-12 rounded-lg transition-all duration-300 inline-flex items-center justify-center gap-2 text-base font-medium disabled:opacity-50 disabled:pointer-events-none',
                   isHovered ? 'shadow-lg shadow-zinc-300' : '',
                 )}
               >
