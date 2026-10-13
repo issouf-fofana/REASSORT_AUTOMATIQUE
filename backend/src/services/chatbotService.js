@@ -1186,7 +1186,9 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         return { toolName, toolResult: await tools.getRevenueAllShops(allowedShopIds, { date, days: daysQuery || 1 }) };
       }
       case 'getStockoutRisks':
-        return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
+        // Même bug que getOrders/getPredictionAccuracy (period ignorée) : "risque de rupture sur
+        // 2 semaines/un mois" retombait silencieusement sur le défaut de l'outil (3 jours).
+        return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department, maxDays: daysQuery || 3 }) };
       case 'getOverstockArticles':
         return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
       case 'getPredictionAccuracy':
@@ -1219,7 +1221,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       // rôle — une question mal formulée ne doit jamais planter.
       case 'getStockoutRisksAllShops': {
         if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERVISOR')) {
-          return { toolName: 'getStockoutRisks', toolResult: await tools.getStockoutRisks(rposShopId, { department }) };
+          return { toolName: 'getStockoutRisks', toolResult: await tools.getStockoutRisks(rposShopId, { department, maxDays: daysQuery || 3 }) };
         }
         return { toolName, toolResult: await tools.getStockoutRisksAllShops(await resolveAllowedShopIds(user), {}) };
       }
