@@ -314,7 +314,15 @@ export function TableauDeBord() {
           Tableau de bord (30/09/2026, jugé peu utile ici). */}
       <div className="row g-3 mb-4">
         <div className="col-lg-7">
-          <ConformityTrendChart shopQueryParam={shopQueryParam()} />
+          {/* Monté seulement une fois un magasin effectif connu (demande du 13/10/2026, bug "Aucun
+              magasin assigné à ce compte" affiché à tort pour un SUPERVISOR) : contrairement aux
+              cartes KPI ci-dessus, dont le chargement est gardé par le second useEffect
+              (if (!isSingleShop && !selectedShopId) return), ce composant a son propre useEffect
+              interne qui se déclenchait dès le tout premier rendu, shopQueryParam() encore vide
+              (selectedShopId pas encore résolu par le sélecteur de magasin global) — appel sans
+              shop= envoyé, rejeté en 400 par le backend, erreur figée à l'écran même une fois le
+              magasin résolu ensuite. */}
+          {(isSingleShop || selectedShopId) && <ConformityTrendChart shopQueryParam={shopQueryParam()} />}
         </div>
         {!isSingleShop && (
           <div className="col-lg-5">
