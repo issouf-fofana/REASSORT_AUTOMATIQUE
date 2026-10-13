@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Eye, EyeOff, ArrowRight, TriangleAlert } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../shared/lib/utils';
-import { DotMap } from './components/DotMap';
 
 // Adapté du composant "Travel Connect Sign In" (21st.dev, demande du 25/09/2026). Palette passée
 // de bleu/indigo à noir/blanc/gris strict, puis à marine/ambre (13/10/2026) pour suivre le reste du
@@ -49,50 +48,55 @@ export function SignIn() {
         transition={{ duration: 0.5 }}
         className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
-      {/* Panneau gauche : carte animée + logo Réassort Automatique. Carte quasi plein écran
-          (demande du 13/10/2026 : "fait comme il faut agrandir", "donner de l'espace comme les
-          autres") — h-screen sur le conteneur extérieur et h-full sur la carte, au lieu d'une
-          hauteur qui suivait juste le contenu du formulaire (restait petite même en grand écran).
-          Textes agrandis pour respirer à la même échelle que le panneau droit ("Bienvenue"). */}
+      {/* Panneau gauche : photo animée (Ken Burns, léger zoom en boucle) + logo Réassort
+          Automatique. Remplace le canvas DotMap (demande du 13/10/2026 : "il faut mettre l'image à
+          la place c'est mieux", "fait en sorte que l'image soit animée aussi") — image statique
+          Tiny-man.jpg avec une animation CSS/Framer Motion de zoom doux en boucle plutôt qu'une
+          image totalement figée, voile sombre dégradé pour garder le texte lisible par-dessus. */}
       <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100">
-        <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
-          <DotMap />
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-12 z-10 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6, duration: 0.5 }}
-              className="mb-8"
-            >
-              <div className="h-24 w-24 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-zinc-300 overflow-hidden">
-                <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain" />
-              </div>
-            </motion.div>
-            <motion.h2
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.7, duration: 0.5 }}
-              className="text-3xl md:text-4xl font-bold mb-2 text-center text-zinc-900 whitespace-nowrap"
-            >
-              Réassort Automatique
-            </motion.h2>
-            <motion.p
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.75, duration: 0.5 }}
-              className="text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-5"
-            >
-              Piloté par l'intelligence artificielle
-            </motion.p>
-            <motion.p
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.8, duration: 0.5 }}
-              className="text-base text-center text-zinc-600 max-w-lg"
-            >
-              Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
-            </motion.p>
-          </div>
+        <motion.div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: "url('/assets/images/Tiny-man.jpg')" }}
+          initial={{ scale: 1 }}
+          animate={{ scale: 1.08 }}
+          transition={{ duration: 18, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/40" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-12 z-10 pointer-events-none">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.5 }}
+            className="mb-8"
+          >
+            <div className="h-24 w-24 rounded-full bg-[#1B2A4A] flex items-center justify-center shadow-lg shadow-black/40 overflow-hidden">
+              <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain" />
+            </div>
+          </motion.div>
+          <motion.h2
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7, duration: 0.5 }}
+            className="text-3xl md:text-4xl font-bold mb-2 text-center text-white whitespace-nowrap"
+          >
+            Réassort Automatique
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.75, duration: 0.5 }}
+            className="text-sm font-semibold uppercase tracking-widest text-zinc-200 mb-5"
+          >
+            Piloté par l'intelligence artificielle
+          </motion.p>
+          <motion.p
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.8, duration: 0.5 }}
+            className="text-base text-center text-zinc-100 max-w-lg"
+          >
+            Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
+          </motion.p>
         </div>
       </div>
 
