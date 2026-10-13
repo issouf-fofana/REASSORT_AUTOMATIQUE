@@ -42,12 +42,19 @@ export function SignIn() {
   }
 
   return (
-    <div className="h-screen w-screen flex bg-white">
-      {/* Panneau gauche : carte animée + logo Réassort Automatique. Plein écran (demande du
-          13/10/2026 : "c'est petit", référence fournie par l'utilisateur en h-screen w-screen,
-          deux panneaux flex-1 sans carte flottante) — remplace l'ancienne carte centrée de taille
-          fixe (max-w-5xl, h-[600px]) par une mise en page qui occupe tout l'écran. */}
-      <div className="hidden md:block flex-1 relative overflow-hidden border-r border-zinc-100">
+    <div className="min-h-screen w-full flex items-center justify-center bg-zinc-100 p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-5xl h-[650px] overflow-hidden rounded-2xl flex bg-white shadow-xl"
+      >
+      {/* Panneau gauche : carte animée + logo Réassort Automatique. Carte centrée aux mêmes
+          dimensions que le modèle 21st.dev fourni par l'utilisateur (demande du 13/10/2026 :
+          "garde le style actuel, je veux les mêmes dimensions") — revient sur le plein écran
+          h-screen/w-screen tenté juste avant, qui n'était pas ce que le modèle montrait non plus
+          (c'est une carte de taille fixe raisonnable, pas étirée sur tout l'écran). */}
+      <div className="hidden md:block w-1/2 relative overflow-hidden border-r border-zinc-100">
         <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-200">
           <DotMap />
           <div className="absolute inset-0 flex flex-col items-center justify-center p-8 z-10 pointer-events-none">
@@ -89,11 +96,8 @@ export function SignIn() {
         </div>
       </div>
 
-      {/* Panneau droit : formulaire de connexion, plein écran lui aussi. max-w-md sur le contenu
-          (pas sur le panneau entier) pour garder un formulaire lisible plutôt qu'étiré sur toute
-          la largeur du panneau. */}
-      <div className="flex-1 flex items-center justify-center bg-white p-8">
-        <div className="w-full max-w-md">
+      {/* Panneau droit : formulaire de connexion. */}
+      <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
             <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
@@ -170,8 +174,8 @@ export function SignIn() {
               </motion.div>
             </form>
           </motion.div>
-        </div>
       </div>
+      </motion.div>
 
       {/* Popup d'erreur de connexion (demande du 25/09/2026 : "quand ya erreur ... on m'affiche un
           pop up") — remplace l'ancien bandeau discret inséré dans le formulaire, qui pouvait passer
