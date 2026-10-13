@@ -112,7 +112,7 @@ export function SignIn() {
           "reviens sur le style de début pour le formulaire", après plusieurs itérations
           (icônes, modèle sign-up-page) qui ne convenaient pas. */}
       <div className="w-full md:w-1/2 p-8 md:p-10 md:pt-16 flex flex-col justify-start bg-white">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="w-full max-w-md">
           {/* Logo déplacé du panneau gauche vers ici (demande du 13/10/2026 : "il faut mettre
               dans le côté de droite où y'a le Bienvenue en haut") — toujours sans badge/fond,
               brightness-0 pour le rendu en noir plein. */}
