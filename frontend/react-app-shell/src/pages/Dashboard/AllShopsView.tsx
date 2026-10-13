@@ -189,15 +189,19 @@ export function AllShopsView() {
                     {pct(data.globalRejectionRate)}
                   </p>
                 </div>
+                {/* Libellés en français simple (13/10/2026, demande explicite : "il faut mettre les
+                    terme en francais ca sera simple" — MAE/WAPE/Biais remplacés sans jargon
+                    statistique, même valeur affichée, juste un nom compréhensible sans bagage
+                    technique). */}
                 <div className="metric-row-item">
-                  <p className="kpi-label">Erreur moy. (MAE)</p>
+                  <p className="kpi-label">Erreur moyenne (en unités)</p>
                   <p className="metric-value">{num(data.globalForecastMAE, 1)}</p>
                 </div>
                 <div className="metric-row-item">
-                  <p className="kpi-label">Biais / WAPE</p>
+                  <p className="kpi-label">Tendance à sous/sur-estimer</p>
                   <p className="metric-value">{num(data.globalForecastBias, 1)}</p>
                   <p className="text-muted small mb-0" style={{ color: '#8a93a8' }}>
-                    {data.globalForecastWAPE !== null ? `${pct(data.globalForecastWAPE)} WAPE` : 'WAPE non mesurable'}
+                    {data.globalForecastWAPE !== null ? `Erreur en % des ventes : ${pct(data.globalForecastWAPE)}` : 'Erreur en % des ventes : non mesurable'}
                   </p>
                 </div>
                 <div className="metric-row-item">
@@ -237,8 +241,8 @@ export function AllShopsView() {
             <div className="card-header bg-transparent">
               <h5 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 600, fontSize: '.95rem' }}>Performance par magasin</h5>
               <p className="text-muted small mb-0 mt-1">
-                Un magasin par ligne : propositions en attente/validées, taux de conformité/rejet/rupture/surstock et précision des
-                prévisions (MAE), calculés sur ses propositions validées. Les magasins avec de l'activité récente apparaissent en premier.
+                Un magasin par ligne : propositions en attente/validées, taux de conformité/rejet/rupture/surstock et erreur moyenne des
+                prévisions, calculés sur ses propositions validées. Les magasins avec de l'activité récente apparaissent en premier.
               </p>
             </div>
             <div className="card-body p-0">
@@ -254,7 +258,7 @@ export function AllShopsView() {
                       <th className="text-end">Rejet</th>
                       <th className="text-end">Rupture</th>
                       <th className="text-end">Surstock</th>
-                      <th className="text-end">MAE</th>
+                      <th className="text-end">Erreur moy.</th>
                       <th>Dernière validation</th>
                     </tr>
                   </thead>
