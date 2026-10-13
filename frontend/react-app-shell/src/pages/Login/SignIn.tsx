@@ -47,7 +47,7 @@ export function SignIn() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-5xl overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
+        className="w-full max-w-6xl overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
       {/* Panneau gauche : carte animée + logo Réassort Automatique. Dimensions reprises du modèle
           fourni par l'utilisateur (demande du 13/10/2026 : "fait les même dimension que lui") :
@@ -88,7 +88,7 @@ export function SignIn() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.8, duration: 0.5 }}
-              className="text-sm text-center text-zinc-600 max-w-xs"
+              className="text-sm text-center text-zinc-600 max-w-sm"
             >
               Connectez-vous pour piloter le réassort, les prévisions et les commandes de vos magasins.
             </motion.p>
@@ -97,7 +97,7 @@ export function SignIn() {
       </div>
 
       {/* Panneau droit : formulaire de connexion. */}
-      <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
+      <div className="w-full md:w-1/2 p-8 md:p-14 flex flex-col justify-center bg-white">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <h1 className="text-2xl md:text-3xl font-bold mb-1 text-zinc-900">Bienvenue</h1>
             <p className="text-zinc-500 mb-8">Connectez-vous à votre compte</p>
