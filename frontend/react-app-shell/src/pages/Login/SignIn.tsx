@@ -111,14 +111,14 @@ export function SignIn() {
           (commit bb4b67f, juste après le passage en marine/ambre) — demande du 13/10/2026 :
           "reviens sur le style de début pour le formulaire", après plusieurs itérations
           (icônes, modèle sign-up-page) qui ne convenaient pas. */}
-      <div className="w-full md:w-1/2 p-8 md:p-10 flex flex-col justify-center bg-white">
+      <div className="w-full md:w-1/2 p-8 md:p-10 md:pt-16 flex flex-col justify-start bg-white">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           {/* Logo déplacé du panneau gauche vers ici (demande du 13/10/2026 : "il faut mettre
               dans le côté de droite où y'a le Bienvenue en haut") — toujours sans badge/fond,
               brightness-0 pour le rendu en noir plein. */}
-          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-20 w-20 object-contain brightness-0 mb-6" />
+          <img src="/assets/images/logo-reassort.png" alt="Réassort Automatique" className="h-16 w-16 object-contain brightness-0 mb-4" />
           <h1 className="text-3xl md:text-4xl font-bold mb-2 text-zinc-900">Bienvenue</h1>
-          <p className="text-zinc-500 text-base mb-10">Connectez-vous à votre compte</p>
+          <p className="text-zinc-500 text-base mb-6">Connectez-vous à votre compte</p>
 
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div>
