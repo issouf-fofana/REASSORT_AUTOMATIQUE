@@ -83,29 +83,32 @@ main.content {
    restent gérés couleur par couleur ci-dessous, pour que les statuts (réussi/échoué/en attente)
    redeviennent identifiables au premier coup d'œil plutôt que par une simple nuance de gris. */
 
-/* Palette noir/blanc/gris : neutralise les couleurs d'accent de Volt (bleu, jaune, vert, rouge)
-   utilisées sur les boutons primaires, badges et liens actifs. Les couleurs sémantiques
-   (succès/erreur/alerte) restent inchangées ailleurs dans l'appli — seule l'identité visuelle
-   générale (accent, sidebar, liens) passe en noir/blanc. */
+/* Palette marine/ambre (13/10/2026, demande explicite : "dans setting les bouton ne son pas au bon
+   couleur" — remplace le noir/blanc/gris strict d'origine) : neutralise les couleurs d'accent de
+   Volt (bleu, jaune, vert, rouge) utilisées sur les boutons primaires, badges et liens actifs, au
+   profit de la marine (#1B2A4A) déjà utilisée sur la sidebar et la barre notch depuis le 30/09/2026
+   ("abandonner le noir/blanc strict") — cohérence enfin complète entre la navigation et les actions
+   de page, plutôt qu'une identité à deux couleurs (marine ici, noir partout ailleurs). Les couleurs
+   sémantiques (succès/erreur/alerte) restent inchangées ailleurs dans l'appli. */
 :root {
-     --bs-primary: #000000;
-     --bs-primary-rgb: 0, 0, 0;
-     --bs-secondary: #666666;
-     --bs-secondary-rgb: 102, 102, 102;
+     --bs-primary: #1B2A4A;
+     --bs-primary-rgb: 27, 42, 74;
+     --bs-secondary: #5B6B85;
+     --bs-secondary-rgb: 91, 107, 133;
 }
 
 .btn-primary,
 .btn-gray-800 {
-     background-color: #000000;
-     border-color: #000000;
+     background-color: #1B2A4A;
+     border-color: #1B2A4A;
      color: #ffffff;
 }
 .btn-primary:hover,
 .btn-primary:focus,
 .btn-gray-800:hover,
 .btn-gray-800:focus {
-     background-color: #1a1a1a;
-     border-color: #1a1a1a;
+     background-color: #14203a;
+     border-color: #14203a;
      color: #ffffff;
 }
 
@@ -114,22 +117,22 @@ main.content {
 .btn-outline-warning,
 .btn-outline-info,
 .btn-outline-danger {
-     color: #000000 !important;
-     border-color: #000000 !important;
+     color: #1B2A4A !important;
+     border-color: #1B2A4A !important;
 }
 .btn-outline-primary:hover,
 .btn-outline-secondary:hover,
 .btn-outline-warning:hover,
 .btn-outline-info:hover,
 .btn-outline-danger:hover {
-     background-color: #000000 !important;
-     border-color: #000000 !important;
+     background-color: #1B2A4A !important;
+     border-color: #1B2A4A !important;
      color: #ffffff !important;
 }
 
 a:not(.sidebar *),
 .text-primary {
-     color: #000000 !important;
+     color: #1B2A4A !important;
 }
 
 /* volt.css définit .text-secondary deux fois : une via var(--bs-secondary-rgb) (déjà neutralisée
@@ -137,7 +140,7 @@ a:not(.sidebar *),
    l'emporte sur la première par ordre d'apparition — on la neutralise donc explicitement ici. */
 .text-secondary,
 .text-secondary:hover {
-     color: #666666 !important;
+     color: #5B6B85 !important;
 }
 
 .sidebar {
