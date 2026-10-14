@@ -1258,6 +1258,7 @@ async function getOrders(rposShopId, { posId, days = 14, dateRangeStart, dateRan
       deliveryDate: rposOrder?.delivery_date || null,
       validationDate: rposOrder?.validation_date || null,
       supplier: rposOrder?.supplier ? { name: rposOrder.supplier.name, code: rposOrder.supplier.code } : null,
+      deliveryType: deliveryTypeFromSupplier(rposOrder?.supplier),
       createdBy: rposOrder?.created_by || null,
       validatedBy: rposOrder?.validated_by || null,
     };
@@ -1285,6 +1286,7 @@ async function getOrders(rposShopId, { posId, days = 14, dateRangeStart, dateRan
         deliveryDate: o.delivery_date || null,
         validationDate: o.validation_date || null,
         supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+        deliveryType: deliveryTypeFromSupplier(o.supplier),
         createdBy: o.created_by || null,
         validatedBy: o.validated_by || null,
       }))
@@ -1405,6 +1407,7 @@ async function getValidatedOrders(posId, shopId, { days = 30, dateRangeStart, da
       deliveryDate: rposOrder?.delivery_date || null,
       validationDate: rposOrder?.validation_date || null,
       supplier: rposOrder?.supplier ? { name: rposOrder.supplier.name, code: rposOrder.supplier.code } : null,
+      deliveryType: deliveryTypeFromSupplier(rposOrder?.supplier),
       createdBy: rposOrder?.created_by || null,
       validatedBy: rposOrder?.validated_by || null,
       // observation : champ demandé mais absent de la réponse RPOS /api/supplier_order/ (confirmé
@@ -1438,6 +1441,7 @@ async function getValidatedOrders(posId, shopId, { days = 30, dateRangeStart, da
         deliveryDate: o.delivery_date || null,
         validationDate: o.validation_date || null,
         supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+        deliveryType: deliveryTypeFromSupplier(o.supplier),
         createdBy: o.created_by || null,
         validatedBy: o.validated_by || null,
         observation: null,
@@ -1491,6 +1495,16 @@ function normalizeForSupplierMatch(str) {
 const SUPPLIER_CENTRAL_CODE = '000000';
 const CENTRAL_SUPPLIER_WORDS = new Set(['central', 'centrale', 'centraux']);
 
+/** Type de livraison dérivé du fournisseur (demande du 14/10/2026 : "il dois me dire si commande LC
+ * ou LD") — même règle que resolveSupplierForArticle (proposalService.js:1946, "centralSupplier ->
+ * LC, sinon LD") : fournisseur central (code 000000) = Livraison Centrale, tout autre fournisseur =
+ * Livraison Directe. Dérivée ici localement (jamais un appel RPOS supplémentaire), le code
+ * fournisseur étant déjà présent sur chaque commande récupérée. */
+function deliveryTypeFromSupplier(supplier) {
+  if (!supplier) return null;
+  return supplier.code === SUPPLIER_CENTRAL_CODE ? 'LC' : 'LD';
+}
+
 /** Filtre partagé fournisseur pour getValidatedOrders/getPosOnlyValidatedOrders (demande du
  * 14/10/2026) : comparaison nom/code insensible à la casse/accents dans les deux sens, plus un cas
  * spécial "central"/"centrale" qui matche directement le code RPOS 000000 même si le nom réel du
@@ -1543,6 +1557,16 @@ async function getOrderLinesDetail(posId, shopId, orderId) {
   }));
 }
 
+/** Nombre d'articles distincts d'une commande, sans résoudre leur libellé (demande du 14/10/2026 :
+ * "il ne doit pas me donner les article a meme temps il peux donner le nombre d'article dans la
+ * commande... si je demande les detail" — le compte seul évite l'appel getProductByEan par EAN,
+ * bien plus coûteux que ce dont une question générale a besoin). Un seul appel RPOS, jamais un appel
+ * par article comme getOrderLinesDetail. */
+async function getOrderLineCount(posId, orderId) {
+  const linesData = await rpos.getSupplierOrderLines(posId, orderId);
+  return (linesData.results || []).filter((l) => l.ean).length;
+}
+
 /**
  * getPosOnlyValidatedOrders(posId, shopId, {days}) — commandes fournisseur VALIDÉES sur cette
  * période, créées ET validées directement sur le POS (RPOS), sans passer par la plateforme (demande
@@ -1559,8 +1583,14 @@ async function getOrderLinesDetail(posId, shopId, orderId) {
  * getValidatedOrders (cf. son commentaire pour le détail) — ajoutés le 14/10/2026, demande
  * explicite : "les commande lie a un fournisseur... sur cette periode... hier, avant hier, la
  * semaine, le mois, ou meme l'intervalle".
+ *
+ * `includeArticleDetail` (ajouté le 14/10/2026, demande explicite : "il ne doit pas me donner les
+ * article a meme temps il peux donner le nombre d'article... si je demande les detail") : par
+ * défaut false, chaque commande ne porte alors que `articleCount` (un seul appel RPOS par
+ * commande, sans résolution de libellé par article) — le détail complet (EAN/libellé/quantités,
+ * via getOrderLinesDetail) n'est calculé que si explicitement demandé par l'appelant.
  */
-async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeStart, dateRangeEnd, supplierQuery } = {}) {
+async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeStart, dateRangeEnd, supplierQuery, includeArticleDetail = false } = {}) {
   if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
 
   const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
@@ -1588,10 +1618,13 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
     supplierFilterApplied = supplierQuery;
   }
 
-  // Détail des lignes (articles/quantités/réception) ajouté seulement sous POS_ONLY_ORDERS_DETAIL_LIMIT
-  // commandes — jamais un échec RPOS sur UNE commande qui ferait disparaître les autres, chaque
-  // échec reste local à sa commande (articlesError explicite plutôt qu'une liste vide trompeuse).
-  const includeDetail = posOnly.length <= POS_ONLY_ORDERS_DETAIL_LIMIT;
+  // Détail complet des lignes (articles/quantités/réception) seulement si explicitement demandé
+  // (includeArticleDetail) ET sous POS_ONLY_ORDERS_DETAIL_LIMIT commandes — jamais un échec RPOS sur
+  // UNE commande qui ferait disparaître les autres, chaque échec reste local à sa commande
+  // (articlesError explicite plutôt qu'une liste vide trompeuse). Sans includeArticleDetail, seul le
+  // COMPTE d'articles est calculé (articleCount, un appel RPOS par commande mais sans résolution de
+  // libellé par EAN — bien moins coûteux, cf. getOrderLineCount).
+  const includeDetail = includeArticleDetail && posOnly.length <= POS_ONLY_ORDERS_DETAIL_LIMIT;
   const orders = await Promise.all(posOnly.map(async (o) => {
     const base = {
       reference: o.reference,
@@ -1600,14 +1633,22 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
       validationDate: o.validation_date || null,
       status: o.status_display || null,
       supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+      deliveryType: deliveryTypeFromSupplier(o.supplier),
       createdBy: o.created_by || null,
       validatedBy: o.validated_by || null,
     };
-    if (!includeDetail) return base;
+    if (includeDetail) {
+      try {
+        base.articles = await getOrderLinesDetail(posId, shopId, o.id);
+      } catch (err) {
+        base.articlesError = `Détail des articles indisponible pour cette commande : ${err.message}`;
+      }
+      return base;
+    }
     try {
-      base.articles = await getOrderLinesDetail(posId, shopId, o.id);
+      base.articleCount = await getOrderLineCount(posId, o.id);
     } catch (err) {
-      base.articlesError = `Détail des articles indisponible pour cette commande : ${err.message}`;
+      base.articleCount = null;
     }
     return base;
   }));
@@ -1616,7 +1657,7 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
     found: true, days, dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
     dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
     supplierFilterApplied, count: orders.length, orders,
-    articlesDetailOmitted: !includeDetail
+    articlesDetailOmitted: (includeArticleDetail && !includeDetail)
       ? `Détail des articles omis : ${posOnly.length} commandes sur cette période dépassent le seuil de ${POS_ONLY_ORDERS_DETAIL_LIMIT} pour ce calcul — réduis la période (days) pour l'obtenir.`
       : undefined,
     source: 'rpos_live', status: 'success',
