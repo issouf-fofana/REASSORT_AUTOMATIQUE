@@ -966,11 +966,19 @@ async function getStockoutRisks(rposShopId, { maxDays = 3, department } = {}) {
       ...(department ? { department } : {}),
     },
     orderBy: { daysUntilStockout: 'asc' },
-    select: { ean: true, label: true, department: true, stockAtGeneration: true, daysUntilStockout: true, quantitySuggested: true },
+    // avgWeeklySales ajouté le 14/10/2026 (bug trouvé en conversation réelle : "pourquoi ils vont
+    // etre en rupture quelle est leur moyenne de vente par jours" — l'assistant répondait ne pas
+    // avoir cette donnée alors qu'elle existe déjà en base, simplement jamais sélectionnée ici,
+    // contrairement à getOverstockArticles juste en dessous qui l'inclut). Arrondie comme partout
+    // ailleurs (roundWeeklySales) : c'est un total divisé par un nombre de semaines d'historique,
+    // jamais un entier exact.
+    select: { ean: true, label: true, department: true, stockAtGeneration: true, daysUntilStockout: true, quantitySuggested: true, avgWeeklySales: true },
     take: 50,
   });
 
-  return { found: true, maxDays, count: lines.length, lines };
+  const linesWithAvg = lines.map((l) => ({ ...l, avgWeeklySales: roundWeeklySales(l.avgWeeklySales) }));
+
+  return { found: true, maxDays, count: linesWithAvg.length, lines: linesWithAvg };
 }
 
 /** getOverstockArticles() — articles dont le stock couvre largement plus que la vente moyenne (surstock probable). */
