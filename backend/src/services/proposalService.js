@@ -3152,4 +3152,5 @@ module.exports = {
   resolveSupplierForArticle,
   previewDepartmentSupplierGrouping,
   groupLinesByResolvedSupplier,
+  getRecentUndeliveredOrderedQuantityCached,
 };

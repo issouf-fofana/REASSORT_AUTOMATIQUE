@@ -16,6 +16,7 @@ const {
   getShadowAiReport,
   getAiDecisionLog,
   getAdminDashboard,
+  getRecentUndeliveredOrderedQuantityCached,
 } = require('../../services/proposalService');
 const { getConfig } = require('../../services/configService');
 const productInsightCache = require('../../services/productInsightCacheService');
@@ -497,7 +498,27 @@ router.get('/product/:productId/analytics', async (req, res) => {
       const product = await rpos.getProductByEan(posId, shopId, ean);
       if (product) {
         currentStock = Number(product.stock || 0);
-        currentOrderedQuantity = Number(product.current_ordered_quantity || 0);
+        // On n'utilise PAS le compteur RPOS brut product.current_ordered_quantity : comme dans
+        // proposalService.processArticle, il accumule indéfiniment des commandes centrales jamais
+        // marquées "livrées" côté RPOS et masquerait un vrai besoin de recommander (cf. le
+        // commentaire équivalent dans proposalService.js). On recalcule la même quantité "déjà en
+        // commande" que le tableau de la proposition (max entre commandes RPOS récentes non
+        // livrées et commandes en transit de cette plateforme), pour que ce panneau de détail ne
+        // raconte jamais une autre histoire que le tableau principal.
+        const ignoreRposStock = !!config.ignoreRposStockInCalculation;
+        let rposOrderedQty = 0;
+        if (!ignoreRposStock) {
+          const recentRposOrder = await getRecentUndeliveredOrderedQuantityCached(
+            posId, shopId, product.id, config.recentOrderMaxAgeDays, ignoreRposStock
+          );
+          rposOrderedQty = recentRposOrder.quantity;
+        }
+        let quantityInTransit = 0;
+        if (!ignoreRposStock) {
+          const { quantityByEan: inTransitByEan } = await rpos.getPendingPlatformOrderedEans(posId, shopId);
+          quantityInTransit = inTransitByEan.get(ean) || 0;
+        }
+        currentOrderedQuantity = Math.max(rposOrderedQty, quantityInTransit);
       }
     } catch (err) {
       console.error('[product analytics] Échec de lecture du produit RPOS:', err.message);
