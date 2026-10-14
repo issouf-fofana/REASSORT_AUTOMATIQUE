@@ -64,9 +64,15 @@ const FALLBACK_INTENT_RULES = [
   // règle getValidatedOrders générique juste en dessous : "commande validée sur le pos"/"hors
   // plateforme" contient aussi "commande validée" et matcherait sinon à tort la règle générique
   // (qui ne couvre QUE les commandes créées par cette plateforme, l'inverse de ce qui est demandé
-  // ici). Mots-clés volontairement spécifiques (toujours "pos" ou "plateforme" en plus de
-  // "validée") pour ne jamais intercepter une question générale sur les commandes validées.
-  { keywords: ['validée sur le pos', 'validee sur le pos', 'validée directement sur le pos', 'validee directement sur le pos', 'validée sur la caisse', 'validee sur la caisse', 'pas sur la plateforme', 'hors plateforme', 'hors de la plateforme', 'sans passer par la plateforme', 'validée en dehors de la plateforme', 'validee en dehors de la plateforme'], tool: 'getPosOnlyValidatedOrders' },
+  // ici). Bug trouvé en test réel le 14/10/2026 : un premier jeu de mots-clés au singulier
+  // ("validée sur le pos") ne matchait JAMAIS la formulation plurielle réelle ("validées sur le
+  // pos") — le matching ici est un simple .includes() sur la question normalisée, jamais une regex
+  // tolérante au pluriel/accord, donc chaque variante grammaticale plausible doit être listée
+  // explicitement. Mots-clés courts ("sur le pos", "sur la caisse") combinés uniquement à des
+  // formulations contenant déjà "commande"/"valid" plus haut dans cette liste n'étant pas un risque
+  // ici car cette règle teste "le pos"/"la plateforme" eux-mêmes, suffisamment spécifiques pour ne
+  // jamais apparaître dans une question générale sur les commandes.
+  { keywords: ['sur le pos', 'sur la caisse', 'pas sur la plateforme', 'hors plateforme', 'hors de la plateforme', 'sans passer par la plateforme', 'en dehors de la plateforme'], tool: 'getPosOnlyValidatedOrders' },
   // getValidatedOrders ajouté le 06/10/2026 (demande explicite : détail complet RPOS d'une commande
   // VALIDÉE — qui a validé, fournisseur, dates, statut) — placé AVANT getOrders générique ci-dessous
   // pour les mêmes raisons que getOrderAnomalies/getOrders juste au-dessus : "commandes validées"
