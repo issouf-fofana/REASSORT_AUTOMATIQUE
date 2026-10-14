@@ -1307,6 +1307,7 @@ async function getProductGisement(posId, shopId, ean) {
 }
 
 module.exports = {
+  PLATFORM_MARKER,
   getShops,
   getProductByEan,
   searchProductsByLabel,

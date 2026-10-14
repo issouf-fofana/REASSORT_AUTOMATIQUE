@@ -65,6 +65,7 @@ const TOOL_CAPABILITY = {
   getRevenueTrendAllShops: 'revenueShop', // classement/évolution du CA réseau, même capacité que le CA global d'un magasin
   getOrders: 'orders',
   getValidatedOrders: 'orders',
+  getPosOnlyValidatedOrders: 'orders',
   getCurrentProposal: 'orders',
   explainProposalQuantity: 'orders',
   getOrderAnomalies: 'orders',

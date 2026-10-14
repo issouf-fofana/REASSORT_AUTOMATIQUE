@@ -1274,6 +1274,57 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
 }
 
 /**
+ * getPosOnlyValidatedOrders(posId, shopId, {days}) — commandes fournisseur VALIDÉES sur cette
+ * période, créées ET validées directement sur le POS (RPOS), sans passer par la plateforme (demande
+ * du 14/10/2026 : "les commandes qui ont été validées aujourd'hui sur le POS et pas sur la
+ * plateforme seulement"). Distingue une commande plateforme d'une commande POS via le marqueur
+ * `[REASSORT-IA]` dans external_reference (cf. PLATFORM_MARKER dans rposClient.js, même marqueur
+ * que getPendingPlatformOrderedEans/getSupplierOrders) : toute commande VALIDÉE (statut 2+, jamais
+ * "en préparation") qui ne porte PAS ce marqueur a été créée et validée hors plateforme, directement
+ * sur le POS. Lecture RPOS directe, aucune table locale à jour (contrairement à getValidatedOrders
+ * qui part de ProposalOrder) — ces commandes n'ont justement aucune trace côté plateforme.
+ */
+async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
+  if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
+
+  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  let results;
+  try {
+    ({ results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false }));
+  } catch (err) {
+    return { found: false, status: 'rpos_error', rposError: err.message, message: 'RPOS injoignable pour cette vérification.' };
+  }
+
+  const VALIDATED_STATUSES = new Set(['en attente de livraison', 'livrée partiellement', 'finalisée et partielle', 'complète']);
+  const posOnly = (results || []).filter((o) => {
+    const isPlatformOrder = (o.external_reference || '').includes(rpos.PLATFORM_MARKER);
+    const isValidated = VALIDATED_STATUSES.has((o.status_display || '').toLowerCase());
+    const validationDate = o.validation_date ? new Date(o.validation_date) : null;
+    const isInRange = validationDate ? validationDate >= dateStart : false;
+    return !isPlatformOrder && isValidated && isInRange;
+  });
+
+  const orders = posOnly.map((o) => ({
+    reference: o.reference,
+    orderDate: o.date || null,
+    deliveryDate: o.delivery_date || null,
+    validationDate: o.validation_date || null,
+    status: o.status_display || null,
+    supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+    createdBy: o.created_by || null,
+    validatedBy: o.validated_by || null,
+  }));
+
+  return {
+    found: true, days, count: orders.length, orders,
+    source: 'rpos_live', status: 'success',
+    isNormalNegative: orders.length === 0,
+    message: orders.length === 0 ? 'Aucune commande validée directement sur le POS (hors plateforme) sur cette période.' : undefined,
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+/**
  * searchArticlesByName(posId, shopId, query) — recherche d'articles par nom/libellé partiel (demande
  * du 05/10/2026 : "si je met pas tout le nom il doit me donner les variantes" — ex: "codys" sans
  * préciser le format doit lister les variantes réellement vendues dans ce magasin, jamais inventer un
@@ -2106,6 +2157,7 @@ module.exports = {
   getPredictionAccuracy,
   getOrders,
   getValidatedOrders,
+  getPosOnlyValidatedOrders,
   getStockMoveHistory,
   getStockMoveHistoryAllShops,
   getDlvArticles,

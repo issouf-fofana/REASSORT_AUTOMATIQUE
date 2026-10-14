@@ -23,7 +23,7 @@ const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
 ]);
@@ -672,6 +672,7 @@ const TOOL_CATALOG = [
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin (vue interne basique : rayon, référence, date, statut de réception).', params: {} },
   { name: 'getValidatedOrders', description: 'Commandes fournisseur VALIDÉES par ce magasin, avec le détail complet côté caisse (RPOS) : qui a validé, qui a créé, fournisseur, statut, date de commande, de livraison, de validation. Utiliser pour toute question sur une commande déjà validée/son détail complet, jamais getOrders qui n\'a pas ces champs.', params: { days: 'nombre de jours à couvrir, optionnel (défaut 30)' } },
+  { name: 'getPosOnlyValidatedOrders', description: 'Commandes fournisseur VALIDÉES directement sur le POS (caisse RPOS), SANS être passées par cette plateforme — utiliser spécifiquement pour une question du type "quelles commandes ont été validées sur le POS et pas sur la plateforme ?" ou "commandes validées aujourd\'hui en dehors de la plateforme", jamais pour une question générale sur les commandes validées (utiliser getValidatedOrders dans ce cas, qui couvre les commandes créées par la plateforme).', params: { days: 'nombre de jours à couvrir, optionnel (défaut 1 = aujourd\'hui)' } },
   { name: 'getOrderAnomalies', description: 'Anomalies détectées sur des commandes récentes (quantité validée nettement supérieure ou inférieure à l\'habitude du magasin) — jamais présentées comme des erreurs certaines, seulement des écarts à vérifier.', params: {} },
   { name: 'getStockoutRisksAllShops', description: 'Nombre d\'articles en risque de rupture, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quels magasins ont des ruptures ?", jamais pour une question sur un seul magasin précis.', params: {} },
   { name: 'getOverstockArticlesAllShops', description: 'Nombre d\'articles en surstock, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR).', params: {} },
@@ -1026,7 +1027,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // "le prix de vodka dans le mag 035" ignorait complètement le magasin ciblé, la recherche portait
   // toujours sur le magasin de la session en cours — même classe de bug déjà corrigée pour
   // getArticleStock le 29/09/2026, jamais étendue à la recherche par nom/EAN).
-  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
   let effectiveShopId = rposShopId;
   // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
   // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
@@ -1210,6 +1211,11 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30 });
         return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
+      }
+      case 'getPosOnlyValidatedOrders': {
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        const posOnlyResult = await tools.getPosOnlyValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 1 });
+        return { toolName, toolResult: targetShopLabel ? { ...posOnlyResult, targetShopLabel } : posOnlyResult };
       }
       case 'getOrderAnomalies':
         // getOrderAnomalies ne connaît pas de notion de période (statut PENDING/ACKNOWLEDGED/DISMISSED
@@ -1556,6 +1562,13 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const validatedOrdersNote = toolName === 'getValidatedOrders' && toolResult.found && toolResult.count > 0
       ? '\n\nQuand ta réponse énumère des commandes individuelles, présente-les en LISTE À PUCES Markdown (une puce par commande), avec pour chacune : rayon, référence RPOS, fournisseur, statut, date de commande, date de livraison, date de validation, créée par, validée par — en omettant simplement les champs null (commande sans détail RPOS retrouvé) sans dire que c\'est une limite générale de l\'outil.'
       : '';
+    // getPosOnlyValidatedOrders (ajouté le 14/10/2026, demande explicite : "les commandes qui ont
+    // été validées aujourd'hui sur le POS et pas sur la plateforme seulement") : préciser
+    // explicitement que ces commandes n'ont AUCUNE trace côté plateforme (pas de proposition, pas de
+    // rayon associé) — ne jamais laisser croire qu'il manque juste un champ, c'est structurel.
+    const posOnlyOrdersNote = toolName === 'getPosOnlyValidatedOrders' && toolResult.found && toolResult.count > 0
+      ? '\n\nCes commandes ont été créées ET validées directement sur le POS, jamais via cette plateforme — précise-le dans ta réponse. Présente-les en LISTE À PUCES Markdown (une puce par commande) avec : référence RPOS, fournisseur, date de commande, date de validation, créée par, validée par.'
+      : '';
     // searchArticlesByName (ajouté le 05/10/2026, demande explicite : une recherche par nom partiel
     // comme "codys" doit lister les variantes réelles plutôt que bloquer sur "précisez le code EAN")
     // : n'atteint jamais ce chemin avec un seul résultat (runSingleTool enchaîne alors directement
@@ -1571,7 +1584,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const negativeStockNote = hasNegativeStockField
       ? '\n\nIMPORTANT : un champ "stock" négatif est une vraie donnée valide, PAS une donnée manquante ni une erreur — ne dis JAMAIS que le stock "n\'est pas renseigné" ou "non disponible" dans ce cas. Un stock négatif signifie que l\'article est en rupture avec un écart réel (des ventes ont été enregistrées au-delà du stock théorique disponible) : annonce la valeur telle quelle (ex: "le stock est de -50, l\'article est en rupture avec un écart de 50 unités").'
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}${negativeStockNote}`;
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}${posOnlyOrdersNote}${negativeStockNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
