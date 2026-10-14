@@ -1193,18 +1193,122 @@ async function getPredictionAccuracy(rposShopId, { days = 90, dateRangeStart, da
 }
 
 /** getOrders() — commandes fournisseur créées récemment par cette plateforme pour ce magasin. */
-async function getOrders(rposShopId, { days = 14 } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const orders = await prisma.proposalOrder.findMany({
-    where: { proposal: { rposShopId }, createdAt: { gte: dateStart } },
+/** Borne de fin de journée (23:59:59.999) pour une date ISO "aaaa-mm-jj" — `new Date('aaaa-mm-jj')`
+ * seul donne MINUIT UTC, donc un filtre `<= dateEnd` exclut à tort toute commande créée après 00:00
+ * ce jour-là (bug trouvé en test réel le 14/10/2026 : "combien de commande on a fait aujourd'hui"
+ * renvoyait 0 alors que ~19 commandes existaient bien ce jour-là, toutes après minuit UTC). Utilisée
+ * par getOrders/getValidatedOrders/getPosOnlyValidatedOrders pour toute borne de fin issue d'une
+ * date calendaire simple (dateRangeEnd), jamais pour une vraie plage déjà précise à l'heure près. */
+function endOfDay(isoDate) {
+  const d = new Date(isoDate);
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
+}
+
+/**
+ * getOrders(rposShopId, {posId, days, dateRangeStart, dateRangeEnd, supplierQuery}) — TOUTES les
+ * commandes fournisseur créées sur la période, VALIDÉES ou pas encore, plateforme ET POS confondus
+ * (demande du 14/10/2026 : "combien de commande on a fait aujourd'hui" doit compter une commande
+ * encore "en préparation" aussi — distinct de getValidatedOrders qui ne liste QUE les commandes déjà
+ * validées). Même principe de fusion que getValidatedOrders (champ "source": 'platform' | 'pos' sur
+ * chaque commande), sans filtre de statut cette fois : aucune commande RPOS valide pour ce magasin
+ * n'est exclue. `posId` optionnel (absent = pas de serveur RPOS connu, repli sur la seule vue
+ * plateforme locale comme avant le 14/10/2026).
+ */
+async function getOrders(rposShopId, { posId, days = 14, dateRangeStart, dateRangeEnd, supplierQuery } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? endOfDay(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const platformOrders = await prisma.proposalOrder.findMany({
+    where: { proposal: { rposShopId }, createdAt: { gte: dateStart, lte: dateEnd } },
     orderBy: { createdAt: 'desc' },
     select: { id: true, department: true, rposOrderReference: true, createdAt: true, receptionStatus: true },
     take: 50,
   });
+
+  let rposResults = [];
+  let rposStatus = 'success';
+  let rposError = null;
+  if (posId) {
+    try {
+      ({ results: rposResults } = await rpos.getSupplierOrders(posId, { shopId: rposShopId, pageSize: 200, platformOnly: false }));
+    } catch (err) {
+      rposStatus = 'rpos_error';
+      rposError = err.message;
+    }
+  } else {
+    rposStatus = 'not_found';
+  }
+  const rposOrdersByRef = new Map();
+  for (const o of rposResults) {
+    if (o.reference) rposOrdersByRef.set(o.reference, o);
+  }
+
+  const platformOrdersFormatted = platformOrders.map((po) => {
+    const rposOrder = po.rposOrderReference ? rposOrdersByRef.get(po.rposOrderReference) : null;
+    return {
+      source: 'platform',
+      department: po.department,
+      createdAt: po.createdAt,
+      receptionStatus: po.receptionStatus,
+      rposOrderReference: po.rposOrderReference || null,
+      rposStatus: rposOrder?.status_display || null,
+      orderDate: rposOrder?.date || null,
+      deliveryDate: rposOrder?.delivery_date || null,
+      validationDate: rposOrder?.validation_date || null,
+      supplier: rposOrder?.supplier ? { name: rposOrder.supplier.name, code: rposOrder.supplier.code } : null,
+      createdBy: rposOrder?.created_by || null,
+      validatedBy: rposOrder?.validated_by || null,
+    };
+  });
+
+  // Commandes POS pures (jamais créées par cette plateforme) : TOUT statut (pas de filtre
+  // VALIDATED_STATUSES ici, contrairement à getValidatedOrders — une commande "en préparation"
+  // compte aussi dans "combien de commandes a-t-on fait").
+  const platformRefs = new Set(platformOrders.map((po) => po.rposOrderReference).filter(Boolean));
+  const posOrdersFormatted = rposStatus === 'success'
+    ? rposResults
+      .filter((o) => {
+        const isPlatformOrder = (o.external_reference || '').includes(rpos.PLATFORM_MARKER) || platformRefs.has(o.reference);
+        const orderDate = o.date ? new Date(o.date) : null;
+        return !isPlatformOrder && orderDate && orderDate >= dateStart && orderDate <= dateEnd;
+      })
+      .map((o) => ({
+        source: 'pos',
+        department: null,
+        createdAt: null,
+        receptionStatus: null,
+        rposOrderReference: o.reference || null,
+        rposStatus: o.status_display || null,
+        orderDate: o.date || null,
+        deliveryDate: o.delivery_date || null,
+        validationDate: o.validation_date || null,
+        supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+        createdBy: o.created_by || null,
+        validatedBy: o.validated_by || null,
+      }))
+    : [];
+
+  let orders = [...platformOrdersFormatted, ...posOrdersFormatted]
+    .sort((a, b) => new Date(b.orderDate || b.createdAt || 0) - new Date(a.orderDate || a.createdAt || 0));
+
+  let supplierFilterApplied = null;
+  if (supplierQuery) {
+    orders = orders.filter((o) => supplierMatchesQuery(o.supplier, supplierQuery));
+    supplierFilterApplied = supplierQuery;
+  }
+
   // isNormalNegative (même correctif que getPredictionAccuracy ci-dessus, bug constaté le
   // 05/10/2026) : "aucune commande récente" est une vraie réponse complète, pas une lacune —
   // l'ancien comportement disait "aucune commande" PUIS "en phase de développement", contradictoire.
-  return { found: orders.length > 0, days, count: orders.length, orders, isNormalNegative: orders.length === 0 ? true : undefined };
+  return {
+    found: true, days, dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
+    supplierFilterApplied, count: orders.length, orders,
+    isNormalNegative: orders.length === 0 ? true : undefined,
+    source: 'rpos_live', status: rposStatus, rposError: rposError || undefined,
+  };
 }
 
 /**
@@ -1241,7 +1345,7 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
  */
 async function getValidatedOrders(posId, shopId, { days = 30, dateRangeStart, dateRangeEnd, supplierQuery } = {}) {
   const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
-  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateEnd = hasExplicitRange ? endOfDay(dateRangeEnd) : new Date();
   const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
 
   const platformOrders = await prisma.proposalOrder.findMany({
@@ -1460,7 +1564,7 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
   if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
 
   const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
-  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateEnd = hasExplicitRange ? endOfDay(dateRangeEnd) : new Date();
   const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
   let results;
   try {

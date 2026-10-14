@@ -1008,7 +1008,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // getPredictionAccuracy/getTopGisements ajoutés le 12/10/2026 (chantier identifié en passation,
   // même extension que getSalesHistory ci-dessus — aucun bug réel signalé dessus pour l'instant,
   // mais le même piège se serait reproduit sur toute question avec une plage explicite).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements', 'getValidatedOrders', 'getPosOnlyValidatedOrders']);
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1080,7 +1080,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // "le prix de vodka dans le mag 035" ignorait complètement le magasin ciblé, la recherche portait
   // toujours sur le magasin de la session en cours — même classe de bug déjà corrigée pour
   // getArticleStock le 29/09/2026, jamais étendue à la recherche par nom/EAN).
-  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
   let effectiveShopId = rposShopId;
   // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
   // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
@@ -1105,7 +1105,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // réellement (getValidatedOrders/getPosOnlyValidatedOrders), jamais calculé pour les autres
   // questions : extractSupplierName appelle getShopSuppliers (un appel RPOS) à chaque fois, inutile
   // de le payer sur une question sans rapport avec les commandes.
-  const SUPPLIER_FILTERABLE_TOOLS = new Set(['getValidatedOrders', 'getPosOnlyValidatedOrders']);
+  const SUPPLIER_FILTERABLE_TOOLS = new Set(['getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders']);
   const supplierQuery = SUPPLIER_FILTERABLE_TOOLS.has(toolName)
     ? await extractSupplierName(question, effectivePosId, effectiveShopId)
     : null;
@@ -1268,11 +1268,8 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
           }),
         };
       case 'getOrders':
-        // Idem : "mes commandes du mois dernier" ignorait daysQuery et retombait sur le défaut (14j).
-        return { toolName, toolResult: await tools.getOrders(rposShopId, { days: daysQuery || 14 }) };
       case 'getValidatedOrders':
       case 'getPosOnlyValidatedOrders': {
-        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         // dateRangeStart/dateRangeEnd ajoutés le 14/10/2026 (demande explicite : "hier, avant hier,
         // la semaine, la semaine encour, le mois, ou meme l'intervalle") — même pattern que
         // getPredictionAccuracy, priment sur daysQuery quand effectiveDateRange est résolu. `date`
@@ -1288,6 +1285,15 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
           dateRangeEnd: resolvedRange?.end || null,
           supplierQuery,
         };
+        if (toolName === 'getOrders') {
+          // getOrders (étendu le 14/10/2026, demande explicite : "combien de commande on a fait
+          // aujourd'hui" doit compter TOUTES les commandes, validées ou pas encore — posId transmis
+          // pour fusionner avec les commandes POS pures, comme getValidatedOrders). "mes commandes du
+          // mois dernier" ignorait auparavant daysQuery et retombait sur le défaut (14j).
+          const ordersResult = await tools.getOrders(effectiveShopId, { posId: effectivePosId, days: daysQuery || 14, ...sharedParams });
+          return { toolName, toolResult: targetShopLabel ? { ...ordersResult, targetShopLabel } : ordersResult };
+        }
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         if (toolName === 'getValidatedOrders') {
           const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30, ...sharedParams });
           return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
@@ -1632,20 +1638,33 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const proposalBreakdownNote = toolName === 'getCurrentProposal' && toolResult.departmentBreakdown
       ? `\n\nIMPORTANT pour cette réponse : si la question porte sur le volume global de la proposition (combien d'articles au total, répartition par rayon...) plutôt que sur un article précis, utilise le champ "departmentBreakdown" (déjà trié par nombre d'articles décroissant) comme structure principale de ta réponse — un rayon par ligne avec son nombre d'articles (ex: "LIQUIDES : 38 articles"), jamais la liste "lines" brute dans ce cas. "totalArticleCount" (${toolResult.totalArticleCount}) est le total réel de la proposition, toujours la somme de "departmentBreakdown" — ne le confonds jamais avec "articleCount" qui ne compte que les lignes d'un rayon filtré si la question en ciblait un précis.`
       : '';
+    // getOrders (étendu le 14/10/2026, demande explicite : "combien de commande on a fait
+    // aujourd'hui", "quelle commande fait par le magasin aujourd'hui") : couvre maintenant TOUTES les
+    // commandes (validées ou pas), plateforme + POS confondus, même fusion/distinction "source" que
+    // getValidatedOrders — ne jamais prétendre qu'une commande "en préparation" (rposStatus) n'existe
+    // pas ou n'a pas été "faite", elle compte bien dans le total.
+    const ordersNote = toolName === 'getOrders' && toolResult.found && toolResult.count > 0
+      ? '\n\nCe résultat regroupe TOUTES les commandes (validées ou encore "en préparation"), DEUX origines distinctes (champ "source") : "platform" = créée via cette plateforme, "pos" = créée directement sur le POS/caisse. Présente le résultat en TABLEAU Markdown (une ligne par commande), avec EXACTEMENT ces colonnes dans cet ordre : Origine | Rayon | Référence RPOS | Fournisseur | Statut | Date commande | Date livraison | Date validation | Créée par | Validée par. "Rayon" reste vide ("—") pour une commande "pos". Remplace un champ null/absent par "—". Si la question porte sur un COMPTE ("combien de commandes"), annonce d\'abord le total en une phrase avant le tableau.'
+      : '';
     // getValidatedOrders (ajouté le 06/10/2026, demande explicite) : certains champs RPOS peuvent
     // être null (commande sans correspondance RPOS retrouvée, champ absent côté RPOS comme
     // "observation" qui n'existe simplement pas dans cette API) — ne JAMAIS les présenter comme
     // "non disponible pour l'instant"/"en développement", juste omettre le champ ou dire qu'il n'est
     // pas renseigné pour CETTE commande précise, les autres champs présents restant fiables.
+    // Format TABLEAU Markdown imposé le 14/10/2026 (demande explicite : "il ne donne pas a un format
+    // bien defini... comme dans un tableau") — remplace l'ancien format "liste à puces" pour ces deux
+    // outils, colonnes FIXES toujours dans le même ordre (demande explicite : colonnes standard,
+    // jamais adaptées question par question) pour que la réponse reste lisible et comparable d'une
+    // conversation à l'autre.
     const validatedOrdersNote = toolName === 'getValidatedOrders' && toolResult.found && toolResult.count > 0
-      ? '\n\nCe résultat regroupe DEUX origines distinctes (champ "source" sur chaque commande) : "platform" = commande créée ET validée via cette plateforme (Réassort Auto), "pos" = commande créée ET validée directement sur le POS/caisse (RPOS), sans jamais passer par cette plateforme. Ne les confonds jamais : précise toujours l\'origine de chaque commande dans ta réponse (ex: "via la plateforme" ou "directement sur le POS"). Quand ta réponse énumère des commandes individuelles, présente-les en LISTE À PUCES Markdown (une puce par commande), avec pour chacune : origine, rayon (uniquement si "platform", toujours null pour "pos"), référence RPOS, fournisseur, statut, date de commande, date de livraison, date de validation, créée par, validée par — en omettant simplement les champs null (commande sans détail RPOS retrouvé, ou rayon non applicable pour une commande POS) sans dire que c\'est une limite générale de l\'outil.'
+      ? '\n\nCe résultat regroupe DEUX origines distinctes (champ "source" sur chaque commande) : "platform" = commande créée ET validée via cette plateforme (Réassort Auto), "pos" = commande créée ET validée directement sur le POS/caisse (RPOS), sans jamais passer par cette plateforme. Ne les confonds jamais : précise toujours l\'origine de chaque commande. Présente le résultat en TABLEAU Markdown (une ligne par commande), avec EXACTEMENT ces colonnes dans cet ordre : Origine | Rayon | Référence RPOS | Fournisseur | Statut | Date commande | Date livraison | Date validation | Créée par | Validée par. "Rayon" reste vide ("—") pour une commande "pos" (non applicable). Remplace un champ null/absent par "—", jamais par une phrase explicative dans la cellule ni une excuse — les cellules vides sont normales (commande sans détail RPOS retrouvé), jamais présentées comme une limite de l\'outil. Ajoute une phrase de résumé avant le tableau (nombre total, répartition platform/pos) si utile, jamais après.'
       : '';
     // getPosOnlyValidatedOrders (ajouté le 14/10/2026, demande explicite : "les commandes qui ont
     // été validées aujourd'hui sur le POS et pas sur la plateforme seulement") : préciser
     // explicitement que ces commandes n'ont AUCUNE trace côté plateforme (pas de proposition, pas de
     // rayon associé) — ne jamais laisser croire qu'il manque juste un champ, c'est structurel.
     const posOnlyOrdersNote = toolName === 'getPosOnlyValidatedOrders' && toolResult.found && toolResult.count > 0
-      ? `\n\nCes commandes ont été créées ET validées directement sur le POS, jamais via cette plateforme — précise-le dans ta réponse. Présente-les en LISTE À PUCES Markdown (une puce par commande) avec : référence RPOS, fournisseur, date de commande, date de validation, créée par, validée par. Si le champ "articles" est présent sur une commande (détail des lignes), liste aussi chaque article en sous-puces avec EAN, libellé, quantité commandée et quantité livrée (la différence entre les deux indique une réception partielle) — si "articlesError" est présent à la place, dis simplement que le détail des articles n'a pas pu être récupéré pour cette commande précise, jamais une limite générale de l'outil. Si "articlesDetailOmitted" est présent au niveau racine, informe l'utilisateur que le détail des articles n'a pas été calculé (trop de commandes sur la période) et suggère de réduire la période.`
+      ? `\n\nCes commandes ont été créées ET validées directement sur le POS, jamais via cette plateforme — précise-le dans ta réponse. Présente le résultat en TABLEAU Markdown (une ligne par commande), avec EXACTEMENT ces colonnes dans cet ordre : Référence RPOS | Fournisseur | Statut | Date commande | Date livraison | Date validation | Créée par | Validée par. Remplace un champ null/absent par "—". Si le champ "articles" est présent sur une commande (détail des lignes), ajoute un second tableau SOUS la ligne de cette commande (ou juste après le tableau principal, en le nommant clairement "Articles de la commande <référence>") avec les colonnes EAN | Libellé | Qté commandée | Qté livrée — si "articlesError" est présent à la place, dis simplement que le détail des articles n'a pas pu être récupéré pour cette commande précise, jamais une limite générale de l'outil. Si "articlesDetailOmitted" est présent au niveau racine, informe l'utilisateur que le détail des articles n'a pas été calculé (trop de commandes sur la période) et suggère de réduire la période.`
       : '';
     // searchArticlesByName (ajouté le 05/10/2026, demande explicite : une recherche par nom partiel
     // comme "codys" doit lister les variantes réelles plutôt que bloquer sur "précisez le code EAN")
@@ -1662,7 +1681,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const negativeStockNote = hasNegativeStockField
       ? '\n\nIMPORTANT : un champ "stock" négatif est une vraie donnée valide, PAS une donnée manquante ni une erreur — ne dis JAMAIS que le stock "n\'est pas renseigné" ou "non disponible" dans ce cas. Un stock négatif signifie que l\'article est en rupture avec un écart réel (des ventes ont été enregistrées au-delà du stock théorique disponible) : annonce la valeur telle quelle (ex: "le stock est de -50, l\'article est en rupture avec un écart de 50 unités").'
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${validatedOrdersNote}${posOnlyOrdersNote}${negativeStockNote}`;
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${ordersNote}${validatedOrdersNote}${posOnlyOrdersNote}${negativeStockNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article

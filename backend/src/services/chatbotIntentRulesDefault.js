@@ -91,6 +91,12 @@ const FALLBACK_INTENT_RULES = [
   // accord manquant) ne matchait aucune des variantes déjà listées (toutes avec le "e" final de
   // l'accord) et tombait sur null — aucun outil déclenché du tout.
   { keywords: ['commande validée', 'commandes validées', 'commande validee', 'commandes validees', 'commande validé', 'commandes validé', 'commande valide', 'commandes valide', 'qui a validé', 'qui a valide', 'commande a été validée', 'commande a ete validee'], tool: 'getValidatedOrders' },
+  // 'commande(s) créée(s)'/'commande(s) fait(e/s) par le magasin'/'combien de commande(s)' ajoutés
+  // le 14/10/2026 (demande explicite : "quelle commande fait par le magasin aujourdhui", "combien
+  // de commande on a fait aujourd'hui") — bug trouvé en test réel, ces formulations ne matchaient
+  // RIEN (detectIntent renvoyait null) malgré 'mes commandes'/'commandes récentes' déjà présents
+  // juste en dessous, car elles ne contiennent aucun de ces deux mots exacts.
+  { keywords: ['commande créée', 'commandes créées', 'commande creee', 'commandes creees', 'commande fait', 'commandes fait', 'combien de commande', 'commande passée', 'commandes passées', 'commande passee', 'commandes passees'], tool: 'getOrders' },
   { keywords: ['mes commandes', 'commandes en cours', 'commandes récentes', 'liste des commandes', 'qu\'est-ce qui a été commandé', 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
   // "aujourd'hui" retiré (bug trouvé le 21/09/2026, campagne de fuzzing large) : trop générique,
   // matchait à tort N'IMPORTE QUELLE question du jour (ex: "chiffre d'affaire aujourd'hui" tombait
