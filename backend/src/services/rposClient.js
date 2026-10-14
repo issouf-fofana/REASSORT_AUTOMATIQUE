@@ -72,7 +72,16 @@ function sleep(ms) {
 // d'un article, qui dépend d'un appel RPOS (profil d'activité du magasin) avant même d'atteindre le
 // LLM. 15s laisse largement le temps à RPOS de répondre en usage normal (quelques centaines de ms à
 // quelques secondes) tout en donnant un échec rapide et clair en cas de réseau réellement coupé.
-const RPOS_REQUEST_TIMEOUT_MS = 15000;
+//
+// Réduit à 6s le 14/10/2026 (demande explicite : "je suis plus dans le reseau donc api ne va pas
+// fonctionné comment tu peux optimisé pour que les reponse soit rapide") : en usage normal RPOS
+// répond en quelques centaines de ms, 15s n'apportait donc aucune marge utile — seulement un coût
+// en cas de coupure réseau, aggravé sur les outils qui enchaînent PLUSIEURS appels RPOS séquentiels
+// pour une seule question (ex: getPosOnlyValidatedOrders, un appel par commande pour le détail
+// articles) : 15s × 2 tentatives (cf. retry réseau ci-dessous) × N commandes pouvait dépasser la
+// minute avant le premier message d'erreur. 6s reste largement suffisant pour un réseau RPOS normal
+// tout en divisant par ~2.5 le pire cas hors-réseau.
+const RPOS_REQUEST_TIMEOUT_MS = 6000;
 
 /**
  * RPOS retourne parfois des 502/503 transitoires sous charge, sans lien avec la validité de la
