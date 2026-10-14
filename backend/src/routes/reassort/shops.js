@@ -440,5 +440,56 @@ router.post('/orders/:rposOrderId/cancel', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/orders/:rposOrderId/validate - valide sur RPOS une commande fournisseur déjà
+// créée et restée "en préparation" (statut 1 → 2 "en attente de livraison"), sans repasser par le
+// POS (demande du 14/10/2026, point 4 : "ajouter la possibilité de valider les commandes depuis la
+// plateforme"). Réservé ADMIN, même niveau de risque que l'annulation ci-dessus : action
+// irréversible transmise à l'entrepôt, jamais déclenchée sans confirmation explicite côté UI.
+router.post('/orders/:rposOrderId/validate', requireAdmin, async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+
+    // Vérifie que cette commande appartient bien au magasin ciblé, avant d'agir sur RPOS (même
+    // garde que /cancel ci-dessus).
+    const proposalOrder = await prisma.proposalOrder.findFirst({
+      where: { rposOrderId: req.params.rposOrderId, proposal: { rposShopId: shopId } },
+    });
+    const legacyProposal = proposalOrder ? null : await prisma.proposal.findFirst({
+      where: { rposShopId: shopId, rposOrderId: req.params.rposOrderId },
+    });
+    if (!proposalOrder && !legacyProposal) {
+      return res.status(404).json({ success: false, message: 'Commande introuvable pour ce magasin' });
+    }
+
+    // Contrôle du statut RPOS réel juste avant d'agir (jamais une simple relecture de la base, qui
+    // peut être périmée) : évite un appel RPOS inutile sur une commande déjà validée ou annulée, et
+    // renvoie un message explicite plutôt que de laisser RPOS répondre une erreur opaque.
+    // getSupplierOrderStatus renvoie directement le statut numérique RPOS (1-6), ou null si la
+    // commande est introuvable côté RPOS (cf. sa définition).
+    const currentStatus = await rpos.getSupplierOrderStatus(posId, req.params.rposOrderId);
+    if (currentStatus !== 1) {
+      return res.status(409).json({
+        success: false,
+        message: `Cette commande n'est plus "en préparation" sur RPOS (statut actuel : ${currentStatus ?? 'introuvable'}) — impossible de la valider depuis ici.`,
+      });
+    }
+
+    await rpos.validateSupplierOrder(posId, { orderId: req.params.rposOrderId });
+
+    if (proposalOrder) {
+      await prisma.proposalOrder.update({ where: { id: proposalOrder.id }, data: { rposOrderValidated: true, lastRposStatus: 2 } });
+    }
+
+    res.json({ success: true, message: 'Commande validée sur RPOS — elle sera prise en compte par l\'entrepôt.' });
+  } catch (error) {
+    console.error('Validate order error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET /api/reassort/proposal?limit=<n> - proposition de commande du magasin de l'utilisateur
 module.exports = router;

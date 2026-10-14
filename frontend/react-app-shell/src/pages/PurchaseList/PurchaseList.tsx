@@ -100,6 +100,9 @@ export function PurchaseList() {
   const [canCancel, setCanCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [canValidate, setCanValidate] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validateError, setValidateError] = useState<string | null>(null);
   const currentOrderRef = useRef<{ id: string; reference: string; statusDisplay: string } | null>(null);
   const detailGridDivRef = useRef<HTMLDivElement>(null);
   const detailGridApiRef = useRef<any>(null);
@@ -362,12 +365,42 @@ export function PurchaseList() {
     }
   }
 
+  // Validation a posteriori d'une commande restée "en préparation" sur RPOS (demande du
+  // 14/10/2026, point 4 : "ajouter la possibilité de valider les commandes depuis la plateforme"
+  // — sans obliger l'utilisateur à se reconnecter au POS). Réservée ADMIN, même niveau de risque
+  // que l'annulation ci-dessus : action irréversible transmise à l'entrepôt.
+  async function handleValidateOrder() {
+    const target = currentOrderRef.current;
+    if (!target || !user) return;
+    const confirmed = window.reassortConfirm
+      ? await window.reassortConfirm(`Valider la commande ${target.reference} sur RPOS ? Elle sera transmise à l'entrepôt et ne pourra plus être modifiée depuis ici.`, { danger: true })
+      : confirm(`Valider la commande ${target.reference} sur RPOS ? Elle sera transmise à l'entrepôt et ne pourra plus être modifiée depuis ici.`);
+    if (!confirmed) return;
+    setValidating(true);
+    setValidateError(null);
+    try {
+      const shopId = selectedShopId();
+      const posId = selectedPosId();
+      await apiFetch(`/reassort/orders/${encodeURIComponent(target.id)}/validate?shop=${encodeURIComponent(shopId)}&pos=${encodeURIComponent(posId)}`, {
+        method: 'POST',
+      });
+      setDetailOpen(false);
+      loadOrders();
+    } catch (err) {
+      setValidateError('Erreur: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setValidating(false);
+    }
+  }
+
   async function showOrderDetail(orderId: string, reference: string, statusDisplay: string) {
     currentOrderRef.current = { id: orderId, reference, statusDisplay };
     setDetailTitle(`Détail de la commande ${reference}`);
     setDetailBody('Chargement...');
     setCancelError(null);
+    setValidateError(null);
     setCanCancel(!!user && user.role === 'ADMIN' && statusDisplay !== 'annulée' && statusDisplay !== 'supprimée');
+    setCanValidate(!!user && user.role === 'ADMIN' && statusDisplay === 'en préparation');
     setDetailOpen(true);
 
     try {
@@ -577,6 +610,7 @@ export function PurchaseList() {
                       <div className="modal-body">{detailBody}</div>
                       <div className="modal-footer">
                         {cancelError && <div className="alert alert-danger py-2 px-3 mb-0 me-auto small">{cancelError}</div>}
+                        {validateError && <div className="alert alert-danger py-2 px-3 mb-0 me-auto small">{validateError}</div>}
                         {currentOrderRef.current && (
                           <button
                             type="button"
@@ -584,6 +618,11 @@ export function PurchaseList() {
                             onClick={() => currentOrderRef.current && handleDownloadPdf(currentOrderRef.current.id)}
                           >
                             <iconify-icon icon="solar:file-pdf-bold-duotone" className="align-middle"></iconify-icon> Télécharger le PDF
+                          </button>
+                        )}
+                        {canValidate && (
+                          <button type="button" className="btn btn-success btn-sm" disabled={validating} onClick={handleValidateOrder}>
+                            {validating ? 'Validation en cours...' : 'Valider cette commande sur RPOS'}
                           </button>
                         )}
                         {canCancel && (
