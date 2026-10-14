@@ -540,6 +540,11 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       conversationHistory,
       question,
       onTextChunk: (text) => send('chunk', { text }),
+      // onStatus (ajouté le 14/10/2026, demande explicite : "a achaque etape de generation il dois
+      // dire ou il est... pour ne pas attendre sans rien voir") — nouvel événement SSE "status",
+      // consommé par le frontend pour afficher l'étape en cours à la place du texte générique
+      // "L'assistant réfléchit...".
+      onStatus: (label) => send('status', { label }),
       user: currentUser,
       pendingFeatureRequest,
     });

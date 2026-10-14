@@ -24,6 +24,10 @@ interface ChatTurn {
   question: string;
   answerHtml: string | null;
   error: string | null;
+  // Étape en cours avant que le texte ne commence à arriver (demande du 14/10/2026, même correctif
+  // que AiAssistant.tsx) — affichée à la place de "Réflexion en cours..." dès qu'un événement SSE
+  // "status" est reçu, jusqu'au premier "chunk" de texte réel.
+  statusLabel?: string;
 }
 
 export function FloatingAiWidget() {
@@ -79,7 +83,11 @@ export function FloatingAiWidget() {
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  async function attemptQuestion(question: string, onChunk: (partial: string) => void): Promise<{ answer: string; conversationId: string }> {
+  async function attemptQuestion(
+    question: string,
+    onChunk: (partial: string) => void,
+    onStatus: (label: string) => void,
+  ): Promise<{ answer: string; conversationId: string }> {
     let streamedAnswer = '';
     const res = await window.reassortFetch(`/reassort/chatbot/ask-stream?shop=${encodeURIComponent(currentShopId() || '')}`, {
       method: 'POST',
@@ -93,6 +101,8 @@ export function FloatingAiWidget() {
       if (eventName === 'chunk') {
         streamedAnswer += data.text;
         onChunk(streamedAnswer);
+      } else if (eventName === 'status') {
+        onStatus(data.label);
       } else if (eventName === 'error') {
         throw new Error(data.message);
       } else if (eventName === 'done') {
@@ -118,13 +128,23 @@ export function FloatingAiWidget() {
     let lastErr: Error | null = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const result = await attemptQuestion(question, (partial) => {
-          setTurns((prev) => {
-            const next = [...prev];
-            next[turnIndex] = { ...next[turnIndex], answerHtml: renderAiMarkdown(partial) };
-            return next;
-          });
-        });
+        const result = await attemptQuestion(
+          question,
+          (partial) => {
+            setTurns((prev) => {
+              const next = [...prev];
+              next[turnIndex] = { ...next[turnIndex], answerHtml: renderAiMarkdown(partial) };
+              return next;
+            });
+          },
+          (label) => {
+            setTurns((prev) => {
+              const next = [...prev];
+              next[turnIndex] = { ...next[turnIndex], statusLabel: label };
+              return next;
+            });
+          },
+        );
         setTurns((prev) => {
           const next = [...prev];
           next[turnIndex] = { question, answerHtml: renderAiMarkdown(result.answer), error: null };
@@ -236,7 +256,7 @@ export function FloatingAiWidget() {
                         >
                           <img src="/assets/images/logo-reassort.png" alt="" className="aiw-thinking-logo" style={{ width: 15, height: 15 }} />
                         </span>
-                        Réflexion en cours...
+                        {turn.statusLabel || 'Réflexion en cours...'}
                       </span>
                     ) : (
                       <span dangerouslySetInnerHTML={{ __html: turn.answerHtml }} />

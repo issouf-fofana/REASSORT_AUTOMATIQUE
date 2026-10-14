@@ -1873,8 +1873,17 @@ async function recordFeatureRequest(decision, { user }) {
  * en réponse à une clarification faisait basculer sur getRevenue/getStockoutRisks, la demande
  * d'origine — un résumé quotidien WhatsApp — n'étant alors jamais complétée ni enregistrée).
  */
-async function askAssistant({ rposShopId, posId, shopReference, shopName, department, subDepartment, conversationHistory, question, onTextChunk, user, pendingFeatureRequest }) {
+async function askAssistant({ rposShopId, posId, shopReference, shopName, department, subDepartment, conversationHistory, question, onTextChunk, onStatus, user, pendingFeatureRequest }) {
+  // onStatus (ajouté le 14/10/2026, demande explicite : "a achaque etape de generation il dois dire
+  // ou il est... pour ne pas attendre sans rien voir") — 3 étapes génériques fixes, jamais une par
+  // outil (trop de call sites à instrumenter pour un gain marginal, et fragile à maintenir à chaque
+  // nouvel outil). L'étape "Récupération des données..." peut durer plusieurs secondes sur les
+  // outils qui appellent RPOS (mesuré jusqu'à 7-8s sur certaines questions de commandes) — jusqu'ici
+  // totalement silencieuse côté utilisateur, d'où ce correctif.
+  const emitStatus = (label) => { if (onStatus) onStatus(label); };
+  emitStatus('Analyse de la question...');
   const { toolName, toolResult, reusedFromHistory, secondaryToolName, secondaryToolResult } = await runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user });
+  if (toolName && !reusedFromHistory) emitStatus('Récupération des données...');
   // En clarification active, le suivi de demande doit passer AVANT tout affichage de données : la
   // réponse de l'utilisateur à "quelles infos voulez-vous dans ce résumé ?" ne doit jamais être
   // interprétée comme une nouvelle question de données, même si elle mentionne "CA"/"rupture".
@@ -1893,6 +1902,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
     ? buildSmallTalkPrompt({ userFirstName: (user?.name || '').split(' ')[0] || null, conversationHistory, question })
     : await buildChatbotPrompt({ shopReference, shopName, department, subDepartment, conversationHistory, question, toolName, toolResult: effectiveToolResult, reusedFromHistory, suggestedQuestions, secondaryToolName, secondaryToolResult: skipToolForPendingClarification ? null : secondaryToolResult });
 
+  emitStatus('Rédaction de la réponse...');
   const { fullText, providerUsed } = await streamWithFallback(prompt, (chunk) => {
     if (onTextChunk) onTextChunk(chunk);
   }, 'chatbot-answer');

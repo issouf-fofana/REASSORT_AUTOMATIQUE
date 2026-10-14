@@ -62,6 +62,10 @@ interface Turn {
   answerText?: string;
   streaming?: boolean;
   streamText?: string;
+  // Étape en cours avant que le texte ne commence à arriver (demande du 14/10/2026 : "a achaque
+  // etape de generation il dois dire ou il est") — affichée à la place de "L'assistant réfléchit..."
+  // dès qu'un événement SSE "status" est reçu, jusqu'au premier "chunk" de texte réel.
+  statusLabel?: string;
   error?: string;
   interrupted?: boolean;
   // Purement visuel pour l'instant (30/09/2026) : aucune persistance backend, juste l'état du
@@ -382,6 +386,7 @@ export function AiAssistant() {
     question: string,
     signal: AbortSignal,
     onChunk: (partial: string) => void,
+    onStatus: (label: string) => void,
   ): Promise<{ finalResult: any; streamedAnswer: string }> {
     let streamedAnswer = '';
     const res = await window.reassortFetch(`/reassort/chatbot/ask-stream?shop=${encodeURIComponent(currentShopId() || '')}`, {
@@ -402,6 +407,8 @@ export function AiAssistant() {
       if (eventName === 'chunk') {
         streamedAnswer += data.text;
         onChunk(streamedAnswer);
+      } else if (eventName === 'status') {
+        onStatus(data.label);
       } else if (eventName === 'error') {
         throw new Error(data.message);
       } else if (eventName === 'done') {
@@ -428,14 +435,25 @@ export function AiAssistant() {
     for (let attempt = 1; attempt <= 2; attempt++) {
       abortControllerRef.current = new AbortController();
       try {
-        const result = await attemptQuestion(q, abortControllerRef.current.signal, (partial) => {
-          setTurns((prev) => {
-            const next = [...prev];
-            next[turnIndex] = { ...next[turnIndex], streamText: partial };
-            return next;
-          });
-          scrollToBottom();
-        });
+        const result = await attemptQuestion(
+          q,
+          abortControllerRef.current.signal,
+          (partial) => {
+            setTurns((prev) => {
+              const next = [...prev];
+              next[turnIndex] = { ...next[turnIndex], streamText: partial };
+              return next;
+            });
+            scrollToBottom();
+          },
+          (label) => {
+            setTurns((prev) => {
+              const next = [...prev];
+              next[turnIndex] = { ...next[turnIndex], statusLabel: label };
+              return next;
+            });
+          },
+        );
         finalResult = result.finalResult;
         streamedAnswer = result.streamedAnswer;
         lastErr = null;
@@ -1022,7 +1040,7 @@ export function AiAssistant() {
                           <span className="aia-thinking-orb-ring"></span>
                           <ThinkingOrb size={34} />
                         </span>
-                        L'assistant réfléchit...
+                        {turn.statusLabel || "L'assistant réfléchit..."}
                       </span>
                     )
                   ) : turn.error ? (
