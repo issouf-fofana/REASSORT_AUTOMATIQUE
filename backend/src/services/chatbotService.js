@@ -1285,14 +1285,24 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
           dateRangeEnd: resolvedRange?.end || null,
           supplierQuery,
         };
-        // includeArticleDetail (ajouté le 14/10/2026, demande explicite : "il ne doit pas me donner
-        // les article a meme temps... si je demande les detail") : le détail complet des articles
-        // (EAN/libellé/quantités, coûteux en appels RPOS) n'est calculé QUE si la question le demande
-        // explicitement — sinon getPosOnlyValidatedOrders ne renvoie qu'un compte d'articles par
-        // commande (articleCount). N'a d'effet que sur getPosOnlyValidatedOrders pour l'instant
-        // (seul outil à exposer ce niveau de détail).
-        const ARTICLE_DETAIL_REGEX = /\b(détails?|detail|articles?)\b.*\b(commande|chaque|chacune)\b|\b(commande|chaque|chacune)\b.*\b(détails?|detail|articles?)\b|quels?\s+articles?|liste\s+des\s+articles/i;
+        // includeArticleDetail/includeArticleCount (ajoutés le 14/10/2026, demande explicite : "il ne
+        // doit pas me donner les article a meme temps il peux donner le nombre d'article... si je
+        // demande les detail") : AUCUN des deux n'est calculé par défaut — chacun coûte un appel RPOS
+        // PAR commande (compte seul : un appel ; détail complet : un appel + un appel par EAN pour le
+        // libellé). Bug de latence trouvé en test réel le 14/10/2026 ("la reponse quil donne est
+        // lent") : même le simple compte, calculé systématiquement avant cette correction, faisait
+        // monter une réponse de ~1.7s à ~7s sur 19 commandes — désormais seulement si la question le
+        // demande. "combien d'articles"/"nombre d'articles" déclenche le compte seul ; "détail"/
+        // "quels articles"/"liste des articles" déclenche le détail complet (et implique le compte).
+        // N'a d'effet que sur getPosOnlyValidatedOrders pour l'instant (seul outil à exposer ce
+        // niveau de détail).
+        // "quels?\s+(?:sont\s+)?(?:les\s+)?articles?" (élargi le 14/10/2026, bug trouvé en test
+        // réel : "quels SONT LES articles de chaque commande" ne matchait pas l'ancien pattern
+        // "quels?\s+articles?", qui exigeait "quels articles" collés sans rien entre les deux).
+        const ARTICLE_DETAIL_REGEX = /\b(détails?|detail)\b.*\b(commande|chaque|chacune|article)\b|\b(commande|chaque|chacune)\b.*\bdétails?\b|quels?\s+(?:sont\s+)?(?:les\s+)?articles?|liste\s+des\s+articles/i;
+        const ARTICLE_COUNT_REGEX = /combien\s+d['e]\s*articles?|nombre\s+d['e]\s*articles?/i;
         const includeArticleDetail = ARTICLE_DETAIL_REGEX.test(question);
+        const includeArticleCount = includeArticleDetail || ARTICLE_COUNT_REGEX.test(question);
         if (toolName === 'getOrders') {
           // getOrders (étendu le 14/10/2026, demande explicite : "combien de commande on a fait
           // aujourd'hui" doit compter TOUTES les commandes, validées ou pas encore — posId transmis
@@ -1306,7 +1316,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
           const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30, ...sharedParams });
           return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
         }
-        const posOnlyResult = await tools.getPosOnlyValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 1, ...sharedParams, includeArticleDetail });
+        const posOnlyResult = await tools.getPosOnlyValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 1, ...sharedParams, includeArticleDetail, includeArticleCount });
         return { toolName, toolResult: targetShopLabel ? { ...posOnlyResult, targetShopLabel } : posOnlyResult };
       }
       case 'getOrderAnomalies':
@@ -1672,7 +1682,7 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     // explicitement que ces commandes n'ont AUCUNE trace côté plateforme (pas de proposition, pas de
     // rayon associé) — ne jamais laisser croire qu'il manque juste un champ, c'est structurel.
     const posOnlyOrdersNote = toolName === 'getPosOnlyValidatedOrders' && toolResult.found && toolResult.count > 0
-      ? `\n\nCes commandes ont été créées ET validées directement sur le POS, jamais via cette plateforme — précise-le dans ta réponse. Chaque commande porte aussi "deliveryType" ("LC" = Livraison Centrale, fournisseur central ; "LD" = Livraison Directe, tout autre fournisseur) — précise-le toujours. Présente le résultat en TABLEAU Markdown (une ligne par commande), avec EXACTEMENT ces colonnes dans cet ordre : Référence RPOS | Type (LC/LD) | Fournisseur | Statut | Date commande | Date livraison | Date validation | Créée par | Validée par | Nb articles. "Nb articles" vient du champ "articleCount" (nombre d'articles de la commande, sans leur détail) — c'est la valeur à afficher par défaut, JAMAIS la liste complète des articles sauf si la question le demande explicitement (ex: "le détail", "quels articles", "la liste des articles"). Dans ce cas précis, le champ "articles" (détail complet EAN/libellé/quantités) est présent sur chaque commande : ajoute alors un second tableau SOUS la ligne de cette commande (ou juste après le tableau principal, en le nommant clairement "Articles de la commande <référence>") avec les colonnes EAN | Libellé | Qté commandée | Qté livrée — si "articlesError" est présent à la place, dis simplement que le détail des articles n'a pas pu être récupéré pour cette commande précise, jamais une limite générale de l'outil. Si "articlesDetailOmitted" est présent au niveau racine, informe l'utilisateur que le détail des articles n'a pas été calculé (trop de commandes sur la période) et suggère de réduire la période. Remplace un champ null/absent par "—".`
+      ? `\n\nCes commandes ont été créées ET validées directement sur le POS, jamais via cette plateforme — précise-le dans ta réponse. Chaque commande porte aussi "deliveryType" ("LC" = Livraison Centrale, fournisseur central ; "LD" = Livraison Directe, tout autre fournisseur) — précise-le toujours. Présente le résultat en TABLEAU Markdown (une ligne par commande), avec ces colonnes : Référence RPOS | Type (LC/LD) | Fournisseur | Statut | Date commande | Date livraison | Date validation | Créée par | Validée par — ajoute une colonne "Nb articles" UNIQUEMENT si le champ "articleCount" est présent sur les commandes (calculé seulement quand la question le demande, ex: "combien d'articles"), sinon omets complètement cette colonne, ne l'affiche jamais comme "—" ou "non disponible". Le détail complet des articles (champ "articles" : EAN/libellé/quantités) n'est présent QUE si explicitement demandé par la question (ex: "le détail", "quels articles", "la liste des articles") : ajoute alors un second tableau SOUS la ligne de cette commande (ou juste après le tableau principal, en le nommant clairement "Articles de la commande <référence>") avec les colonnes EAN | Libellé | Qté commandée | Qté livrée — si "articlesError" est présent à la place, dis simplement que le détail des articles n'a pas pu être récupéré pour cette commande précise, jamais une limite générale de l'outil. Si "articlesDetailOmitted" est présent au niveau racine, informe l'utilisateur que le détail des articles n'a pas été calculé (trop de commandes sur la période) et suggère de réduire la période. Remplace un champ null/absent par "—".`
       : '';
     // searchArticlesByName (ajouté le 05/10/2026, demande explicite : une recherche par nom partiel
     // comme "codys" doit lister les variantes réelles plutôt que bloquer sur "précisez le code EAN")

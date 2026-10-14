@@ -1598,7 +1598,7 @@ async function getOrderLineCount(posId, orderId) {
  * commande, sans résolution de libellé par article) — le détail complet (EAN/libellé/quantités,
  * via getOrderLinesDetail) n'est calculé que si explicitement demandé par l'appelant.
  */
-async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeStart, dateRangeEnd, supplierQuery, includeArticleDetail = false } = {}) {
+async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeStart, dateRangeEnd, supplierQuery, includeArticleDetail = false, includeArticleCount = false } = {}) {
   if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
 
   const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
@@ -1629,10 +1629,16 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
   // Détail complet des lignes (articles/quantités/réception) seulement si explicitement demandé
   // (includeArticleDetail) ET sous POS_ONLY_ORDERS_DETAIL_LIMIT commandes — jamais un échec RPOS sur
   // UNE commande qui ferait disparaître les autres, chaque échec reste local à sa commande
-  // (articlesError explicite plutôt qu'une liste vide trompeuse). Sans includeArticleDetail, seul le
-  // COMPTE d'articles est calculé (articleCount, un appel RPOS par commande mais sans résolution de
-  // libellé par EAN — bien moins coûteux, cf. getOrderLineCount).
+  // (articlesError explicite plutôt qu'une liste vide trompeuse).
+  //
+  // Même principe pour le simple COMPTE d'articles (articleCount) : lui aussi désactivé par défaut
+  // (bug de latence trouvé en test réel le 14/10/2026 — "la reponse quil donne est lent", mesuré à
+  // ~7s au lieu de ~1.7s pour 19 commandes POS, CE calcul précis en étant la cause : un appel RPOS
+  // supplémentaire PAR commande rien que pour compter ses lignes, même quand la question ne porte
+  // pas du tout sur les articles). N'est calculé que si includeArticleCount (ou includeArticleDetail,
+  // qui l'implique) est explicitement demandé par la question.
   const includeDetail = includeArticleDetail && posOnly.length <= POS_ONLY_ORDERS_DETAIL_LIMIT;
+  const includeCount = includeArticleCount || includeArticleDetail;
   const orders = await Promise.all(posOnly.map(async (o) => {
     const base = {
       reference: o.reference,
@@ -1653,6 +1659,7 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeSta
       }
       return base;
     }
+    if (!includeCount) return base;
     try {
       base.articleCount = await getOrderLineCount(posId, o.id);
     } catch (err) {
