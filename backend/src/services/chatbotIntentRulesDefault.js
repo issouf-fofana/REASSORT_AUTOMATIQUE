@@ -59,6 +59,14 @@ const FALLBACK_INTENT_RULES = [
   // Placé AVANT la règle getOrders générique ci-dessous : "anomalie(s) de commande" contient
   // "commande" mais désigne un besoin précis, jamais la simple liste des commandes récentes.
   { keywords: ['anomalie', 'anomalies', 'commande anormale', 'commandes anormales', 'quantité anormale', 'quantite anormale', 'écart de commande', 'ecart de commande'], tool: 'getOrderAnomalies' },
+  // getPosOnlyValidatedOrders ajouté le 14/10/2026 (demande explicite : "les commandes qui ont été
+  // validées aujourd'hui sur le pos et pas sur la plateforme seulement") — DOIT rester AVANT la
+  // règle getValidatedOrders générique juste en dessous : "commande validée sur le pos"/"hors
+  // plateforme" contient aussi "commande validée" et matcherait sinon à tort la règle générique
+  // (qui ne couvre QUE les commandes créées par cette plateforme, l'inverse de ce qui est demandé
+  // ici). Mots-clés volontairement spécifiques (toujours "pos" ou "plateforme" en plus de
+  // "validée") pour ne jamais intercepter une question générale sur les commandes validées.
+  { keywords: ['validée sur le pos', 'validee sur le pos', 'validée directement sur le pos', 'validee directement sur le pos', 'validée sur la caisse', 'validee sur la caisse', 'pas sur la plateforme', 'hors plateforme', 'hors de la plateforme', 'sans passer par la plateforme', 'validée en dehors de la plateforme', 'validee en dehors de la plateforme'], tool: 'getPosOnlyValidatedOrders' },
   // getValidatedOrders ajouté le 06/10/2026 (demande explicite : détail complet RPOS d'une commande
   // VALIDÉE — qui a validé, fournisseur, dates, statut) — placé AVANT getOrders générique ci-dessous
   // pour les mêmes raisons que getOrderAnomalies/getOrders juste au-dessus : "commandes validées"
