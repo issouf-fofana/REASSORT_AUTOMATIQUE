@@ -77,7 +77,11 @@ const FALLBACK_INTENT_RULES = [
   // VALIDÉE — qui a validé, fournisseur, dates, statut) — placé AVANT getOrders générique ci-dessous
   // pour les mêmes raisons que getOrderAnomalies/getOrders juste au-dessus : "commandes validées"
   // contient "commande" mais désigne un besoin précis (détail RPOS), jamais la liste interne basique.
-  { keywords: ['commande validée', 'commandes validées', 'commande validee', 'commandes validees', 'qui a validé', 'qui a valide', 'commande a été validée', 'commande a ete validee'], tool: 'getValidatedOrders' },
+  // 'commande validé'/'commandes validé' (sans accord pluriel/féminin) ajoutés le 14/10/2026 : bug
+  // trouvé en test réel, "donne moi les commande validé aujoudhui" (faute de frappe courante,
+  // accord manquant) ne matchait aucune des variantes déjà listées (toutes avec le "e" final de
+  // l'accord) et tombait sur null — aucun outil déclenché du tout.
+  { keywords: ['commande validée', 'commandes validées', 'commande validee', 'commandes validees', 'commande validé', 'commandes validé', 'commande valide', 'commandes valide', 'qui a validé', 'qui a valide', 'commande a été validée', 'commande a ete validee'], tool: 'getValidatedOrders' },
   { keywords: ['mes commandes', 'commandes en cours', 'commandes récentes', 'liste des commandes', 'qu\'est-ce qui a été commandé', 'quest ce qui a ete commande', 'quoi a ete commande', 'derniere commande', 'dernières commandes'], tool: 'getOrders' },
   // "aujourd'hui" retiré (bug trouvé le 21/09/2026, campagne de fuzzing large) : trop générique,
   // matchait à tort N'IMPORTE QUELLE question du jour (ex: "chiffre d'affaire aujourd'hui" tombait

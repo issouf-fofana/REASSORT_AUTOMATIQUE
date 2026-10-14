@@ -1197,6 +1197,13 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
  * correspondance RPOS trouvée (rposOrderReference null, ou introuvable côté RPOS) est quand même
  * listée avec les champs RPOS à null plutôt qu'silencieusement omise — toujours honnête sur ce qui
  * manque réellement.
+ *
+ * Fusionné le 14/10/2026 (demande explicite : "si je demande commande validé auj il dois me donner
+ * les commande validé sur le pos et sur le reassort auto") avec les commandes validées DIRECTEMENT
+ * sur le POS, sans être passées par cette plateforme (même source RPOS que getPosOnlyValidatedOrders,
+ * distinguées par le marqueur PLATFORM_MARKER dans external_reference) — chaque commande du résultat
+ * porte maintenant `source: 'platform' | 'pos'` pour que le LLM puisse toujours préciser l'origine
+ * dans sa réponse, jamais les présenter comme équivalentes sans distinction.
  */
 async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
   const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -1210,16 +1217,15 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
     select: { department: true, rposOrderReference: true, createdAt: true, receptionStatus: true },
     take: 50,
   });
-  if (!platformOrders.length) {
-    return { found: true, days, count: 0, orders: [], isNormalNegative: true, message: 'Aucune commande validée sur cette période pour ce magasin.' };
-  }
 
   // Un seul appel RPOS paginé pour tout le lot plutôt qu'un appel par commande (jusqu'à 50) : la
   // référence filtre déjà côté serveur, mais /api/supplier_order/ n'accepte qu'une référence à la
   // fois — on récupère donc une fenêtre large (200 dernières commandes toutes sources confondues,
   // plus que suffisant pour y retrouver les 50 références de platformOrders) puis on fait
-  // correspondre par référence en mémoire, plus robuste qu'un filtre texte imprécis côté RPOS.
-  let rposOrdersByRef = new Map();
+  // correspondre par référence en mémoire, plus robuste qu'un filtre texte imprécis côté RPOS. Cette
+  // même fenêtre sert aussi à retrouver les commandes POS pures (sans PLATFORM_MARKER) validées sur
+  // la période, ajoutées ci-dessous.
+  let rposResults = [];
   // rposStatus (amelioration1.md §12-14, ajouté le 07/10/2026) : distingue "RPOS injoignable" (champs
   // détaillés absents car l'appel a échoué) de "commande sans correspondance RPOS" (appel réussi,
   // référence simplement introuvable) — jusqu'ici les deux cas se présentaient identiquement (tous
@@ -1229,10 +1235,7 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
   let rposError = null;
   if (posId) {
     try {
-      const { results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false });
-      for (const o of results || []) {
-        if (o.reference) rposOrdersByRef.set(o.reference, o);
-      }
+      ({ results: rposResults } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false }));
     } catch (err) {
       // RPOS injoignable : on renvoie quand même la vue plateforme, avec les champs RPOS à null
       // plutôt que de faire échouer toute la réponse pour une donnée partiellement indisponible —
@@ -1243,10 +1246,15 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
   } else {
     rposStatus = 'not_found'; // pas de serveur RPOS connu pour ce magasin, jamais tenté
   }
+  const rposOrdersByRef = new Map();
+  for (const o of rposResults) {
+    if (o.reference) rposOrdersByRef.set(o.reference, o);
+  }
 
-  const orders = platformOrders.map((po) => {
+  const platformOrdersFormatted = platformOrders.map((po) => {
     const rposOrder = po.rposOrderReference ? rposOrdersByRef.get(po.rposOrderReference) : null;
     return {
+      source: 'platform',
       department: po.department,
       createdAt: po.createdAt,
       receptionStatus: po.receptionStatus,
@@ -1265,6 +1273,46 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
       observation: null,
     };
   });
+
+  // Commandes validées directement sur le POS, sans PLATFORM_MARKER (cf. getPosOnlyValidatedOrders
+  // pour le détail de cette logique de distinction) — ajoutées seulement si RPOS a répondu (rpos_error
+  // laisse cette partie vide plutôt que de deviner).
+  const VALIDATED_STATUSES = new Set(['en attente de livraison', 'livrée partiellement', 'finalisée et partielle', 'complète']);
+  const posOrdersFormatted = rposStatus === 'success'
+    ? rposResults
+      .filter((o) => {
+        const isPlatformOrder = (o.external_reference || '').includes(rpos.PLATFORM_MARKER);
+        const isValidated = VALIDATED_STATUSES.has((o.status_display || '').toLowerCase());
+        const validationDate = o.validation_date ? new Date(o.validation_date) : null;
+        return !isPlatformOrder && isValidated && validationDate && validationDate >= dateStart;
+      })
+      .map((o) => ({
+        source: 'pos',
+        department: null,
+        createdAt: null,
+        receptionStatus: null,
+        rposOrderReference: o.reference || null,
+        rposStatus: o.status_display || null,
+        orderDate: o.date || null,
+        deliveryDate: o.delivery_date || null,
+        validationDate: o.validation_date || null,
+        supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+        createdBy: o.created_by || null,
+        validatedBy: o.validated_by || null,
+        observation: null,
+      }))
+    : [];
+
+  const orders = [...platformOrdersFormatted, ...posOrdersFormatted]
+    .sort((a, b) => new Date(b.validationDate || b.createdAt || 0) - new Date(a.validationDate || a.createdAt || 0));
+
+  if (!orders.length) {
+    return {
+      found: true, days, count: 0, orders, isNormalNegative: true,
+      message: 'Aucune commande validée sur cette période pour ce magasin, ni via la plateforme ni directement sur le POS.',
+      source: 'rpos_live', status: rposStatus, rposError: rposError || undefined,
+    };
+  }
 
   return {
     found: true, days, count: orders.length, orders,
