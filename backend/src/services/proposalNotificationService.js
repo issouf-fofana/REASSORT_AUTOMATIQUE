@@ -376,7 +376,13 @@ function orderSummaryHtml(orders) {
   return orders
     .map((o) => {
       const supplierLabel = o.supplierName ? ` — ${o.supplierName}${o.deliveryType ? ` (${o.deliveryType})` : ''}` : '';
-      return `<li><strong>Commande ${o.rposOrderReference || o.rposOrderId}</strong> — ${o.department}${supplierLabel} : ${o.linesTotal - o.linesFailed} article(s) commandé(s)${o.linesFailed ? ` (${o.linesFailed} refusé(s) par RPOS)` : ''}</li>`;
+      // Statut réel affiché par commande (corrigé le 14/10/2026, cf. introText) : utile surtout sur
+      // le cas mélangé (plusieurs commandes, pas toutes validées) pour savoir laquelle reste à
+      // confirmer sans avoir à rouvrir RPOS.
+      const statusLabel = o.rposOrderValidated === true
+        ? ' <span style="color:#2e7d32;">(validée)</span>'
+        : ' <span style="color:#b45309;">(en préparation, non validée)</span>';
+      return `<li><strong>Commande ${o.rposOrderReference || o.rposOrderId}</strong> — ${o.department}${supplierLabel} : ${o.linesTotal - o.linesFailed} article(s) commandé(s)${o.linesFailed ? ` (${o.linesFailed} refusé(s) par RPOS)` : ''}${statusLabel}</li>`;
     })
     .join('');
 }
@@ -434,6 +440,15 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
   const users = await getShopRecipientUsers(shop.rposShopId);
   if (!users.length || !orders.length) return;
 
+  // Statut réel RPOS des commandes créées (corrigé le 14/10/2026) : une commande créée avec
+  // validateAfterCreate=false reste au statut RPOS 1 "en préparation" — RPOS ne la transmet PAS à
+  // l'entrepôt tant qu'elle n'est pas passée au statut 2 (cf. rpos.validateSupplierOrder). L'ancien
+  // texte fixe "a été validée et envoyée à l'entrepôt" mentait dans ce cas précis. On distingue 3
+  // cas selon rposOrderValidated sur les commandes reçues : toutes validées, aucune, ou mélange
+  // (plusieurs commandes par rayon/fournisseur peuvent avoir des statuts différents).
+  const validatedCount = orders.filter((o) => o.rposOrderValidated === true).length;
+  const unvalidatedCount = orders.filter((o) => o.rposOrderValidated !== true).length;
+
   let introText;
   if (isAutoMode) {
     try {
@@ -445,8 +460,12 @@ async function notifyShopUsersOfOrderCreated(shop, proposal, orders, { isAutoMod
       console.error('[proposalNotificationService] Intro IA du mail Mode Auto indisponible, repli sur texte fixe:', err.message);
       introText = 'Le Mode Auto a validé et envoyé automatiquement la proposition de commande suivante.';
     }
+  } else if (unvalidatedCount === 0) {
+    introText = `La proposition de commande du magasin <strong>${shop.reference} — ${shop.name}</strong> a été validée et sera prise en compte par l'entrepôt.`;
+  } else if (validatedCount === 0) {
+    introText = `Une commande a été créée pour le magasin <strong>${shop.reference} — ${shop.name}</strong>, mais elle est encore <strong>en préparation</strong> et n'a pas été validée sur RPOS. Pour la confirmer, validez-la depuis le POS ou depuis la plateforme.`;
   } else {
-    introText = `La proposition de commande du magasin <strong>${shop.reference} — ${shop.name}</strong> a été validée et envoyée à l'entrepôt.`;
+    introText = `Une partie des commandes du magasin <strong>${shop.reference} — ${shop.name}</strong> a été validée (sera prise en compte par l'entrepôt) ; <strong>${unvalidatedCount}</strong> reste(nt) en préparation et doivent encore être validée(s) sur RPOS ou depuis la plateforme.`;
   }
 
   // Les pièces jointes PDF sont récupérées UNE SEULE FOIS (pas par destinataire) : identiques pour

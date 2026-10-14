@@ -1823,6 +1823,7 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
           ordersWithRposId.map((o) => ({
             rposOrderId: o.order.id, rposOrderReference: o.order.reference, department,
             linesTotal: o.processed + o.failed, linesFailed: o.failed, supplierName: o.supplierName, deliveryType: o.deliveryType,
+            rposOrderValidated: o.rposOrderValidated,
           })),
           { isAutoMode: false },
         );
@@ -2356,7 +2357,7 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
     const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
     const createdOrders = await prisma.proposalOrder.findMany({
       where: { proposalId, rposOrderId: { not: null } },
-      select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true },
+      select: { rposOrderId: true, rposOrderReference: true, department: true, linesTotal: true, linesFailed: true, rposOrderValidated: true },
     });
     if (shop && createdOrders.length) {
       const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
