@@ -7,7 +7,6 @@
 const prisma = require('../utils/prisma');
 const outlookMailService = require('./outlookMailService');
 const rpos = require('./rposClient');
-const { checkSupplierEligibility } = require('./proposalService');
 const { renderMailTemplate } = require('./mailTemplateService');
 
 /** Comptes à alerter pour un magasin donné : rattachement direct (DIRECTOR/DEPARTMENT_HEAD/
@@ -99,43 +98,50 @@ function purchaseOrderLink(shop) {
   return `${configured}/purchase-order?shop=${encodeURIComponent(shop.rposShopId)}&src=email`;
 }
 
-/** Nombre d'articles non rattachés au fournisseur central RPOS, et résumé HTML correspondant (jamais
- * la liste détaillée) — demande du 26/09/2026 : "quand il liste comme ça c'est pas joli à voir, le
- * mail devient compliqué à lire" (jusqu'à 26 articles listés un par un dans un email précédent). Le
+/** Résumé HTML des articles réellement bloqués (aucun fournisseur résolu), et répartition par
+ * fournisseur — demande du 26/09/2026 : "quand il liste comme ça c'est pas joli à voir, le mail
+ * devient compliqué à lire" (jusqu'à 26 articles listés un par un dans un email précédent). Le
  * détail complet est désormais visible directement dans la page Proposition de commande (bandeau
- * ⚠️), le mail se contente d'alerter et de renvoyer vers cette vue. Un échec de ce contrôle (RPOS
- * indisponible...) ne doit jamais empêcher l'envoi du mail lui-même : le résumé est alors omis
- * plutôt que de bloquer toute la notification. Renvoie aussi `count` (jamais recalculé une seconde
- * fois par l'appelant, ex: pour construire le récap admin de fin de nuit).
+ * ⚠️), le mail se contente d'alerter et de renvoyer vers cette vue.
+ *
+ * Corrigé le 14/10/2026 : n'appelle plus checkSupplierEligibility (qui ne teste QUE l'éligibilité
+ * au fournisseur central, logique binaire antérieure à la gestion multi-fournisseurs LD/LC). Un
+ * article "non central" peut très bien avoir été résolu via l'historique ou un fournisseur de
+ * repli (resolveSupplierForArticle, cascade CENTRAL → HISTORY → FALLBACK → NONE) et partir
+ * normalement dans une commande LD — il ne doit donc plus être compté comme "à risque". Seules les
+ * lignes sans resolvedSupplierId (origin NONE, calculé à la génération dans processArticle) sont
+ * réellement non commandables. Chaque ProposalLine porte déjà ce résultat (resolvedSupplierId),
+ * donc plus besoin d'un second appel RPOS ici (élimine aussi le risque d'échec réseau signalé
+ * dans l'ancien commentaire de cette fonction).
  */
-async function buildSupplierWarningHtml(shop, lines, link) {
-  try {
-    const ineligible = await checkSupplierEligibility(shop.rposPosId, shop.rposShopId, lines);
-    if (!ineligible.length) return { html: '', count: 0 };
-    return {
-      html: `
-        <p style="color:#b45309;"><strong>⚠️ ${ineligible.length} article(s) non rattaché(s) au fournisseur central</strong> —
-        risque qu'ils manquent à l'envoi réel de la commande. <a href="${link}">Voir le détail dans la proposition</a>.</p>
-      `,
-      count: ineligible.length,
-    };
-  } catch (err) {
-    console.error(`[proposalNotificationService] Contrôle fournisseur échoué pour ${shop.reference}:`, err.message);
-    return { html: '', count: 0 };
+function buildSupplierWarningHtml(shop, lines, link) {
+  const unresolved = lines.filter((l) => !l.resolvedSupplierId);
+  const centralCount = lines.filter((l) => l.supplierResolutionOrigin === 'CENTRAL').length;
+  const otherSupplierCount = lines.length - unresolved.length - centralCount;
+
+  let html = `
+    <p style="color:#555;">Répartition fournisseur : <strong>${centralCount}</strong> article(s) fournisseur central,
+    <strong>${otherSupplierCount}</strong> article(s) autre(s) fournisseur(s)${unresolved.length ? `, <strong>${unresolved.length}</strong> article(s) sans fournisseur` : ''}.</p>
+  `;
+  if (unresolved.length) {
+    html += `
+      <p style="color:#b45309;"><strong>⚠️ ${unresolved.length} article(s) sans fournisseur rattaché</strong> —
+      ne seront pas inclus dans la commande envoyée. <a href="${link}">Voir le détail dans la proposition</a>.</p>
+    `;
   }
+  return { html, count: unresolved.length };
 }
 
 /** Alerte de nouvelle proposition générée (job nocturne) — jamais sur une génération manuelle.
  * Un email individuel par destinataire (demande du 25/09/2026), avec son vrai nom en salutation.
  * N'inclut PLUS les ADMIN (demande du 26/09/2026, cf. commentaire de getShopRecipientUsers) : ils
  * reçoivent à la place un récap unique en fin de job (cf. notifyAdminsOfNightlySummary), pour lequel
- * cette fonction renvoie le nombre d'articles non rattachés au fournisseur déjà calculé ici — évite
- * de refaire le même appel RPOS coûteux une seconde fois côté job pour construire ce récap. */
+ * cette fonction renvoie le nombre d'articles sans fournisseur déjà calculé ici. */
 async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
   const users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins: false });
 
   const link = purchaseOrderLink(shop);
-  const { html: supplierWarningHtml, count: ineligibleCount } = await buildSupplierWarningHtml(shop, proposal.lines, link);
+  const { html: supplierWarningHtml, count: ineligibleCount } = buildSupplierWarningHtml(shop, proposal.lines, link);
 
   if (!users.length) return { ineligibleCount };
 
@@ -190,7 +196,7 @@ async function notifyAdminsOfNightlySummary(summaries) {
         <tr style="border-bottom:2px solid #ececec;">
           <th style="text-align:left;padding:6px 8px;">Magasin</th>
           <th style="text-align:right;padding:6px 8px;">Articles proposés</th>
-          <th style="text-align:right;padding:6px 8px;">Non rattachés fournisseur</th>
+          <th style="text-align:right;padding:6px 8px;">Sans fournisseur</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -203,7 +209,7 @@ async function notifyAdminsOfNightlySummary(summaries) {
       'Récap de la génération nocturne',
       `
         <p>Bonjour ${user.name},</p>
-        <p><strong>${nonEmpty.length}</strong> magasin(s) ont une nouvelle proposition cette nuit, pour un total de <strong>${totalArticles}</strong> article(s) proposé(s)${totalIneligible ? `, dont <strong>${totalIneligible}</strong> non rattaché(s) au fournisseur central sur l'ensemble des magasins` : ''}.</p>
+        <p><strong>${nonEmpty.length}</strong> magasin(s) ont une nouvelle proposition cette nuit, pour un total de <strong>${totalArticles}</strong> article(s) proposé(s)${totalIneligible ? `, dont <strong>${totalIneligible}</strong> sans fournisseur rattaché sur l'ensemble des magasins` : ''}.</p>
         ${tableHtml}
       `,
       { severity: totalIneligible ? 'warning' : 'info' },
@@ -224,14 +230,10 @@ async function notifyAdminsOfNightlySummary(summaries) {
  * dois recevoir un mail pas plusieurs") : l'admin reçoit désormais UN récap en fin de job plutôt
  * qu'une copie de chaque relance individuelle. L'envoi manuel depuis la page Proposition de commande
  * garde l'admin en copie par défaut (volume faible, un seul magasin à la fois).
- * `includeSupplierWarning` (optionnel, défaut true) : mis à false uniquement par l'envoi MANUEL
- * (bouton "Envoyer par email") — bug trouvé le 26/09/2026 : buildSupplierWarningHtml fait un appel
- * RPOS par article (checkSupplierEligibility), rendant l'envoi manuel extrêmement lent voire bloqué
- * sur une grosse proposition (500+ articles, ~100 vagues d'appels séquentiels à 5 en concurrence).
- * L'utilisateur qui clique ce bouton a déjà ce même résumé sous les yeux dans le bandeau ⚠️ de la
- * page (calculé une seule fois au chargement) — inutile de le recalculer à chaque clic d'envoi. Le
- * job planifié de relance (une exécution par jour, jamais déclenchée par un clic utilisateur en
- * attente) garde ce contrôle. */
+ * `includeSupplierWarning` (optionnel, défaut true) : conservé pour compatibilité des appelants
+ * existants, mais n'a plus d'effet sur le coût de l'appel depuis le 14/10/2026 — buildSupplierWarningHtml
+ * lit désormais resolvedSupplierId déjà calculé sur chaque ProposalLine (plus aucun appel RPOS ici),
+ * donc l'inclure sur l'envoi manuel aussi n'a plus l'impact perf qui justifiait de le désactiver. */
 async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipientEmails, { includeAdmins = true, includeSupplierWarning = true } = {}) {
   let users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins });
   if (overrideRecipientEmails) users = users.filter((u) => overrideRecipientEmails.includes(u.email));
@@ -240,11 +242,11 @@ async function notifyShopUsersOfPendingProposal(shop, proposal, overrideRecipien
   const link = purchaseOrderLink(shop);
   // Le mail magasin doit rester plus détaillé/actionnable que le récap admin (simple total par
   // magasin) — demande du 26/09/2026 : "le mail que le magasin reçoit doit être différent de pour
-  // l'admin". Ajout de l'alerte fournisseur (déjà présente sur le mail de nouvelle proposition,
-  // mais oubliée ici) : une personne qui reçoit une relance doit savoir immédiatement si des
-  // articles risquent de manquer à l'envoi réel, pas seulement "350 articles en attente".
+  // l'admin". Alerte fournisseur (déjà présente sur le mail de nouvelle proposition) : une personne
+  // qui reçoit une relance doit savoir immédiatement si des articles sont réellement sans
+  // fournisseur, pas seulement "350 articles en attente".
   const supplierWarningHtml = includeSupplierWarning
-    ? (await buildSupplierWarningHtml(shop, proposal.lines, link)).html
+    ? buildSupplierWarningHtml(shop, proposal.lines, link).html
     : '';
 
   await sendMailToEachRecipient(users, async (user) => ({

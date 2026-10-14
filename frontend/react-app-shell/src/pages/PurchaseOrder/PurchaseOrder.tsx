@@ -946,7 +946,7 @@ export function PurchaseOrder() {
                   <div className="alert alert-warning small mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <div>
                       <iconify-icon icon="solar:danger-triangle-bold" className="align-middle me-1"></iconify-icon>
-                      <strong>{supplierIneligible.length} article(s) non rattaché(s) au fournisseur central</strong> — risque qu'ils manquent à l'envoi réel de la commande.
+                      <strong>{supplierIneligible.length} article(s) non rattaché(s) au fournisseur central</strong> — commandés via un autre fournisseur (historique ou délai le plus court) si disponible, sinon absents de la commande.
                     </div>
                     <button
                       type="button"
