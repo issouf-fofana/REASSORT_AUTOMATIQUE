@@ -127,6 +127,28 @@ async function getShopDepartments(rposShopId) {
 }
 
 /**
+ * getShopSuppliers(posId, shopId) — liste des fournisseurs RÉELS vus sur les commandes récentes de
+ * ce magasin (nom + code), pour faire correspondre un nom de fournisseur tapé en langage libre
+ * ("le fournisseur central") à un nom RÉEL RPOS — même principe que getShopDepartments, utilisée
+ * par chatbotService.extractSupplierName. Ajoutée le 14/10/2026 (demande explicite : "je dois
+ * pouvoir demande les commande lie a un fournisseur ex le fournisseur centrale"). Best-effort : une
+ * erreur RPOS renvoie une liste vide plutôt que de faire échouer toute la détection d'intention.
+ */
+async function getShopSuppliers(posId, shopId) {
+  if (!posId) return [];
+  try {
+    const { results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false });
+    const seen = new Map();
+    for (const o of results || []) {
+      if (o.supplier?.name) seen.set(o.supplier.code || o.supplier.name, { name: o.supplier.name, code: o.supplier.code || null });
+    }
+    return [...seen.values()];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * getDataAvailability(rposShopId) — étendue RÉELLE de l'historique de ventes disponible en base
  * pour ce magasin (spec du 28/09/2026 §7 : "utiliser TOUTES les données disponibles par magasin,
  * pas une fenêtre fixe arbitraire" + "Données disponibles : du DD/MM/AAAA au DD/MM/AAAA"). Distinct
@@ -1204,13 +1226,28 @@ async function getOrders(rposShopId, { days = 14 } = {}) {
  * distinguées par le marqueur PLATFORM_MARKER dans external_reference) — chaque commande du résultat
  * porte maintenant `source: 'platform' | 'pos'` pour que le LLM puisse toujours préciser l'origine
  * dans sa réponse, jamais les présenter comme équivalentes sans distinction.
+ *
+ * `dateRangeStart`/`dateRangeEnd` (ISO, ajoutés le 14/10/2026, même pattern que
+ * getPredictionAccuracy) priment sur `days` quand fournis — permet "hier", "avant-hier", "la
+ * semaine dernière/en cours", "le mois", ou une plage explicite (gérés en amont par
+ * resolveDateRange/extractDateRange dans chatbotService.js, pas dupliqués ici).
+ *
+ * `supplierQuery` (ajouté le 14/10/2026, demande explicite : "je dois pouvoir demande les commande
+ * lie a un fournisseur ex le fournisseur centrale") filtre le résultat sur le nom/code fournisseur
+ * (comparaison insensible à la casse/accents, sous-chaîne dans les deux sens — même principe que
+ * extractDepartment/isDepartmentAllowedForUser côté département) — appliqué après récupération
+ * complète (jamais un filtre RPOS côté serveur, peu fiable sur ce champ texte comme déjà constaté
+ * sur d'autres filtres RPOS dans ce fichier).
  */
-async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+async function getValidatedOrders(posId, shopId, { days = 30, dateRangeStart, dateRangeEnd, supplierQuery } = {}) {
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
   const platformOrders = await prisma.proposalOrder.findMany({
     where: {
       proposal: { rposShopId: shopId },
-      createdAt: { gte: dateStart },
+      createdAt: { gte: dateStart, lte: dateEnd },
       rposOrderValidated: true,
     },
     orderBy: { createdAt: 'desc' },
@@ -1284,7 +1321,7 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
         const isPlatformOrder = (o.external_reference || '').includes(rpos.PLATFORM_MARKER);
         const isValidated = VALIDATED_STATUSES.has((o.status_display || '').toLowerCase());
         const validationDate = o.validation_date ? new Date(o.validation_date) : null;
-        return !isPlatformOrder && isValidated && validationDate && validationDate >= dateStart;
+        return !isPlatformOrder && isValidated && validationDate && validationDate >= dateStart && validationDate <= dateEnd;
       })
       .map((o) => ({
         source: 'pos',
@@ -1303,22 +1340,64 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
       }))
     : [];
 
-  const orders = [...platformOrdersFormatted, ...posOrdersFormatted]
+  let orders = [...platformOrdersFormatted, ...posOrdersFormatted]
     .sort((a, b) => new Date(b.validationDate || b.createdAt || 0) - new Date(a.validationDate || a.createdAt || 0));
+
+  let supplierFilterApplied = null;
+  if (supplierQuery) {
+    orders = orders.filter((o) => supplierMatchesQuery(o.supplier, supplierQuery));
+    supplierFilterApplied = supplierQuery;
+  }
 
   if (!orders.length) {
     return {
-      found: true, days, count: 0, orders, isNormalNegative: true,
-      message: 'Aucune commande validée sur cette période pour ce magasin, ni via la plateforme ni directement sur le POS.',
+      found: true, days, dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+      dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
+      supplierFilterApplied, count: 0, orders, isNormalNegative: true,
+      message: supplierFilterApplied
+        ? `Aucune commande validée pour un fournisseur correspondant à "${supplierFilterApplied}" sur cette période, ni via la plateforme ni directement sur le POS.`
+        : 'Aucune commande validée sur cette période pour ce magasin, ni via la plateforme ni directement sur le POS.',
       source: 'rpos_live', status: rposStatus, rposError: rposError || undefined,
     };
   }
 
   return {
-    found: true, days, count: orders.length, orders,
+    found: true, days, dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
+    supplierFilterApplied, count: orders.length, orders,
     source: 'rpos_live', status: rposStatus, rposError: rposError || undefined,
     queriedAt: rposStatus !== 'not_found' ? new Date().toISOString() : undefined,
   };
+}
+
+/** Normalisation pour comparaison de nom/code fournisseur (accents retirés, minuscules, espaces
+ * compactés) — même principe que normalizeForMatch (chatbotService.js) pour les rayons, dupliqué
+ * ici car chatbotToolsService.js ne doit pas dépendre de chatbotService.js (risque de cycle). */
+function normalizeForSupplierMatch(str) {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Code RPOS du fournisseur central (cf. SUPPLIER_CENTRAL_CODE dans proposalService.js, dupliqué ici
+// pour éviter une dépendance circulaire entre les deux services).
+const SUPPLIER_CENTRAL_CODE = '000000';
+const CENTRAL_SUPPLIER_WORDS = new Set(['central', 'centrale', 'centraux']);
+
+/** Filtre partagé fournisseur pour getValidatedOrders/getPosOnlyValidatedOrders (demande du
+ * 14/10/2026) : comparaison nom/code insensible à la casse/accents dans les deux sens, plus un cas
+ * spécial "central"/"centrale" qui matche directement le code RPOS 000000 même si le nom réel du
+ * fournisseur central (variable selon le magasin/RPOS) ne contient littéralement pas ce mot. */
+function supplierMatchesQuery(supplier, supplierQuery) {
+  if (!supplier || !supplierQuery) return false;
+  const normalizedQuery = normalizeForSupplierMatch(supplierQuery);
+  if (CENTRAL_SUPPLIER_WORDS.has(normalizedQuery) && supplier.code === SUPPLIER_CENTRAL_CODE) return true;
+  const normalizedName = normalizeForSupplierMatch(supplier.name || '');
+  const normalizedCode = normalizeForSupplierMatch(supplier.code || '');
+  return normalizedName.includes(normalizedQuery) || normalizedQuery.includes(normalizedName) || normalizedCode === normalizedQuery;
 }
 
 // Nombre maximum de commandes pour lesquelles on va chercher le détail des lignes (EAN, libellé,
@@ -1371,11 +1450,18 @@ async function getOrderLinesDetail(posId, shopId, orderId) {
  * préparation") qui ne porte PAS ce marqueur a été créée et validée hors plateforme, directement sur
  * le POS. Lecture RPOS directe, aucune table locale à jour (contrairement à getValidatedOrders qui
  * part de ProposalOrder) — ces commandes n'ont justement aucune trace côté plateforme.
+ *
+ * `dateRangeStart`/`dateRangeEnd` et `supplierQuery` : mêmes paramètres et même logique que
+ * getValidatedOrders (cf. son commentaire pour le détail) — ajoutés le 14/10/2026, demande
+ * explicite : "les commande lie a un fournisseur... sur cette periode... hier, avant hier, la
+ * semaine, le mois, ou meme l'intervalle".
  */
-async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
+async function getPosOnlyValidatedOrders(posId, shopId, { days = 1, dateRangeStart, dateRangeEnd, supplierQuery } = {}) {
   if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
 
-  const dateStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const hasExplicitRange = !!(dateRangeStart && dateRangeEnd);
+  const dateEnd = hasExplicitRange ? new Date(dateRangeEnd) : new Date();
+  const dateStart = hasExplicitRange ? new Date(dateRangeStart) : new Date(dateEnd.getTime() - days * 24 * 60 * 60 * 1000);
   let results;
   try {
     ({ results } = await rpos.getSupplierOrders(posId, { shopId, pageSize: 200, platformOnly: false }));
@@ -1384,13 +1470,19 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
   }
 
   const VALIDATED_STATUSES = new Set(['en attente de livraison', 'livrée partiellement', 'finalisée et partielle', 'complète']);
-  const posOnly = (results || []).filter((o) => {
+  let posOnly = (results || []).filter((o) => {
     const isPlatformOrder = (o.external_reference || '').includes(rpos.PLATFORM_MARKER);
     const isValidated = VALIDATED_STATUSES.has((o.status_display || '').toLowerCase());
     const validationDate = o.validation_date ? new Date(o.validation_date) : null;
-    const isInRange = validationDate ? validationDate >= dateStart : false;
+    const isInRange = validationDate ? validationDate >= dateStart && validationDate <= dateEnd : false;
     return !isPlatformOrder && isValidated && isInRange;
   });
+
+  let supplierFilterApplied = null;
+  if (supplierQuery) {
+    posOnly = posOnly.filter((o) => supplierMatchesQuery(o.supplier, supplierQuery));
+    supplierFilterApplied = supplierQuery;
+  }
 
   // Détail des lignes (articles/quantités/réception) ajouté seulement sous POS_ONLY_ORDERS_DETAIL_LIMIT
   // commandes — jamais un échec RPOS sur UNE commande qui ferait disparaître les autres, chaque
@@ -1417,13 +1509,19 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
   }));
 
   return {
-    found: true, days, count: orders.length, orders,
+    found: true, days, dateRangeStart: hasExplicitRange ? dateStart.toISOString().slice(0, 10) : null,
+    dateRangeEnd: hasExplicitRange ? dateEnd.toISOString().slice(0, 10) : null,
+    supplierFilterApplied, count: orders.length, orders,
     articlesDetailOmitted: !includeDetail
       ? `Détail des articles omis : ${posOnly.length} commandes sur cette période dépassent le seuil de ${POS_ONLY_ORDERS_DETAIL_LIMIT} pour ce calcul — réduis la période (days) pour l'obtenir.`
       : undefined,
     source: 'rpos_live', status: 'success',
     isNormalNegative: orders.length === 0,
-    message: orders.length === 0 ? 'Aucune commande validée directement sur le POS (hors plateforme) sur cette période.' : undefined,
+    message: orders.length === 0
+      ? (supplierFilterApplied
+        ? `Aucune commande validée directement sur le POS (hors plateforme) pour un fournisseur correspondant à "${supplierFilterApplied}" sur cette période.`
+        : 'Aucune commande validée directement sur le POS (hors plateforme) sur cette période.')
+      : undefined,
     queriedAt: new Date().toISOString(),
   };
 }
@@ -2268,4 +2366,5 @@ module.exports = {
   getArticleDlvStatus,
   getDataAvailability,
   getShopDepartments,
+  getShopSuppliers,
 };

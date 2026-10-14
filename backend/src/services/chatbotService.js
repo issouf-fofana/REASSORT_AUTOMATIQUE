@@ -99,6 +99,12 @@ const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|l
 const DEPARTMENT_NAME_REGEX = /\brayons?\s+(?:de\s+|du\s+|des\s+|ce\s+|cette\s+|le\s+|la\s+)?([^?.!]+)/i;
 const DEPARTMENT_GENERIC_WORDS = new Set(['ce', 'cette', 'du', 'de', 'des', 'le', 'la', 'les', 'quel', 'quelle', 'notre', 'votre']);
 
+// "fournisseur central" ajouté le 14/10/2026 (demande explicite : "je dois pouvoir demande les
+// commande lie a un fournisseur ex le fournisseur centrale") : capte "fournisseur X", "chez X",
+// "du fournisseur X" — mêmes mots génériques que DEPARTMENT_GENERIC_WORDS, un fournisseur ne
+// commence jamais par un article/déterminant seul.
+const SUPPLIER_NAME_REGEX = /\bfournisseurs?\s+(?:de\s+|du\s+|des\s+|ce\s+|cette\s+|le\s+|la\s+)?([^?.!]+)|\bchez\s+(?:le\s+|la\s+)?([^?.!]+)/i;
+
 // "tous/chaque/l'ensemble de mes magasins" en même temps qu'une question de CA (demande du
 // 19/09/2026, réservé ADMIN/SUPERVISOR — cf. runToolForQuestion) doit gagner sur la règle générique
 // getRevenue (mot-clé "ca") — sans cette priorité, "quel est le CA de tous les magasins" retombait
@@ -294,6 +300,53 @@ async function extractDepartment(question, rposShopId) {
     return capturedWords.some((w) => normalizedReal.includes(w));
   });
   return wordMatch || null;
+}
+
+/**
+ * Tente d'extraire un nom de fournisseur mentionné dans la question ("le fournisseur central",
+ * "chez SATOCI") et le fait correspondre à un fournisseur RÉEL vu sur les commandes récentes de ce
+ * magasin (même principe que extractDepartment, cf. son commentaire) — ajouté le 14/10/2026,
+ * demande explicite : "je dois pouvoir demande les commande lie a un fournisseur ex le fournisseur
+ * centrale il doit me donne les commande du fournisseur sur cette periode". Retourne le texte brut
+ * capturé si aucune correspondance réelle n'est trouvée (ex: fournisseur jamais vu sur les 200
+ * dernières commandes de ce magasin) — les outils filtrent alors sur ce texte brut, qui peut encore
+ * matcher un nom RPOS partiel non couvert par cet échantillon récent, plutôt que d'abandonner
+ * silencieusement la détection d'intention fournisseur.
+ */
+async function extractSupplierName(question, posId, rposShopId) {
+  const match = (question || '').match(SUPPLIER_NAME_REGEX);
+  if (!match) return null;
+  const captured = (match[1] || match[2] || '').trim();
+  if (!captured) return null;
+  const firstWord = captured.split(/\s+/)[0].toLowerCase();
+  if (DEPARTMENT_GENERIC_WORDS.has(firstWord)) return null;
+
+  const normalizedCaptured = normalizeForMatch(captured);
+  if (!normalizedCaptured) return null;
+
+  const realSuppliers = await tools.getShopSuppliers(posId, rposShopId);
+  const exactOrContains = realSuppliers.find((s) => {
+    const normalizedReal = normalizeForMatch(s.name);
+    return normalizedReal === normalizedCaptured
+      || normalizedReal.includes(normalizedCaptured)
+      || normalizedCaptured.includes(normalizedReal);
+  });
+  if (exactOrContains) return exactOrContains.name;
+
+  const capturedWords = normalizedCaptured.split(' ').filter((w) => w.length >= 3);
+  const wordMatch = capturedWords.length
+    ? realSuppliers.find((s) => {
+      const normalizedReal = normalizeForMatch(s.name);
+      return capturedWords.some((w) => normalizedReal.includes(w));
+    })
+    : null;
+  if (wordMatch) return wordMatch.name;
+
+  // "central"/"centrale" : jamais garanti d'apparaître dans l'échantillon récent (un magasin
+  // majoritairement LD peut n'avoir aucune commande centrale dans ses 200 dernières) — repli sur le
+  // texte brut capturé, que l'outil comparera aussi au CODE fournisseur RPOS (000000, cf.
+  // SUPPLIER_CENTRAL_CODE dans proposalService.js) via son filtre supplierQuery, pas seulement le nom.
+  return captured;
 }
 
 /**
@@ -671,8 +724,8 @@ const TOOL_CATALOG = [
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin (vue interne basique : rayon, référence, date, statut de réception).', params: {} },
-  { name: 'getValidatedOrders', description: 'Commandes fournisseur VALIDÉES par ce magasin, avec le détail complet côté caisse (RPOS) : qui a validé, qui a créé, fournisseur, statut, date de commande, de livraison, de validation. Utiliser pour toute question sur une commande déjà validée/son détail complet, jamais getOrders qui n\'a pas ces champs.', params: { days: 'nombre de jours à couvrir, optionnel (défaut 30)' } },
-  { name: 'getPosOnlyValidatedOrders', description: 'Commandes fournisseur VALIDÉES directement sur le POS (caisse RPOS), SANS être passées par cette plateforme — utiliser spécifiquement pour une question du type "quelles commandes ont été validées sur le POS et pas sur la plateforme ?" ou "commandes validées aujourd\'hui en dehors de la plateforme", jamais pour une question générale sur les commandes validées (utiliser getValidatedOrders dans ce cas, qui couvre les commandes créées par la plateforme).', params: { days: 'nombre de jours à couvrir, optionnel (défaut 1 = aujourd\'hui)' } },
+  { name: 'getValidatedOrders', description: 'Commandes fournisseur VALIDÉES par ce magasin, TOUTES ORIGINES confondues (créées via cette plateforme ET validées directement sur le POS/caisse RPOS — champ "source" sur chaque commande), avec le détail complet côté caisse : qui a validé, qui a créé, fournisseur, statut, date de commande, de livraison, de validation. Utiliser pour toute question générale sur des commandes déjà validées/leur détail complet, y compris filtrée par fournisseur ou sur une période donnée (jour précis, hier, la semaine, le mois, un intervalle...), jamais getOrders qui n\'a pas ces champs.', params: { days: 'nombre de jours à couvrir, optionnel (défaut 30)', supplier: 'nom ou code du fournisseur pour filtrer (ex: "fournisseur central"), optionnel' } },
+  { name: 'getPosOnlyValidatedOrders', description: 'Commandes fournisseur VALIDÉES directement sur le POS (caisse RPOS) UNIQUEMENT, SANS être passées par cette plateforme — utiliser spécifiquement pour une question qui exclut explicitement la plateforme, du type "quelles commandes ont été validées sur le POS et pas sur la plateforme ?" ou "commandes validées hors plateforme". Pour une question générale sur les commandes validées (même avec un fournisseur ou une période précisée), toujours préférer getValidatedOrders qui couvre déjà les deux origines.', params: { days: 'nombre de jours à couvrir, optionnel (défaut 1 = aujourd\'hui)', supplier: 'nom ou code du fournisseur pour filtrer (ex: "fournisseur central"), optionnel' } },
   { name: 'getOrderAnomalies', description: 'Anomalies détectées sur des commandes récentes (quantité validée nettement supérieure ou inférieure à l\'habitude du magasin) — jamais présentées comme des erreurs certaines, seulement des écarts à vérifier.', params: {} },
   { name: 'getStockoutRisksAllShops', description: 'Nombre d\'articles en risque de rupture, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR) — utile pour "quels magasins ont des ruptures ?", jamais pour une question sur un seul magasin précis.', params: {} },
   { name: 'getOverstockArticlesAllShops', description: 'Nombre d\'articles en surstock, PAR MAGASIN, sur tout le réseau accessible au compte (réservé ADMIN/SUPERVISOR).', params: {} },
@@ -955,7 +1008,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // getPredictionAccuracy/getTopGisements ajoutés le 12/10/2026 (chantier identifié en passation,
   // même extension que getSalesHistory ci-dessus — aucun bug réel signalé dessus pour l'instant,
   // mais le même piège se serait reproduit sur toute question avec une plage explicite).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements']);
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements', 'getValidatedOrders', 'getPosOnlyValidatedOrders']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1046,6 +1099,16 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       }
     }
   }
+
+  // supplierQuery (ajouté le 14/10/2026, demande explicite : "je dois pouvoir demande les commande
+  // lie a un fournisseur ex le fournisseur centrale") — limité aux deux outils qui le consomment
+  // réellement (getValidatedOrders/getPosOnlyValidatedOrders), jamais calculé pour les autres
+  // questions : extractSupplierName appelle getShopSuppliers (un appel RPOS) à chaque fois, inutile
+  // de le payer sur une question sans rapport avec les commandes.
+  const SUPPLIER_FILTERABLE_TOOLS = new Set(['getValidatedOrders', 'getPosOnlyValidatedOrders']);
+  const supplierQuery = SUPPLIER_FILTERABLE_TOOLS.has(toolName)
+    ? await extractSupplierName(question, effectivePosId, effectiveShopId)
+    : null;
 
   // Permissions IA par capacité (plan de rôles validé le 15/09/2026) : vérifiées ici, APRÈS avoir
   // résolu ean/department, car getRevenue est ambigu (CA magasin vs CA article/département — seul
@@ -1207,14 +1270,29 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
       case 'getOrders':
         // Idem : "mes commandes du mois dernier" ignorait daysQuery et retombait sur le défaut (14j).
         return { toolName, toolResult: await tools.getOrders(rposShopId, { days: daysQuery || 14 }) };
-      case 'getValidatedOrders': {
-        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-        const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30 });
-        return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
-      }
+      case 'getValidatedOrders':
       case 'getPosOnlyValidatedOrders': {
         if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
-        const posOnlyResult = await tools.getPosOnlyValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 1 });
+        // dateRangeStart/dateRangeEnd ajoutés le 14/10/2026 (demande explicite : "hier, avant hier,
+        // la semaine, la semaine encour, le mois, ou meme l'intervalle") — même pattern que
+        // getPredictionAccuracy, priment sur daysQuery quand effectiveDateRange est résolu. `date`
+        // (résolu par "hier"/"avant-hier"/"aujourd'hui", cf. resolveDateRange qui renvoie {date} et
+        // non {days} pour ces trois formulations précises) converti ici en plage d'un seul jour —
+        // sans cette conversion, "hier"/"avant-hier" retombaient sur le défaut 30j/1j (bug trouvé en
+        // test réel : "commandes du fournisseur central hier" retournait 71 résultats, le volume de
+        // tout le mois, pas seulement d'hier).
+        const singleDayRange = (!effectiveDateRange?.start && date) ? { start: date, end: date } : null;
+        const resolvedRange = effectiveDateRange || singleDayRange;
+        const sharedParams = {
+          dateRangeStart: resolvedRange?.start || null,
+          dateRangeEnd: resolvedRange?.end || null,
+          supplierQuery,
+        };
+        if (toolName === 'getValidatedOrders') {
+          const validatedOrdersResult = await tools.getValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 30, ...sharedParams });
+          return { toolName, toolResult: targetShopLabel ? { ...validatedOrdersResult, targetShopLabel } : validatedOrdersResult };
+        }
+        const posOnlyResult = await tools.getPosOnlyValidatedOrders(effectivePosId, effectiveShopId, { days: daysQuery || 1, ...sharedParams });
         return { toolName, toolResult: targetShopLabel ? { ...posOnlyResult, targetShopLabel } : posOnlyResult };
       }
       case 'getOrderAnomalies':

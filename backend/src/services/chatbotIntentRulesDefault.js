@@ -73,6 +73,15 @@ const FALLBACK_INTENT_RULES = [
   // ici car cette règle teste "le pos"/"la plateforme" eux-mêmes, suffisamment spécifiques pour ne
   // jamais apparaître dans une question générale sur les commandes.
   { keywords: ['sur le pos', 'sur la caisse', 'pas sur la plateforme', 'hors plateforme', 'hors de la plateforme', 'sans passer par la plateforme', 'en dehors de la plateforme'], tool: 'getPosOnlyValidatedOrders' },
+  // "commande(s) du/au fournisseur" ajouté le 14/10/2026 (demande explicite : "je dois pouvoir
+  // demande les commande lie a un fournisseur ex le fournisseur centrale") — une question du type
+  // "donne moi les commandes du fournisseur central cette semaine" ne contient ni "validée" ni "sur
+  // le pos", seulement "commande" + "fournisseur" : sans cette règle, elle ne matchait RIEN (gap
+  // trouvé en test réel, detectIntent renvoyait null). Volontairement large sur "commande" +
+  // "fournisseur" dans la même question plutôt qu'une phrase figée, pour couvrir aussi "quelles
+  // commandes chez le fournisseur X", "commande passée à ce fournisseur"... — reste spécifique
+  // (nécessite les deux mots) donc aucun risque de capter une question sans rapport.
+  { keywords: ['commande fournisseur', 'commandes fournisseur', 'commande au fournisseur', 'commandes au fournisseur', 'commande du fournisseur', 'commandes du fournisseur', 'commande de ce fournisseur', 'commandes de ce fournisseur', 'commande chez le fournisseur', 'commandes chez le fournisseur', 'commande passée à ce fournisseur', 'commande passee a ce fournisseur'], tool: 'getValidatedOrders' },
   // getValidatedOrders ajouté le 06/10/2026 (demande explicite : détail complet RPOS d'une commande
   // VALIDÉE — qui a validé, fournisseur, dates, statut) — placé AVANT getOrders générique ci-dessous
   // pour les mêmes raisons que getOrderAnomalies/getOrders juste au-dessus : "commandes validées"
