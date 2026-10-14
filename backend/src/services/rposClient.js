@@ -1057,6 +1057,16 @@ async function getSupplierOrders(posId, { shopId, pageSize = 50, page = 1, platf
 }
 
 /**
+ * Lignes d'une commande fournisseur RPOS donnée (EAN, quantité commandée, quantité livrée) — pas de
+ * libellé sur cet endpoint (cf. getOrderLinesDetail dans chatbotToolsService.js, qui résout le
+ * libellé séparément via getProductByEan). Utilisée pour le détail article/quantité d'une commande,
+ * demande du 14/10/2026 ("les article a l'interieur les quantité commande et autre, reception").
+ */
+async function getSupplierOrderLines(posId, orderId) {
+  return rposGet(posId, '/api/supplier_order_line/', { order: orderId, page_size: 250 });
+}
+
+/**
  * Date de la dernière vente enregistrée pour un magasin (ISO string), ou null si aucune.
  * Sert de référence pour calculer les périodes relatives ("hier", "7 derniers jours") : on se
  * base sur la dernière activité réelle du magasin, pas sur la date système, pour rester correct
@@ -1323,6 +1333,7 @@ module.exports = {
   validateSupplierOrder,
   cancelSupplierOrder,
   getSupplierOrders,
+  getSupplierOrderLines,
   getSupplierOrderPdf,
   getPendingPlatformOrderedEans,
   getLastSaleDate,

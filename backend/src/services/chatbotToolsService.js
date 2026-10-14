@@ -1273,16 +1273,56 @@ async function getValidatedOrders(posId, shopId, { days = 30 } = {}) {
   };
 }
 
+// Nombre maximum de commandes pour lesquelles on va chercher le détail des lignes (EAN, libellé,
+// quantités) — chaque commande coûte un appel RPOS supplémentaire (/api/supplier_order_line/), et
+// une commande peut avoir plusieurs dizaines d'articles distincts nécessitant chacun un appel
+// getProductByEan pour résoudre le libellé (non présent sur la ligne elle-même, cf. commentaire plus
+// bas). Un volume de commandes POS pur sur une seule journée reste typiquement faible (quelques
+// unités) ; au-delà de ce seuil, seules les infos de commande (sans détail article) sont renvoyées
+// pour éviter une explosion du nombre d'appels RPOS sur une question mal bornée (days trop large).
+const POS_ONLY_ORDERS_DETAIL_LIMIT = 15;
+
+/**
+ * Lignes d'une commande fournisseur RPOS (EAN, libellé, quantité commandée, quantité livrée) —
+ * /api/supplier_order_line/ ne renvoie que ean/quantity/delivered_quantity/quantity_to_be_delivered,
+ * jamais de libellé (confirmé par les usages existants de cet endpoint, aucun ne lit de champ
+ * label) : on résout le libellé via rpos.getProductByEan, avec déduplication par EAN pour ne pas
+ * refaire le même appel si un article apparaît sur plusieurs lignes (cas rare mais possible).
+ */
+async function getOrderLinesDetail(posId, shopId, orderId) {
+  const linesData = await rpos.getSupplierOrderLines(posId, orderId);
+  const rawLines = (linesData.results || []).filter((l) => l.ean);
+
+  const uniqueEans = [...new Set(rawLines.map((l) => l.ean))];
+  const labelByEan = new Map();
+  await Promise.all(uniqueEans.map(async (ean) => {
+    try {
+      const product = await rpos.getProductByEan(posId, shopId, ean);
+      labelByEan.set(ean, product?.label_1 || null);
+    } catch {
+      labelByEan.set(ean, null); // une résolution de libellé échouée ne doit jamais bloquer le reste
+    }
+  }));
+
+  return rawLines.map((l) => ({
+    ean: l.ean,
+    label: labelByEan.get(l.ean) || null,
+    quantityOrdered: Number(l.quantity) || 0,
+    quantityDelivered: Number(l.delivered_quantity) || 0,
+  }));
+}
+
 /**
  * getPosOnlyValidatedOrders(posId, shopId, {days}) — commandes fournisseur VALIDÉES sur cette
  * période, créées ET validées directement sur le POS (RPOS), sans passer par la plateforme (demande
  * du 14/10/2026 : "les commandes qui ont été validées aujourd'hui sur le POS et pas sur la
- * plateforme seulement"). Distingue une commande plateforme d'une commande POS via le marqueur
- * `[REASSORT-IA]` dans external_reference (cf. PLATFORM_MARKER dans rposClient.js, même marqueur
- * que getPendingPlatformOrderedEans/getSupplierOrders) : toute commande VALIDÉE (statut 2+, jamais
- * "en préparation") qui ne porte PAS ce marqueur a été créée et validée hors plateforme, directement
- * sur le POS. Lecture RPOS directe, aucune table locale à jour (contrairement à getValidatedOrders
- * qui part de ProposalOrder) — ces commandes n'ont justement aucune trace côté plateforme.
+ * plateforme seulement" + "les article a l'interieur les quantité commande et autre, reception").
+ * Distingue une commande plateforme d'une commande POS via le marqueur `[REASSORT-IA]` dans
+ * external_reference (cf. PLATFORM_MARKER dans rposClient.js, même marqueur que
+ * getPendingPlatformOrderedEans/getSupplierOrders) : toute commande VALIDÉE (statut 2+, jamais "en
+ * préparation") qui ne porte PAS ce marqueur a été créée et validée hors plateforme, directement sur
+ * le POS. Lecture RPOS directe, aucune table locale à jour (contrairement à getValidatedOrders qui
+ * part de ProposalOrder) — ces commandes n'ont justement aucune trace côté plateforme.
  */
 async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
   if (!posId) return { found: false, status: 'not_found', message: 'Serveur RPOS introuvable pour ce magasin.' };
@@ -1304,19 +1344,35 @@ async function getPosOnlyValidatedOrders(posId, shopId, { days = 1 } = {}) {
     return !isPlatformOrder && isValidated && isInRange;
   });
 
-  const orders = posOnly.map((o) => ({
-    reference: o.reference,
-    orderDate: o.date || null,
-    deliveryDate: o.delivery_date || null,
-    validationDate: o.validation_date || null,
-    status: o.status_display || null,
-    supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
-    createdBy: o.created_by || null,
-    validatedBy: o.validated_by || null,
+  // Détail des lignes (articles/quantités/réception) ajouté seulement sous POS_ONLY_ORDERS_DETAIL_LIMIT
+  // commandes — jamais un échec RPOS sur UNE commande qui ferait disparaître les autres, chaque
+  // échec reste local à sa commande (articlesError explicite plutôt qu'une liste vide trompeuse).
+  const includeDetail = posOnly.length <= POS_ONLY_ORDERS_DETAIL_LIMIT;
+  const orders = await Promise.all(posOnly.map(async (o) => {
+    const base = {
+      reference: o.reference,
+      orderDate: o.date || null,
+      deliveryDate: o.delivery_date || null,
+      validationDate: o.validation_date || null,
+      status: o.status_display || null,
+      supplier: o.supplier ? { name: o.supplier.name, code: o.supplier.code } : null,
+      createdBy: o.created_by || null,
+      validatedBy: o.validated_by || null,
+    };
+    if (!includeDetail) return base;
+    try {
+      base.articles = await getOrderLinesDetail(posId, shopId, o.id);
+    } catch (err) {
+      base.articlesError = `Détail des articles indisponible pour cette commande : ${err.message}`;
+    }
+    return base;
   }));
 
   return {
     found: true, days, count: orders.length, orders,
+    articlesDetailOmitted: !includeDetail
+      ? `Détail des articles omis : ${posOnly.length} commandes sur cette période dépassent le seuil de ${POS_ONLY_ORDERS_DETAIL_LIMIT} pour ce calcul — réduis la période (days) pour l'obtenir.`
+      : undefined,
     source: 'rpos_live', status: 'success',
     isNormalNegative: orders.length === 0,
     message: orders.length === 0 ? 'Aucune commande validée directement sur le POS (hors plateforme) sur cette période.' : undefined,
