@@ -259,6 +259,39 @@ async function searchProductsByLabel(posId, shopId, query, { limit = 10 } = {}) 
 }
 
 /**
+ * Tous les articles actuellement en promotion d'un magasin (demande d'évolution du 15/10/2026,
+ * "Afficher la liste des produits en promotion" — jusqu'ici l'utilisateur devait chercher chaque
+ * article un par un par nom/EAN, aucun moyen de lister globalement les promos). `has_promo_price`
+ * confirmé par l'utilisateur comme le vrai filtre serveur (trouvé dans l'interface admin RPOS elle-
+ * même, "Avec prix promo") — contrairement à `has_promo`/`is_promotion`/`promo_price__isnull` testés
+ * en amont, qui sont tous silencieusement ignorés par RPOS et renvoient le catalogue entier non
+ * filtré (68981 articles sur le magasin de test, piège déjà documenté sur d'autres endpoints de ce
+ * fichier). Pagination complète (comme getAllEndOfLifeProducts) : un magasin peut avoir plus de
+ * `pageSize` articles en promo à la fois, jamais tronquer silencieusement la liste.
+ */
+async function getPromotionalProducts(posId, shopId, { pageSize = 250 } = {}) {
+  let page = 1;
+  let allResults = [];
+  let total = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await rposGet(posId, '/api/product/', {
+      shop: shopId,
+      has_promo_price: 'true',
+      is_deleted: 'false',
+      page_size: pageSize,
+      page,
+      fields: 'ean,label_1,label_2,selling_price,promo_price,stock,department',
+    });
+    total = data.count || 0;
+    allResults = allResults.concat(data.results || []);
+    if (!data.next_page) break;
+    page = data.next_page;
+  }
+  return { count: total, results: allResults };
+}
+
+/**
  * Résout le "rayon générique" d'un code de vente sans article catalogué (demande du 21/09/2026 :
  * "il y a des générique avec code et d'autre non... il faut faire la différence entre Code article
  * saisi et Code article") — un article générique (vente au poids/valeur libre, ex: "GENERIQUE
@@ -1372,6 +1405,7 @@ module.exports = {
   getShops,
   getProductByEan,
   searchProductsByLabel,
+  getPromotionalProducts,
   getGenericArticleDepartment,
   getPriceChangeHistory,
   getSupplierByCode,

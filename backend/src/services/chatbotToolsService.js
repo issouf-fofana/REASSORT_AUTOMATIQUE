@@ -1731,6 +1731,34 @@ async function searchArticlesByName(posId, shopId, query) {
 }
 
 /**
+ * getPromotionalProducts(posId, shopId) — tous les articles actuellement en promotion d'un magasin
+ * (demande d'évolution du 15/10/2026 : "afficher la liste des produits en promotion... sans avoir à
+ * rechercher chaque article individuellement"). Repose sur rpos.getPromotionalProducts, qui utilise
+ * le filtre serveur has_promo_price (trouvé par l'utilisateur dans l'interface admin RPOS elle-même,
+ * "Avec prix promo") — contrairement aux autres variantes testées avant lui (has_promo,
+ * is_promotion...), silencieusement ignorées par RPOS. Volontairement PAS limité à 10 résultats
+ * comme searchArticlesByName (qui cible UN article précis) : une vraie liste globale de promos a
+ * besoin de tout montrer, pagination complète déjà gérée côté rposClient.
+ */
+async function getPromotionalProducts(posId, shopId) {
+  const { count, results } = await rpos.getPromotionalProducts(posId, shopId);
+  if (!results.length) return { found: true, count: 0, isNormalNegative: true, message: 'Aucun article actuellement en promotion dans ce magasin.' };
+  return {
+    found: true,
+    count,
+    products: results.map((p) => ({
+      ean: p.ean,
+      label: p.label_1,
+      label2: p.label_2 || null,
+      sellingPrice: toNum(p.selling_price),
+      promoPrice: toNum(p.promo_price),
+      stock: toNum(p.stock),
+      department: p.department ? { name: p.department.name, code: p.department.code } : null,
+    })),
+  };
+}
+
+/**
  * getArticleDetails(posId, shopId, ean) — fiche complète d'un article en direct depuis RPOS
  * (demande du 15/09/2026 : un admin doit pouvoir demander "où se trouve cet article", "quel est
  * son prix actuel", "a-t-il une promo" et toute autre info produit). Distinct de getArticleStock
@@ -2519,6 +2547,7 @@ module.exports = {
   getSilentShops,
   getArticleDetails,
   searchArticlesByName,
+  getPromotionalProducts,
   getArticlesByGisement,
   getTopGisements,
   getPriceChangeHistory,

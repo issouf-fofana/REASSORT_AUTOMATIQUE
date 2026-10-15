@@ -21,7 +21,7 @@ const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 // aiPermissionsService.TOOL_CAPABILITY (sans getStoreStock, jamais une cible directe de règle —
 // c'est un repli interne de getArticleStock sans EAN, pas une intention détectable par mot-clé).
 const VALID_INTENT_TOOLS = new Set([
-  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
+  'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getPromotionalProducts', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
   'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
@@ -710,6 +710,7 @@ const TOOL_CATALOG = [
   { name: 'getLastSoldArticle', description: 'Le DERNIER article vendu dans le magasin, tous articles confondus (ex: "quel est le dernier article vendu ?", "qu\'est-ce qui vient d\'être vendu ?") — jamais pour un article précis, utiliser getArticleDetails/getSalesHistory dans ce cas.', params: {} },
   { name: 'getArticleDetails', description: 'Fiche complète d\'un article précis : emplacement/rayon, prix actuel, promo en cours, fournisseur.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'searchArticlesByName', description: 'Recherche un ou plusieurs articles par nom/libellé partiel (ex: "codys", "coca cola") quand aucun code EAN n\'est identifiable dans la question — utiliser PLUTÔT que getArticleDetails avec tool: null dans ce cas précis.', params: { query: 'nom ou libellé partiel de l\'article, OBLIGATOIRE' } },
+  { name: 'getPromotionalProducts', description: 'Liste tous les articles actuellement en promotion dans le magasin (prix promo actif), sans recherche par nom. À utiliser pour "quels articles sont en promo", "liste des produits en promotion".', params: {} },
   { name: 'getArticlesByGisement', description: 'Liste tous les articles rangés dans un gisement précis (position physique de stockage en magasin, ex: "PETITS ELECTRO-MENAGERS", "ACCESSOIRES DE CUISINE") — à ne pas confondre avec le rayon/département (classification produit). Utile pour "quels articles sont dans tel gisement", "tops ventes par gisement/emplacement".', params: { gisement: 'nom ou code approximatif du gisement recherché, OBLIGATOIRE' } },
   { name: 'getTopGisements', description: 'Classement des gisements (positions physiques de stockage) par chiffre d\'affaires généré — utile quand la question porte sur les gisements SANS en nommer un précis (ex: "top des gisements", "quels gisements vendent le plus").', params: { days: 'nombre de jours de la période, optionnel (défaut 30)' } },
   { name: 'getPriceChangeHistory', description: 'Historique des changements de prix (dont mises en promo) d\'un article précis.', params: { ean: 'code EAN article, OBLIGATOIRE' } },
@@ -1080,7 +1081,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // "le prix de vodka dans le mag 035" ignorait complètement le magasin ciblé, la recherche portait
   // toujours sur le magasin de la session en cours — même classe de bug déjà corrigée pour
   // getArticleStock le 29/09/2026, jamais étendue à la recherche par nom/EAN).
-  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getArticleDetails', 'searchArticlesByName']);
+  const TARGETABLE_SHOP_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getCurrentProposal', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getArticleDetails', 'searchArticlesByName', 'getPromotionalProducts']);
   let effectiveShopId = rposShopId;
   // effectivePosId (29/09/2026, ajouté avec getArticleStock) : chaque magasin a son propre serveur
   // RPOS (posId), pas nécessairement celui de la session courante — un repli RPOS sur le magasin
@@ -1161,6 +1162,9 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         if (!articleNameQuery) return { toolName, toolResult: { found: false, message: 'Précisez le nom ou le code EAN de l\'article recherché.' } };
         return resolveArticleByName(effectivePosId, effectiveShopId, articleNameQuery, user);
+      case 'getPromotionalProducts':
+        if (!effectivePosId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
+        return { toolName, toolResult: await tools.getPromotionalProducts(effectivePosId, effectiveShopId) };
       case 'getArticlesByGisement':
         if (!posId) return { toolName, toolResult: { found: false, message: 'Serveur RPOS introuvable pour ce magasin.' } };
         // Aucun nom de gisement précisé ("chaque gisement", "mes gisements") : bascule sur un

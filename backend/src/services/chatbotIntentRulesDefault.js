@@ -42,6 +42,11 @@ const FALLBACK_INTENT_RULES = [
   // par nom : "quel est le prix de l'article codys ?" ne matchait aucun mot-clé existant — seuls
   // "prix de vente"/"prix actuel"/"quel prix" l'étaient — donc tombait sur le filet LLM générique au
   // lieu de cette règle déterministe, qui seule sait basculer vers searchArticlesByName/EAN manquant.
+  // getPromotionalProducts ajouté le 15/10/2026 (demande d'évolution d'un DIRECTOR, magasin 414 :
+  // "afficher la liste des produits en promotion" sans recherche article par article). Placée AVANT
+  // la règle générique getArticleDetails ci-dessous, qui matche aussi "promotion"/"en promo" mais pour
+  // UN article précis — même pattern de priorité spécifique-avant-générique que getPosOnlyValidatedOrders.
+  { keywords: ['produits en promotion', 'produits en promo', 'articles en promotion', 'articles en promo', 'liste des promo', 'liste de promo', 'quels articles sont en promo', 'quels produits sont en promo', 'tous les articles en promo', 'tous les produits en promo', 'promotions en cours', 'promotions du magasin'], tool: 'getPromotionalProducts' },
   { keywords: ['où se trouve', 'ou se trouve', 'emplacement', 'où est', 'ou est', 'quel rayon', 'dans quel rayon', 'adresse rayon', 'prix actuel', 'prix de vente', 'prix promo', 'en promo', 'promotion', 'quel prix', 'le prix de', 'prix de l\'article', 'prix de larticle', 'combien coûte', 'combien coute', 'fiche article', 'fiche produit', 'fiche complète', 'fiche complete', 'détails de l\'article', 'details de larticle', 'infos article', 'informations sur l\'article', 'toutes les informations', 'tout savoir sur', 'caractéristiques', 'caracteristiques', 'fournisseur de'], tool: 'getArticleDetails' },
   // "les chiffres du jour"/"chiffres d'aujourd'hui" ajoutés le 06/10/2026 (bug trouvé en conversation
   // réelle : une relance naturelle après une salutation, "je veux les chiffres du jour", ne matchait

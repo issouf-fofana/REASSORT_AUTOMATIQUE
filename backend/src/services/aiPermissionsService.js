@@ -41,6 +41,7 @@ const TOOL_CAPABILITY = {
   getRevenueAllShops: 'revenueShop', // même capacité que le CA d'un seul magasin — la restriction ADMIN/SUPERVISOR est appliquée dans chatbotService.js, pas ici
   getArticleDetails: 'articleDetails',
   searchArticlesByName: 'articleDetails',
+  getPromotionalProducts: 'articleDetails',
   getArticlesByGisement: 'articleDetails',
   getTopGisements: 'articleDetails',
   getPriceChangeHistory: 'articleDetails',
