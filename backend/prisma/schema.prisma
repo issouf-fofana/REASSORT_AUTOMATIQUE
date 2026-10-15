@@ -1180,6 +1180,65 @@ model SalesSyncState {
   @@map("sales_sync_state")
 }
 
+// Mouvements de stock RPOS (/api/stock_move/) synchronisés localement (demande du 15/10/2026 :
+// le chatbot interrogeait RPOS en direct à chaque question "mouvement de stock"/"pourquoi le stock
+// a bougé", 4-5s mesurées même réseau normal, contre <100ms pour les autres outils déjà basés sur
+// une table locale comme SalesLine). Même principe que SalesLine/SalesSyncState : un job
+// (stockMoveSyncJob.js) synchronise incrémentalement, stockMoveAnalysisService lit la base locale
+// en priorité, RPOS en direct seulement en repli si la fenêtre demandée dépasse ce qui est
+// synchronisé.
+//
+// Contrairement à SalesLine (aucun identifiant unique renvoyé par RPOS sur /api/product_line/,
+// nécessitant une dedupKey composite avec gestion de collision), /api/stock_move/ renvoie un VRAI
+// id UUID par mouvement (confirmé par test direct le 15/10/2026) — dédup triviale, @@unique direct
+// sur rposMoveId, aucun schéma de collision nécessaire.
+//
+// isScrap/recording sont résolus UNE FOIS au moment de la synchro (via le référentiel
+// getStockMoveTypes de rposClient.js, déjà caché 1h côté RPOS) et stockés tels quels — jamais
+// recalculés à la lecture, pour qu'une lecture locale ne dépende d'aucun appel RPOS, même pour ce
+// référentiel.
+model StockMove {
+  id String @id @default(cuid())
+
+  rposMoveId String @unique @map("rpos_move_id") // id RPOS du mouvement lui-même (dédup native)
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+
+  ean   String
+  label String?
+  date  DateTime // date réelle du mouvement côté RPOS (pas la date de synchronisation)
+
+  typeLabel        String  @map("type_label") // stock_move_type_label RPOS (ex: "Vente", "Casse", "Arrivage")
+  recording        String? // 'Entrée' | 'Sortie' | 'Aucune' | 'Initialisation' | null si type inconnu du référentiel
+  isScrap          Boolean @default(false) @map("is_scrap")
+  quantity         Float
+  previousQuantity Float?  @map("previous_quantity")
+
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  // Les deux filtres systématiquement utilisés côté métier : période seule (vue magasin) et
+  // période + article (historique/explication d'un article donné, cf. getStockMoveSummary).
+  @@index([rposShopId, date])
+  @@index([rposShopId, ean, date])
+  @@map("stock_moves")
+}
+
+// Dernière date synchronisée par magasin pour les mouvements de stock (pas par mouvement), même
+// principe que SalesSyncState.
+model StockMoveSyncState {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @unique @map("rpos_shop_id")
+
+  lastSyncedUntil DateTime? @map("last_synced_until")
+  lastSyncStatus  String?   @map("last_sync_status") // 'ok' | 'error'
+  lastSyncError   String?   @map("last_sync_error")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("stock_move_sync_state")
+}
+
 // Enregistrement EXPLICITE des périodes disponibles/manquantes, jour par jour (demande du
 // 21/09/2026 : "il faut également enregistrer dans la base les périodes pour lesquelles les
 // données sont disponibles ou manquantes... si les ventes du 10/09/2026 sont récupérées seulement

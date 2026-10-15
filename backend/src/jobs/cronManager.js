@@ -5,6 +5,7 @@ const { runReceptionSync } = require('./receptionSyncJob');
 const { runSalesSync } = require('./salesSyncJob');
 const { runSalesDailyRecap } = require('./salesDailyRecapJob');
 const { runProductEndOfLifeSync } = require('./productEndOfLifeSyncJob');
+const { runStockMoveSync } = require('./stockMoveSyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -20,6 +21,7 @@ let currentReceptionSyncTask = null;
 let currentSalesSyncTask = null;
 let currentSalesDailyRecapTask = null;
 let currentProductEolSyncTask = null;
+let currentStockMoveSyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -36,6 +38,7 @@ const receptionSyncLock = createJobLock('Synchronisation des réceptions');
 const salesSyncLock = createJobLock('Synchronisation des ventes');
 const salesDailyRecapLock = createJobLock('Récap quotidien de couverture des ventes');
 const productEolSyncLock = createJobLock('Synchronisation des DLV actives');
+const stockMoveSyncLock = createJobLock('Synchronisation des mouvements de stock');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -195,6 +198,35 @@ async function startOrRestartProductEolSyncJob() {
   });
 
   console.log(`⏰ Synchronisation des DLV planifiée: ${cronSchedule}`);
+}
+
+/** (Re)programme la synchronisation locale des mouvements de stock (stockMoveSyncJob.js). */
+async function startOrRestartStockMoveSyncJob() {
+  if (currentStockMoveSyncTask) {
+    currentStockMoveSyncTask.stop();
+    currentStockMoveSyncTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCK_MOVE_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation des mouvements de stock désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCK_MOVE_SYNC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), synchronisation des mouvements de stock non planifiée`);
+    return;
+  }
+
+  currentStockMoveSyncTask = cron.schedule(cronSchedule, () => {
+    stockMoveSyncLock(async () => {
+      console.log('[cron] Démarrage de la synchronisation des mouvements de stock...');
+      await trackJobRun('stockMoveSync', runStockMoveSync);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Synchronisation des mouvements de stock planifiée: ${cronSchedule}`);
 }
 
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
@@ -410,6 +442,7 @@ module.exports = {
   startOrRestartSalesSyncJob,
   startOrRestartSalesDailyRecapJob,
   startOrRestartProductEolSyncJob,
+  startOrRestartStockMoveSyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

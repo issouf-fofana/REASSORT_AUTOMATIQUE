@@ -79,9 +79,16 @@ function sleep(ms) {
 // en cas de coupure réseau, aggravé sur les outils qui enchaînent PLUSIEURS appels RPOS séquentiels
 // pour une seule question (ex: getPosOnlyValidatedOrders, un appel par commande pour le détail
 // articles) : 15s × 2 tentatives (cf. retry réseau ci-dessous) × N commandes pouvait dépasser la
-// minute avant le premier message d'erreur. 6s reste largement suffisant pour un réseau RPOS normal
-// tout en divisant par ~2.5 le pire cas hors-réseau.
-const RPOS_REQUEST_TIMEOUT_MS = 6000;
+// minute avant le premier message d'erreur.
+//
+// Remonté à 10s le 15/10/2026 : 6s s'est révélé TROP court pour un cas réel — le magasin 414
+// (pos16), à fort volume (4975 mouvements de stock sur ~24h mesurés le 15/10/2026), met
+// systématiquement ~8s à répondre sur /api/stock_move/ même sans aucun problème réseau (confirmé
+// par test direct avec un timeout élargi à 30s : réponse HTTP 200 en 7.9s). Avec 6s, ce magasin
+// échouait à CHAQUE synchro de stockMoveSyncJob.js, pris à tort pour une coupure réseau. 10s reste
+// un compromis : toujours 1.5× plus rapide que les 15s d'origine en cas de vraie coupure réseau,
+// tout en couvrant les requêtes légitimement lentes sur un gros volume.
+const RPOS_REQUEST_TIMEOUT_MS = 10000;
 
 /**
  * RPOS retourne parfois des 502/503 transitoires sous charge, sans lien avec la validité de la
@@ -384,6 +391,41 @@ async function getStockMovesForProduct(posId, shopId, ean, dateStart, dateEnd, {
       previousQuantity: r.previous_quantity != null ? Number(r.previous_quantity) : null,
     };
   });
+}
+
+/**
+ * Une page de mouvements de stock pour TOUT un magasin (pas un article précis) — utilisée par
+ * stockMoveSyncJob.js pour synchroniser localement, sans passer par getStockMovesForProduct
+ * (toujours scopée à un EAN). Confirmé par test direct le 15/10/2026 : omettre product__ean renvoie
+ * bien TOUS les mouvements du magasin sur la période (shop + date_0/date_1 seuls), avec
+ * product_ean/product_label_1 déjà inclus par ligne — aucun appel supplémentaire nécessaire pour les
+ * résoudre, contrairement aux commandes fournisseur (getOrderLinesDetail) qui doivent résoudre le
+ * libellé article par un appel getProductByEan séparé. Pagination standard confirmée identique à
+ * getAllEndOfLifeProducts (page/page_size/next_page/final_page).
+ */
+async function getStockMovesPageForShop(posId, shopId, dateStart, dateEnd, page, pageSize = 250) {
+  const [data, typesByLabel] = await Promise.all([
+    rposGet(posId, '/api/stock_move/', {
+      shop: shopId,
+      date_0: dateStart,
+      date_1: dateEnd,
+      page_size: pageSize,
+      page,
+      ordering: '-date',
+    }),
+    getStockMoveTypes(posId).catch(() => new Map()), // référentiel best-effort : un échec n'empêche pas de synchroniser les mouvements bruts
+  ]);
+
+  const results = (data.results || []).map((r) => {
+    const typeInfo = typesByLabel.get(r.stock_move_type_label) || null;
+    return {
+      ...r,
+      _recording: typeInfo ? typeInfo.recording : null,
+      _isScrap: typeInfo ? typeInfo.isScrap : false,
+    };
+  });
+
+  return { results, count: data.count || 0, nextPage: data.next_page || null };
 }
 
 async function getProductsByEans(posId, shopId, eans) {
@@ -1360,6 +1402,7 @@ module.exports = {
   getMonthlySalesCount,
   getStockMoveTypes,
   getStockMovesForProduct,
+  getStockMovesPageForShop,
   getShopRayons,
   listGisements,
   getArticlesByGisement,

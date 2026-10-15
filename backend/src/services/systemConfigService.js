@@ -23,6 +23,10 @@ const KEYS = {
   // stock qui a basculé sur un EAN DLV distinct doit être retiré du stock "normal" pris en compte
   // pour calculer la quantité à recommander de l'article d'origine (proposalService.js).
   PRODUCT_EOL_SYNC_CRON: 'PRODUCT_EOL_SYNC_CRON',
+  // Synchronisation locale des mouvements de stock (/api/stock_move/, demande du 15/10/2026 : le
+  // chatbot interrogeait RPOS en direct à chaque question "mouvement de stock", 4-5s mesurées même
+  // réseau normal) — même principe que SALES_SYNC_CRON, table StockMove alimentée incrémentalement.
+  STOCK_MOVE_SYNC_CRON: 'STOCK_MOVE_SYNC_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -104,6 +108,7 @@ const KEYS = {
   SALES_SYNC_SHOP_IDS: 'SALES_SYNC_SHOP_IDS',
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   PRODUCT_EOL_SYNC_ENABLED: 'PRODUCT_EOL_SYNC_ENABLED',
+  STOCK_MOVE_SYNC_ENABLED: 'STOCK_MOVE_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -209,6 +214,11 @@ const ENV_FALLBACK = {
   // Toutes les heures par défaut : une DLV créée manuellement par le personnel n'a pas besoin
   // d'être reflétée à la minute près dans le calcul de réassort (généré au plus une fois par jour).
   [KEYS.PRODUCT_EOL_SYNC_CRON]: () => process.env.PRODUCT_EOL_SYNC_CRON || '15 * * * *',
+  // Toutes les 20 minutes par défaut : volume mesuré élevé (4651 mouvements/jour sur un seul
+  // magasin lors du test de validation le 15/10/2026), synchro incrémentale (comme SALES_SYNC_CRON)
+  // donc chaque passage reste rapide — intervalle un peu plus large que les ventes (15 min) car
+  // cette donnée est moins urgente (explicative, pas utilisée pour la génération de proposition).
+  [KEYS.STOCK_MOVE_SYNC_CRON]: () => process.env.STOCK_MOVE_SYNC_CRON || '*/20 * * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -308,6 +318,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.SALES_DAILY_RECAP_ENABLED]: () => 'true',
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.PRODUCT_EOL_SYNC_ENABLED]: () => 'true',
+  [KEYS.STOCK_MOVE_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',

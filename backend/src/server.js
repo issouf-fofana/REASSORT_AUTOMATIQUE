@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -224,6 +224,8 @@ async function start() {
     await startOrRestartSalesDailyRecapJob();
     // Synchronisation locale des DLV actives (horaire configurable, toutes les heures par défaut).
     await startOrRestartProductEolSyncJob();
+    // Synchronisation locale des mouvements de stock RPOS (horaire configurable, toutes les 20 min par défaut).
+    await startOrRestartStockMoveSyncJob();
     // Synchronisation locale de la liste des magasins RPOS (horaire configurable).
     await startOrRestartShopsSyncJob();
     // Réajustement quotidien continu des plans hebdomadaires non encore validés (horaire configurable).
