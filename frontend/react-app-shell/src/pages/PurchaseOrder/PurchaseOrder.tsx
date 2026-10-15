@@ -20,6 +20,14 @@ interface ExcludedItem {
 export function PurchaseOrder() {
   const [user] = useState(() => window.reassortGetUser());
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
+  // Génération de proposition réservée ADMIN/SUPERVISOR (demande du 15/10/2026 : "le magasin soit
+  // meme le directeur ne doit pas avoir access a generé un enouvelle propostion... mais il peux
+  // lencé une analyse et voir le resultat") — un rôle magasin (DIRECTOR, STORE, DEPARTMENT_HEAD,
+  // SHELF_STOCKER) ne doit voir ni "Générer une nouvelle proposition", ni "Forcer une nouvelle
+  // génération", ni "Générer à partir de cette analyse". Backend protégé en miroir
+  // (requireAdminOrSupervisor sur /proposal/generate et /proposal/generate-from-analysis,
+  // routes/reassort/proposals.js) — jamais une restriction purement côté affichage.
+  const canGenerate = !!user && (user.role === 'ADMIN' || user.role === 'SUPERVISOR');
 
   const shopSelectRef = useRef<HTMLSelectElement>(null);
   const [shops, setShops] = useState<Shop[]>([]);
@@ -796,6 +804,7 @@ export function PurchaseOrder() {
                 shopName={(isSingleShop ? user?.rposShopName : selectedShop?.name) || ''}
                 shopQueryParam={shopQueryParam()}
                 hasPendingProposal={!!proposal}
+                canGenerate={canGenerate}
                 onDone={loadPendingProposal}
               />
             </div>

@@ -67,6 +67,7 @@ export function GenerationFlow({
   shopName,
   shopQueryParam,
   hasPendingProposal,
+  canGenerate,
   onDone,
 }: {
   shopId: string;
@@ -74,6 +75,10 @@ export function GenerationFlow({
   shopName: string;
   shopQueryParam: string;
   hasPendingProposal: boolean;
+  // Génération réservée ADMIN/SUPERVISOR (demande du 15/10/2026, cf. commentaire PurchaseOrder.tsx)
+  // — false masque "Générer une nouvelle proposition"/"Forcer une nouvelle génération"/"Générer à
+  // partir de cette analyse", jamais "Lancer une nouvelle analyse" (lecture seule, toujours visible).
+  canGenerate: boolean;
   onDone: () => void;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -314,12 +319,16 @@ export function GenerationFlow({
 
   return (
     <>
-      <button className="btn btn-sm reassort-btn-navy" disabled={!!runId} onClick={() => openConfirm(false)}>
-        <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Générer une nouvelle proposition
-      </button>
-      <button className="btn btn-sm reassort-btn-amber-outline" disabled={!!runId} onClick={() => openConfirm(true)}>
-        <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Forcer une nouvelle génération
-      </button>
+      {canGenerate && (
+        <>
+          <button className="btn btn-sm reassort-btn-navy" disabled={!!runId} onClick={() => openConfirm(false)}>
+            <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Générer une nouvelle proposition
+          </button>
+          <button className="btn btn-sm reassort-btn-amber-outline" disabled={!!runId} onClick={() => openConfirm(true)}>
+            <iconify-icon icon="solar:refresh-circle-bold-duotone" className="align-middle"></iconify-icon> Forcer une nouvelle génération
+          </button>
+        </>
+      )}
       <button className="btn btn-sm reassort-btn-navy-outline" disabled={!!runId} onClick={launchAnalyzeOnly}>
         <iconify-icon icon="solar:chart-2-bold-duotone" className="align-middle"></iconify-icon> Lancer une nouvelle analyse
       </button>
@@ -332,9 +341,11 @@ export function GenerationFlow({
             avec ventes, période du {new Date(analysisStatus.periodStart).toLocaleDateString('fr-FR')} au{' '}
             {new Date(analysisStatus.periodEnd).toLocaleDateString('fr-FR')}).
           </span>
-          <button type="button" className="btn btn-sm reassort-btn-navy-outline" disabled={!!runId} onClick={launchGenerateFromAnalysis}>
-            Générer à partir de cette analyse
-          </button>
+          {canGenerate && (
+            <button type="button" className="btn btn-sm reassort-btn-navy-outline" disabled={!!runId} onClick={launchGenerateFromAnalysis}>
+              Générer à partir de cette analyse
+            </button>
+          )}
         </div>
       )}
 

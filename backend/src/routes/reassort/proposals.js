@@ -27,7 +27,7 @@ const { filterProposalLinesForUser, DEPARTMENT_SCOPED_ROLES } = require('../../s
 const { mapWithConcurrency } = require('../../utils/concurrency');
 const orderAnomalyService = require('../../services/orderAnomalyService');
 const chatbotTools = require('../../services/chatbotToolsService');
-const { requireAdmin } = require('../../middleware/auth');
+const { requireAdmin, requireAdminOrSupervisor } = require('../../middleware/auth');
 
 router.get('/proposal', async (req, res) => {
   try {
@@ -184,7 +184,14 @@ router.get('/proposal/generate/preview-period', async (req, res) => {
 // bloquer la requête HTTP jusqu'à la fin (jusqu'à plusieurs minutes sur un gros magasin avec appel
 // RPOS) — même principe que /proposal/:id/validate, pour permettre une vraie barre de progression
 // (étape en cours, X/Y articles traités, dernier article traité) plutôt qu'un déroulé simulé.
-router.post('/proposal/generate', async (req, res) => {
+// Réservé ADMIN/SUPERVISOR (demande du 15/10/2026 : "le magasin soit meme le directeur ne doit pas
+// avoir access a generé un enouvelle propostion... mais il peux lencé une analyse et voir le
+// resultat") — un rôle magasin (DIRECTOR, STORE, DEPARTMENT_HEAD, SHELF_STOCKER) ne doit pouvoir que
+// consulter/analyser, jamais déclencher une génération qui écrit une nouvelle proposition. Même
+// restriction sur /proposal/generate-from-analysis et le "force" ci-dessous (même route, juste un
+// flag différent côté frontend) — /proposal/analyze (lecture seule, aucune proposition écrite) reste
+// ouvert à tous les rôles.
+router.post('/proposal/generate', requireAdminOrSupervisor, async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     const posId = resolvePosId(req);
@@ -418,7 +425,8 @@ router.get('/proposal/analyze/detail', async (req, res) => {
 // l'analyse déjà sauvegardée pour ce magasin (rapide : ne recharge jamais les ventes). Permet de
 // lancer plusieurs générations différentes (ex: avec des `limit` différents) à partir de la même
 // analyse sans la refaire.
-router.post('/proposal/generate-from-analysis', async (req, res) => {
+// Réservé ADMIN/SUPERVISOR, même raison que /proposal/generate ci-dessus.
+router.post('/proposal/generate-from-analysis', requireAdminOrSupervisor, async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     const posId = resolvePosId(req);
