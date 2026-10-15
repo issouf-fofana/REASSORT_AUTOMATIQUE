@@ -314,6 +314,24 @@ function recordAiUsage({ providerKeyId, provider, model, promptTokens, completio
   }).catch((err) => console.error(`[aiForecastService] Échec d'enregistrement d'usage tokens (${provider}) : ${err.message}`));
 }
 
+// gemini-3.6-flash a le "thinking" (raisonnement interne avant de répondre) actif par défaut — plus
+// lent que l'ancien 2.0-flash (jusqu'à ~52s pour un batch d'articles, cf. commentaire
+// LLM_CALL_TIMEOUT_MS ci-dessous), mais surtout perceptible sur le chatbot où même une question
+// triviale ("bonjour") attendait plusieurs secondes de raisonnement inutile avant de répondre (signalé
+// le 15/10/2026 : "meme un simple bonjour sa dur", mesuré à 4.6s dont 4.5s de purs appel LLM, routage
+// interne lui-même <200ms). Désactivé (thinkingBudget: 0) pour tout contexte "chatbot-*" — ces prompts
+// sont déjà très directifs (détection d'intention, résolution de date, réponse formatée à partir de
+// données déjà extraites) et n'ont jamais eu besoin d'un raisonnement multi-étapes pour rester
+// corrects ; laissé actif pour les autres contextes (prévisions/ajustement IA à la génération, plus
+// complexes et moins sensibles à la latence perçue par un utilisateur qui attend en direct).
+function geminiGenerationConfig(context) {
+  const config = { temperature: 0.2 };
+  if (typeof context === 'string' && context.startsWith('chatbot-')) {
+    config.thinkingConfig = { thinkingBudget: 0 };
+  }
+  return config;
+}
+
 async function callGemini(apiKey, model, prompt, usageCtx) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:generateContent?key=${apiKey}`;
   const res = await fetchWithTimeout(url, {
@@ -321,7 +339,7 @@ async function callGemini(apiKey, model, prompt, usageCtx) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.2 },
+      generationConfig: geminiGenerationConfig(usageCtx?.context),
     }),
   });
   if (!res.ok) {
@@ -477,7 +495,7 @@ async function streamGemini(apiKey, model, prompt, onChunk, usageCtx) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.2 },
+      generationConfig: geminiGenerationConfig(usageCtx?.context),
     }),
   });
   if (!res.ok) {
