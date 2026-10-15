@@ -1062,22 +1062,37 @@ async function getParetoArticles(posId, rposShopId, { thresholdPct, department, 
     }
   }
 
-  const lines = await prisma.salesLine.findMany({
+  // Agrégation par EAN faite en base (groupBy + SUM), pas en mémoire côté Node — bug de latence
+  // trouvé en test réel le 15/10/2026 ("quel rayon vend le mieux" : 35-44s en prod sur la période
+  // par défaut du magasin, souvent 1 an) : l'ancienne version chargeait TOUTES les lignes de vente
+  // de la période (45 370 lignes mesurées sur 1 an pour un seul magasin de test, bien plus en prod
+  // réelle) pour les sommer par EAN en JS. Un simple SUM groupé en SQL fait ce travail nativement,
+  // bien plus vite (445ms mesurés contre 1.3s+ rien que pour le transfert des lignes, sans compter
+  // la boucle JS ensuite) — l'écart se creuse encore plus sur un vrai volume de prod.
+  const grouped = await prisma.salesLine.groupBy({
+    by: ['ean'],
     where: { rposShopId, ...(eanFilter ? { ean: { in: eanFilter } } : {}), date: { gte: dateStart, lte: dateEnd } },
-    select: { ean: true, label: true, revenueExclTax: true },
+    _sum: { revenueExclTax: true },
   });
-  if (!lines.length) return { found: false, message: `Aucune vente enregistrée sur la période résolue${department ? ` pour le rayon ${department}` : ''}.` };
+  if (!grouped.length) return { found: false, message: `Aucune vente enregistrée sur la période résolue${department ? ` pour le rayon ${department}` : ''}.` };
 
-  const byEan = new Map();
-  for (const line of lines) {
-    if (!byEan.has(line.ean)) byEan.set(line.ean, { ean: line.ean, label: line.label, revenue: 0 });
-    const entry = byEan.get(line.ean);
-    entry.revenue += line.revenueExclTax;
-    if (line.label) entry.label = line.label;
-  }
-
-  const articles = Array.from(byEan.values()).filter((a) => a.revenue > 0).sort((a, b) => b.revenue - a.revenue);
+  const articles = grouped
+    .map((g) => ({ ean: g.ean, label: null, revenue: g._sum.revenueExclTax || 0 }))
+    .filter((a) => a.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue);
   const totalRevenue = articles.reduce((s, a) => s + a.revenue, 0);
+
+  // Libellé résolu seulement pour les articles qui survivent au tri (jamais pour les milliers d'EAN
+  // à faible CA jamais présentés) — un seul findMany ciblé, bien moins coûteux que de porter le
+  // libellé sur chaque ligne de vente individuelle comme avant.
+  const topEans = articles.slice(0, 200).map((a) => a.ean);
+  const labelRows = await prisma.salesLine.findMany({
+    where: { rposShopId, ean: { in: topEans }, label: { not: null } },
+    select: { ean: true, label: true },
+    distinct: ['ean'],
+  });
+  const labelByEan = new Map(labelRows.map((r) => [r.ean, r.label]));
+  for (const art of articles) art.label = labelByEan.get(art.ean) || null;
 
   let cumulative = 0;
   const withinThreshold = [];
