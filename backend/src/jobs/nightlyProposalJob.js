@@ -172,7 +172,7 @@ async function runNightlyProposalGeneration() {
       return { shop, proposalsGenerated: stats.proposalsGenerated, ineligibleCount };
     } catch (error) {
       console.error(`[nightlyProposalJob] Échec pour ${shop.reference}:`, error.message);
-      return { shop, proposalsGenerated: 0, ineligibleCount: 0 };
+      return { shop, proposalsGenerated: 0, ineligibleCount: 0, error: error.message };
     }
   });
 
@@ -186,6 +186,21 @@ async function runNightlyProposalGeneration() {
   }
 
   console.log('[nightlyProposalJob] Terminé.');
+
+  // Bug trouvé le 16/10/2026 : chaque échec par magasin était capturé silencieusement ci-dessus
+  // (try/catch autour de generateAndSaveProposal), donc même si TOUS les magasins échouaient, cette
+  // fonction ne levait jamais d'exception — trackJobRun (jobHealthService.js) enregistrait "OK" dans
+  // Paramètres > Planification quel que soit le résultat réel par magasin. Un magasin resté sans
+  // nouvelle proposition toute une nuit n'était détectable qu'en ouvrant manuellement sa page, ou
+  // via l'email récapitulatif admin (notifyAdminsOfNightlySummary ci-dessus — mais pas reçu côté
+  // utilisateur lors de l'incident, donc aucune alerte visible nulle part). Désormais, si AU MOINS
+  // UN magasin a échoué avec une exception (pas juste 0 article proposé, ce qui est un résultat
+  // normal), le job lève pour que trackJobRun l'enregistre comme un échec réel et visible.
+  const failedShops = summaries.filter((s) => s.error);
+  if (failedShops.length > 0) {
+    const details = failedShops.map((s) => `${s.shop.reference} (${s.error})`).join(', ');
+    throw new Error(`${failedShops.length}/${summaries.length} magasin(s) en échec lors de la génération nocturne : ${details}`);
+  }
 }
 
 module.exports = { runNightlyProposalGeneration };
