@@ -201,7 +201,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             // Niveau 1 : Secteurs
             bySector === null ? (
               <div className="text-muted small">Chargement...</div>
-            ) : bySector.groups.length === 0 ? (
+            ) : !bySector.groups || bySector.groups.length === 0 ? (
               <div className="text-muted small py-3">{bySector.message || 'Aucune rupture en cours.'}</div>
             ) : (
               <div className="row g-3">
@@ -221,7 +221,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             // Niveau 2 : Rayons du secteur sélectionné
             byDepartment === null ? (
               <div className="text-muted small">Chargement...</div>
-            ) : byDepartment.groups.length === 0 ? (
+            ) : !byDepartment.groups || byDepartment.groups.length === 0 ? (
               <div className="text-muted small py-3">{byDepartment.message || 'Aucune rupture en cours pour ce secteur.'}</div>
             ) : (
               <div className="row g-3">

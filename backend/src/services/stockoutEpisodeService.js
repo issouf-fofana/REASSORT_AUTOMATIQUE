@@ -269,7 +269,7 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
 
   results.sort((a, b) => b.openCount - a.openCount);
 
-  if (!results.length) return { found: true, shopCount: 0, message: 'Aucun magasin avec une rupture détectée sur la période.' };
+  if (!results.length) return { found: true, shopCount: 0, shops: [], message: 'Aucun magasin avec une rupture détectée sur la période.' };
   return {
     found: true,
     shopCount: results.length,
@@ -298,7 +298,7 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
   ]);
 
   if (!openEpisodes.length && !resolvedEpisodes.length) {
-    return { found: true, groupCount: 0, message: noDataLabel || 'Aucune rupture détectée pour ce magasin sur la période.' };
+    return { found: true, groupCount: 0, groups: [], message: noDataLabel || 'Aucune rupture détectée pour ce magasin sur la période.' };
   }
 
   // Valeur null possible (épisode dont l'article n'a jamais été proposé, cf. diagnoseCause) —
