@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutsAllShopsView } from './StockoutsAllShopsView';
+import { StockoutsByDepartmentView } from './StockoutsByDepartmentView';
 import { EpisodeDetailModal } from './EpisodeDetailModal';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
@@ -54,10 +55,13 @@ export function Stockouts() {
   const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string } | null>(null);
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
 
-  // Onglets "Ce magasin" / "Tous les magasins" (spec rupture.md §2, demande explicite du 16/10/2026
-  // : "tout doit etre dans le dashbord des rupture pas l'autre" — même pattern que
-  // TableauDeBord.tsx, pas de page séparée pour la vue réseau).
-  const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
+  // Onglets "Ce magasin" / "Tous les magasins" / "Par rayon" (spec rupture.md §2 et §7, demande
+  // explicite du 16/10/2026 : "tout doit etre dans le dashbord des rupture pas l'autre" — même
+  // pattern que TableauDeBord.tsx, pas de page séparée pour ces vues).
+  const [activeTab, setActiveTab] = useState<'shop' | 'all' | 'department'>('shop');
+  // Filtre appliqué à la table "Ce magasin" après un clic dans "Par rayon" (drill-down) — purement
+  // côté client, summary.openEpisodes est déjà chargé en entier, pas de second appel API.
+  const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<StockoutSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +103,15 @@ export function Stockouts() {
     setActiveTab('shop');
   }
 
+  function handleSelectDepartment(department: string) {
+    setDepartmentFilter(department);
+    setActiveTab('shop');
+  }
+
+  const visibleEpisodes = departmentFilter
+    ? (summary?.openEpisodes || []).filter((e) => (e.department || 'Sans rayon') === departmentFilter)
+    : summary?.openEpisodes || [];
+
   return (
     <div className="container-fluid py-4">
       {/* Même style que TableauDeBord.tsx (reassort-tabs) — dupliqué ici car chaque page garde son
@@ -113,23 +126,30 @@ export function Stockouts() {
         <span className="text-muted small">Sans données entrepôt (Cyrus) — diagnostic simplifié</span>
       </div>
 
-      {!isSingleShop && (
-        <ul className="nav reassort-tabs mb-3">
-          <li className="nav-item">
-            <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
-              Ce magasin
-            </button>
-          </li>
+      <ul className="nav reassort-tabs mb-3">
+        <li className="nav-item">
+          <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
+            Ce magasin
+          </button>
+        </li>
+        {!isSingleShop && (
           <li className="nav-item">
             <button type="button" className={`nav-link${activeTab === 'all' ? ' active' : ''}`} onClick={() => setActiveTab('all')}>
               Tous les magasins
             </button>
           </li>
-        </ul>
-      )}
+        )}
+        <li className="nav-item">
+          <button type="button" className={`nav-link${activeTab === 'department' ? ' active' : ''}`} onClick={() => setActiveTab('department')}>
+            Par rayon
+          </button>
+        </li>
+      </ul>
 
       {activeTab === 'all' && !isSingleShop ? (
         <StockoutsAllShopsView onSelectShop={handleSelectShopFromNetwork} />
+      ) : activeTab === 'department' ? (
+        <StockoutsByDepartmentView shopQueryParam={shopQueryParam()} onSelectDepartment={handleSelectDepartment} />
       ) : (
       <div className="card">
         <div className="card-body">
@@ -154,6 +174,15 @@ export function Stockouts() {
                 </div>
               </div>
 
+              {departmentFilter && (
+                <div className="alert alert-light border d-flex align-items-center justify-content-between py-2 mb-3">
+                  <span className="small">Filtré sur le rayon <strong>{departmentFilter}</strong></span>
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setDepartmentFilter(null)}>
+                    Retirer le filtre
+                  </button>
+                </div>
+              )}
+
               <div className="table-responsive">
                 <table className="table align-middle mb-0 table-hover table-centered">
                   <thead className="bg-light-subtle">
@@ -167,14 +196,14 @@ export function Stockouts() {
                     </tr>
                   </thead>
                   <tbody>
-                    {summary.openEpisodes.length === 0 ? (
+                    {visibleEpisodes.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="text-center text-muted py-4">
-                          Aucune rupture en cours.
+                          {departmentFilter ? 'Aucune rupture en cours pour ce rayon.' : 'Aucune rupture en cours.'}
                         </td>
                       </tr>
                     ) : (
-                      summary.openEpisodes.map((e) => (
+                      visibleEpisodes.map((e) => (
                         <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedEpisodeId(e.id)}>
                           <td>{e.label || e.ean}</td>
                           <td>{e.department || '—'}</td>

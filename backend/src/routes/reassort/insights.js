@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops, getEpisodeDetail } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -319,6 +319,22 @@ router.get('/stockout-episodes/all-shops', requireAdminOrSupervisor, async (req,
   try {
     const shopIdFilter = await getAccessibleShopIds(req);
     const result = await getDashboardSummaryAllShops(shopIdFilter);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/by-department - module Ruptures, dashboard par rayon (spec
+// rupture.md §7, 16/10/2026) : une ligne-résumé par rayon pour le magasin résolu. Placée AVANT
+// /stockout-episodes/:id ci-dessous — sinon Express interpréterait "by-department" comme un :id.
+router.get('/stockout-episodes/by-department', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const result = await getDashboardSummaryByDepartment(shopId);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

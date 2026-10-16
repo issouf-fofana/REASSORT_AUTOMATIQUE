@@ -276,6 +276,77 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
   };
 }
 
+/**
+ * Dashboard par rayon (spec rupture.md §7, 16/10/2026) : pour un magasin donné, une ligne-résumé
+ * par rayon (ProposalLine.department/StockoutEpisode.department). Même indicateurs que la vue
+ * réseau (§2), appliqués au niveau rayon au lieu du niveau magasin — permet d'identifier les rayons
+ * les plus exposés. Un seul magasin à la fois (pas de boucle réseau ici), donc agrégation directe en
+ * base via groupBy plutôt qu'une boucle JS comme getDashboardSummaryAllShops.
+ */
+async function getDashboardSummaryByDepartment(rposShopId, { resolvedLookbackDays = 30 } = {}) {
+  const now = new Date();
+  const resolvedSince = new Date(now.getTime() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
+
+  const [openEpisodes, resolvedEpisodes] = await Promise.all([
+    prisma.stockoutEpisode.findMany({ where: { rposShopId, status: 'EN_COURS' } }),
+    prisma.stockoutEpisode.findMany({
+      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince } },
+      select: { department: true, caPerdueEstime: true },
+    }),
+  ]);
+
+  if (!openEpisodes.length && !resolvedEpisodes.length) {
+    return { found: true, departmentCount: 0, message: 'Aucune rupture détectée pour ce magasin sur la période.' };
+  }
+
+  // department peut être null (épisode dont l'article n'a jamais été proposé, cf. diagnoseCause) —
+  // regroupé sous "Sans rayon" plutôt que silencieusement exclu, pour ne jamais faire disparaître
+  // un épisode réel de la vue agrégée.
+  const byDept = new Map();
+  function getBucket(dept) {
+    const key = dept || 'Sans rayon';
+    if (!byDept.has(key)) byDept.set(key, { department: key, openEpisodes: [], resolvedCount: 0, totalCaPerdu: 0 });
+    return byDept.get(key);
+  }
+
+  for (const e of openEpisodes) getBucket(e.department).openEpisodes.push(e);
+  for (const e of resolvedEpisodes) {
+    const bucket = getBucket(e.department);
+    bucket.resolvedCount += 1;
+    bucket.totalCaPerdu += e.caPerdueEstime || 0;
+  }
+
+  const results = Array.from(byDept.values()).map((bucket) => {
+    const durations = bucket.openEpisodes.map((e) => (now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000));
+    const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
+    const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
+    const noOrderCount = bucket.openEpisodes.filter((e) => NO_ORDER_CAUSES.has(e.causeProposee)).length;
+
+    const causeCounts = {};
+    for (const e of bucket.openEpisodes) causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
+
+    return {
+      department: bucket.department,
+      openCount: bucket.openEpisodes.length,
+      totalEpisodesCount: bucket.openEpisodes.length + bucket.resolvedCount,
+      avgDurationHours: Math.round(avgDurationHours * 10) / 10,
+      longEpisodesCount,
+      noOrderCount,
+      causeCounts,
+      totalCaPerduEstime: Math.round(bucket.totalCaPerdu),
+    };
+  });
+
+  results.sort((a, b) => b.openCount - a.openCount);
+
+  return {
+    found: true,
+    departmentCount: results.length,
+    totalOpenAcrossDepartments: results.reduce((s, r) => s + r.openCount, 0),
+    departments: results,
+  };
+}
+
 // Historique des mouvements de stock/ventes affiché dans la fiche détail : fenêtre large pour
 // couvrir tout l'épisode (même ancien) plus quelques jours avant son début (spec §3 : "quantités
 // vendues avant la rupture").
@@ -400,4 +471,4 @@ async function getEpisodeDetail(episodeId) {
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getEpisodeDetail };
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail };
