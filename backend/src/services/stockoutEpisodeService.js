@@ -108,6 +108,31 @@ async function diagnoseCause(rposShopId, ean) {
 }
 
 /**
+ * Vente moyenne attendue par jour pour un article, sur les mêmes jours de semaine que `referenceDate`
+ * parmi les LOOKBACK_WEEKS semaines précédentes — factorisé entre estimateLoss (perte pendant la
+ * rupture) et estimateDemand (besoin couvert par une commande) pour ne pas dupliquer cette logique.
+ * null si l'historique comparable est trop court (MIN_COMPARABLE_WEEKS) pour être fiable.
+ */
+async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
+  const lookbackStart = new Date(referenceDate.getTime() - LOOKBACK_WEEKS * 7 * 24 * 60 * 60 * 1000);
+  const comparableSales = await prisma.salesLine.findMany({
+    where: { rposShopId, ean, date: { gte: lookbackStart, lt: referenceDate } },
+    select: { date: true, quantity: true, revenueExclTax: true },
+  });
+
+  const targetDow = referenceDate.getDay();
+  const sameDowSales = comparableSales.filter((s) => s.date.getDay() === targetDow);
+  const comparableWeeksCount = new Set(sameDowSales.map((s) => s.date.toISOString().slice(0, 10))).size;
+
+  if (comparableWeeksCount < MIN_COMPARABLE_WEEKS) return null;
+
+  return {
+    avgDailyQty: sameDowSales.reduce((sum, s) => sum + s.quantity, 0) / comparableWeeksCount,
+    avgDailyRevenue: sameDowSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableWeeksCount,
+  };
+}
+
+/**
  * Quantité/CA perdus estimés = ventes attendues (moyenne du même jour de semaine sur les
  * LOOKBACK_WEEKS précédentes, hors période de rupture) moins ventes réellement réalisées pendant la
  * rupture. Cf. rupture.md §2.4.
@@ -116,25 +141,11 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
   const durationMs = endedAt.getTime() - startedAt.getTime();
   const durationDays = Math.max(1, Math.ceil(durationMs / (24 * 60 * 60 * 1000)));
 
-  const lookbackStart = new Date(startedAt.getTime() - LOOKBACK_WEEKS * 7 * 24 * 60 * 60 * 1000);
-  const comparableSales = await prisma.salesLine.findMany({
-    where: { rposShopId, ean, date: { gte: lookbackStart, lt: startedAt } },
-    select: { date: true, quantity: true, revenueExclTax: true },
-  });
+  const demand = await getAvgDailyDemand(rposShopId, ean, startedAt);
+  if (!demand) return { qtyPerdue: null, caPerdue: null };
 
-  const targetDow = startedAt.getDay();
-  const sameDowSales = comparableSales.filter((s) => s.date.getDay() === targetDow);
-  const comparableWeeksCount = new Set(sameDowSales.map((s) => s.date.toISOString().slice(0, 10))).size;
-
-  if (comparableWeeksCount < MIN_COMPARABLE_WEEKS) {
-    return { qtyPerdue: null, caPerdue: null };
-  }
-
-  const avgDailyQty = sameDowSales.reduce((sum, s) => sum + s.quantity, 0) / comparableWeeksCount;
-  const avgDailyRevenue = sameDowSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableWeeksCount;
-
-  const expectedQty = avgDailyQty * durationDays;
-  const expectedRevenue = avgDailyRevenue * durationDays;
+  const expectedQty = demand.avgDailyQty * durationDays;
+  const expectedRevenue = demand.avgDailyRevenue * durationDays;
 
   const actualSales = await prisma.salesLine.aggregate({
     where: { rposShopId, ean, date: { gte: startedAt, lte: endedAt } },
@@ -147,6 +158,18 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
   const caPerdue = Math.max(0, expectedRevenue - actualRevenue);
 
   return { qtyPerdue, caPerdue };
+}
+
+/**
+ * Demande attendue (en quantité) sur `coverageDays` jours à partir de `fromDate` — utilisé pour
+ * juger si une quantité commandée était suffisante pour couvrir le magasin jusqu'à la livraison
+ * (demande explicite : "déterminer si la quantité commandée était suffisante pour couvrir les
+ * besoins du magasin jusqu'à la livraison"). null si l'historique comparable est insuffisant.
+ */
+async function estimateDemand(rposShopId, ean, fromDate, coverageDays) {
+  const demand = await getAvgDailyDemand(rposShopId, ean, fromDate);
+  if (!demand) return null;
+  return demand.avgDailyQty * coverageDays;
 }
 
 /**
@@ -426,30 +449,6 @@ async function getEpisodeDetail(episodeId) {
     }
   }
 
-  // Statut de réaction du magasin (demande explicite du 16/10/2026 : "une commande doit etre fait
-  // dans 24h et la livraison est prevu pour 48h... si Apres 48h que ya pas de commande c'est la on
-  // doit voir") — règle à 2 seuils, distincte de causeProposee (figée à l'ouverture de l'épisode,
-  // jamais réévaluée) : ici calculée à chaque lecture, donc toujours à jour même sur un épisode
-  // encore ouvert depuis des jours.
-  //   - < 24h sans commande : délai normal, pas encore de jugement (EN_ATTENTE)
-  //   - 24-48h sans commande : en retard mais pas encore confirmé fautif (RETARD)
-  //   - > 48h sans AUCUNE commande passée depuis le début : confirmé, le magasin n'a pas réagi
-  //     (MAGASIN_NA_PAS_REAGI)
-  //   - une commande existe : le magasin a réagi, le statut porte sur le délai de réaction observé
-  //     (REAGI)
-  const REACTION_DEADLINE_HOURS = 24;
-  const CONFIRMED_DEADLINE_HOURS = 48;
-  let reactionStatus;
-  if (order) {
-    reactionStatus = 'REAGI';
-  } else if (durationHours > CONFIRMED_DEADLINE_HOURS) {
-    reactionStatus = 'MAGASIN_NA_PAS_REAGI';
-  } else if (durationHours > REACTION_DEADLINE_HOURS) {
-    reactionStatus = 'RETARD';
-  } else {
-    reactionStatus = 'EN_ATTENTE';
-  }
-
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
   const [stockMoves, salesBefore, salesDuring, loss] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
@@ -470,6 +469,61 @@ async function getEpisodeDetail(episodeId) {
     // ma couté... ya rien").
     episode.status === 'EN_COURS' ? estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, endedAt) : null,
   ]);
+
+  // Statut de réaction du magasin (demande explicite du 16/10/2026 : "une commande doit etre fait
+  // dans 24h et la livraison est prevu pour 48h... si Apres 48h que ya pas de commande c'est la on
+  // doit voir" + "si aucune commande n'a encore été passée... le système ne doit pas attribuer
+  // automatiquement la perte au magasin... il doit signaler que le stock n'est potentiellement pas
+  // à jour") — règle à 2 seuils + 1 garde-fou, distincte de causeProposee (figée à l'ouverture de
+  // l'épisode, jamais réévaluée) : ici calculée à chaque lecture, donc toujours à jour même sur un
+  // épisode encore ouvert depuis des jours.
+  //   - Aucune vente enregistrée depuis le début de la rupture ET aucune commande : personne n'a
+  //     concrètement constaté l'absence du produit (ni vente ratée, ni réassort) — le stock à 0
+  //     peut être une désynchronisation RPOS plutôt qu'une vraie rupture (STOCK_PEUT_ETRE_PAS_A_JOUR),
+  //     distinct d'un manque de réaction confirmé. Prioritaire sur les seuils 24h/48h : sans aucun
+  //     signal de vente, même après 48h on ne peut pas conclure avec certitude que c'est le magasin.
+  //   - < 24h sans commande (avec ventes constatées) : délai normal, pas encore de jugement (EN_ATTENTE)
+  //   - 24-48h sans commande : en retard mais pas encore confirmé fautif (RETARD)
+  //   - > 48h sans AUCUNE commande passée depuis le début : confirmé, le magasin n'a pas réagi
+  //     (MAGASIN_NA_PAS_REAGI)
+  //   - une commande existe : le magasin a réagi, le statut porte sur le délai de réaction observé
+  //     (REAGI)
+  const REACTION_DEADLINE_HOURS = 24;
+  const CONFIRMED_DEADLINE_HOURS = 48;
+  const noSalesSinceStart = (salesDuring._sum.quantity || 0) === 0;
+  let reactionStatus;
+  if (order) {
+    reactionStatus = 'REAGI';
+  } else if (noSalesSinceStart) {
+    reactionStatus = 'STOCK_PEUT_ETRE_PAS_A_JOUR';
+  } else if (durationHours > CONFIRMED_DEADLINE_HOURS) {
+    reactionStatus = 'MAGASIN_NA_PAS_REAGI';
+  } else if (durationHours > REACTION_DEADLINE_HOURS) {
+    reactionStatus = 'RETARD';
+  } else {
+    reactionStatus = 'EN_ATTENTE';
+  }
+
+  // Suffisance de la quantité commandée (demande explicite : "déterminer si la quantité commandée
+  // était suffisante pour couvrir les besoins du magasin jusqu'à la livraison") — même méthode que
+  // estimateLoss : demande attendue = vente moyenne du même jour de semaine sur 8 semaines
+  // comparables, multipliée par la durée réelle entre la commande et la réception (ou, si pas
+  // encore reçue, jusqu'à maintenant). Null si pas de commande, pas encore assez de recul pour
+  // juger (pas encore reçue ET commande très récente), ou historique de vente insuffisant.
+  let orderQuantitySufficiency = null;
+  if (order && matchedLine) {
+    const coverageEnd = order.actualReceptionDate || now;
+    const coverageDays = Math.max(1, Math.ceil((coverageEnd.getTime() - order.createdAt.getTime()) / (24 * 60 * 60 * 1000)));
+    const demandEstimate = await estimateDemand(episode.rposShopId, episode.ean, order.createdAt, coverageDays);
+    const quantityOrdered = matchedLine.quantityValidated ?? matchedLine.quantitySuggested ?? null;
+    if (demandEstimate !== null && quantityOrdered !== null) {
+      orderQuantitySufficiency = {
+        quantityOrdered,
+        expectedDemand: Math.round(demandEstimate * 10) / 10,
+        sufficient: quantityOrdered >= demandEstimate,
+      };
+    }
+  }
 
   return {
     found: true,
@@ -515,6 +569,7 @@ async function getEpisodeDetail(episodeId) {
     reactionDelayHours,
     replenishmentDelayHours,
     totalDurationHours: durationHours,
+    orderQuantitySufficiency,
   };
 }
 

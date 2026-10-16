@@ -71,6 +71,7 @@ export function Stockouts() {
         .reassort-badge-soft-warning { background-color: #FDF1DD !important; color: #8A5A00 !important; }
         .reassort-badge-soft-danger { background-color: #F5EDEC !important; color: #7A4A45 !important; }
         .reassort-badge-soft-success { background-color: #E9F3EC !important; color: #2E5B3F !important; }
+        .reassort-badge-soft-info { background-color: #E9EEF6 !important; color: #2E4870 !important; }
       `}</style>
 
       <div className="d-flex align-items-center justify-content-between mb-3">

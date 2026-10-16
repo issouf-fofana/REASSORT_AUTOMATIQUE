@@ -35,7 +35,9 @@ type OrderInfo = {
 
 type ReceptionEvent = { observedAt: string; receptionStatus: string; rposStatus: number };
 
-type ReactionStatus = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
+type ReactionStatus = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI' | 'STOCK_PEUT_ETRE_PAS_A_JOUR';
+
+type OrderQuantitySufficiency = { quantityOrdered: number; expectedDemand: number; sufficient: boolean };
 
 type EpisodeDetail = {
   id: string;
@@ -59,6 +61,7 @@ type EpisodeDetail = {
   reactionDelayHours: number | null;
   replenishmentDelayHours: number | null;
   totalDurationHours: number;
+  orderQuantitySufficiency: OrderQuantitySufficiency | null;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -83,6 +86,7 @@ const REACTION_STATUS_META: Record<ReactionStatus, { label: string; badge: strin
   EN_ATTENTE: { label: 'En attente de commande (< 24h)', badge: 'reassort-badge-neutral', icon: 'solar:clock-circle-bold-duotone' },
   RETARD: { label: 'Retard de commande (24-48h)', badge: 'reassort-badge-soft-warning', icon: 'solar:danger-triangle-bold-duotone' },
   MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", badge: 'reassort-badge-soft-danger', icon: 'solar:close-circle-bold-duotone' },
+  STOCK_PEUT_ETRE_PAS_A_JOUR: { label: 'Stock potentiellement pas à jour', badge: 'reassort-badge-soft-info', icon: 'solar:question-circle-bold-duotone' },
 };
 
 function formatDuration(hours: number | null): string {
@@ -227,14 +231,21 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
                   {!detail.order ? (
                     <p className="text-muted small mb-4">Aucune commande identifiée depuis le début de la rupture.</p>
                   ) : (
-                    <table className="table table-sm align-middle mb-4">
-                      <tbody>
-                        <tr><td className="text-muted">Quantité commandée</td><td>{detail.order.quantityOrdered ?? '—'}</td></tr>
-                        <tr><td className="text-muted">Statut de réception</td><td>{RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus}</td></tr>
-                        <tr><td className="text-muted">Date de réception prévue</td><td>{formatDateTime(detail.order.expectedReceptionDate)}</td></tr>
-                        <tr><td className="text-muted">Fournisseur</td><td>{detail.order.supplierName || '—'} {detail.order.deliveryType ? `(${detail.order.deliveryType})` : ''}</td></tr>
-                      </tbody>
-                    </table>
+                    <>
+                      <table className="table table-sm align-middle mb-3">
+                        <tbody>
+                          <tr><td className="text-muted">Quantité commandée</td><td>{detail.order.quantityOrdered ?? '—'}</td></tr>
+                          <tr><td className="text-muted">Statut de réception</td><td>{RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus}</td></tr>
+                          <tr><td className="text-muted">Date de réception prévue</td><td>{formatDateTime(detail.order.expectedReceptionDate)}</td></tr>
+                          <tr><td className="text-muted">Fournisseur</td><td>{detail.order.supplierName || '—'} {detail.order.deliveryType ? `(${detail.order.deliveryType})` : ''}</td></tr>
+                        </tbody>
+                      </table>
+                      {detail.orderQuantitySufficiency && (
+                        <div className={`alert ${detail.orderQuantitySufficiency.sufficient ? 'alert-success' : 'alert-warning'} py-2 px-3 mb-4`} style={{ fontSize: '.85rem' }}>
+                          Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered}) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à une demande estimée de ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} unité(s) sur la période de couverture.
+                        </div>
+                      )}
+                    </>
                   )}
 
                   <div className="stockout-modal-section-title">Ventes</div>
