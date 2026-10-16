@@ -88,7 +88,13 @@ async function runNightlyProposalGeneration() {
   // SEUL récap admin en fin de job (cf. notifyAdminsOfNightlySummary), plutôt qu'une copie de chaque
   // email individuel par magasin comme auparavant. mapWithConcurrency renvoie déjà les retours de
   // chaque handler (cf. utils/concurrency.js), donc un simple `return` par itération suffit.
-  const summaries = await mapWithConcurrency(activeShops, SHOP_CONCURRENCY, async (shop) => {
+  //
+  // Extrait en fonction nommée (16/10/2026, demande explicite : "si le serveur injoignable... il
+  // doit pouvoir revenir sur les magasins où y a eu erreur") pour pouvoir rejouer EXACTEMENT le même
+  // traitement (génération + email + IA + Mode Auto) sur les seuls magasins en échec, en fin de
+  // boucle — RPOS injoignable est souvent transitoire (quelques minutes), un second passage après
+  // avoir traité tous les autres magasins suffit fréquemment à récupérer ces échecs isolés.
+  const processShop = async (shop) => {
     let ineligibleCount = 0;
     try {
       const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({
@@ -174,7 +180,26 @@ async function runNightlyProposalGeneration() {
       console.error(`[nightlyProposalJob] Échec pour ${shop.reference}:`, error.message);
       return { shop, proposalsGenerated: 0, ineligibleCount: 0, error: error.message };
     }
-  });
+  };
+
+  let summaries = await mapWithConcurrency(activeShops, SHOP_CONCURRENCY, processShop);
+
+  // Retry : un seul second passage, uniquement sur les magasins en échec (jamais toute la liste),
+  // après que tous les autres aient déjà été traités — laisse le temps à un problème réseau/VPN
+  // transitoire de se résorber avant de retenter, sans retarder les magasins qui ont déjà réussi.
+  // Les résultats du retry REMPLACENT ceux du premier passage pour ces magasins (déduplication par
+  // shop.rposShopId) — jamais de doublon dans summaries, jamais deux emails pour le même magasin.
+  const firstPassFailures = summaries.filter((s) => s.error);
+  if (firstPassFailures.length > 0) {
+    console.log(`[nightlyProposalJob] ${firstPassFailures.length} magasin(s) en échec, nouvelle tentative...`);
+    const retryShops = firstPassFailures.map((s) => s.shop);
+    const retryResults = await mapWithConcurrency(retryShops, SHOP_CONCURRENCY, processShop);
+    const retryByShopId = new Map(retryResults.map((r) => [r.shop.rposShopId, r]));
+    summaries = summaries.map((s) => retryByShopId.get(s.shop.rposShopId) || s);
+
+    const stillFailing = retryResults.filter((r) => r.error).length;
+    console.log(`[nightlyProposalJob] Nouvelle tentative terminée : ${firstPassFailures.length - stillFailing}/${firstPassFailures.length} magasin(s) récupéré(s).`);
+  }
 
   try {
     await notifyAdminsOfNightlySummary(summaries);

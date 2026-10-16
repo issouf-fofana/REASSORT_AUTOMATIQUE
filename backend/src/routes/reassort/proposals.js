@@ -238,9 +238,23 @@ router.post('/proposal/generate', requireAdminOrSupervisor, async (req, res) => 
           }).catch(() => {}); // une mise à jour de progression manquée ne doit jamais interrompre la génération elle-même
         };
 
-        const { proposal, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress });
+        const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, periodOverride, onProgress });
         if (!weeklyPlanAttached) {
           console.warn(`[proposal/generate] ALERTE ${shopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+        }
+
+        // Même email que la génération nocturne automatique (demande explicite du 16/10/2026 :
+        // "apres generation manuel il ne fait pas un mail de generation auto ?") — avant ce correctif,
+        // seul nightlyProposalJob.js appelait notifyShopUsersOfNewProposal, donc une génération
+        // manuelle restait silencieuse pour les utilisateurs du magasin. Un échec email ne doit
+        // jamais faire échouer la génération elle-même (déjà réussie et sauvegardée à ce stade).
+        if (stats.proposalsGenerated > 0) {
+          try {
+            const { notifyShopUsersOfNewProposal } = require('../../services/proposalNotificationService');
+            await notifyShopUsersOfNewProposal({ rposShopId: shopId, reference: shopReference, name: shopName }, stats, proposal);
+          } catch (mailError) {
+            console.error(`[proposal/generate] Alerte email échouée pour ${shopReference}:`, mailError.message);
+          }
         }
 
         await prisma.proposalGenerationRun.update({
@@ -476,9 +490,19 @@ router.post('/proposal/generate-from-analysis', requireAdminOrSupervisor, async 
         if (!analysis) throw new Error('Aucune analyse disponible pour ce magasin — lancez une analyse au préalable.');
 
         const result = await generateFromAnalysis(analysis, { posId, shopId, limit, onProgress });
-        const { proposal, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, onProgress }, result);
+        const { proposal, stats, weeklyPlanAttached } = await generateAndSaveProposal({ posId, shopId, shopReference, shopName, limit, onProgress }, result);
         if (!weeklyPlanAttached) {
           console.warn(`[proposal/generate-from-analysis] ALERTE ${shopReference} : proposition ${proposal.id} sans plan hebdomadaire (prédictions non évaluables).`);
+        }
+
+        // Même email que la génération nocturne automatique, cf. /proposal/generate ci-dessus.
+        if (stats.proposalsGenerated > 0) {
+          try {
+            const { notifyShopUsersOfNewProposal } = require('../../services/proposalNotificationService');
+            await notifyShopUsersOfNewProposal({ rposShopId: shopId, reference: shopReference, name: shopName }, stats, proposal);
+          } catch (mailError) {
+            console.error(`[proposal/generate-from-analysis] Alerte email échouée pour ${shopReference}:`, mailError.message);
+          }
         }
 
         await prisma.proposalGenerationRun.update({
