@@ -5,6 +5,12 @@ import { apiFetch } from '../../shared/api/client';
 // commande associée (si passée APRÈS le début de la rupture, cf. stockoutEpisodeService.js), ventes
 // avant/pendant, mouvements de stock. Les 3 délais (réaction / réapprovisionnement / durée totale)
 // sont affichés séparément, jamais additionnés — exigence explicite de la spec §4.
+//
+// Refonte visuelle + reactionStatus ajoutés le 16/10/2026 (demande explicite : "je n'ai pas le
+// temps de rupture... combien de pert la rupture ma couté, est c que le magasin a reagi au moment
+// de la rupture... et revoir le style fais pro") — cartes KPI en tête (durée, perte estimée, statut
+// de réaction visible d'un coup d'œil), CA perdu désormais calculé en temps réel côté backend même
+// pour un épisode toujours EN_COURS (avant : seulement calculé à la résolution de l'épisode).
 type StockMove = {
   date: string;
   typeLabel: string;
@@ -29,6 +35,8 @@ type OrderInfo = {
 
 type ReceptionEvent = { observedAt: string; receptionStatus: string; rposStatus: number };
 
+type ReactionStatus = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
+
 type EpisodeDetail = {
   id: string;
   ean: string;
@@ -40,6 +48,7 @@ type EpisodeDetail = {
   durationHours: number;
   causeProposee: string;
   niveauConfiance: string;
+  reactionStatus: ReactionStatus;
   qtyPerdueEstimee: number | null;
   caPerdueEstime: number | null;
   salesBeforeEpisode: { windowDays: number; quantity: number; revenue: number };
@@ -67,6 +76,15 @@ const RECEPTION_STATUS_LABELS: Record<string, string> = {
   ANNULEE: 'Annulée',
 };
 
+// Statut de réaction du magasin — règle explicite : < 24h = délai normal, 24-48h = en retard,
+// > 48h sans commande = confirmé, le magasin n'a pas réagi (cf. stockoutEpisodeService.js).
+const REACTION_STATUS_META: Record<ReactionStatus, { label: string; badge: string; icon: string }> = {
+  REAGI: { label: 'Le magasin a réagi', badge: 'reassort-badge-soft-success', icon: 'solar:check-circle-bold-duotone' },
+  EN_ATTENTE: { label: 'En attente de commande (< 24h)', badge: 'reassort-badge-neutral', icon: 'solar:clock-circle-bold-duotone' },
+  RETARD: { label: 'Retard de commande (24-48h)', badge: 'reassort-badge-soft-warning', icon: 'solar:danger-triangle-bold-duotone' },
+  MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", badge: 'reassort-badge-soft-danger', icon: 'solar:close-circle-bold-duotone' },
+};
+
 function formatDuration(hours: number | null): string {
   if (hours === null) return '—';
   if (hours < 0) return '—';
@@ -79,6 +97,11 @@ function formatDuration(hours: number | null): string {
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('fr-FR');
+}
+
+function formatMoney(value: number | null): string {
+  if (value === null) return 'Estimation indisponible';
+  return `${Math.round(value).toLocaleString('fr-FR')} CFA`;
 }
 
 export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; onClose: () => void }) {
@@ -95,15 +118,30 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
     return () => { cancelled = true; };
   }, [episodeId]);
 
+  const reactionMeta = detail ? REACTION_STATUS_META[detail.reactionStatus] : null;
+
   return (
     <>
+      <style>{`
+        .stockout-modal-kpi { border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 14px 16px; height: 100%; }
+        .stockout-modal-kpi .label { color: #5B6B85; font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+        .stockout-modal-kpi .value { color: #1B2A4A; font-size: 1.25rem; font-weight: 700; margin-top: 2px; }
+        .stockout-modal-section-title { color: #1B2A4A; font-weight: 700; font-size: .9rem; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 10px; }
+      `}</style>
+      {/* Les classes "reassort-badge-*" (reassort-badge-soft-danger, etc.) ne sont PAS définies en
+          CSS global du projet — déclarées une seule fois au niveau de la page dans Stockouts.tsx
+          (composant parent), pas ici, pour ne pas dupliquer ce bloc dans chaque sous-composant qui
+          les utilise (StockoutShopDetail.tsx, cette modale...). Bug réel trouvé le 16/10/2026 : le
+          badge existait bien dans le DOM mais restait invisible sans cette règle quelque part dans
+          l'arbre. */}
       <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
         <div className="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" role="document">
           <div className="modal-content">
             <div className="modal-header">
-              <h5 className="modal-title">
-                {detail ? (detail.label || detail.ean) : 'Détail de la rupture'}
-              </h5>
+              <div>
+                <h5 className="modal-title mb-1">{detail ? (detail.label || detail.ean) : 'Détail de la rupture'}</h5>
+                {detail && <div className="text-muted small">{detail.department || 'Sans rayon'} · EAN {detail.ean}</div>}
+              </div>
               <button type="button" className="btn-close" onClick={onClose}></button>
             </div>
             <div className="modal-body">
@@ -113,26 +151,47 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
                 <p className="text-muted text-center py-4">Chargement...</p>
               ) : (
                 <>
+                  {/* Cartes KPI — l'essentiel visible d'un coup d'œil, sans avoir à lire le texte. */}
                   <div className="row g-3 mb-4">
                     <div className="col-6 col-md-3">
-                      <div className="text-muted small">Rayon</div>
-                      <div className="fw-semibold">{detail.department || '—'}</div>
+                      <div className="stockout-modal-kpi">
+                        <div className="label">Statut</div>
+                        <div className="value">{detail.status === 'EN_COURS' ? 'En cours' : 'Résolue'}</div>
+                      </div>
                     </div>
                     <div className="col-6 col-md-3">
-                      <div className="text-muted small">Statut</div>
-                      <div className="fw-semibold">{detail.status === 'EN_COURS' ? 'En cours' : 'Résolue'}</div>
+                      <div className="stockout-modal-kpi">
+                        <div className="label">Durée</div>
+                        <div className="value">{formatDuration(detail.totalDurationHours)}</div>
+                      </div>
                     </div>
                     <div className="col-6 col-md-3">
-                      <div className="text-muted small">Durée totale</div>
-                      <div className="fw-semibold">{formatDuration(detail.totalDurationHours)}</div>
+                      <div className="stockout-modal-kpi">
+                        <div className="label">CA perdu estimé</div>
+                        <div className="value">{formatMoney(detail.caPerdueEstime)}</div>
+                      </div>
                     </div>
                     <div className="col-6 col-md-3">
-                      <div className="text-muted small">Cause probable</div>
-                      <div className="fw-semibold">{CAUSE_LABELS[detail.causeProposee] || detail.causeProposee}</div>
+                      <div className="stockout-modal-kpi">
+                        <div className="label">Quantité perdue</div>
+                        <div className="value">{detail.qtyPerdueEstimee !== null ? `${Math.round(detail.qtyPerdueEstimee)} u.` : '—'}</div>
+                      </div>
                     </div>
                   </div>
 
-                  <h6 className="mb-2">Chronologie</h6>
+                  {/* Statut de réaction du magasin — mis en avant, c'est la question la plus
+                      actionnable ("le magasin a-t-il réagi ?"). */}
+                  {reactionMeta && (
+                    <div className="d-flex align-items-center gap-2 mb-4">
+                      <span className={`badge ${reactionMeta.badge} py-2 px-3 d-inline-flex align-items-center gap-2`} style={{ fontSize: '.85rem' }}>
+                        <iconify-icon icon={reactionMeta.icon}></iconify-icon>
+                        {reactionMeta.label}
+                      </span>
+                      <span className="text-muted small">Cause probable : {CAUSE_LABELS[detail.causeProposee] || detail.causeProposee}</span>
+                    </div>
+                  )}
+
+                  <div className="stockout-modal-section-title">Chronologie</div>
                   <table className="table table-sm align-middle mb-4">
                     <tbody>
                       <tr>
@@ -164,7 +223,7 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
                     </tbody>
                   </table>
 
-                  <h6 className="mb-2">Commande associée</h6>
+                  <div className="stockout-modal-section-title">Commande associée</div>
                   {!detail.order ? (
                     <p className="text-muted small mb-4">Aucune commande identifiée depuis le début de la rupture.</p>
                   ) : (
@@ -178,7 +237,7 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
                     </table>
                   )}
 
-                  <h6 className="mb-2">Ventes</h6>
+                  <div className="stockout-modal-section-title">Ventes</div>
                   <div className="row g-3 mb-4">
                     <div className="col-6">
                       <div className="text-muted small">Avant la rupture ({detail.salesBeforeEpisode.windowDays}j)</div>
@@ -190,14 +249,7 @@ export function EpisodeDetailModal({ episodeId, onClose }: { episodeId: string; 
                     </div>
                   </div>
 
-                  {(detail.qtyPerdueEstimee !== null || detail.caPerdueEstime !== null) && (
-                    <div className="alert alert-light border mb-4">
-                      <strong>Impact estimé :</strong> {detail.qtyPerdueEstimee !== null ? `${Math.round(detail.qtyPerdueEstimee)} unités perdues, ` : ''}
-                      {detail.caPerdueEstime !== null ? `${Math.round(detail.caPerdueEstime).toLocaleString('fr-FR')} CFA de CA potentiellement perdu` : 'estimation indisponible'}.
-                    </div>
-                  )}
-
-                  <h6 className="mb-2">Mouvements de stock récents</h6>
+                  <div className="stockout-modal-section-title">Mouvements de stock récents</div>
                   <div className="table-responsive">
                     <table className="table table-sm align-middle mb-0">
                       <thead className="bg-light-subtle">

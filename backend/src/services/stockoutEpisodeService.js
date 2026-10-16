@@ -426,8 +426,32 @@ async function getEpisodeDetail(episodeId) {
     }
   }
 
+  // Statut de réaction du magasin (demande explicite du 16/10/2026 : "une commande doit etre fait
+  // dans 24h et la livraison est prevu pour 48h... si Apres 48h que ya pas de commande c'est la on
+  // doit voir") — règle à 2 seuils, distincte de causeProposee (figée à l'ouverture de l'épisode,
+  // jamais réévaluée) : ici calculée à chaque lecture, donc toujours à jour même sur un épisode
+  // encore ouvert depuis des jours.
+  //   - < 24h sans commande : délai normal, pas encore de jugement (EN_ATTENTE)
+  //   - 24-48h sans commande : en retard mais pas encore confirmé fautif (RETARD)
+  //   - > 48h sans AUCUNE commande passée depuis le début : confirmé, le magasin n'a pas réagi
+  //     (MAGASIN_NA_PAS_REAGI)
+  //   - une commande existe : le magasin a réagi, le statut porte sur le délai de réaction observé
+  //     (REAGI)
+  const REACTION_DEADLINE_HOURS = 24;
+  const CONFIRMED_DEADLINE_HOURS = 48;
+  let reactionStatus;
+  if (order) {
+    reactionStatus = 'REAGI';
+  } else if (durationHours > CONFIRMED_DEADLINE_HOURS) {
+    reactionStatus = 'MAGASIN_NA_PAS_REAGI';
+  } else if (durationHours > REACTION_DEADLINE_HOURS) {
+    reactionStatus = 'RETARD';
+  } else {
+    reactionStatus = 'EN_ATTENTE';
+  }
+
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
-  const [stockMoves, salesBefore, salesDuring] = await Promise.all([
+  const [stockMoves, salesBefore, salesDuring, loss] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
     prisma.salesLine.aggregate({
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
@@ -438,6 +462,13 @@ async function getEpisodeDetail(episodeId) {
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt, lte: endedAt } },
       _sum: { quantity: true, revenueExclTax: true },
     }),
+    // Pour un épisode RÉSOLU, episode.qtyPerdueEstimee/caPerdueEstime (déjà calculés par
+    // detectStockoutEpisodes à la fermeture) restent la source de vérité. Pour un épisode EN_COURS,
+    // ces champs sont encore null en base (calculés seulement à la clôture) — recalculé ici en
+    // temps réel avec endedAt=maintenant, pour que la perte s'affiche dès l'ouverture de la fiche
+    // plutôt que d'attendre la résolution de la rupture (bug signalé : "combien de perte la rupture
+    // ma couté... ya rien").
+    episode.status === 'EN_COURS' ? estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, endedAt) : null,
   ]);
 
   return {
@@ -453,8 +484,9 @@ async function getEpisodeDetail(episodeId) {
     durationHours,
     causeProposee: episode.causeProposee,
     niveauConfiance: episode.niveauConfiance,
-    qtyPerdueEstimee: episode.qtyPerdueEstimee,
-    caPerdueEstime: episode.caPerdueEstime,
+    reactionStatus,
+    qtyPerdueEstimee: loss ? loss.qtyPerdue : episode.qtyPerdueEstimee,
+    caPerdueEstime: loss ? loss.caPerdue : episode.caPerdueEstime,
     salesBeforeEpisode: {
       windowDays: PRE_EPISODE_CONTEXT_DAYS,
       quantity: salesBefore._sum.quantity || 0,

@@ -60,6 +60,17 @@ export function Stockouts() {
       <style>{`
         .reassort-tabs .nav-link { color: #5B6B85; font-weight: 600; border: none; border-bottom: 2px solid transparent; }
         .reassort-tabs .nav-link.active { color: #1B2A4A; border-bottom-color: #F5A623; background: transparent; }
+        /* Bug trouvé le 16/10/2026 en testant dans le navigateur : ces classes "reassort-badge-*"
+           ne sont définies NULLE PART en CSS global du projet (chaque page qui les utilise doit les
+           redéfinir elle-même, cf. TableauDeBord.tsx) — avant ce correctif, les badges de confiance
+           du tableau d'articles (StockoutShopDetail.tsx) restaient invisibles tant qu'aucun autre
+           composant n'avait par ailleurs injecté ce même <style> (ex: la modale de détail, ouverte
+           ou non). Déclaré ici une seule fois, au niveau de la page, pour tous les sous-composants
+           de /stockouts plutôt que de dupliquer ce bloc dans chacun. */
+        .reassort-badge-neutral { background-color: #EDF1F7 !important; color: #1B2A4A !important; }
+        .reassort-badge-soft-warning { background-color: #FDF1DD !important; color: #8A5A00 !important; }
+        .reassort-badge-soft-danger { background-color: #F5EDEC !important; color: #7A4A45 !important; }
+        .reassort-badge-soft-success { background-color: #E9F3EC !important; color: #2E5B3F !important; }
       `}</style>
 
       <div className="d-flex align-items-center justify-content-between mb-3">
