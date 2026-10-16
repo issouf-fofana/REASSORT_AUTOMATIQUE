@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StockoutsAllShopsView } from './StockoutsAllShopsView';
 import { StockoutShopDetail } from './StockoutShopDetail';
+import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
 // 16/10/2026 : d'abord intégrée en bas du Tableau de bord, puis déplacée ici sur demande explicite
@@ -22,7 +23,7 @@ export function Stockouts() {
   // Onglets "Ce magasin" / "Tous les magasins" (spec rupture.md §2, demande explicite du 16/10/2026
   // : "tout doit etre dans le dashbord des rupture pas l'autre" — même pattern que
   // TableauDeBord.tsx, pas de page séparée pour la vue réseau).
-  const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
+  const [activeTab, setActiveTab] = useState<'shop' | 'all' | 'byDepartment'>('shop');
 
   function shopQueryParam(): string {
     const id = isSingleShop ? user?.rposShopId || '' : selectedShop?.id || '';
@@ -62,23 +63,30 @@ export function Stockouts() {
         <span className="text-muted small">Sans données entrepôt (Cyrus) — diagnostic simplifié</span>
       </div>
 
-      {!isSingleShop && (
-        <ul className="nav reassort-tabs mb-3">
-          <li className="nav-item">
-            <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
-              Ce magasin
-            </button>
-          </li>
+      <ul className="nav reassort-tabs mb-3">
+        <li className="nav-item">
+          <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
+            Ce magasin
+          </button>
+        </li>
+        {!isSingleShop && (
           <li className="nav-item">
             <button type="button" className={`nav-link${activeTab === 'all' ? ' active' : ''}`} onClick={() => setActiveTab('all')}>
               Tous les magasins
             </button>
           </li>
-        </ul>
-      )}
+        )}
+        <li className="nav-item">
+          <button type="button" className={`nav-link${activeTab === 'byDepartment' ? ' active' : ''}`} onClick={() => setActiveTab('byDepartment')}>
+            Analyse par rayon
+          </button>
+        </li>
+      </ul>
 
       {activeTab === 'all' && !isSingleShop ? (
         <StockoutsAllShopsView onSelectShop={handleSelectShopFromNetwork} />
+      ) : activeTab === 'byDepartment' ? (
+        <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam()} />
       ) : (
         <StockoutShopDetail shopQueryParam={shopQueryParam()} />
       )}
