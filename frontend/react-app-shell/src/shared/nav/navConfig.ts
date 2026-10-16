@@ -54,6 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Pilotage',
     entries: [
       { id: 'dashboard', label: 'Tableau de bord', href: '/', icon: LayoutDashboard },
+      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
       { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-guide', label: 'Mon accès', href: '/ai-guide', icon: Info },
       { id: 'project-guide', label: 'Guide du projet', href: '/project-guide', icon: BookOpen },
@@ -72,7 +73,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },
       { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
       { id: 'feature-requests', label: "Demandes d'évolution", href: '/feature-requests', icon: Lightbulb, adminOnly: true },
-      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
     ],
   },
   {
