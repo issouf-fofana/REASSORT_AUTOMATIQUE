@@ -5,7 +5,6 @@ import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
 import { TodayProposalsCard } from './TodayProposalsCard';
 import { TopArticlesCard } from './TopArticlesCard';
-import { StockoutDashboardCard } from './StockoutDashboardCard';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
@@ -404,8 +403,6 @@ export function TableauDeBord() {
           </div>
         </div>
       </div>
-
-      <StockoutDashboardCard shopQueryParam={shopQueryParam()} />
         </>
       )}
     </div>

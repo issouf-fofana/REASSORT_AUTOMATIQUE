@@ -20,6 +20,7 @@ import { AiQuality } from '../pages/AiQuality/AiQuality';
 import { AiAssistantPage } from '../pages/AiAssistant/AiAssistantPage';
 import { PurchaseOrderPage } from '../pages/PurchaseOrder/PurchaseOrderPage';
 import { Dashboard } from '../pages/Dashboard/Dashboard';
+import { Stockouts } from '../pages/Stockouts/Stockouts';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -68,6 +69,7 @@ export function AppRoutes() {
         <Route path="/sales-history" element={<SalesHistory />} />
         <Route path="/purchase-list" element={<PurchaseList />} />
         <Route path="/order-anomalies" element={<AdminGuard><OrderAnomalies /></AdminGuard>} />
+        <Route path="/stockouts" element={<Stockouts />} />
         <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
         <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
         <Route path="/ai-assistant" element={<AiAssistantPage />} />
