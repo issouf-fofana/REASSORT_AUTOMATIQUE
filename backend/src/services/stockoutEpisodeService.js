@@ -6,8 +6,13 @@
  */
 const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
 const LOOKBACK_WEEKS = 8;
+// Concurrence pour le recalcul en temps réel de la perte (estimateLoss) sur les épisodes EN_COURS
+// lors d'une agrégation (par rayon/secteur/magasin) — potentiellement des centaines d'épisodes par
+// appel, chacun coûtant plusieurs requêtes SQL.
+const EPISODE_LOSS_CONCURRENCY = 8;
 const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
 
 /**
@@ -275,7 +280,14 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
       where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
       select: { caPerdueEstime: true },
     });
-    const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0);
+    // Même correctif que getDashboardSummaryByField (bug signalé le 16/10/2026 : "CA perdu
+    // estimé... tout les valeur ne son pas correct") — caPerdueEstime n'existe en base QUE pour les
+    // épisodes déjà résolus ; recalculé en temps réel ici pour les épisodes encore EN_COURS.
+    const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
+      const loss = await estimateLoss(shop.rposShopId, e.ean, e.startedAt, new Date(now));
+      return loss.caPerdue || 0;
+    });
+    const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0) + openLosses.reduce((s, v) => s + v, 0);
 
     results.push({
       rposShopId: shop.rposShopId,
@@ -335,7 +347,23 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
     return byGroup.get(key);
   }
 
-  for (const e of openEpisodes) getBucket(e[field]).openEpisodes.push(e);
+  // Bug trouvé le 16/10/2026 (signalé : "CA perdu estimé... tout les valeur ne son pas correct") :
+  // caPerdueEstime n'est calculé par detectStockoutEpisodes qu'à la RÉSOLUTION d'un épisode — un
+  // épisode encore EN_COURS a toujours caPerdueEstime=null en base, donc l'agrégation qui ne lisait
+  // QUE ce champ stocké affichait systématiquement 0 CFA dès que la majorité des ruptures était
+  // encore ouverte (cas courant : juste après une capture de stock). Recalculé ici en temps réel
+  // avec estimateLoss (même fonction que getEpisodeDetail pour un épisode individuel), en parallèle
+  // avec une concurrence limitée — potentiellement des centaines d'épisodes ouverts par magasin.
+  const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
+    const loss = await estimateLoss(rposShopId, e.ean, e.startedAt, now);
+    return { episode: e, caPerdue: loss.caPerdue || 0 };
+  });
+
+  for (const { episode: e, caPerdue } of openLosses) {
+    const bucket = getBucket(e[field]);
+    bucket.openEpisodes.push(e);
+    bucket.totalCaPerdu += caPerdue;
+  }
   for (const e of resolvedEpisodes) {
     const bucket = getBucket(e[field]);
     bucket.resolvedCount += 1;
