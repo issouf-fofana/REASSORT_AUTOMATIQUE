@@ -27,6 +27,11 @@ const KEYS = {
   // chatbot interrogeait RPOS en direct à chaque question "mouvement de stock", 4-5s mesurées même
   // réseau normal) — même principe que SALES_SYNC_CRON, table StockMove alimentée incrémentalement.
   STOCK_MOVE_SYNC_CRON: 'STOCK_MOVE_SYNC_CRON',
+  // Capture périodique du stock (StockSnapshot) pour dater les épisodes de rupture (module Ruptures,
+  // 16/10/2026, cf. rupture.md) — fréquence par défaut 4x/jour (toutes les 6h), suffisant pour une
+  // durée de rupture à l'heure près sans multiplier les lignes (17505 articles orderable mesurés sur
+  // 30 magasins le 16/10/2026, donc ~70k lignes/jour à ce rythme).
+  STOCK_SNAPSHOT_CRON: 'STOCK_SNAPSHOT_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -109,6 +114,7 @@ const KEYS = {
   SHOPS_SYNC_ENABLED: 'SHOPS_SYNC_ENABLED',
   PRODUCT_EOL_SYNC_ENABLED: 'PRODUCT_EOL_SYNC_ENABLED',
   STOCK_MOVE_SYNC_ENABLED: 'STOCK_MOVE_SYNC_ENABLED',
+  STOCK_SNAPSHOT_ENABLED: 'STOCK_SNAPSHOT_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -219,6 +225,10 @@ const ENV_FALLBACK = {
   // donc chaque passage reste rapide — intervalle un peu plus large que les ventes (15 min) car
   // cette donnée est moins urgente (explicative, pas utilisée pour la génération de proposition).
   [KEYS.STOCK_MOVE_SYNC_CRON]: () => process.env.STOCK_MOVE_SYNC_CRON || '*/20 * * * *',
+  // 4x/jour par défaut (toutes les 6h) : suffisant pour dater une rupture à l'heure près sans
+  // multiplier les lignes de StockSnapshot (17505 articles orderable mesurés sur 30 magasins le
+  // 16/10/2026, donc ~70k lignes/jour à ce rythme).
+  [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -319,6 +329,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.SHOPS_SYNC_ENABLED]: () => 'true',
   [KEYS.PRODUCT_EOL_SYNC_ENABLED]: () => 'true',
   [KEYS.STOCK_MOVE_SYNC_ENABLED]: () => 'true',
+  [KEYS.STOCK_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',

@@ -2043,3 +2043,60 @@ model UserGuideImage {
   @@index([sectionId, order])
   @@map("user_guide_images")
 }
+
+// Snapshot périodique du stock magasin (plusieurs fois par jour), nécessaire pour dater le début et
+// la fin réels d'un épisode de rupture (cf. StockoutEpisode). ProductCache.stock ne suffit pas : il
+// est écrasé à chaque sync RPOS et ne garde qu'une seule valeur, donc impossible de savoir QUAND un
+// article est tombé à zéro. Alimentée par stockSnapshotJob.js, qui lit ProductCache (pas de nouvel
+// appel RPOS, le stock y est déjà caché) et capture seulement les articles orderable=true (= réellement
+// attendus dans le magasin — cf. rupture.md §2.1 "articles actifs et réellement attendus").
+model StockSnapshot {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+  ean        String
+
+  stock      Float
+  capturedAt DateTime @default(now()) @map("captured_at")
+
+  // Lecture systématique par article sur une période (reconstruction d'un épisode) et par magasin
+  // sur une période (détection de tous les épisodes en cours).
+  @@index([rposShopId, ean, capturedAt])
+  @@index([rposShopId, capturedAt])
+  @@map("stock_snapshots")
+}
+
+// Un épisode = une rupture continue d'UN article dans UN magasin, du moment où le stock est tombé
+// à 0 (ou négatif) jusqu'à son retour positif. causeProposee/niveauConfiance suivent exactement la
+// grille de rupture.md §5, simplifiée car on n'a pas encore les données Cyrus (entrepôt) : on ne peut
+// distinguer "stock central indisponible" / "non préparé" / "retard transport", donc ces 3 cas
+// retombent tous sur 'AMONT_A_PRECISER'.
+model StockoutEpisode {
+  id String @id @default(cuid())
+
+  rposPosId  String @map("rpos_pos_id")
+  rposShopId String @map("rpos_shop_id")
+  ean        String
+  label      String?
+  department String?
+
+  startedAt DateTime  @map("started_at")
+  endedAt   DateTime? @map("ended_at") // null = rupture toujours en cours
+  status    String    @default("EN_COURS") @map("status") // 'EN_COURS' | 'RESOLUE'
+
+  causeProposee    String  @map("cause_proposee") // 'MAGASIN_REASSORT' | 'MAGASIN_COMMANDE_NON_VALIDEE' | 'AMONT_A_PRECISER' | 'ECART_STOCK_RAYON' | 'INDETERMINEE'
+  niveauConfiance  String  @map("niveau_confiance") // 'CONFIRMEE' | 'PROBABLE' | 'INDETERMINEE'
+  commandeRefUtile String? @map("commande_ref_utile") // id ProposalOrder éventuellement lié au diagnostic
+
+  qtyPerdueEstimee Float? @map("qty_perdue_estimee")
+  caPerdueEstime   Float? @map("ca_perdue_estime")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Vue "ruptures en cours d'un magasin" (dashboard) et recherche d'un épisode ouvert pour un
+  // article précis (pour savoir s'il faut en ouvrir un nouveau ou continuer l'existant).
+  @@index([rposShopId, status])
+  @@index([rposShopId, ean, status])
+  @@map("stockout_episodes")
+}
