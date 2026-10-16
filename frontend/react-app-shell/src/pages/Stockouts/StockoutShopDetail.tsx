@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
+import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 import { EpisodeDetailModal } from './EpisodeDetailModal';
 
 // Détail d'un magasin pour le module Ruptures (demande explicite du 16/10/2026 : "je dois faire
@@ -170,6 +171,13 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             <div className="col">
               <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
             </div>
+          </div>
+
+          {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
+              sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →
+              Articles juste en dessous, qui sert au drill-down vers les articles). */}
+          <div className="mb-4">
+            <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} />
           </div>
         </>
       )}

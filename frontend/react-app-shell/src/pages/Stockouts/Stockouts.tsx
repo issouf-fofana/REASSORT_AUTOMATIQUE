@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StockoutsAllShopsView } from './StockoutsAllShopsView';
 import { StockoutShopDetail } from './StockoutShopDetail';
-import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
 // 16/10/2026 : d'abord intégrée en bas du Tableau de bord, puis déplacée ici sur demande explicite
@@ -15,6 +14,11 @@ import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 // "Ce magasin" ont fusionné dans StockoutShopDetail.tsx, qui porte la navigation hiérarchique
 // Secteur → Rayon → Articles → détail, réutilisée identiquement pour "Ce magasin" ET le drill-down
 // depuis "Tous les magasins" (plus de duplication de comportement entre ces deux entrées).
+//
+// "Analyse par rayon" avait d'abord été ajoutée comme onglet séparé, puis déplacée DANS
+// StockoutShopDetail.tsx (demande explicite : "doit etre dans les detail quand je clique sur pour
+// mag") — elle fait partie du détail d'un magasin (comme les KPI/graphes), pas une vue indépendante
+// au même niveau que "Ce magasin" / "Tous les magasins".
 export function Stockouts() {
   const [user] = useState(() => window.reassortGetUser());
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
@@ -23,7 +27,7 @@ export function Stockouts() {
   // Onglets "Ce magasin" / "Tous les magasins" (spec rupture.md §2, demande explicite du 16/10/2026
   // : "tout doit etre dans le dashbord des rupture pas l'autre" — même pattern que
   // TableauDeBord.tsx, pas de page séparée pour la vue réseau).
-  const [activeTab, setActiveTab] = useState<'shop' | 'all' | 'byDepartment'>('shop');
+  const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
 
   function shopQueryParam(): string {
     const id = isSingleShop ? user?.rposShopId || '' : selectedShop?.id || '';
@@ -63,30 +67,23 @@ export function Stockouts() {
         <span className="text-muted small">Sans données entrepôt (Cyrus) — diagnostic simplifié</span>
       </div>
 
-      <ul className="nav reassort-tabs mb-3">
-        <li className="nav-item">
-          <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
-            Ce magasin
-          </button>
-        </li>
-        {!isSingleShop && (
+      {!isSingleShop && (
+        <ul className="nav reassort-tabs mb-3">
+          <li className="nav-item">
+            <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
+              Ce magasin
+            </button>
+          </li>
           <li className="nav-item">
             <button type="button" className={`nav-link${activeTab === 'all' ? ' active' : ''}`} onClick={() => setActiveTab('all')}>
               Tous les magasins
             </button>
           </li>
-        )}
-        <li className="nav-item">
-          <button type="button" className={`nav-link${activeTab === 'byDepartment' ? ' active' : ''}`} onClick={() => setActiveTab('byDepartment')}>
-            Analyse par rayon
-          </button>
-        </li>
-      </ul>
+        </ul>
+      )}
 
       {activeTab === 'all' && !isSingleShop ? (
         <StockoutsAllShopsView onSelectShop={handleSelectShopFromNetwork} />
-      ) : activeTab === 'byDepartment' ? (
-        <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam()} />
       ) : (
         <StockoutShopDetail shopQueryParam={shopQueryParam()} />
       )}
