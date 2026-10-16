@@ -3,6 +3,8 @@ import { apiFetch } from '../../shared/api/client';
 import { StockoutsAllShopsView } from './StockoutsAllShopsView';
 import { StockoutsByDepartmentView } from './StockoutsByDepartmentView';
 import { EpisodeDetailModal } from './EpisodeDetailModal';
+import { StockoutTrendChart } from './StockoutTrendChart';
+import { StockoutCauseChart } from './StockoutCauseChart';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
 // 16/10/2026 : d'abord intégrée en bas du Tableau de bord, puis déplacée ici sur demande explicite
@@ -150,81 +152,122 @@ export function Stockouts() {
         <StockoutsAllShopsView onSelectShop={handleSelectShopFromNetwork} />
       ) : activeTab === 'department' ? (
         <StockoutsByDepartmentView shopQueryParam={shopQueryParam()} onSelectDepartment={handleSelectDepartment} />
+      ) : error ? (
+        <div className="text-danger small">Erreur : {error}</div>
+      ) : summary === null ? (
+        <div className="text-muted small">Chargement...</div>
       ) : (
-      <div className="card">
-        <div className="card-body">
-          {error ? (
-            <div className="text-danger small">Erreur : {error}</div>
-          ) : summary === null ? (
-            <div className="text-muted small">Chargement...</div>
-          ) : (
-            <>
-              <div className="row g-3 mb-4">
-                <div className="col-12 col-md-4">
-                  <div className="text-muted small">Ruptures en cours</div>
-                  <div className="fs-4 fw-semibold">{summary.openCount}</div>
-                </div>
-                <div className="col-12 col-md-4">
-                  <div className="text-muted small">Durée moyenne</div>
-                  <div className="fs-4 fw-semibold">{formatDuration(summary.avgDurationHours)}</div>
-                </div>
-                <div className="col-12 col-md-4">
-                  <div className="text-muted small">CA perdu estimé (30j résolues)</div>
-                  <div className="fs-4 fw-semibold">{summary.totalCaPerduEstime.toLocaleString('fr-FR')} CFA</div>
-                </div>
-              </div>
+        <>
+          <div className="row row-cols-1 row-cols-md-3 g-3 mb-4">
 
-              {departmentFilter && (
-                <div className="alert alert-light border d-flex align-items-center justify-content-between py-2 mb-3">
-                  <span className="small">Filtré sur le rayon <strong>{departmentFilter}</strong></span>
-                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setDepartmentFilter(null)}>
-                    Retirer le filtre
-                  </button>
+            {/* Carte KPI : Ruptures en cours */}
+            <div className="col">
+              <div className="card kpi-card h-100">
+                <div className="card-body d-flex align-items-start gap-2">
+                  <div className="kpi-icon bg-warning-subtle">
+                    <iconify-icon icon="solar:alert-bold-duotone" className="text-warning"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="kpi-label">Ruptures en cours</p>
+                    <h3 className="kpi-value">{summary.openCount ?? 0}</h3>
+                  </div>
                 </div>
-              )}
-
-              <div className="table-responsive">
-                <table className="table align-middle mb-0 table-hover table-centered">
-                  <thead className="bg-light-subtle">
-                    <tr>
-                      <th>Article</th>
-                      <th>Rayon</th>
-                      <th>Depuis</th>
-                      <th>Durée</th>
-                      <th>Cause probable</th>
-                      <th>Confiance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleEpisodes.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="text-center text-muted py-4">
-                          {departmentFilter ? 'Aucune rupture en cours pour ce rayon.' : 'Aucune rupture en cours.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      visibleEpisodes.map((e) => (
-                        <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedEpisodeId(e.id)}>
-                          <td>{e.label || e.ean}</td>
-                          <td>{e.department || '—'}</td>
-                          <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
-                          <td>{formatDuration(e.durationHours)}</td>
-                          <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
-                          <td>
-                            <span className={`badge ${CONFIDENCE_BADGE[e.niveauConfiance] || 'reassort-badge-neutral'} py-1 px-2`}>
-                              {e.niveauConfiance.toLowerCase()}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                <div className="kpi-footer">Durée moyenne: {formatDuration(summary.avgDurationHours ?? 0)}</div>
               </div>
-            </>
+            </div>
+
+            {/* Carte KPI : CA perdu estimé */}
+            <div className="col">
+              <div className="card kpi-card h-100">
+                <div className="card-body d-flex align-items-start gap-2">
+                  <div className="kpi-icon bg-danger-subtle">
+                    <iconify-icon icon="solar:dollar-bold-duotone" className="text-danger"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="kpi-label">CA perdu estimé</p>
+                    <h3 className="kpi-value">{(summary.totalCaPerduEstime ?? 0).toLocaleString('fr-FR')} CFA</h3>
+                  </div>
+                </div>
+                <div className="kpi-footer">Sur 30j résolues</div>
+              </div>
+            </div>
+
+            {/* Carte KPI : Durée moyenne */}
+            <div className="col">
+              <div className="card kpi-card h-100">
+                <div className="card-body d-flex align-items-start gap-2">
+                  <div className="kpi-icon bg-info-subtle">
+                    <iconify-icon icon="solar:clock-bold-duotone" className="text-info"></iconify-icon>
+                  </div>
+                  <div>
+                    <p className="kpi-label">Durée moyenne</p>
+                    <h3 className="kpi-value">{formatDuration(summary.avgDurationHours ?? 0)}</h3>
+                  </div>
+                </div>
+                <div className="kpi-footer">En cours</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="row row-cols-1 row-cols-md-2 g-3 mb-4">
+            <div className="col">
+              {/* Graphique évolution des ruptures */}
+              <StockoutTrendChart shopQueryParam={shopQueryParam()} />
+            </div>
+            <div className="col">
+              {/* Graphique répartition par cause */}
+              <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
+            </div>
+          </div>
+
+          {departmentFilter && (
+            <div className="alert alert-light border d-flex align-items-center justify-content-between py-2 mb-3">
+              <span className="small">Filtré sur le rayon <strong>{departmentFilter}</strong></span>
+              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setDepartmentFilter(null)}>
+                Retirer le filtre
+              </button>
+            </div>
           )}
-        </div>
-      </div>
+
+          <div className="table-responsive">
+            <table className="table align-middle mb-0 table-hover table-centered">
+              <thead className="bg-light-subtle">
+                <tr>
+                  <th>Article</th>
+                  <th>Rayon</th>
+                  <th>Depuis</th>
+                  <th>Durée</th>
+                  <th>Cause probable</th>
+                  <th>Confiance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEpisodes.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center text-muted py-4">
+                      {departmentFilter ? 'Aucune rupture en cours pour ce rayon.' : 'Aucune rupture en cours.'}
+                    </td>
+                  </tr>
+                ) : (
+                  visibleEpisodes.map((e) => (
+                    <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedEpisodeId(e.id)}>
+                      <td>{e.label || e.ean}</td>
+                      <td>{e.department || '—'}</td>
+                      <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
+                      <td>{formatDuration(e.durationHours)}</td>
+                      <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
+                      <td>
+                        <span className={`badge ${CONFIDENCE_BADGE[e.niveauConfiance] || 'reassort-badge-neutral'} py-1 px-2`}>
+                          {e.niveauConfiance.toLowerCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {selectedEpisodeId && (

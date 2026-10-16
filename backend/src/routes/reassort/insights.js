@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail, getTrend: getStockoutTrend } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -335,6 +335,22 @@ router.get('/stockout-episodes/by-department', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const result = await getDashboardSummaryByDepartment(shopId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/trend - module Ruptures, évolution du nombre de ruptures en
+// cours jour par jour sur les 30 derniers jours (demande du 16/10/2026 : même niveau de détail
+// visuel que TableauDeBord.tsx, courbe de tendance). Placée AVANT /stockout-episodes/:id.
+router.get('/stockout-episodes/trend', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const result = await getStockoutTrend(shopId);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

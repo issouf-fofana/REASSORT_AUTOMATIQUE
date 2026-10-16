@@ -471,4 +471,37 @@ async function getEpisodeDetail(episodeId) {
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail };
+/**
+ * Évolution du nombre de ruptures en cours, jour par jour, sur les `days` derniers jours (demande
+ * du 16/10/2026, drill-down magasin au même niveau de détail visuel que TableauDeBord.tsx : graphe
+ * de tendance, pas juste un chiffre figé). Pour chaque jour, compte les épisodes qui étaient
+ * EN_COURS à ce moment précis (startedAt <= jour ET (pas encore résolu OU résolu après ce jour)) —
+ * calcul direct en JS plutôt qu'une requête SQL par jour (30 requêtes), un seul findMany suffit car
+ * le nombre d'épisodes sur 30j + marge reste limité par magasin.
+ */
+async function getTrend(rposShopId, { days = 30 } = {}) {
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+  // Tout épisode qui a pu être "en cours" à un moment de la fenêtre : commencé avant la fin de la
+  // fenêtre, et (toujours ouvert OU résolu après le début de la fenêtre).
+  const episodes = await prisma.stockoutEpisode.findMany({
+    where: {
+      rposShopId,
+      startedAt: { lte: now },
+      OR: [{ endedAt: null }, { endedAt: { gte: windowStart } }],
+    },
+    select: { startedAt: true, endedAt: true },
+  });
+
+  const points = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const count = episodes.filter((e) => e.startedAt <= day && (!e.endedAt || e.endedAt > day)).length;
+    points.push({ date: day.toISOString().slice(0, 10), openCount: count });
+  }
+
+  return { found: true, points };
+}
+
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail, getTrend };
