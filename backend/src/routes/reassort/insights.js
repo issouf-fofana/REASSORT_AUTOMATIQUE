@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail, getTrend: getStockoutTrend } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -325,16 +325,33 @@ router.get('/stockout-episodes/all-shops', requireAdminOrSupervisor, async (req,
   }
 });
 
-// GET /api/reassort/stockout-episodes/by-department - module Ruptures, dashboard par rayon (spec
-// rupture.md §7, 16/10/2026) : une ligne-résumé par rayon pour le magasin résolu. Placée AVANT
-// /stockout-episodes/:id ci-dessous — sinon Express interpréterait "by-department" comme un :id.
+// GET /api/reassort/stockout-episodes/by-sector - module Ruptures, 1er niveau de la navigation
+// Secteur → Rayon → Articles (identique à Proposition de commande, demande du 16/10/2026). Placées
+// AVANT /stockout-episodes/:id ci-dessous — sinon Express interpréterait ces chemins comme un :id.
+router.get('/stockout-episodes/by-sector', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const result = await getDashboardSummaryBySector(shopId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/by-department?sector=... - 2e niveau (rayons d'un secteur
+// donné). `sector` optionnel : omis = tous les rayons du magasin (comportement d'origine, encore
+// utilisé par l'ancien onglet "Par rayon" avant sa fusion dans cette navigation hiérarchique).
 router.get('/stockout-episodes/by-department', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getDashboardSummaryByDepartment(shopId);
+    const sector = typeof req.query.sector === 'string' ? req.query.sector : undefined;
+    const result = await getDashboardSummaryByDepartment(shopId, { sector });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

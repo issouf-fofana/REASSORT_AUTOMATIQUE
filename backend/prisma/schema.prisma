@@ -2080,6 +2080,7 @@ model StockoutEpisode {
   ean        String
   label      String?
   department String?
+  sector     String? // secteur (1er niveau RPOS, ex: "PRODUITS SECS"), même origine que ProposalLine.sector — ajouté le 16/10/2026 pour la navigation Secteur → Rayon → Articles du module Ruptures, identique à Proposition de commande.
 
   startedAt DateTime  @map("started_at")
   endedAt   DateTime? @map("ended_at") // null = rupture toujours en cours

@@ -39,6 +39,7 @@ async function detectStockoutEpisodes(rposShopId) {
           ean: snap.ean,
           label: diagnosis.label || null,
           department: diagnosis.department || null,
+          sector: diagnosis.sector || null,
           startedAt: snap.capturedAt,
           status: 'EN_COURS',
           causeProposee: diagnosis.cause,
@@ -76,9 +77,10 @@ async function diagnoseCause(rposShopId, ean) {
 
   const label = recentLine?.label || null;
   const department = recentLine?.department || null;
+  const sector = recentLine?.sector || null;
 
   if (!recentLine) {
-    return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department };
+    return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department, sector };
   }
 
   const order = await prisma.proposalOrder.findFirst({
@@ -87,22 +89,22 @@ async function diagnoseCause(rposShopId, ean) {
   });
 
   if (!order) {
-    return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department };
+    return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department, sector };
   }
 
   if (order.rposOrderValidated === false || order.status === 'PENDING') {
-    return { cause: 'MAGASIN_COMMANDE_NON_VALIDEE', confiance: 'CONFIRMEE', commandeRef: order.id, label, department };
+    return { cause: 'MAGASIN_COMMANDE_NON_VALIDEE', confiance: 'CONFIRMEE', commandeRef: order.id, label, department, sector };
   }
 
   if (order.receptionStatus === 'EN_ATTENTE_RECEPTION') {
-    return { cause: 'AMONT_A_PRECISER', confiance: 'PROBABLE', commandeRef: order.id, label, department };
+    return { cause: 'AMONT_A_PRECISER', confiance: 'PROBABLE', commandeRef: order.id, label, department, sector };
   }
 
   if (order.receptionStatus === 'RECUE_ESTIMEE') {
-    return { cause: 'ECART_STOCK_RAYON', confiance: 'PROBABLE', commandeRef: order.id, label, department };
+    return { cause: 'ECART_STOCK_RAYON', confiance: 'PROBABLE', commandeRef: order.id, label, department, sector };
   }
 
-  return { cause: 'INDETERMINEE', confiance: 'INDETERMINEE', commandeRef: order.id, label, department };
+  return { cause: 'INDETERMINEE', confiance: 'INDETERMINEE', commandeRef: order.id, label, department, sector };
 }
 
 /**
@@ -277,46 +279,47 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
 }
 
 /**
- * Dashboard par rayon (spec rupture.md §7, 16/10/2026) : pour un magasin donné, une ligne-résumé
- * par rayon (ProposalLine.department/StockoutEpisode.department). Même indicateurs que la vue
- * réseau (§2), appliqués au niveau rayon au lieu du niveau magasin — permet d'identifier les rayons
- * les plus exposés. Un seul magasin à la fois (pas de boucle réseau ici), donc agrégation directe en
- * base via groupBy plutôt qu'une boucle JS comme getDashboardSummaryAllShops.
+ * Agrégation générique par champ de classement (rayon ou secteur) — factorise ce qui était dupliqué
+ * entre getDashboardSummaryByDepartment et getDashboardSummaryBySector (navigation Secteur → Rayon
+ * → Articles du module Ruptures, identique à Proposition de commande, demande du 16/10/2026). Même
+ * indicateurs que la vue réseau (§2), appliqués au niveau du champ choisi. `extraWhere` permet de
+ * restreindre à un secteur précis pour lister seulement SES rayons (étape intermédiaire Rayon).
  */
-async function getDashboardSummaryByDepartment(rposShopId, { resolvedLookbackDays = 30 } = {}) {
+async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackDays = 30, extraWhere = {}, noDataLabel } = {}) {
   const now = new Date();
   const resolvedSince = new Date(now.getTime() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
 
   const [openEpisodes, resolvedEpisodes] = await Promise.all([
-    prisma.stockoutEpisode.findMany({ where: { rposShopId, status: 'EN_COURS' } }),
+    prisma.stockoutEpisode.findMany({ where: { rposShopId, status: 'EN_COURS', ...extraWhere } }),
     prisma.stockoutEpisode.findMany({
-      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince } },
-      select: { department: true, caPerdueEstime: true },
+      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince }, ...extraWhere },
+      select: { [field]: true, caPerdueEstime: true },
     }),
   ]);
 
   if (!openEpisodes.length && !resolvedEpisodes.length) {
-    return { found: true, departmentCount: 0, message: 'Aucune rupture détectée pour ce magasin sur la période.' };
+    return { found: true, groupCount: 0, message: noDataLabel || 'Aucune rupture détectée pour ce magasin sur la période.' };
   }
 
-  // department peut être null (épisode dont l'article n'a jamais été proposé, cf. diagnoseCause) —
-  // regroupé sous "Sans rayon" plutôt que silencieusement exclu, pour ne jamais faire disparaître
-  // un épisode réel de la vue agrégée.
-  const byDept = new Map();
-  function getBucket(dept) {
-    const key = dept || 'Sans rayon';
-    if (!byDept.has(key)) byDept.set(key, { department: key, openEpisodes: [], resolvedCount: 0, totalCaPerdu: 0 });
-    return byDept.get(key);
+  // Valeur null possible (épisode dont l'article n'a jamais été proposé, cf. diagnoseCause) —
+  // regroupée sous un libellé "Sans ..." plutôt que silencieusement exclue, pour ne jamais faire
+  // disparaître un épisode réel de la vue agrégée.
+  const fallbackLabel = field === 'sector' ? 'Sans secteur' : 'Sans rayon';
+  const byGroup = new Map();
+  function getBucket(value) {
+    const key = value || fallbackLabel;
+    if (!byGroup.has(key)) byGroup.set(key, { group: key, openEpisodes: [], resolvedCount: 0, totalCaPerdu: 0 });
+    return byGroup.get(key);
   }
 
-  for (const e of openEpisodes) getBucket(e.department).openEpisodes.push(e);
+  for (const e of openEpisodes) getBucket(e[field]).openEpisodes.push(e);
   for (const e of resolvedEpisodes) {
-    const bucket = getBucket(e.department);
+    const bucket = getBucket(e[field]);
     bucket.resolvedCount += 1;
     bucket.totalCaPerdu += e.caPerdueEstime || 0;
   }
 
-  const results = Array.from(byDept.values()).map((bucket) => {
+  const results = Array.from(byGroup.values()).map((bucket) => {
     const durations = bucket.openEpisodes.map((e) => (now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000));
     const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
     const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
@@ -326,7 +329,7 @@ async function getDashboardSummaryByDepartment(rposShopId, { resolvedLookbackDay
     for (const e of bucket.openEpisodes) causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
 
     return {
-      department: bucket.department,
+      group: bucket.group,
       openCount: bucket.openEpisodes.length,
       totalEpisodesCount: bucket.openEpisodes.length + bucket.resolvedCount,
       avgDurationHours: Math.round(avgDurationHours * 10) / 10,
@@ -341,10 +344,22 @@ async function getDashboardSummaryByDepartment(rposShopId, { resolvedLookbackDay
 
   return {
     found: true,
-    departmentCount: results.length,
-    totalOpenAcrossDepartments: results.reduce((s, r) => s + r.openCount, 0),
-    departments: results,
+    groupCount: results.length,
+    totalOpenAcrossGroups: results.reduce((s, r) => s + r.openCount, 0),
+    groups: results,
   };
+}
+
+/** Dashboard par secteur (1er niveau, spec rupture.md §7 étendu, 16/10/2026) : point d'entrée de la
+ * navigation Secteur → Rayon → Articles. */
+async function getDashboardSummaryBySector(rposShopId, options = {}) {
+  return getDashboardSummaryByField(rposShopId, 'sector', options);
+}
+
+/** Dashboard par rayon — optionnellement restreint à un secteur (2e niveau de la navigation). */
+async function getDashboardSummaryByDepartment(rposShopId, { sector, ...options } = {}) {
+  const extraWhere = sector !== undefined ? { sector: sector === '__none__' ? null : sector } : {};
+  return getDashboardSummaryByField(rposShopId, 'department', { ...options, extraWhere });
 }
 
 // Historique des mouvements de stock/ventes affiché dans la fiche détail : fenêtre large pour
@@ -504,4 +519,4 @@ async function getTrend(rposShopId, { days = 30 } = {}) {
   return { found: true, points };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getEpisodeDetail, getTrend };
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend };
