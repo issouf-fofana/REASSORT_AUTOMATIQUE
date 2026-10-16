@@ -65,7 +65,6 @@ export const NAV_GROUPS: NavGroup[] = [
     entries: [
       { id: 'purchase-order', label: 'Proposition de commande', href: '/purchase-order', icon: ShoppingCart },
       { id: 'purchase-list', label: 'Historique', href: '/purchase-list', icon: History },
-      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
       { id: 'sales-analysis', label: "Résultat de l'analyse", href: '/sales-analysis', icon: LineChart },
       { id: 'sales-history', label: 'Ventes synchronisées', href: '/sales-history', icon: BarChart3 },
       { id: 'ai-predictions', label: 'IA & Prédictions', href: '/ai-predictions', icon: Sparkles },
@@ -73,6 +72,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },
       { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
       { id: 'feature-requests', label: "Demandes d'évolution", href: '/feature-requests', icon: Lightbulb, adminOnly: true },
+      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
     ],
   },
   {
