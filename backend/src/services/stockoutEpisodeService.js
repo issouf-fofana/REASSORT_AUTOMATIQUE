@@ -199,4 +199,80 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary };
+// Seuil "rupture longue" par défaut, cf. spec §2 "Nombre de ruptures qui dépassent un seuil de
+// durée défini" — pas de configuration dédiée pour l'instant (vague 1 : vue réseau), valeur fixe
+// raisonnable reprise s'il faut la rendre réglable plus tard.
+const LONG_EPISODE_HOURS = 48;
+
+// Causes qui indiquent qu'AUCUNE commande n'a été identifiée pour expliquer la rupture (spec §2 :
+// "Nombre de ruptures sans commande de réapprovisionnement identifiée") — distinct de
+// MAGASIN_COMMANDE_NON_VALIDEE, où une commande EXISTE mais n'a pas été validée.
+const NO_ORDER_CAUSES = new Set(['MAGASIN_REASSORT', 'INDETERMINEE']);
+
+/**
+ * Vue réseau (spec rupture.md §2, 16/10/2026) : pour chaque magasin accessible, une ligne-résumé
+ * de sa situation de ruptures. Même principe que getStockoutRisksAllShops (chatbotToolsService.js) :
+ * itère les magasins du périmètre, agrège, trie par magasin le plus touché en premier.
+ */
+async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDays = 30 } = {}) {
+  // allowedShopIds === null signifie "pas de restriction" (ADMIN, cf. getAccessibleShopIds dans
+  // middleware/auth.js) — distinct d'un tableau vide, qui signifierait "aucun magasin accessible"
+  // pour un SUPERVISOR sans périmètre configuré. Même convention que getWeeklyConformityRate.
+  if (Array.isArray(allowedShopIds) && !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true, reference: true, name: true },
+  });
+
+  const results = [];
+  for (const shop of shops) {
+    const [openEpisodes, resolvedCount] = await Promise.all([
+      prisma.stockoutEpisode.findMany({ where: { rposShopId: shop.rposShopId, status: 'EN_COURS' } }),
+      prisma.stockoutEpisode.count({
+        where: {
+          rposShopId: shop.rposShopId,
+          status: 'RESOLUE',
+          endedAt: { gte: new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
+        },
+      }),
+    ]);
+    if (!openEpisodes.length && !resolvedCount) continue;
+
+    const now = Date.now();
+    const durations = openEpisodes.map((e) => (now - e.startedAt.getTime()) / (60 * 60 * 1000));
+    const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
+    const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
+    const noOrderCount = openEpisodes.filter((e) => NO_ORDER_CAUSES.has(e.causeProposee)).length;
+
+    const resolvedWithLoss = await prisma.stockoutEpisode.findMany({
+      where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
+      select: { caPerdueEstime: true },
+    });
+    const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0);
+
+    results.push({
+      rposShopId: shop.rposShopId,
+      shopReference: shop.reference,
+      shopName: shop.name,
+      openCount: openEpisodes.length,
+      totalEpisodesCount: openEpisodes.length + resolvedCount,
+      avgDurationHours: Math.round(avgDurationHours * 10) / 10,
+      longEpisodesCount,
+      noOrderCount,
+      totalCaPerduEstime: Math.round(totalCaPerdu),
+    });
+  }
+
+  results.sort((a, b) => b.openCount - a.openCount);
+
+  if (!results.length) return { found: true, shopCount: 0, message: 'Aucun magasin avec une rupture détectée sur la période.' };
+  return {
+    found: true,
+    shopCount: results.length,
+    totalOpenAcrossShops: results.reduce((s, r) => s + r.openCount, 0),
+    shops: results,
+  };
+}
+
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops };

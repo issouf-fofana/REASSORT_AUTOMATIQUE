@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -306,6 +306,19 @@ router.get('/stockout-episodes', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const result = await getDashboardSummary(shopId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/all-shops - module Ruptures, vue réseau (spec rupture.md
+// §2, 16/10/2026) : une ligne-résumé par magasin du périmètre accessible (ADMIN = tous, SUPERVISOR
+// = son périmètre), même raisonnement que /admin/conformity/weekly ci-dessus.
+router.get('/stockout-episodes/all-shops', requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const result = await getDashboardSummaryAllShops(shopIdFilter);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

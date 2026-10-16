@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
+import { StockoutsAllShopsView } from './StockoutsAllShopsView';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
 // 16/10/2026 : d'abord intégrée en bas du Tableau de bord, puis déplacée ici sur demande explicite
@@ -51,6 +52,11 @@ export function Stockouts() {
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
   const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string } | null>(null);
 
+  // Onglets "Ce magasin" / "Tous les magasins" (spec rupture.md §2, demande explicite du 16/10/2026
+  // : "tout doit etre dans le dashbord des rupture pas l'autre" — même pattern que
+  // TableauDeBord.tsx, pas de page séparée pour la vue réseau).
+  const [activeTab, setActiveTab] = useState<'shop' | 'all'>('shop');
+
   const [summary, setSummary] = useState<StockoutSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,13 +92,43 @@ export function Stockouts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSingleShop, selectedShop?.id]);
 
+  function handleSelectShopFromNetwork(shop: { id: string; reference: string; name: string }) {
+    setSelectedShop({ id: shop.id });
+    setActiveTab('shop');
+  }
+
   return (
     <div className="container-fluid py-4">
+      {/* Même style que TableauDeBord.tsx (reassort-tabs) — dupliqué ici car chaque page garde son
+          propre scope de style, pas de feuille partagée entre pages de la SPA. */}
+      <style>{`
+        .reassort-tabs .nav-link { color: #5B6B85; font-weight: 600; border: none; border-bottom: 2px solid transparent; }
+        .reassort-tabs .nav-link.active { color: #1B2A4A; border-bottom-color: #F5A623; background: transparent; }
+      `}</style>
+
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h2 className="mb-0">Ruptures de stock</h2>
         <span className="text-muted small">Sans données entrepôt (Cyrus) — diagnostic simplifié</span>
       </div>
 
+      {!isSingleShop && (
+        <ul className="nav reassort-tabs mb-3">
+          <li className="nav-item">
+            <button type="button" className={`nav-link${activeTab === 'shop' ? ' active' : ''}`} onClick={() => setActiveTab('shop')}>
+              Ce magasin
+            </button>
+          </li>
+          <li className="nav-item">
+            <button type="button" className={`nav-link${activeTab === 'all' ? ' active' : ''}`} onClick={() => setActiveTab('all')}>
+              Tous les magasins
+            </button>
+          </li>
+        </ul>
+      )}
+
+      {activeTab === 'all' && !isSingleShop ? (
+        <StockoutsAllShopsView onSelectShop={handleSelectShopFromNetwork} />
+      ) : (
       <div className="card">
         <div className="card-body">
           {error ? (
@@ -158,6 +194,7 @@ export function Stockouts() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
