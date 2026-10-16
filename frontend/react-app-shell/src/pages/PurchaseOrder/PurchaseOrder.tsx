@@ -750,8 +750,15 @@ export function PurchaseOrder() {
                 <h4 className="mb-0">{selectedSector ? `Rayons — ${selectedSector}` : 'Secteurs'}</h4>
               </div>
               {isSingleShop && user && <div className="text-muted small">{user.rposShopReference} — {user.rposShopName}</div>}
+              {/* Sélecteur de magasin dupliqué avec celui de la topbar, signalé le 16/10/2026
+                  ("retire ca sur cette vue"). Masqué plutôt que supprimé : ce <select> porte toute la
+                  logique réelle de résolution du magasin actif de cette page (deep-link email,
+                  conflit avec ?shop= dans l'URL, câblage shop-picker.js — cf. l'effet juste en
+                  dessous, lignes ~359-413) — le retirer du DOM aurait cassé ce mécanisme. Toujours
+                  rendu, seulement invisible : le magasin affiché reste piloté par le sélecteur
+                  global de la topbar, comme sur TableauDeBord.tsx (déjà sans <select> local). */}
               {!isSingleShop && (
-                <select className="form-select form-select-sm mt-1" style={{ minWidth: 260 }} ref={shopSelectRef} defaultValue="">
+                <select className="visually-hidden" aria-hidden="true" ref={shopSelectRef} defaultValue="">
                   <ShopOptions />
                 </select>
               )}
