@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getEpisodeDetail } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -319,6 +319,30 @@ router.get('/stockout-episodes/all-shops', requireAdminOrSupervisor, async (req,
   try {
     const shopIdFilter = await getAccessibleShopIds(req);
     const result = await getDashboardSummaryAllShops(shopIdFilter);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/:id - module Ruptures, fiche détaillée d'un épisode (spec
+// rupture.md §3-§5, 16/10/2026) : mouvements de stock, ventes, commande associée et chronologie.
+// Vérifie que l'épisode appartient à un magasin accessible avant de le renvoyer (ADMIN = tous,
+// SUPERVISOR = son périmètre, autre rôle = son propre magasin) — même raisonnement que
+// isEanInUserScope ci-dessus, pour empêcher un accès à un épisode d'un autre magasin via son id.
+router.get('/stockout-episodes/:id', async (req, res) => {
+  try {
+    const episode = await prisma.stockoutEpisode.findUnique({ where: { id: req.params.id }, select: { rposShopId: true } });
+    if (!episode) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const ownShopId = resolveShopId(req);
+    const allowed = shopIdFilter === null ? true : shopIdFilter.includes(episode.rposShopId);
+    if (!allowed && episode.rposShopId !== ownShopId) {
+      return res.status(403).json({ success: false, message: 'Accès refusé à ce magasin.' });
+    }
+
+    const result = await getEpisodeDetail(req.params.id);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

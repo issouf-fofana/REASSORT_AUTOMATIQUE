@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutsAllShopsView } from './StockoutsAllShopsView';
+import { EpisodeDetailModal } from './EpisodeDetailModal';
 
 // Module Ruptures (cf. rupture.md, 16/10/2026) — page séparée dans la sidebar (demande du
 // 16/10/2026 : d'abord intégrée en bas du Tableau de bord, puis déplacée ici sur demande explicite
@@ -51,6 +52,7 @@ export function Stockouts() {
   const [user] = useState(() => window.reassortGetUser());
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : true;
   const [selectedShop, setSelectedShop] = useState<{ id: string; posId?: string } | null>(null);
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
 
   // Onglets "Ce magasin" / "Tous les magasins" (spec rupture.md §2, demande explicite du 16/10/2026
   // : "tout doit etre dans le dashbord des rupture pas l'autre" — même pattern que
@@ -173,7 +175,7 @@ export function Stockouts() {
                       </tr>
                     ) : (
                       summary.openEpisodes.map((e) => (
-                        <tr key={e.id}>
+                        <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedEpisodeId(e.id)}>
                           <td>{e.label || e.ean}</td>
                           <td>{e.department || '—'}</td>
                           <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
@@ -194,6 +196,10 @@ export function Stockouts() {
           )}
         </div>
       </div>
+      )}
+
+      {selectedEpisodeId && (
+        <EpisodeDetailModal episodeId={selectedEpisodeId} onClose={() => setSelectedEpisodeId(null)} />
       )}
     </div>
   );

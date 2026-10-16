@@ -108,4 +108,4 @@ async function getStockMoveSummary(posId, shopId, ean, dateStart, dateEnd) {
   };
 }
 
-module.exports = { getStockMoveSummary };
+module.exports = { getStockMoveSummary, getMovesFromLocal };

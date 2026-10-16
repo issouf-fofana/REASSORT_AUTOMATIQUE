@@ -5,6 +5,7 @@
  * retombent tous sur AMONT_A_PRECISER.
  */
 const prisma = require('../utils/prisma');
+const { getMovesFromLocal } = require('./stockMoveAnalysisService');
 
 const LOOKBACK_WEEKS = 8;
 const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
@@ -275,4 +276,128 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops };
+// Historique des mouvements de stock/ventes affiché dans la fiche détail : fenêtre large pour
+// couvrir tout l'épisode (même ancien) plus quelques jours avant son début (spec §3 : "quantités
+// vendues avant la rupture").
+const PRE_EPISODE_CONTEXT_DAYS = 14;
+
+/**
+ * Fiche détaillée d'un épisode de rupture (spec rupture.md §3-§5, 16/10/2026) : identité article,
+ * mouvements de stock, ventes avant/pendant la rupture, commande associée avec sa chronologie
+ * complète (création -> transmission -> réception, via ReceptionEvent), et les 3 délais distincts
+ * demandés (§4 : réaction, réapprovisionnement, durée totale) — jamais additionnés entre eux,
+ * affichés séparément comme le document l'exige explicitement.
+ */
+async function getEpisodeDetail(episodeId) {
+  const episode = await prisma.stockoutEpisode.findUnique({ where: { id: episodeId } });
+  if (!episode) return { found: false, message: 'Épisode de rupture introuvable.' };
+
+  const now = new Date();
+  const endedAt = episode.endedAt || now;
+  const durationHours = Math.round(((endedAt.getTime() - episode.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
+
+  // Commande associée à CET épisode précis : contrairement à diagnoseCause (qui prend la dernière
+  // proposition connue, utile pour un diagnostic rapide à la détection), on ne retient ici qu'une
+  // commande créée À PARTIR du début de la rupture — une commande plus ancienne n'est pas une
+  // réaction à cette rupture mais à une situation antérieure (bug trouvé en testant réellement :
+  // un épisode du 16/10 se voyait associer une commande du 16/09, donnant un "délai de réaction"
+  // négatif de -719h). Sans commande postérieure au début, order reste null (spec §4, scénario 1 :
+  // "aucune commande n'a été identifiée").
+  const candidateLines = await prisma.proposalLine.findMany({
+    where: { ean: episode.ean, proposal: { rposShopId: episode.rposShopId, generatedAt: { gte: episode.startedAt } } },
+    orderBy: { proposal: { generatedAt: 'asc' } },
+    include: { proposal: true },
+  });
+
+  let order = null;
+  let matchedLine = null;
+  let receptionEvents = [];
+  for (const line of candidateLines) {
+    const candidateOrder = await prisma.proposalOrder.findFirst({
+      where: { proposalId: line.proposalId, department: line.department || undefined, createdAt: { gte: episode.startedAt } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (candidateOrder) {
+      order = candidateOrder;
+      matchedLine = line;
+      break;
+    }
+  }
+  if (order) {
+    receptionEvents = await prisma.receptionEvent.findMany({
+      where: { proposalOrderId: order.id },
+      orderBy: { observedAt: 'asc' },
+    });
+  }
+
+  // Les 3 délais distincts de la spec §4 — null si l'étape correspondante n'a pas (encore) de date.
+  let reactionDelayHours = null;
+  let replenishmentDelayHours = null;
+  if (order) {
+    reactionDelayHours = Math.round(((order.createdAt.getTime() - episode.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
+    if (order.actualReceptionDate) {
+      replenishmentDelayHours = Math.round(((order.actualReceptionDate.getTime() - order.createdAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
+    }
+  }
+
+  const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
+  const [stockMoves, salesBefore, salesDuring] = await Promise.all([
+    getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
+    prisma.salesLine.aggregate({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
+      _sum: { quantity: true, revenueExclTax: true },
+      _count: true,
+    }),
+    prisma.salesLine.aggregate({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt, lte: endedAt } },
+      _sum: { quantity: true, revenueExclTax: true },
+    }),
+  ]);
+
+  return {
+    found: true,
+    id: episode.id,
+    ean: episode.ean,
+    label: episode.label,
+    department: episode.department,
+    rposShopId: episode.rposShopId,
+    startedAt: episode.startedAt,
+    endedAt: episode.endedAt,
+    status: episode.status,
+    durationHours,
+    causeProposee: episode.causeProposee,
+    niveauConfiance: episode.niveauConfiance,
+    qtyPerdueEstimee: episode.qtyPerdueEstimee,
+    caPerdueEstime: episode.caPerdueEstime,
+    salesBeforeEpisode: {
+      windowDays: PRE_EPISODE_CONTEXT_DAYS,
+      quantity: salesBefore._sum.quantity || 0,
+      revenue: salesBefore._sum.revenueExclTax || 0,
+    },
+    salesDuringEpisode: {
+      quantity: salesDuring._sum.quantity || 0,
+      revenue: salesDuring._sum.revenueExclTax || 0,
+    },
+    stockMoves,
+    order: order
+      ? {
+          id: order.id,
+          status: order.status,
+          receptionStatus: order.receptionStatus,
+          rposOrderValidated: order.rposOrderValidated,
+          supplierName: order.supplierName,
+          deliveryType: order.deliveryType,
+          createdAt: order.createdAt,
+          expectedReceptionDate: order.expectedReceptionDate,
+          actualReceptionDate: order.actualReceptionDate,
+          quantityOrdered: matchedLine?.quantityValidated ?? matchedLine?.quantitySuggested ?? null,
+        }
+      : null,
+    receptionEvents: receptionEvents.map((e) => ({ observedAt: e.observedAt, receptionStatus: e.receptionStatus, rposStatus: e.rposStatus })),
+    reactionDelayHours,
+    replenishmentDelayHours,
+    totalDurationHours: durationHours,
+  };
+}
+
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getEpisodeDetail };
