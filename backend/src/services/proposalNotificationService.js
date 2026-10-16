@@ -172,7 +172,16 @@ async function notifyShopUsersOfNewProposal(shop, stats, proposal) {
  */
 async function notifyAdminsOfNightlySummary(summaries) {
   const nonEmpty = summaries.filter((s) => s.proposalsGenerated > 0);
-  if (!nonEmpty.length) return;
+  // Magasins en échec RÉEL (exception RPOS, etc. — cf. nightlyProposalJob.js), distincts d'un
+  // magasin sans article à proposer (proposalsGenerated: 0 sans `error`, résultat normal).
+  const failed = summaries.filter((s) => s.error);
+
+  // Bug trouvé le 16/10/2026 (demande explicite : "il doit me dire sil a reussi... et sil ya des
+  // erreur il m'envoi par mail") : ce récap ne partait JAMAIS si aucun magasin n'avait de
+  // proposition réussie — donc une nuit où TOUS les magasins échouaient (RPOS injoignable
+  // généralisé, l'incident investigué ce jour) ne générait aucune alerte, nulle part. Envoie
+  // maintenant dès qu'il y a quelque chose à rapporter : un succès OU un échec.
+  if (!nonEmpty.length && !failed.length) return;
 
   const admins = await getAdminUsers();
   if (!admins.length) return;
@@ -190,7 +199,7 @@ async function notifyAdminsOfNightlySummary(summaries) {
     `)
     .join('');
 
-  const tableHtml = `
+  const tableHtml = nonEmpty.length ? `
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:12px;">
       <thead>
         <tr style="border-bottom:2px solid #ececec;">
@@ -201,18 +210,40 @@ async function notifyAdminsOfNightlySummary(summaries) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
-  `;
+  ` : '';
+
+  const failedRows = failed
+    .map((s) => `<tr><td>${s.shop.reference} — ${s.shop.name}</td><td>${s.error}</td></tr>`)
+    .join('');
+
+  const failedHtml = failed.length ? `
+    <p style="margin-top:16px;"><strong>⚠️ ${failed.length} magasin(s) en échec</strong> (aucune nouvelle proposition générée, nécessite une vérification manuelle ou une nouvelle tentative depuis la page Proposition de commande) :</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ececec;">
+          <th style="text-align:left;padding:6px 8px;">Magasin</th>
+          <th style="text-align:left;padding:6px 8px;">Erreur</th>
+        </tr>
+      </thead>
+      <tbody>${failedRows}</tbody>
+    </table>
+  ` : '';
+
+  const subjectParts = [];
+  if (nonEmpty.length) subjectParts.push(`${nonEmpty.length} magasin(s) OK`);
+  if (failed.length) subjectParts.push(`${failed.length} échec(s)`);
 
   await sendMailToEachRecipient(admins, async (user) => ({
-    subject: `Réassort Automatique — récap nocturne (${nonEmpty.length} magasin(s), ${totalArticles} article(s))`,
+    subject: `Réassort Automatique — récap nocturne (${subjectParts.join(', ')})`,
     htmlBody: renderMailTemplate(
       'Récap de la génération nocturne',
       `
         <p>Bonjour ${user.name},</p>
-        <p><strong>${nonEmpty.length}</strong> magasin(s) ont une nouvelle proposition cette nuit, pour un total de <strong>${totalArticles}</strong> article(s) proposé(s)${totalIneligible ? `, dont <strong>${totalIneligible}</strong> sans fournisseur rattaché sur l'ensemble des magasins` : ''}.</p>
+        ${nonEmpty.length ? `<p><strong>${nonEmpty.length}</strong> magasin(s) ont une nouvelle proposition cette nuit, pour un total de <strong>${totalArticles}</strong> article(s) proposé(s)${totalIneligible ? `, dont <strong>${totalIneligible}</strong> sans fournisseur rattaché sur l'ensemble des magasins` : ''}.</p>` : ''}
         ${tableHtml}
+        ${failedHtml}
       `,
-      { severity: totalIneligible ? 'warning' : 'info' },
+      { severity: failed.length ? 'warning' : 'info' },
     ),
   }));
 }
