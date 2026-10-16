@@ -79,8 +79,8 @@ export function Stockouts() {
     let cancelled = false;
     setSummary(null);
     setError(null);
-    apiFetch<{ success: boolean; data: StockoutSummary }>(`/reassort/stockout-episodes?${qs}`)
-      .then((data) => { if (!cancelled) setSummary(data.data); })
+    apiFetch<StockoutSummary>(`/reassort/stockout-episodes?${qs}`)
+      .then((data) => { if (!cancelled) setSummary(data); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
