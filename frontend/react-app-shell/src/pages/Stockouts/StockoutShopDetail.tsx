@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
@@ -65,6 +65,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [bySector, setBySector] = useState<ByFieldSummary | null>(null);
   const [byDepartment, setByDepartment] = useState<ByFieldSummary | null>(null);
 
+  const mountRef = useRef(true);
+
   // Résumé complet (KPI, graphes, articles) : chargé une fois par magasin, le reste navigue dedans
   // côté client, sans nouvel appel API par clic.
   useEffect(() => {
@@ -74,9 +76,24 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     setError(null);
     setSelectedSector(null);
     setSelectedDepartment(null);
+    mountRef.current = true;
     apiFetch<StockoutSummary>(`/reassort/stockout-episodes?${shopQueryParam}`)
-      .then((data) => { if (!cancelled) setSummary(data); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+      .then((data) => { if (!cancelled && mountRef.current) setSummary(data); })
+      .catch((err) => { if (!cancelled && mountRef.current) setError(err instanceof Error ? err.message : String(err)); });
+    return () => {
+      cancelled = true;
+      mountRef.current = false;
+    };
+  }, [shopQueryParam]);
+
+  // Niveau Secteurs : chargé une fois par magasin.
+  useEffect(() => {
+    if (!shopQueryParam) return;
+    let cancelled = false;
+    setBySector(null);
+    apiFetch<ByFieldSummary>(`/reassort/stockout-episodes/by-sector?${shopQueryParam}`)
+      .then((data) => { if (!cancelled) setBySector(data); })
+      .catch(() => { /* non bloquant : la liste d'articles reste consultable sans ce niveau */ });
     return () => { cancelled = true; };
   }, [shopQueryParam]);
 
@@ -115,8 +132,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           d'ensemble du magasin, pas seulement du rayon/secteur consulté. */}
       {error ? (
         <div className="text-danger small mb-3">Erreur : {error}</div>
-      ) : summary === null ? (
-        <div className="text-muted small mb-3">Chargement...</div>
+      ) : !mountRef.current ? null :
+      summary === null ? (
+        <div className="text-muted small mb-3">Chargement des données de rupture...</div>
       ) : (
         <>
           <div className="row row-cols-1 row-cols-md-3 g-3 mb-4">
