@@ -214,7 +214,17 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
     ? openEpisodes.reduce((sum, e) => sum + e.durationHours, 0) / openEpisodes.length
     : 0;
 
-  const totalCaPerdu = resolvedEpisodes.reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  // Même bug que les autres vues agrégées (corrigé le 16/10/2026, cf. getDashboardSummaryByField/
+  // getDashboardSummaryAllShops) : caPerdueEstime n'existe en base QUE pour les épisodes déjà
+  // résolus. Cette fonction-ci alimente directement les 3 cartes KPI tout en haut de "Ce magasin" —
+  // la plus visible de toutes les vues — et avait été oubliée lors du premier correctif. Recalculé
+  // en temps réel pour chaque épisode EN_COURS.
+  const now = new Date();
+  const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
+    const loss = await estimateLoss(rposShopId, e.ean, e.startedAt, now);
+    return loss.caPerdue || 0;
+  });
+  const totalCaPerdu = resolvedEpisodes.reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0) + openLosses.reduce((s, v) => s + v, 0);
 
   const causeCounts = {};
   for (const e of [...openEpisodes, ...resolvedEpisodes]) {
