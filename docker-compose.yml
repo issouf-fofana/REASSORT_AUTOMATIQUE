@@ -80,6 +80,15 @@ services:
       # il n'a pas d'IP propre dans le réseau Docker Compose de ce projet — host.docker.internal
       # résout vers l'hôte, où le port 3001 est bien atteignable.
       INTERNAL_BACKEND_HOST: host.docker.internal
+      # Bug trouvé le 17/10/2026 : sans BACKEND_URL, le frontend retombe sur
+      # `window.location.hostname:3001` (cf. index.html) — fonctionne depuis CETTE machine (3001
+      # écoute en network_mode: host), mais un poste client sur le même réseau qui n'accède qu'au
+      # port 8080 (ex: pare-feu, routage réseau) ne peut jamais joindre le port 3001 : tous les
+      # appels API restent bloqués indéfiniment ("Chargement..." qui ne se résout jamais, aucune
+      # erreur visible). En pointant vers /api-backend (même origine, proxié par nginx vers le
+      # backend, cf. location /api-backend/ dans nginx.conf), tout passe par le port 8080 déjà
+      # ouvert pour tout le monde.
+      BACKEND_URL: /api-backend
     extra_hosts:
       # host.docker.internal n'est résolu automatiquement que sur Docker Desktop (Mac/Windows) —
       # sur Linux il faut le déclarer explicitement pour qu'il pointe vers la passerelle Docker.

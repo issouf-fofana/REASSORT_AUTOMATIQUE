@@ -569,6 +569,7 @@ async function getEpisodeDetail(episodeId) {
     ean: episode.ean,
     label: episode.label,
     department: episode.department,
+    sector: episode.sector,
     rposShopId: episode.rposShopId,
     startedAt: episode.startedAt,
     endedAt: episode.endedAt,

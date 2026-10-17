@@ -1,0 +1,1799 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Analyse de rupture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Layout: topbar · article header with sparkline · 5 KPIs · AI analysis panel · timeline+sidebar grid · cause analysis · impact+patterns · recommendations · history */
+
+  :root {
+    --bg: #f1f3f6;
+    --surface: #ffffff;
+    --surface-2: #f8fafb;
+    --surface-3: #eef1f4;
+    --border: #e3e8ec;
+    --border-strong: #c6d0d8;
+    --text: #0f1a24;
+    --text-muted: #566573;
+    --text-subtle: #8591a0;
+
+    --accent: #0e5964;
+    --accent-hover: #0a4650;
+    --accent-fg: #ffffff;
+    --accent-soft: #dfecee;
+    --accent-ring: #0e59641a;
+
+    --ai-accent: #4a3fb8;
+    --ai-soft: #ebe9f8;
+    --ai-strong: #332990;
+
+    --critical: #b8302c;
+    --critical-soft: #fbe6e4;
+    --critical-strong: #8a221e;
+    --warning: #a86718;
+    --warning-soft: #faecd3;
+    --warning-strong: #7a4910;
+    --success: #2d6a3f;
+    --success-soft: #e0efe4;
+    --info: #2f5a85;
+    --info-soft: #e2ecf5;
+
+    --font-display: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Menlo', monospace;
+
+    --radius: 10px;
+    --radius-sm: 6px;
+    --radius-lg: 14px;
+    --shadow-sm: 0 1px 2px rgba(15, 26, 36, 0.04);
+    --shadow-md: 0 2px 8px rgba(15, 26, 36, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c1013;
+      --surface: #161c21;
+      --surface-2: #1b232a;
+      --surface-3: #212a32;
+      --border: #263038;
+      --border-strong: #3a4652;
+      --text: #e8edf2;
+      --text-muted: #98a4b0;
+      --text-subtle: #6c7985;
+      --accent: #52b4bf;
+      --accent-hover: #6cc6d1;
+      --accent-fg: #0c1013;
+      --accent-soft: #0f353a;
+      --accent-ring: #52b4bf26;
+      --ai-accent: #9c92f0;
+      --ai-soft: #1e1a3a;
+      --ai-strong: #beb5ff;
+      --critical: #e5635e;
+      --critical-soft: #3a1b19;
+      --critical-strong: #f08580;
+      --warning: #d99a4e;
+      --warning-soft: #3a2a13;
+      --warning-strong: #ebb574;
+      --success: #6fac7b;
+      --success-soft: #19291e;
+      --info: #85a9ca;
+      --info-soft: #192838;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+      --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0c1013; --surface: #161c21; --surface-2: #1b232a; --surface-3: #212a32;
+    --border: #263038; --border-strong: #3a4652;
+    --text: #e8edf2; --text-muted: #98a4b0; --text-subtle: #6c7985;
+    --accent: #52b4bf; --accent-hover: #6cc6d1; --accent-fg: #0c1013; --accent-soft: #0f353a; --accent-ring: #52b4bf26;
+    --ai-accent: #9c92f0; --ai-soft: #1e1a3a; --ai-strong: #beb5ff;
+    --critical: #e5635e; --critical-soft: #3a1b19; --critical-strong: #f08580;
+    --warning: #d99a4e; --warning-soft: #3a2a13; --warning-strong: #ebb574;
+    --success: #6fac7b; --success-soft: #19291e;
+    --info: #85a9ca; --info-soft: #192838;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    z-index: 20;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .page {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 48px;
+  }
+
+  /* ========= TOP BAR ========= */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding-block: 4px 20px; flex-wrap: wrap;
+  }
+  .breadcrumb {
+    display: flex; align-items: center; gap: 8px; font-size: 13px;
+    color: var(--text-muted); min-width: 0; flex-wrap: wrap;
+  }
+  .breadcrumb a { color: var(--text-muted); text-decoration: none; transition: color 0.15s; }
+  .breadcrumb a:hover { color: var(--accent); }
+  .breadcrumb .current {
+    color: var(--text); font-weight: 500;
+    font-family: var(--font-mono); font-size: 12.5px;
+  }
+  .breadcrumb .sep { color: var(--text-subtle); opacity: 0.6; }
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px 6px 6px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--surface);
+    color: var(--text-muted); text-decoration: none; font-size: 13px;
+    font-weight: 500; transition: all 0.15s;
+  }
+  .back-link:hover { color: var(--text); border-color: var(--border-strong); }
+
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: var(--radius-sm);
+    font-family: var(--font-body); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  }
+  .btn:hover { border-color: var(--border-strong); background: var(--surface-2); }
+  .btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .theme-toggle {
+    width: 32px; height: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  /* ========= ARTICLE HEADER ========= */
+  .article-head {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 24px;
+    margin-bottom: 20px; box-shadow: var(--shadow-sm);
+    position: relative; overflow: hidden;
+  }
+  .article-head::before {
+    content: ""; position: absolute; inset: 0 0 auto 0;
+    height: 3px; background: var(--critical);
+  }
+
+  .article-head-grid {
+    display: grid; grid-template-columns: 1.3fr 1fr auto;
+    gap: 28px; align-items: start;
+  }
+  @media (max-width: 1040px) {
+    .article-head-grid { grid-template-columns: 1fr auto; }
+    .article-head-grid .sparkline-wrap { grid-column: 1 / -1; }
+  }
+  @media (max-width: 720px) {
+    .article-head { padding: 20px 18px; }
+    .article-head-grid { grid-template-columns: 1fr; }
+  }
+
+  .article-code {
+    font-family: var(--font-mono); font-size: 12.5px;
+    color: var(--text-muted); letter-spacing: 0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .article-code .code-tag {
+    background: var(--surface-3); padding: 3px 8px;
+    border-radius: 4px; color: var(--text); font-weight: 500;
+  }
+  .article-code .abc-chip {
+    background: var(--critical-soft); color: var(--critical-strong);
+    padding: 3px 7px; border-radius: 4px; font-weight: 600;
+    font-size: 11px; letter-spacing: 0.03em;
+  }
+  .article-title {
+    font-family: var(--font-display); font-size: 26px;
+    font-weight: 600; letter-spacing: -0.015em;
+    text-wrap: balance; margin: 0 0 16px; color: var(--text); line-height: 1.2;
+  }
+  .article-meta {
+    display: grid; grid-template-columns: repeat(2, auto);
+    gap: 14px 28px; font-size: 13px; margin: 0;
+  }
+  @media (max-width: 440px) {
+    .article-meta { grid-template-columns: 1fr; }
+  }
+  .article-meta dt {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-subtle); font-weight: 600; margin-bottom: 3px;
+  }
+  .article-meta dd {
+    margin: 0; color: var(--text); font-weight: 500; font-size: 13.5px;
+  }
+
+  /* Sparkline */
+  .sparkline-wrap {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px;
+    display: flex; flex-direction: column; min-width: 0;
+  }
+  .sparkline-label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 10px; gap: 8px;
+  }
+  .sparkline-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .sparkline-period {
+    font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .sparkline-svg {
+    width: 100%; height: 68px; display: block;
+  }
+  .sparkline-legend {
+    display: flex; gap: 14px; margin-top: 8px;
+    font-size: 10.5px; color: var(--text-muted);
+    font-family: var(--font-mono); flex-wrap: wrap;
+  }
+  .sparkline-legend .marker {
+    display: inline-block; width: 10px; height: 2px;
+    vertical-align: middle; margin-right: 4px;
+  }
+  .sparkline-legend .marker.dashed {
+    border-top: 2px dashed var(--warning); background: none; height: 0;
+  }
+  .sparkline-legend .marker.dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--critical);
+  }
+
+  .article-status {
+    display: flex; flex-direction: column; align-items: flex-end;
+    gap: 10px; min-width: 200px;
+  }
+  @media (max-width: 720px) { .article-status { align-items: flex-start; } }
+
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 12px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; letter-spacing: -0.005em;
+  }
+  .status-pill-critical { background: var(--critical-soft); color: var(--critical-strong); }
+  .status-pill-critical::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--critical);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 20%, transparent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  @media (prefers-reduced-motion: reduce) {
+    .status-pill-critical::before { animation: none; }
+  }
+
+  .duration-block { text-align: right; }
+  @media (max-width: 720px) { .duration-block { text-align: left; } }
+  .duration-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-subtle); font-weight: 600; margin-bottom: 2px;
+  }
+  .duration-value {
+    font-family: var(--font-display); font-size: 20px; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--critical);
+  }
+  .duration-start {
+    font-size: 12px; color: var(--text-muted);
+    font-family: var(--font-mono); margin-top: 2px;
+  }
+
+  /* ========= KPI ROW ========= */
+  .kpis {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 12px; margin-bottom: 20px;
+  }
+  @media (max-width: 1040px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); gap: 10px; } }
+
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 16px 14px;
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column; min-width: 0;
+  }
+  .kpi::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; background: var(--border-strong);
+  }
+  .kpi-warn::before { background: var(--warning); }
+  .kpi-crit::before { background: var(--critical); }
+  .kpi-ok::before { background: var(--success); }
+  .kpi-info::before { background: var(--info); }
+
+  .kpi-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-subtle); font-weight: 600;
+    margin-bottom: 10px; line-height: 1.3; min-height: 2.6em;
+  }
+  .kpi-value {
+    font-family: var(--font-display); font-size: 24px; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.015em;
+    color: var(--text); line-height: 1.1; margin-bottom: 4px;
+  }
+  .kpi-value .unit {
+    font-size: 13px; color: var(--text-muted); font-weight: 500; margin-left: 2px;
+  }
+  .kpi-sub {
+    font-size: 11.5px; color: var(--text-muted);
+    font-family: var(--font-mono); line-height: 1.4; margin-top: auto;
+  }
+  .kpi-sub.delta-down { color: var(--critical); }
+  .kpi-sub.delta-up { color: var(--success); }
+
+  /* ========= AI ANALYSIS CARD ========= */
+  .ai-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); margin-bottom: 20px;
+    overflow: hidden; position: relative;
+  }
+  .ai-card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0;
+    height: 3px; background: linear-gradient(90deg, var(--ai-accent), var(--accent));
+  }
+
+  .ai-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border);
+    background: var(--surface-2); flex-wrap: wrap;
+  }
+  .ai-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 11px 5px 9px;
+    background: var(--ai-soft); color: var(--ai-strong);
+    border-radius: 999px; font-weight: 600; font-size: 12px;
+    letter-spacing: -0.005em;
+  }
+  .ai-badge .ai-mark {
+    width: 14px; height: 14px; flex-shrink: 0;
+  }
+  .ai-meta {
+    display: flex; gap: 14px; font-size: 11.5px;
+    color: var(--text-subtle); font-family: var(--font-mono);
+    flex-wrap: wrap;
+  }
+  .ai-meta b { color: var(--text-muted); font-weight: 500; }
+
+  .ai-body {
+    display: grid; grid-template-columns: 1.5fr 1fr;
+    gap: 0;
+  }
+  @media (max-width: 900px) {
+    .ai-body { grid-template-columns: 1fr; }
+  }
+
+  .ai-narrative {
+    padding: 24px 24px 20px;
+  }
+  .ai-narrative h3 {
+    font-family: var(--font-display); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-subtle); font-weight: 600;
+    margin: 0 0 12px;
+  }
+  .ai-narrative p {
+    font-size: 14.5px; line-height: 1.65;
+    color: var(--text); margin: 0 0 12px; text-wrap: pretty;
+  }
+  .ai-narrative p:last-child { margin-bottom: 0; }
+  .ai-narrative mark {
+    background: color-mix(in srgb, var(--warning) 25%, transparent);
+    color: var(--text); padding: 1px 4px; border-radius: 3px;
+    font-weight: 500;
+  }
+  .ai-narrative strong { color: var(--text); font-weight: 600; }
+
+  .ai-insights {
+    padding: 24px; background: var(--surface-2);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  @media (max-width: 900px) {
+    .ai-insights { border-left: none; border-top: 1px solid var(--border); }
+  }
+  .ai-insights h3 {
+    font-family: var(--font-display); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-subtle); font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .insight {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .insight-icon {
+    width: 28px; height: 28px; flex-shrink: 0;
+    border-radius: 6px; display: flex;
+    align-items: center; justify-content: center;
+    background: var(--surface-3); color: var(--text-muted);
+  }
+  .insight-icon.warn { background: var(--warning-soft); color: var(--warning-strong); }
+  .insight-icon.ok { background: var(--success-soft); color: var(--success); }
+  .insight-icon.info { background: var(--info-soft); color: var(--info); }
+  .insight-icon.crit { background: var(--critical-soft); color: var(--critical-strong); }
+  .insight-text { min-width: 0; }
+  .insight-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-subtle); font-weight: 600; margin-bottom: 1px;
+  }
+  .insight-value {
+    font-size: 13px; color: var(--text); font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .ai-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; border-top: 1px solid var(--border);
+    background: var(--surface); gap: 16px; flex-wrap: wrap;
+  }
+  .confidence {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--text-muted);
+  }
+  .confidence-bar {
+    width: 140px; height: 5px; background: var(--surface-3);
+    border-radius: 3px; overflow: hidden;
+  }
+  .confidence-fill {
+    height: 100%; background: linear-gradient(90deg, var(--warning), var(--success));
+    border-radius: 3px;
+  }
+  .confidence-value {
+    font-family: var(--font-mono); font-weight: 600;
+    color: var(--text); font-variant-numeric: tabular-nums;
+  }
+  .ai-footer .explain-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--text-muted); font-size: 12px;
+    text-decoration: none; font-weight: 500;
+  }
+  .ai-footer .explain-link:hover { color: var(--accent); text-decoration: underline; }
+
+  /* ========= MAIN GRID ========= */
+  .main-grid {
+    display: grid; grid-template-columns: 1.4fr 1fr;
+    gap: 20px; margin-bottom: 20px;
+  }
+  @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); overflow: hidden;
+  }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px 14px; border-bottom: 1px solid var(--border);
+    gap: 12px; flex-wrap: wrap;
+  }
+  .card-title {
+    font-family: var(--font-display); font-size: 15px; font-weight: 600;
+    letter-spacing: -0.01em; margin: 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card-title .icon {
+    width: 18px; height: 18px; color: var(--accent); flex-shrink: 0;
+  }
+  .card-body { padding: 20px; }
+
+  /* ========= TIMELINE ========= */
+  .timeline { position: relative; padding: 4px 0; }
+  .timeline-item {
+    position: relative; padding-left: 44px; padding-bottom: 24px;
+    display: grid; grid-template-columns: 90px 1fr;
+    gap: 16px; align-items: start;
+  }
+  @media (max-width: 540px) {
+    .timeline-item { grid-template-columns: 1fr; gap: 4px; }
+  }
+  .timeline-item::before {
+    content: ""; position: absolute; left: 15px; top: 24px;
+    bottom: -4px; width: 2px; background: var(--border);
+  }
+  .timeline-item:last-child::before { display: none; }
+  .timeline-marker {
+    position: absolute; left: 6px; top: 4px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--surface); border: 2px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center; z-index: 1;
+  }
+  .timeline-marker.done { background: var(--accent); border-color: var(--accent); }
+  .timeline-marker.done::after {
+    content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-fg);
+  }
+  .timeline-marker.critical { background: var(--critical); border-color: var(--critical); }
+  .timeline-marker.critical::after {
+    content: ""; width: 6px; height: 6px; border-radius: 50%; background: #ffffff;
+  }
+  .timeline-marker.pending { background: var(--surface); border-style: dashed; }
+
+  .timeline-time {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
+    padding-top: 2px; line-height: 1.4;
+  }
+  .timeline-time .day { display: block; color: var(--text); font-weight: 500; }
+  .timeline-content { min-width: 0; }
+  .timeline-event {
+    font-size: 14px; font-weight: 600; color: var(--text);
+    margin-bottom: 3px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .timeline-desc {
+    font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
+  }
+  .timeline-desc.pending-text { color: var(--text-subtle); font-style: italic; }
+
+  .mini-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    background: var(--surface-3); color: var(--text-muted);
+  }
+  .mini-tag.red { background: var(--critical-soft); color: var(--critical-strong); }
+  .mini-tag.amber { background: var(--warning-soft); color: var(--warning-strong); }
+  .mini-tag.green { background: var(--success-soft); color: var(--success); }
+  .mini-tag.blue { background: var(--info-soft); color: var(--info); }
+
+  /* ========= ORDER CARD ========= */
+  .order-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .order-number {
+    font-family: var(--font-mono); font-size: 15px;
+    font-weight: 500; color: var(--text);
+  }
+  .order-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 14px 20px; margin-bottom: 16px;
+  }
+  @media (max-width: 480px) { .order-grid { grid-template-columns: 1fr; } }
+  .order-field dt {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-subtle); font-weight: 600; margin-bottom: 3px;
+  }
+  .order-field dd {
+    margin: 0; font-size: 13.5px; color: var(--text);
+    font-weight: 500; font-variant-numeric: tabular-nums;
+  }
+  .order-field.mono dd { font-family: var(--font-mono); font-size: 12.5px; }
+  .order-field.highlight dd {
+    color: var(--critical); font-family: var(--font-mono); font-weight: 600;
+  }
+  .quantity-bar {
+    height: 10px; background: var(--surface-3); border-radius: 999px;
+    overflow: hidden; margin-top: 10px; position: relative; display: flex;
+  }
+  .quantity-bar-fill { background: var(--accent); height: 100%; }
+  .quantity-bar-missing {
+    background: repeating-linear-gradient(-45deg, var(--critical-soft), var(--critical-soft) 4px, var(--surface-3) 4px, var(--surface-3) 8px);
+    height: 100%; flex: 1;
+  }
+  .quantity-legend {
+    display: flex; gap: 16px; margin-top: 10px;
+    font-size: 11.5px; color: var(--text-muted); flex-wrap: wrap;
+  }
+  .quantity-legend .swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; margin-right: 5px; vertical-align: middle;
+  }
+  .link-arrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent); text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .link-arrow:hover { text-decoration: underline; }
+
+  /* ========= SUFFICIENCY ========= */
+  .sufficiency-verdict {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; border-radius: var(--radius);
+    background: var(--warning-soft);
+    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
+    margin-bottom: 18px;
+  }
+  .verdict-icon {
+    width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%;
+    background: var(--warning); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .verdict-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--warning-strong); font-weight: 600; margin-bottom: 2px;
+  }
+  .verdict-text {
+    font-family: var(--font-display); font-size: 15px; font-weight: 600;
+    color: var(--text); letter-spacing: -0.01em;
+  }
+  .calc-block {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px; font-size: 12.5px;
+  }
+  .calc-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 6px 0; gap: 12px; border-bottom: 1px dashed var(--border);
+  }
+  .calc-row:last-child { border-bottom: none; }
+  .calc-row.total {
+    border-top: 1px solid var(--border-strong); border-bottom: none;
+    margin-top: 4px; padding-top: 10px; font-weight: 600;
+  }
+  .calc-label { color: var(--text-muted); min-width: 0; }
+  .calc-value {
+    font-family: var(--font-mono); color: var(--text);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .sufficiency-note {
+    font-size: 12.5px; color: var(--text-muted); line-height: 1.6;
+    margin-top: 14px; padding: 12px 14px; background: var(--surface-2);
+    border-left: 2px solid var(--info);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+
+  /* ========= CAUSE ANALYSIS ========= */
+  .cause-section { margin-bottom: 20px; }
+  .cause-verdict {
+    padding: 18px 20px;
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .cause-verdict-main { flex: 1; min-width: 220px; }
+  .cause-verdict-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-subtle); font-weight: 600; margin-bottom: 4px;
+  }
+  .cause-verdict-text {
+    font-family: var(--font-display); font-size: 20px; font-weight: 600;
+    letter-spacing: -0.01em; color: var(--text);
+  }
+  .confidence-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600;
+    background: var(--surface-3); color: var(--text-muted); white-space: nowrap;
+  }
+  .confidence-chip .dots { display: inline-flex; gap: 2px; }
+  .confidence-chip .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--border-strong);
+  }
+  .confidence-chip .dot.on { background: var(--text); }
+
+  .factors-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--border);
+  }
+  @media (max-width: 760px) { .factors-grid { grid-template-columns: 1fr; } }
+  .factor {
+    background: var(--surface); padding: 20px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .factor-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap;
+  }
+  .factor-category {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 4px;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .factor-category.store { background: var(--warning-soft); color: var(--warning-strong); }
+  .factor-category.warehouse { background: var(--critical-soft); color: var(--critical-strong); }
+  .factor-category.stock { background: var(--info-soft); color: var(--info); }
+
+  .factor-title {
+    font-family: var(--font-display); font-size: 15px; font-weight: 600;
+    color: var(--text); letter-spacing: -0.005em; line-height: 1.3;
+  }
+  .factor-metric {
+    font-family: var(--font-mono); font-size: 22px; font-weight: 500;
+    color: var(--text); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em; line-height: 1;
+  }
+  .factor-metric .suffix {
+    font-size: 13px; color: var(--text-muted); margin-left: 4px;
+  }
+  .factor-evidence {
+    font-size: 12.5px; color: var(--text-muted); line-height: 1.55;
+  }
+  .factor-evidence ul {
+    margin: 0; padding-left: 18px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+
+  /* ========= IMPACT + PATTERNS GRID ========= */
+  .impact-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 20px; margin-bottom: 20px;
+  }
+  @media (max-width: 960px) { .impact-grid { grid-template-columns: 1fr; } }
+
+  /* Impact financier */
+  .impact-stats {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; margin-bottom: 18px;
+  }
+  @media (max-width: 440px) { .impact-stats { grid-template-columns: 1fr; } }
+  .impact-stat {
+    padding: 14px 16px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .impact-stat-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-subtle); font-weight: 600;
+  }
+  .impact-stat-value {
+    font-family: var(--font-display); font-size: 22px; font-weight: 600;
+    color: var(--text); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.015em; line-height: 1.1;
+  }
+  .impact-stat-value.loss { color: var(--critical); }
+  .impact-stat-value .unit {
+    font-size: 12px; color: var(--text-muted); font-weight: 500; margin-left: 3px;
+  }
+  .impact-stat-detail {
+    font-size: 11.5px; color: var(--text-muted); line-height: 1.4;
+    font-family: var(--font-mono);
+  }
+  .impact-breakdown {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+    font-size: 12.5px; line-height: 1.6; color: var(--text-muted);
+  }
+  .impact-breakdown b { color: var(--text); font-weight: 500; }
+  .impact-breakdown .formula {
+    display: block; margin-top: 8px; padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--text-subtle);
+  }
+
+  /* Patterns */
+  .pattern-item {
+    display: flex; gap: 12px; padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .pattern-item:last-child { border-bottom: none; }
+  .pattern-item:first-child { padding-top: 0; }
+  .pattern-badge {
+    flex-shrink: 0; width: 40px; height: 40px; border-radius: 8px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-size: 15px; font-weight: 600;
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
+  }
+  .pattern-badge.alert { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 30%, var(--border)); background: var(--critical-soft); }
+  .pattern-badge.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); background: var(--success-soft); }
+  .pattern-content { flex: 1; min-width: 0; }
+  .pattern-title {
+    font-size: 13.5px; font-weight: 600; color: var(--text);
+    margin-bottom: 3px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .pattern-desc {
+    font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
+  }
+  .pattern-desc a {
+    color: var(--accent); text-decoration: none; font-weight: 500;
+  }
+  .pattern-desc a:hover { text-decoration: underline; }
+
+  .supplier-score {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+  }
+  .supplier-score-circle {
+    width: 56px; height: 56px; flex-shrink: 0; position: relative;
+  }
+  .supplier-score-circle svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .supplier-score-circle .score-text {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-size: 16px; font-weight: 600;
+    color: var(--text); font-variant-numeric: tabular-nums;
+  }
+  .supplier-score-info { flex: 1; min-width: 0; }
+  .supplier-score-name {
+    font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 2px;
+  }
+  .supplier-score-detail {
+    font-size: 11.5px; color: var(--text-muted); line-height: 1.5;
+  }
+
+  /* ========= RECOMMENDATIONS ========= */
+  .recommendations-wrap { margin-bottom: 20px; }
+  .reco-list {
+    display: flex; flex-direction: column; gap: 1px;
+    background: var(--border);
+    border-top: 1px solid var(--border);
+  }
+  .reco {
+    display: grid; grid-template-columns: 100px 1fr auto;
+    gap: 20px; padding: 18px 24px; background: var(--surface);
+    align-items: center;
+  }
+  @media (max-width: 760px) {
+    .reco { grid-template-columns: 1fr; gap: 10px; padding: 16px 18px; }
+    .reco .reco-actions { justify-self: start; }
+  }
+  .priority-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px 5px 8px;
+    border-radius: 999px;
+    font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .priority-badge::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor;
+  }
+  .priority-badge.urgent { background: var(--critical-soft); color: var(--critical-strong); }
+  .priority-badge.high { background: var(--warning-soft); color: var(--warning-strong); }
+  .priority-badge.medium { background: var(--info-soft); color: var(--info); }
+  .priority-badge.low { background: var(--surface-3); color: var(--text-muted); }
+
+  .reco-main { min-width: 0; }
+  .reco-title {
+    font-family: var(--font-display); font-size: 15.5px; font-weight: 600;
+    color: var(--text); letter-spacing: -0.005em;
+    margin-bottom: 4px; line-height: 1.3;
+  }
+  .reco-desc {
+    font-size: 13px; color: var(--text-muted); line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .reco-meta {
+    display: flex; gap: 16px; font-size: 11.5px;
+    color: var(--text-subtle); flex-wrap: wrap;
+  }
+  .reco-meta b { color: var(--text-muted); font-weight: 500; }
+  .reco-meta .reco-impact { color: var(--success); font-weight: 500; }
+  .reco-actions {
+    display: flex; gap: 8px; align-items: center;
+  }
+
+  /* ========= HISTORY TABLE ========= */
+  .table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px; min-width: 760px;
+  }
+  thead th {
+    text-align: left; padding: 10px 16px;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-subtle); font-weight: 600;
+    background: var(--surface-2); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 11px 16px; border-bottom: 1px solid var(--border);
+    color: var(--text); vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--surface-2); }
+  td.mono {
+    font-family: var(--font-mono); font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  td.qty {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    text-align: right; font-weight: 500;
+  }
+  td.source { font-size: 11.5px; color: var(--text-muted); }
+  .verif {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 500;
+  }
+  .verif-ok { color: var(--success); }
+  .verif-partial { color: var(--warning-strong); }
+  .verif-missing { color: var(--text-subtle); font-style: italic; }
+
+  /* ========= SECTION HEADER ========= */
+  .section-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin: 32px 0 14px; padding-left: 2px;
+  }
+  .section-title {
+    font-family: var(--font-display); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); margin: 0;
+  }
+  .section-head .section-rule { flex: 1; height: 1px; background: var(--border); }
+
+  /* ========= DEMO BANNER ========= */
+  .demo-banner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: var(--info-soft);
+    border: 1px solid color-mix(in srgb, var(--info) 20%, transparent);
+    border-radius: var(--radius-sm);
+    font-size: 12px; color: var(--info); margin-bottom: 16px;
+  }
+  .demo-banner svg { flex-shrink: 0; width: 16px; height: 16px; }
+
+  .ic { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px;
+  }
+</style>
+
+<div class="page">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <nav class="breadcrumb" aria-label="Fil d'ariane">
+      <a href="#" class="back-link">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Retour
+      </a>
+      <span class="sep">/</span>
+      <a href="#">Réassort</a>
+      <span class="sep">/</span>
+      <a href="#">Ruptures en cours</a>
+      <span class="sep">/</span>
+      <span class="current">ART-45782</span>
+    </nav>
+    <div class="topbar-actions">
+      <button class="btn" type="button">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+        Exporter
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Créer un bon de régul.
+      </button>
+      <button class="btn theme-toggle" type="button" aria-label="Changer le thème" onclick="(function(){var r=document.documentElement;var cur=r.getAttribute('data-theme');if(cur==='dark'){r.setAttribute('data-theme','light')}else if(cur==='light'){r.removeAttribute('data-theme')}else{r.setAttribute('data-theme','dark')}})()">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- DEMO BANNER -->
+  <div class="demo-banner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <span>Maquette d'intégration — données de démonstration. Les valeurs réelles seront alimentées par les API métier de Réassort Auto et le modèle d'analyse interne.</span>
+  </div>
+
+  <!-- ARTICLE HEADER -->
+  <section class="article-head" aria-labelledby="article-title">
+    <div class="article-head-grid">
+      <div>
+        <div class="article-code">
+          <span>Code article</span>
+          <span class="code-tag">ART-45782</span>
+          <span style="color: var(--text-subtle)">·</span>
+          <span>GTIN 3245678901234</span>
+          <span class="abc-chip" title="Classification ABC — rotation forte">Classe A</span>
+        </div>
+        <h1 class="article-title" id="article-title">Huile d'arachide Dinor — bouteille 1L</h1>
+        <dl class="article-meta">
+          <div>
+            <dt>Magasin</dt>
+            <dd>Prosuma Marcory Zone 4</dd>
+          </div>
+          <div>
+            <dt>Secteur</dt>
+            <dd>Épicerie salée</dd>
+          </div>
+          <div>
+            <dt>Entrepôt source</dt>
+            <dd>Dépôt central Yopougon</dd>
+          </div>
+          <div>
+            <dt>Fournisseur</dt>
+            <dd>SANIA Côte d'Ivoire</dd>
+          </div>
+          <div>
+            <dt>Prix public TTC</dt>
+            <dd>1 450 FCFA</dd>
+          </div>
+          <div>
+            <dt>Marge unitaire</dt>
+            <dd>320 FCFA · 22 %</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- Sparkline -->
+      <div class="sparkline-wrap">
+        <div class="sparkline-label">
+          <span class="sparkline-title">Stock sur 30 jours</span>
+          <span class="sparkline-period">17 sept. → 17 oct.</span>
+        </div>
+        <svg class="sparkline-svg" viewBox="0 0 300 68" preserveAspectRatio="none" aria-label="Évolution du stock sur 30 jours">
+          <!-- grille y=0 -->
+          <line x1="0" y1="60" x2="300" y2="60" stroke="var(--border)" stroke-width="1"/>
+          <!-- seuil stock sécurité (60 u → y = 60-60/2 = 30) -->
+          <line x1="0" y1="30" x2="300" y2="30" stroke="var(--warning)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
+          <!-- aire sous courbe -->
+          <path d="M 0,0 L 10,2.5 L 20,6 L 30,9 L 40,12.5 L 50,15 L 60,17.5 L 70,5 L 80,7.5 L 90,11 L 100,15 L 110,17.5 L 120,21 L 130,25 L 140,27.5 L 150,30 L 160,32.5 L 170,36 L 180,40 L 190,44 L 200,50 L 210,55 L 220,60 L 290,60 L 290,60 L 0,60 Z"
+            fill="var(--accent-soft)" opacity="0.6"/>
+          <!-- courbe -->
+          <path d="M 0,0 L 10,2.5 L 20,6 L 30,9 L 40,12.5 L 50,15 L 60,17.5 L 70,5 L 80,7.5 L 90,11 L 100,15 L 110,17.5 L 120,21 L 130,25 L 140,27.5 L 150,30 L 160,32.5 L 170,36 L 180,40 L 190,44 L 200,50 L 210,55 L 220,60 L 290,60"
+            fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+          <!-- marqueur rupture (jour 23, Oct 10) -->
+          <circle cx="220" cy="60" r="4" fill="var(--critical)" stroke="var(--surface)" stroke-width="2"/>
+        </svg>
+        <div class="sparkline-legend">
+          <span><span class="marker" style="background: var(--accent);"></span>Stock disponible</span>
+          <span><span class="marker dashed"></span>Seuil sécurité (60)</span>
+          <span><span class="marker dot"></span>Rupture · 10 oct.</span>
+        </div>
+      </div>
+
+      <div class="article-status">
+        <span class="status-pill status-pill-critical">Rupture active</span>
+        <div class="duration-block">
+          <div class="duration-label">Durée totale de rupture</div>
+          <div class="duration-value">7 j 5 h 27 min</div>
+          <div class="duration-start">Depuis le 10 oct. · 08:23</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- KPIS -->
+  <section class="kpis" aria-label="Indicateurs clés">
+    <div class="kpi kpi-warn">
+      <div class="kpi-label">Rupture avant commande</div>
+      <div class="kpi-value">2j 4h<span class="unit">22 min</span></div>
+      <div class="kpi-sub">Entre détection et saisie commande</div>
+    </div>
+    <div class="kpi kpi-crit">
+      <div class="kpi-label">Rupture après commande</div>
+      <div class="kpi-value">4j 21h<span class="unit">05 min</span></div>
+      <div class="kpi-sub">En cours — livraison incomplète</div>
+    </div>
+    <div class="kpi kpi-info">
+      <div class="kpi-label">Quantité commandée</div>
+      <div class="kpi-value">240<span class="unit">u</span></div>
+      <div class="kpi-sub">CMD-2026-10-45872</div>
+    </div>
+    <div class="kpi kpi-warn">
+      <div class="kpi-label">Quantité livrée</div>
+      <div class="kpi-value">180<span class="unit">u</span></div>
+      <div class="kpi-sub">75 % de la demande</div>
+    </div>
+    <div class="kpi kpi-crit">
+      <div class="kpi-label">Quantité manquante</div>
+      <div class="kpi-value">60<span class="unit">u</span></div>
+      <div class="kpi-sub delta-down">↓ 25 % vs commande</div>
+    </div>
+  </section>
+
+  <!-- ================= AI ANALYSIS ================= -->
+  <section class="ai-card" aria-labelledby="ai-title">
+    <header class="ai-header">
+      <span class="ai-badge" id="ai-title">
+        <svg class="ai-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l2.5 6.5L21 11l-6.5 2.5L12 20l-2.5-6.5L3 11l6.5-2.5L12 2z"/>
+        </svg>
+        Analyse IA
+      </span>
+      <div class="ai-meta">
+        <span><b>Analysée</b> il y a 3 min</span>
+        <span><b>Modèle</b> rupture-analyzer v2.4</span>
+        <span><b>Sources</b> 8 tables · 142 événements</span>
+      </div>
+    </header>
+
+    <div class="ai-body">
+      <div class="ai-narrative">
+        <h3>Diagnostic</h3>
+        <p>
+          Cette rupture combine <strong>deux causes successives</strong>. Le magasin a attendu
+          <mark>2 j 4 h 22 min</mark> entre la détection du stock à zéro et la saisie de la commande,
+          puis l'entrepôt a livré <mark>60 unités de moins</mark> que demandé (−25 %).
+        </p>
+        <p>
+          Le second facteur est le plus déterminant : la commande initiale de 240 u couvrait correctement
+          le besoin estimé (235 u avec stock de sécurité). Sans le déficit de livraison, la rupture aurait
+          dû être résolue le <strong>15 oct.</strong>. Le manque de 60 u prolonge la situation d'environ
+          <strong>1 j 17 h</strong> au rythme de consommation actuel.
+        </p>
+        <p>
+          Signal faible mais récurrent : le <strong>Dépôt central Yopougon</strong> présente
+          <strong>3 livraisons partielles ce mois</strong> sur des références alimentaires classées A.
+          Une investigation côté entrepôt est à envisager avant d'imputer la cause au magasin.
+        </p>
+      </div>
+
+      <div class="ai-insights">
+        <h3>Points saillants</h3>
+
+        <div class="insight">
+          <div class="insight-icon warn">
+            <svg class="ic" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div class="insight-text">
+            <div class="insight-label">Schéma détecté</div>
+            <div class="insight-value">3<sup>e</sup> livraison partielle du Dépôt Yopougon ce mois (produits alimentaires A)</div>
+          </div>
+        </div>
+
+        <div class="insight">
+          <div class="insight-icon ok">
+            <svg class="ic" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          </div>
+          <div class="insight-text">
+            <div class="insight-label">Dimensionnement commande</div>
+            <div class="insight-value">Correct — 240 u pour un besoin estimé de 235 u</div>
+          </div>
+        </div>
+
+        <div class="insight">
+          <div class="insight-icon info">
+            <svg class="ic" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          </div>
+          <div class="insight-text">
+            <div class="insight-label">Résolution probable</div>
+            <div class="insight-value">19 oct. ± 1 j — sous réserve d'un bon de régularisation</div>
+          </div>
+        </div>
+
+        <div class="insight">
+          <div class="insight-icon crit">
+            <svg class="ic" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <div class="insight-text">
+            <div class="insight-label">Impact commercial</div>
+            <div class="insight-value">≈ 255 200 FCFA de CA non réalisé · 56 320 FCFA de marge perdue</div>
+          </div>
+        </div>
+
+        <div class="insight">
+          <div class="insight-icon info">
+            <svg class="ic" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <div class="insight-text">
+            <div class="insight-label">Saisonnalité</div>
+            <div class="insight-value">Ventes +40 % en octobre vs moyenne annuelle — stock sécurité sous-dimensionné</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="ai-footer">
+      <div class="confidence">
+        <span>Fiabilité du diagnostic</span>
+        <div class="confidence-bar" role="progressbar" aria-valuenow="86" aria-valuemin="0" aria-valuemax="100">
+          <div class="confidence-fill" style="width: 86%;"></div>
+        </div>
+        <span class="confidence-value">86 %</span>
+      </div>
+      <a href="#" class="explain-link">
+        Comment ce diagnostic est produit
+        <svg class="ic" style="width:12px;height:12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg>
+      </a>
+    </footer>
+  </section>
+
+  <!-- MAIN GRID: TIMELINE + SIDEBAR -->
+  <div class="main-grid">
+
+    <!-- TIMELINE -->
+    <section class="card" aria-labelledby="t-title">
+      <div class="card-head">
+        <h2 class="card-title" id="t-title">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          Chronologie des événements
+        </h2>
+        <span class="mini-tag">6 étapes · 1 en attente</span>
+      </div>
+      <div class="card-body">
+        <ol class="timeline" style="list-style: none; padding: 0; margin: 0;">
+
+          <li class="timeline-item">
+            <span class="timeline-marker critical" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">10 oct 2026</span>
+              <span>08:23:14</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Début de rupture détecté
+                <span class="mini-tag red">T0</span>
+              </div>
+              <div class="timeline-desc">Stock passé de 3 à 0 unités suite au ticket n° 2026-10-10-POS3-00847. Aucune commande active à ce moment.</div>
+            </div>
+          </li>
+
+          <li class="timeline-item">
+            <span class="timeline-marker done" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">12 oct 2026</span>
+              <span>12:45:02</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Création de la commande
+                <span class="mini-tag amber">+ 2j 4h 22min</span>
+              </div>
+              <div class="timeline-desc">Saisie manuelle par le gestionnaire magasin. Quantité demandée : 240 unités. Aucune commande automatique configurée.</div>
+            </div>
+          </li>
+
+          <li class="timeline-item">
+            <span class="timeline-marker done" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">12 oct 2026</span>
+              <span>16:30:48</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Validation de la commande
+                <span class="mini-tag green">+ 3h 45min</span>
+              </div>
+              <div class="timeline-desc">Validée par le chef de rayon alimentaire. Statut : « Brouillon » → « Validée ».</div>
+            </div>
+          </li>
+
+          <li class="timeline-item">
+            <span class="timeline-marker done" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">14 oct 2026</span>
+              <span>09:00:12</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Préparation entrepôt
+                <span class="mini-tag blue">BP-2026-10-7812</span>
+              </div>
+              <div class="timeline-desc">Bon de préparation édité au dépôt Yopougon. 240 unités préparées — conforme à la demande.</div>
+            </div>
+          </li>
+
+          <li class="timeline-item">
+            <span class="timeline-marker critical" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">17 oct 2026</span>
+              <span>10:00:45</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Livraison partielle réceptionnée
+                <span class="mini-tag red">− 60 unités</span>
+              </div>
+              <div class="timeline-desc">BL n° BL-2026-10-33421 — 180 u reçues sur 240 commandées. Écart confirmé par le réceptionnaire magasin.</div>
+            </div>
+          </li>
+
+          <li class="timeline-item">
+            <span class="timeline-marker pending" aria-hidden="true"></span>
+            <div class="timeline-time">
+              <span class="day">— —</span>
+              <span>— —:— —</span>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-event">
+                Retour en stock complet
+                <span class="mini-tag">En attente</span>
+              </div>
+              <div class="timeline-desc pending-text">Information indisponible — stock encore à 0 unité. Reliquat de 60 u attendu sur la prochaine livraison ou via régularisation.</div>
+            </div>
+          </li>
+
+        </ol>
+      </div>
+    </section>
+
+    <!-- SIDEBAR -->
+    <aside style="display: flex; flex-direction: column; gap: 20px;">
+
+      <!-- ORDER CARD -->
+      <section class="card" aria-labelledby="o-title">
+        <div class="card-head">
+          <h2 class="card-title" id="o-title">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M8 4v4M16 4v4"/></svg>
+            Commande associée
+          </h2>
+          <span class="mini-tag amber">Livrée partiellement</span>
+        </div>
+        <div class="card-body">
+          <div class="order-head">
+            <span class="order-number">CMD-2026-10-45872</span>
+          </div>
+          <dl class="order-grid">
+            <div class="order-field mono">
+              <dt>Créée le</dt>
+              <dd>12/10/26 · 12:45</dd>
+            </div>
+            <div class="order-field mono">
+              <dt>Validée le</dt>
+              <dd>12/10/26 · 16:30</dd>
+            </div>
+            <div class="order-field">
+              <dt>Qté demandée</dt>
+              <dd>240 u</dd>
+            </div>
+            <div class="order-field">
+              <dt>Qté préparée</dt>
+              <dd>240 u</dd>
+            </div>
+            <div class="order-field">
+              <dt>Qté expédiée</dt>
+              <dd>200 u</dd>
+            </div>
+            <div class="order-field">
+              <dt>Qté réceptionnée</dt>
+              <dd>180 u</dd>
+            </div>
+            <div class="order-field highlight" style="grid-column: 1 / -1;">
+              <dt>Écart commande ↔ réception</dt>
+              <dd>− 60 u (− 25,0 %)</dd>
+            </div>
+          </dl>
+
+          <div class="quantity-bar" aria-label="Progression de la livraison">
+            <div class="quantity-bar-fill" style="width: 75%;"></div>
+            <div class="quantity-bar-missing"></div>
+          </div>
+          <div class="quantity-legend">
+            <span><span class="swatch" style="background: var(--accent);"></span>Livré · 180 u</span>
+            <span><span class="swatch" style="background: repeating-linear-gradient(-45deg, var(--critical-soft), var(--critical-soft) 3px, var(--surface-3) 3px, var(--surface-3) 6px);"></span>Manquant · 60 u</span>
+          </div>
+
+          <a href="#" class="link-arrow">
+            Voir la commande d'origine
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg>
+          </a>
+        </div>
+      </section>
+
+      <!-- SUFFICIENCY CARD -->
+      <section class="card" aria-labelledby="s-title">
+        <div class="card-head">
+          <h2 class="card-title" id="s-title">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+            Suffisance de la commande
+          </h2>
+        </div>
+        <div class="card-body">
+          <div class="sufficiency-verdict">
+            <div class="verdict-icon" aria-hidden="true">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+            </div>
+            <div>
+              <div class="verdict-label">Diagnostic</div>
+              <div class="verdict-text">Quantité correcte à la commande, insuffisante après livraison</div>
+            </div>
+          </div>
+
+          <div class="calc-block" aria-label="Détail du calcul de besoin">
+            <div class="calc-row">
+              <span class="calc-label">Consommation moyenne (30j)</span>
+              <span class="calc-value">35 u / jour</span>
+            </div>
+            <div class="calc-row">
+              <span class="calc-label">Délai réappro. moyen</span>
+              <span class="calc-value">5,0 jours</span>
+            </div>
+            <div class="calc-row">
+              <span class="calc-label">Stock de sécurité paramétré</span>
+              <span class="calc-value">60 unités</span>
+            </div>
+            <div class="calc-row total">
+              <span class="calc-label">Besoin estimé</span>
+              <span class="calc-value">235 unités</span>
+            </div>
+            <div class="calc-row">
+              <span class="calc-label">Commandé</span>
+              <span class="calc-value" style="color: var(--success);">240 u · + 5</span>
+            </div>
+            <div class="calc-row">
+              <span class="calc-label">Livré</span>
+              <span class="calc-value" style="color: var(--critical);">180 u · − 55</span>
+            </div>
+          </div>
+
+          <div class="sufficiency-note">
+            La commande initiale couvrait le besoin (240 u pour 235 u estimés). La livraison partielle crée un déficit de 55 u par rapport à ce besoin — à l'origine du prolongement de la rupture.
+          </div>
+        </div>
+      </section>
+    </aside>
+
+  </div>
+
+  <!-- CAUSE ANALYSIS -->
+  <div class="section-head">
+    <h2 class="section-title">Analyse de la cause de perte</h2>
+    <span class="section-rule"></span>
+  </div>
+
+  <section class="card cause-section" aria-labelledby="c-title">
+    <div class="cause-verdict">
+      <div class="cause-verdict-main">
+        <div class="cause-verdict-label" id="c-title">Verdict combiné</div>
+        <div class="cause-verdict-text">Causes multiples · Magasin + Entrepôt</div>
+      </div>
+      <span class="confidence-chip">
+        Certitude
+        <span class="dots" aria-label="Haute">
+          <span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span>
+        </span>
+        Haute
+      </span>
+    </div>
+
+    <div class="factors-grid">
+
+      <article class="factor">
+        <div class="factor-head">
+          <span class="factor-category store">
+            <svg class="ic" style="width:12px;height:12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Magasin
+          </span>
+          <span class="confidence-chip">
+            <span class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span></span>
+            Faible
+          </span>
+        </div>
+        <h3 class="factor-title">Retard de commande après détection de la rupture</h3>
+        <div class="factor-metric">2j 4h 22min<span class="suffix">de délai</span></div>
+        <div class="factor-evidence">
+          <ul>
+            <li>Rupture détectée le 10 oct. à 08:23, commande saisie le 12 oct. à 12:45.</li>
+            <li>Aucune commande automatique configurée pour cet article (classe A).</li>
+            <li>Le délai dépasse le seuil interne (24 h) de 1 j 4 h.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="factor">
+        <div class="factor-head">
+          <span class="factor-category warehouse">
+            <svg class="ic" style="width:12px;height:12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="1"/><path d="M8 7V3h8v4"/></svg>
+            Entrepôt
+          </span>
+          <span class="confidence-chip">
+            <span class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span></span>
+            Haute
+          </span>
+        </div>
+        <h3 class="factor-title">Livraison incomplète par rapport à la commande</h3>
+        <div class="factor-metric">− 60 u<span class="suffix">soit − 25 %</span></div>
+        <div class="factor-evidence">
+          <ul>
+            <li>Bon de livraison BL-2026-10-33421 : 180 u reçues sur 240 commandées.</li>
+            <li>Préparation conforme (240 u) mais expédition réduite à 200 u — motif non renseigné.</li>
+            <li>Écart supplémentaire BE → BL : 20 u manquantes à la réception.</li>
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= IMPACT + PATTERNS ================= -->
+  <div class="section-head">
+    <h2 class="section-title">Impact commercial & patterns</h2>
+    <span class="section-rule"></span>
+  </div>
+
+  <div class="impact-grid">
+
+    <!-- Impact financier -->
+    <section class="card" aria-labelledby="i-title">
+      <div class="card-head">
+        <h2 class="card-title" id="i-title">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          Impact commercial estimé
+        </h2>
+        <span class="mini-tag">Estimation IA</span>
+      </div>
+      <div class="card-body">
+        <div class="impact-stats">
+          <div class="impact-stat">
+            <div class="impact-stat-label">Chiffre d'affaires perdu</div>
+            <div class="impact-stat-value loss">255 200<span class="unit">FCFA</span></div>
+            <div class="impact-stat-detail">sur 7j 5h de rupture</div>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-stat-label">Marge perdue</div>
+            <div class="impact-stat-value loss">56 320<span class="unit">FCFA</span></div>
+            <div class="impact-stat-detail">22 % × unités non vendues</div>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-stat-label">Unités non vendues (nettes)</div>
+            <div class="impact-stat-value">176<span class="unit">u</span></div>
+            <div class="impact-stat-detail">après taux de substitution</div>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-stat-label">Clients impactés</div>
+            <div class="impact-stat-value">≈ 118</div>
+            <div class="impact-stat-detail">dont 42 fidélité « Prosuma+ »</div>
+          </div>
+        </div>
+
+        <div class="impact-breakdown">
+          <b>Méthode de calcul.</b> Consommation moyenne (35 u/j) × durée rupture (7,2 j) = 252 u potentielles.
+          Taux de substitution interne mesuré à 30 % → 176 u effectivement perdues. Appliqué au prix public TTC et à la marge unitaire du référentiel.
+          <span class="formula">35 × 7,2 × (1 − 0,30) × 1 450 ≈ 255 k FCFA</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Patterns -->
+    <section class="card" aria-labelledby="p-title">
+      <div class="card-head">
+        <h2 class="card-title" id="p-title">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 3v18"/></svg>
+          Patterns détectés
+        </h2>
+        <span class="mini-tag">3 signaux</span>
+      </div>
+      <div class="card-body">
+
+        <!-- Score fournisseur -->
+        <div class="supplier-score">
+          <div class="supplier-score-circle" aria-label="Score fiabilité : 72 sur 100">
+            <svg viewBox="0 0 56 56">
+              <circle cx="28" cy="28" r="24" fill="none" stroke="var(--surface-3)" stroke-width="5"/>
+              <circle cx="28" cy="28" r="24" fill="none" stroke="var(--warning)" stroke-width="5"
+                stroke-dasharray="150.8" stroke-dashoffset="42.2" stroke-linecap="round"/>
+            </svg>
+            <div class="score-text">72</div>
+          </div>
+          <div class="supplier-score-info">
+            <div class="supplier-score-name">Fiabilité Dépôt Yopougon</div>
+            <div class="supplier-score-detail">18 livraisons complètes · 5 partielles · 1 non livrée sur 30 jours</div>
+          </div>
+        </div>
+
+        <!-- Patterns -->
+        <div class="pattern-item">
+          <div class="pattern-badge alert">×3</div>
+          <div class="pattern-content">
+            <div class="pattern-title">Livraisons partielles récurrentes</div>
+            <div class="pattern-desc">
+              3 ruptures prolongées ce mois sur le même entrepôt pour des produits alimentaires classe A.
+              <a href="#">Voir le détail →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="pattern-item">
+          <div class="pattern-badge ok">+40 %</div>
+          <div class="pattern-content">
+            <div class="pattern-title">Saisonnalité octobre</div>
+            <div class="pattern-desc">
+              Les ventes d'huile Dinor 1L progressent de 40 % en octobre vs moyenne annuelle (2024–2025).
+              Stock de sécurité actuel calibré sur la moyenne.
+            </div>
+          </div>
+        </div>
+
+        <div class="pattern-item">
+          <div class="pattern-badge">12 %</div>
+          <div class="pattern-content">
+            <div class="pattern-title">Délais commande magasin</div>
+            <div class="pattern-desc">
+              Prosuma Marcory dépasse le seuil 24 h de saisie sur 12 % des ruptures ce trimestre.
+              Comparable aux autres magasins Prosuma (10,4 %).
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= RECOMMENDATIONS ================= -->
+  <div class="section-head">
+    <h2 class="section-title">Actions recommandées</h2>
+    <span class="section-rule"></span>
+  </div>
+
+  <section class="card recommendations-wrap" aria-labelledby="r-title">
+    <div class="card-head">
+      <h2 class="card-title" id="r-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+        Prochaines actions
+      </h2>
+      <span class="mini-tag">4 recommandations · priorisées</span>
+    </div>
+
+    <div class="reco-list">
+
+      <div class="reco">
+        <span class="priority-badge urgent">Urgente</span>
+        <div class="reco-main">
+          <div class="reco-title">Émettre un bon de régularisation pour les 60 unités manquantes</div>
+          <div class="reco-desc">Rupture encore active. Le dépôt Yopougon reconnaît l'écart sur BL-33421 — demande de régularisation possible en moins de 24 h.</div>
+          <div class="reco-meta">
+            <span><b>Impact</b> <span class="reco-impact">− 1j 17h de rupture · + 87 u ventes</span></span>
+            <span><b>Responsable</b> Chef de rayon</span>
+            <span><b>Effort</b> 15 min</span>
+          </div>
+        </div>
+        <div class="reco-actions">
+          <button class="btn btn-primary" type="button">Créer</button>
+        </div>
+      </div>
+
+      <div class="reco">
+        <span class="priority-badge high">Haute</span>
+        <div class="reco-main">
+          <div class="reco-title">Activer le réassort automatique sur ART-45782</div>
+          <div class="reco-desc">Article classe A sans commande auto. L'activation aurait déclenché la commande 2 j 4 h plus tôt, évitant la première moitié de la rupture.</div>
+          <div class="reco-meta">
+            <span><b>Impact</b> <span class="reco-impact">évite 2 j de rupture / incident</span></span>
+            <span><b>Responsable</b> Gestionnaire magasin</span>
+            <span><b>Effort</b> 2 min</span>
+          </div>
+        </div>
+        <div class="reco-actions">
+          <button class="btn" type="button">Configurer</button>
+        </div>
+      </div>
+
+      <div class="reco">
+        <span class="priority-badge medium">Moyenne</span>
+        <div class="reco-main">
+          <div class="reco-title">Ouvrir un audit sur les livraisons partielles du Dépôt Yopougon</div>
+          <div class="reco-desc">3<sup>e</sup> incident ce mois sur produits alimentaires classe A. Pattern systémique à qualifier côté entrepôt (préparation vs expédition).</div>
+          <div class="reco-meta">
+            <span><b>Impact</b> <span class="reco-impact">cause racine fournisseur</span></span>
+            <span><b>Responsable</b> Direction logistique</span>
+            <span><b>Effort</b> 1 à 2 jours</span>
+          </div>
+        </div>
+        <div class="reco-actions">
+          <button class="btn" type="button">Ouvrir ticket</button>
+        </div>
+      </div>
+
+      <div class="reco">
+        <span class="priority-badge low">Préventive</span>
+        <div class="reco-main">
+          <div class="reco-title">Ajuster le stock de sécurité à 85 unités pour octobre–novembre</div>
+          <div class="reco-desc">Saisonnalité +40 % non reflétée dans le paramétrage actuel (60 u). Un ajustement temporaire couvrirait le besoin estimé en haute saison.</div>
+          <div class="reco-meta">
+            <span><b>Impact</b> <span class="reco-impact">évite rupture récurrente</span></span>
+            <span><b>Responsable</b> Approvisionnement central</span>
+            <span><b>Effort</b> 5 min</span>
+          </div>
+        </div>
+        <div class="reco-actions">
+          <button class="btn" type="button">Proposer</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- EVENT HISTORY -->
+  <div class="section-head">
+    <h2 class="section-title">Historique et traçabilité</h2>
+    <span class="section-rule"></span>
+  </div>
+
+  <section class="card" aria-labelledby="h-title">
+    <div class="card-head">
+      <h2 class="card-title" id="h-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+        Journal des événements
+      </h2>
+      <span class="mini-tag">8 enregistrements</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date / heure</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th style="text-align:right;">Quantité</th>
+            <th>Source</th>
+            <th>Vérification</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">10/10 · 08:23</td>
+            <td><span class="mini-tag red">Rupture</span></td>
+            <td>Stock passé à 0 — vente ticket POS3-00847</td>
+            <td class="qty">0</td>
+            <td class="source">mouvements_stock</td>
+            <td><span class="verif verif-ok">● Vérifié</span></td>
+          </tr>
+          <tr>
+            <td class="mono">11/10 · 14:12</td>
+            <td><span class="mini-tag">Alerte</span></td>
+            <td>Notification seuil critique envoyée au gestionnaire</td>
+            <td class="qty">—</td>
+            <td class="source">notifications_log</td>
+            <td><span class="verif verif-ok">● Vérifié</span></td>
+          </tr>
+          <tr>
+            <td class="mono">12/10 · 12:45</td>
+            <td><span class="mini-tag blue">Commande</span></td>
+            <td>Création CMD-2026-10-45872 par U. Kouassi</td>
+            <td class="qty">240</td>
+            <td class="source">commandes</td>
+            <td><span class="verif verif-ok">● Vérifié</span></td>
+          </tr>
+          <tr>
+            <td class="mono">12/10 · 16:30</td>
+            <td><span class="mini-tag green">Validation</span></td>
+            <td>Validation par le chef de rayon alimentaire</td>
+            <td class="qty">240</td>
+            <td class="source">commandes_statut</td>
+            <td><span class="verif verif-ok">● Vérifié</span></td>
+          </tr>
+          <tr>
+            <td class="mono">14/10 · 09:00</td>
+            <td><span class="mini-tag blue">Préparation</span></td>
+            <td>Bon de préparation BP-2026-10-7812 édité</td>
+            <td class="qty">240</td>
+            <td class="source">bons_prep</td>
+            <td><span class="verif verif-ok">● Vérifié</span></td>
+          </tr>
+          <tr>
+            <td class="mono">15/10 · 09:12</td>
+            <td><span class="mini-tag blue">Expédition</span></td>
+            <td>BE-2026-10-6511 — écart de 40 u vs préparation</td>
+            <td class="qty">200</td>
+            <td class="source">bons_exp</td>
+            <td><span class="verif verif-partial">▲ Partiel</span></td>
+          </tr>
+          <tr>
+            <td class="mono">17/10 · 10:00</td>
+            <td><span class="mini-tag red">Réception</span></td>
+            <td>BL-2026-10-33421 — 20 u supplémentaires manquantes à l'arrivée</td>
+            <td class="qty">180</td>
+            <td class="source">receptions</td>
+            <td><span class="verif verif-partial">▲ À confirmer</span></td>
+          </tr>
+          <tr>
+            <td class="mono">—/— · —:—</td>
+            <td><span class="mini-tag">Retour stock</span></td>
+            <td>Retour à un stock disponible — en attente</td>
+            <td class="qty">—</td>
+            <td class="source">—</td>
+            <td><span class="verif verif-missing">○ Non applicable</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+</body></html>

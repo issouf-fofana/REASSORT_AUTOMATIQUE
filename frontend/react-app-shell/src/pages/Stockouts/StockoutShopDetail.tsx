@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
 import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
-import { EpisodeDetailModal } from './EpisodeDetailModal';
 
 // Détail d'un magasin pour le module Ruptures (demande explicite du 16/10/2026 : "je dois faire
 // comme pour les commande, les article son classer par rayon et quand je clique je peux voir les
@@ -56,9 +56,9 @@ function formatDuration(hours: number): string {
 }
 
 export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string }) {
+  const navigate = useNavigate();
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<StockoutSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -283,7 +283,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                     </tr>
                   ) : (
                     articlesInDepartment.map((e) => (
-                      <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedEpisodeId(e.id)}>
+                      <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}`)}>
                         <td>{e.label || e.ean}</td>
                         <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
                         <td>{formatDuration(e.durationHours)}</td>
@@ -302,10 +302,6 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           )}
         </div>
       </div>
-
-      {selectedEpisodeId && (
-        <EpisodeDetailModal episodeId={selectedEpisodeId} onClose={() => setSelectedEpisodeId(null)} />
-      )}
     </div>
   );
 }
