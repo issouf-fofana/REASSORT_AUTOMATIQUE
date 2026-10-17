@@ -6,6 +6,7 @@
  */
 const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
+const rpos = require('./rposClient');
 
 const LOOKBACK_WEEKS = 8;
 const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
@@ -447,6 +448,32 @@ async function getEpisodeDetail(episodeId) {
       break;
     }
   }
+  // Qui a créé/validé la commande, et sa date de validation réelle (demande explicite du
+  // 17/10/2026 : "date e validation et heure puis il qui a cree et validé") — ProposalOrder/Proposal
+  // ne stocke QUE qui a validé la proposition côté plateforme (Proposal.validatedBy), pas forcément
+  // qui a créé/validé la commande fournisseur réelle côté RPOS (peut être différent : validation
+  // automatique par la génération nocturne, ou commande ensuite revalidée manuellement sur RPOS).
+  // Même principe que getValidatedOrders (chatbotToolsService.js) : created_by/validated_by/
+  // validation_date ne sont disponibles QUE via l'API RPOS /api/supplier_order/, jamais en base
+  // locale — recherche par référence (rposOrderReference) dans un lot paginé, jamais un échec
+  // bloquant (RPOS injoignable = champs simplement absents, pas une erreur de la page).
+  let rposOrderDetail = null;
+  if (order && order.rposOrderReference) {
+    try {
+      const { results } = await rpos.getSupplierOrders(episode.rposPosId, { shopId: episode.rposShopId, pageSize: 200, platformOnly: false });
+      const match = results.find((o) => o.reference === order.rposOrderReference);
+      if (match) {
+        rposOrderDetail = {
+          createdBy: match.created_by || null,
+          validatedBy: match.validated_by || null,
+          validationDate: match.validation_date || null,
+        };
+      }
+    } catch (err) {
+      console.error(`[stockoutEpisodeService] RPOS injoignable pour le détail de commande ${order.rposOrderReference} :`, err.message);
+    }
+  }
+
   if (order) {
     receptionEvents = await prisma.receptionEvent.findMany({
       where: { proposalOrderId: order.id },
@@ -591,8 +618,12 @@ async function getEpisodeDetail(episodeId) {
           supplierName: order.supplierName,
           deliveryType: order.deliveryType,
           createdAt: order.createdAt,
-          validatedAt: matchedLine?.proposal?.validatedAt ?? null,
-          validatedBy: matchedLine?.proposal?.validatedBy ?? null,
+          createdBy: rposOrderDetail?.createdBy ?? null,
+          // RPOS (rposOrderDetail) prioritaire : reflète la commande fournisseur réelle, pas
+          // seulement notre proposition interne. Repli sur Proposal.validatedAt/validatedBy si RPOS
+          // injoignable ou sans correspondance — mieux qu'un champ vide.
+          validatedAt: rposOrderDetail?.validationDate ?? matchedLine?.proposal?.validatedAt ?? null,
+          validatedBy: rposOrderDetail?.validatedBy ?? matchedLine?.proposal?.validatedBy ?? null,
           expectedReceptionDate: order.expectedReceptionDate,
           actualReceptionDate: order.actualReceptionDate,
           quantityOrdered: matchedLine?.quantityValidated ?? matchedLine?.quantitySuggested ?? null,
