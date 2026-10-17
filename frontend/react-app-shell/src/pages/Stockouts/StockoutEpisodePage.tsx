@@ -337,6 +337,7 @@ export function StockoutEpisodePage() {
                     <>
                       <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{formatDateTime(detail.order.createdAt)}</div>
                       <div className="small text-muted">N° {detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</div>
+                      <div className="small text-muted">Fournisseur : {detail.order.supplierName || '—'}{detail.order.deliveryType ? ` (${detail.order.deliveryType})` : ''}</div>
                       <div className="small text-muted">Créée par {detail.order.createdBy || 'inconnu'}</div>
                       {detail.order.validatedAt ? (
                         <div className="small text-muted">Validée le {formatDateTime(detail.order.validatedAt)}{detail.order.validatedBy ? ` par ${detail.order.validatedBy}` : ''}</div>
