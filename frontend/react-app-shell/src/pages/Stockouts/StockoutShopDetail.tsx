@@ -64,6 +64,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [error, setError] = useState<string | null>(null);
   const [bySector, setBySector] = useState<ByFieldSummary | null>(null);
   const [byDepartment, setByDepartment] = useState<ByFieldSummary | null>(null);
+  const [showCharts, setShowCharts] = useState(false);
 
   const mountRef = useRef(true);
 
@@ -128,8 +129,18 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
 
   return (
     <div>
-      {/* KPI + graphes toujours visibles en haut, quel que soit le niveau de navigation — vue
-          d'ensemble du magasin, pas seulement du rayon/secteur consulté. */}
+      <style>{`
+        .stockout-mini-kpi { border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 10px 14px; background: #fff; display: flex; align-items: center; gap: 10px; }
+        .stockout-mini-kpi .icon { width: 30px; height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; }
+        .stockout-mini-kpi .label { font-size: .68rem; color: #8591A0; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; line-height: 1.2; }
+        .stockout-mini-kpi .value { font-size: 1.15rem; font-weight: 700; color: #1B2A4A; line-height: 1.1; }
+        .stockout-toggle-charts { font-size: .76rem; color: #5B6B85; background: none; border: none; display: inline-flex; align-items: center; gap: 4px; padding: 0; }
+        .stockout-toggle-charts:hover { color: #1B2A4A; }
+      `}</style>
+
+      {/* KPI condensés en une seule bande mince + Analyse par rayon juste en dessous — tout doit
+          tenir sans scroll (demande explicite du 17/10/2026 : "si on viens on doit tous voir sans
+          scroller"). Les graphes (courbe 30j, causes) sont repliés par défaut, ouverts à la demande. */}
       {error ? (
         <div className="text-danger small mb-3">Erreur : {error}</div>
       ) : !mountRef.current ? null :
@@ -137,64 +148,57 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         <div className="text-muted small mb-3">Chargement des données de rupture...</div>
       ) : (
         <>
-          <div className="row row-cols-1 row-cols-md-3 g-3 mb-4">
+          <div className="row row-cols-2 row-cols-md-4 g-2 mb-3">
             <div className="col">
-              <div className="card kpi-card h-100">
-                <div className="card-body d-flex align-items-start gap-2">
-                  <div className="kpi-icon bg-warning-subtle">
-                    <iconify-icon icon="solar:alert-bold-duotone" className="text-warning"></iconify-icon>
-                  </div>
-                  <div>
-                    <p className="kpi-label">Ruptures en cours</p>
-                    <h3 className="kpi-value">{summary.openCount ?? 0}</h3>
-                  </div>
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-warning-subtle"><iconify-icon icon="solar:alert-bold-duotone" className="text-warning"></iconify-icon></span>
+                <div>
+                  <div className="label">En cours</div>
+                  <div className="value">{summary.openCount ?? 0}</div>
                 </div>
-                <div className="kpi-footer">Durée moyenne: {formatDuration(summary.avgDurationHours ?? 0)}</div>
               </div>
             </div>
             <div className="col">
-              <div className="card kpi-card h-100">
-                <div className="card-body d-flex align-items-start gap-2">
-                  <div className="kpi-icon bg-danger-subtle">
-                    <iconify-icon icon="solar:dollar-bold-duotone" className="text-danger"></iconify-icon>
-                  </div>
-                  <div>
-                    <p className="kpi-label">CA perdu estimé</p>
-                    <h3 className="kpi-value">{(summary.totalCaPerduEstime ?? 0).toLocaleString('fr-FR')} CFA</h3>
-                  </div>
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-danger-subtle"><iconify-icon icon="solar:dollar-bold-duotone" className="text-danger"></iconify-icon></span>
+                <div>
+                  <div className="label">CA perdu (30j)</div>
+                  <div className="value">{(summary.totalCaPerduEstime ?? 0).toLocaleString('fr-FR')} CFA</div>
                 </div>
-                <div className="kpi-footer">Sur 30j résolues</div>
               </div>
             </div>
             <div className="col">
-              <div className="card kpi-card h-100">
-                <div className="card-body d-flex align-items-start gap-2">
-                  <div className="kpi-icon bg-info-subtle">
-                    <iconify-icon icon="solar:clock-bold-duotone" className="text-info"></iconify-icon>
-                  </div>
-                  <div>
-                    <p className="kpi-label">Durée moyenne</p>
-                    <h3 className="kpi-value">{formatDuration(summary.avgDurationHours ?? 0)}</h3>
-                  </div>
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-info-subtle"><iconify-icon icon="solar:clock-bold-duotone" className="text-info"></iconify-icon></span>
+                <div>
+                  <div className="label">Durée moyenne</div>
+                  <div className="value">{formatDuration(summary.avgDurationHours ?? 0)}</div>
                 </div>
-                <div className="kpi-footer">En cours</div>
               </div>
+            </div>
+            <div className="col d-flex align-items-center justify-content-end justify-content-md-start">
+              <button type="button" className="stockout-toggle-charts" onClick={() => setShowCharts((v) => !v)}>
+                <iconify-icon icon={showCharts ? 'solar:alt-arrow-up-linear' : 'solar:chart-2-bold'}></iconify-icon>
+                {showCharts ? 'Masquer les graphes' : 'Voir les graphes'}
+              </button>
             </div>
           </div>
 
-          <div className="row row-cols-1 row-cols-md-2 g-3 mb-4">
-            <div className="col">
-              <StockoutTrendChart shopQueryParam={shopQueryParam} />
+          {showCharts && (
+            <div className="row row-cols-1 row-cols-md-2 g-3 mb-3">
+              <div className="col">
+                <StockoutTrendChart shopQueryParam={shopQueryParam} />
+              </div>
+              <div className="col">
+                <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
+              </div>
             </div>
-            <div className="col">
-              <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
-            </div>
-          </div>
+          )}
 
           {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
               sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →
               Articles juste en dessous, qui sert au drill-down vers les articles). */}
-          <div className="mb-4">
+          <div className="mb-3">
             <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} />
           </div>
         </>

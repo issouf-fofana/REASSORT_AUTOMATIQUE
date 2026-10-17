@@ -512,6 +512,27 @@ async function getEpisodeDetail(episodeId) {
     reactionStatus = 'EN_ATTENTE';
   }
 
+  // Perte avant/après commande, séparément (demande explicite du 17/10/2026 : "on doit voir le ca
+  // perte avant la commande et ca perte apres la commande") — distinct de caPerdueEstime (perte
+  // totale sur toute la durée, déjà stockée/précalculée par stockoutLossRecalcJob.js). Recalculé ici
+  // à la demande (consultation d'un seul épisode, pas une agrégation de centaines) : avant = du
+  // début de la rupture à la commande, après = de la commande à la fin (ou maintenant si toujours
+  // en cours). Null si aucune commande (rien à séparer) ou historique de ventes insuffisant.
+  let lossBeforeOrder = null;
+  let lossAfterOrder = null;
+  if (order) {
+    const [before, after] = await Promise.all([
+      order.createdAt.getTime() > episode.startedAt.getTime()
+        ? estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, order.createdAt)
+        : { qtyPerdue: 0, caPerdue: 0 },
+      endedAt.getTime() > order.createdAt.getTime()
+        ? estimateLoss(episode.rposShopId, episode.ean, order.createdAt, endedAt)
+        : { qtyPerdue: 0, caPerdue: 0 },
+    ]);
+    lossBeforeOrder = before;
+    lossAfterOrder = after;
+  }
+
   // Suffisance de la quantité commandée (demande explicite : "déterminer si la quantité commandée
   // était suffisante pour couvrir les besoins du magasin jusqu'à la livraison") — même méthode que
   // estimateLoss : demande attendue = vente moyenne du même jour de semaine sur 8 semaines
@@ -563,12 +584,15 @@ async function getEpisodeDetail(episodeId) {
     order: order
       ? {
           id: order.id,
+          rposOrderReference: order.rposOrderReference,
           status: order.status,
           receptionStatus: order.receptionStatus,
           rposOrderValidated: order.rposOrderValidated,
           supplierName: order.supplierName,
           deliveryType: order.deliveryType,
           createdAt: order.createdAt,
+          validatedAt: matchedLine?.proposal?.validatedAt ?? null,
+          validatedBy: matchedLine?.proposal?.validatedBy ?? null,
           expectedReceptionDate: order.expectedReceptionDate,
           actualReceptionDate: order.actualReceptionDate,
           quantityOrdered: matchedLine?.quantityValidated ?? matchedLine?.quantitySuggested ?? null,
@@ -579,6 +603,8 @@ async function getEpisodeDetail(episodeId) {
     replenishmentDelayHours,
     totalDurationHours: durationHours,
     orderQuantitySufficiency,
+    lossBeforeOrder,
+    lossAfterOrder,
   };
 }
 
