@@ -11,6 +11,8 @@ import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 // hiérarchique Secteur → Rayon → Articles → détail que Proposition de commande (PurchaseOrder.tsx),
 // réutilisé à l'identique pour "Ce magasin" (magasin actif topbar) ET le drill-down depuis
 // "Tous les magasins" — un seul composant, un seul comportement.
+type ReactionStatusLight = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
+
 type StockoutEpisode = {
   id: string;
   ean: string;
@@ -21,6 +23,9 @@ type StockoutEpisode = {
   durationHours: number;
   causeProposee: string;
   niveauConfiance: string;
+  hasOrder: boolean;
+  reactionStatus: ReactionStatusLight;
+  caPerdueEstime: number | null;
 };
 
 type StockoutSummary = {
@@ -42,11 +47,18 @@ const CAUSE_LABELS: Record<string, string> = {
   INDETERMINEE: 'Indéterminée',
 };
 
-const CONFIDENCE_BADGE: Record<string, string> = {
-  CONFIRMEE: 'reassort-badge-soft-success',
-  PROBABLE: 'reassort-badge-soft-warning',
-  INDETERMINEE: 'reassort-badge-neutral',
+// Colonne "Réaction" + filtre (demande explicite du 17/10/2026 : "on doit voir... qui son en
+// rupture et qui on une commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de
+// commande dessu") — version légère de REACTION_STATUS_META (StockoutEpisodePage.tsx), sans
+// STOCK_PEUT_ETRE_PAS_A_JOUR (nécessite les ventes pendant l'épisode, pas calculé en masse ici).
+const REACTION_LIGHT_META: Record<ReactionStatusLight, { label: string; badge: string }> = {
+  REAGI: { label: 'Commande passée', badge: 'reassort-badge-soft-success' },
+  EN_ATTENTE: { label: 'En attente (< 24h)', badge: 'reassort-badge-neutral' },
+  RETARD: { label: 'Retard (24-48h)', badge: 'reassort-badge-soft-warning' },
+  MAGASIN_NA_PAS_REAGI: { label: 'Sans commande (> 48h)', badge: 'reassort-badge-soft-danger' },
 };
+
+type OrderFilter = 'all' | 'with-order' | 'without-order';
 
 function formatDuration(hours: number): string {
   if (hours < 24) return `${Math.round(hours)} h`;
@@ -79,6 +91,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
 
   function setSelectedDepartment(dept: string | null) {
     setSelectedDepartmentState(dept);
+    setOrderFilter('all');
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (dept) next.set('dept', dept); else next.delete('dept');
@@ -91,6 +104,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [bySector, setBySector] = useState<ByFieldSummary | null>(null);
   const [byDepartment, setByDepartment] = useState<ByFieldSummary | null>(null);
   const [showCharts, setShowCharts] = useState(false);
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
 
   const mountRef = useRef(true);
   // Détecte un vrai CHANGEMENT de magasin (sélecteur topbar) par opposition au premier montage —
@@ -154,9 +168,16 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     return () => { cancelled = true; };
   }, [shopQueryParam, selectedSector]);
 
-  const articlesInDepartment = selectedDepartment
+  const articlesInDepartmentAll = selectedDepartment
     ? (summary?.openEpisodes || []).filter((e) => (e.department || 'Sans rayon') === selectedDepartment)
     : [];
+  const articlesInDepartment = articlesInDepartmentAll.filter((e) => {
+    if (orderFilter === 'with-order') return e.hasOrder;
+    if (orderFilter === 'without-order') return !e.hasOrder;
+    return true;
+  });
+  const withOrderCount = articlesInDepartmentAll.filter((e) => e.hasOrder).length;
+  const withoutOrderCount = articlesInDepartmentAll.length - withOrderCount;
 
   const showArticleList = !!selectedSector && !!selectedDepartment;
 
@@ -301,41 +322,62 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               </div>
             )
           ) : (
-            // Niveau 3 : Articles du rayon sélectionné
-            <div className="table-responsive">
-              <table className="table align-middle mb-0 table-hover table-centered">
-                <thead className="bg-light-subtle">
-                  <tr>
-                    <th>Article</th>
-                    <th>Depuis</th>
-                    <th>Durée</th>
-                    <th>Cause probable</th>
-                    <th>Confiance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {articlesInDepartment.length === 0 ? (
+            // Niveau 3 : Articles du rayon sélectionné — filtre avec/sans commande (demande
+            // explicite du 17/10/2026 : "on doit voit un filtre aussi sur ce qui son en rupture et
+            // qui on une commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de
+            // commande dessu").
+            <>
+              <div className="d-flex gap-2 mb-3">
+                <button type="button" className={`btn btn-sm ${orderFilter === 'all' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('all')}>
+                  Toutes ({articlesInDepartmentAll.length})
+                </button>
+                <button type="button" className={`btn btn-sm ${orderFilter === 'with-order' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('with-order')}>
+                  Avec commande ({withOrderCount})
+                </button>
+                <button type="button" className={`btn btn-sm ${orderFilter === 'without-order' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('without-order')}>
+                  Sans commande ({withoutOrderCount})
+                </button>
+              </div>
+              <div className="table-responsive">
+                <table className="table align-middle mb-0 table-hover table-centered">
+                  <thead className="bg-light-subtle">
                     <tr>
-                      <td colSpan={5} className="text-center text-muted py-4">Aucune rupture en cours pour ce rayon.</td>
+                      <th>Article</th>
+                      <th>Depuis</th>
+                      <th>Durée</th>
+                      <th>Réaction</th>
+                      <th>CA perdu</th>
+                      <th>Cause probable</th>
                     </tr>
-                  ) : (
-                    articlesInDepartment.map((e) => (
-                      <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
-                        <td>{e.label || e.ean}</td>
-                        <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
-                        <td>{formatDuration(e.durationHours)}</td>
-                        <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
-                        <td>
-                          <span className={`badge ${CONFIDENCE_BADGE[e.niveauConfiance] || 'reassort-badge-neutral'} py-1 px-2`}>
-                            {e.niveauConfiance.toLowerCase()}
-                          </span>
+                  </thead>
+                  <tbody>
+                    {articlesInDepartment.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-center text-muted py-4">
+                          {articlesInDepartmentAll.length === 0 ? 'Aucune rupture en cours pour ce rayon.' : 'Aucun article ne correspond à ce filtre.'}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ) : (
+                      articlesInDepartment.map((e) => {
+                        const reaction = REACTION_LIGHT_META[e.reactionStatus];
+                        return (
+                          <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
+                            <td>{e.label || e.ean}</td>
+                            <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
+                            <td>{formatDuration(e.durationHours)}</td>
+                            <td>
+                              <span className={`badge ${reaction.badge} py-1 px-2`}>{reaction.label}</span>
+                            </td>
+                            <td>{e.caPerdueEstime !== null ? `${Math.round(e.caPerdueEstime).toLocaleString('fr-FR')} CFA` : '—'}</td>
+                            <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </div>

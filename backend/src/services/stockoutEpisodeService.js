@@ -173,21 +173,87 @@ async function estimateDemand(rposShopId, ean, fromDate, coverageDays) {
   return demand.avgDailyQty * coverageDays;
 }
 
+// Seuils réaction, identiques à getEpisodeDetail (cf. reactionStatus plus bas) — dupliqués ici
+// plutôt que partagés car le calcul en masse n'a pas les ventes pendant l'épisode sous la main
+// (coûterait une agrégation SalesLine par EAN, inutile pour une simple liste) : la variante légère
+// ne distingue donc pas STOCK_PEUT_ETRE_PAS_A_JOUR, seulement "a commandé" vs seuils de durée.
+const REACTION_DEADLINE_HOURS = 24;
+const CONFIRMED_DEADLINE_HOURS = 48;
+
 /**
  * Liste les épisodes en cours d'un magasin, pour le dashboard. durationHours calculé à la volée
  * (pas stocké, puisque l'épisode est toujours ouvert).
+ *
+ * Enrichi le 17/10/2026 (demande explicite : "on doit voir... qui son en rupture et qui on une
+ * commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de commande dessu") avec
+ * hasOrder + reactionStatus (version LÉGÈRE, sans appel RPOS ni recalcul de perte — juste "une
+ * commande a-t-elle été créée depuis le début de CET épisode ?", en masse pour tout le magasin en 2
+ * requêtes plutôt qu'une par article comme getEpisodeDetail, potentiellement des centaines
+ * d'articles en rupture sur un même rayon).
  */
 async function getOpenEpisodes(rposShopId) {
   const episodes = await prisma.stockoutEpisode.findMany({
     where: { rposShopId, status: 'EN_COURS' },
     orderBy: { startedAt: 'asc' },
   });
+  if (!episodes.length) return [];
 
   const now = new Date();
-  return episodes.map((e) => ({
-    ...e,
-    durationHours: Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10,
-  }));
+  const eans = [...new Set(episodes.map((e) => e.ean))];
+  const earliestStart = episodes.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), episodes[0].startedAt);
+
+  // Toutes les lignes de proposition + commandes potentiellement pertinentes pour CES articles
+  // depuis le début de rupture le plus ancien du lot — un seul aller-retour DB, le matching précis
+  // par épisode (seuil de date propre à chaque startedAt) se fait ensuite en mémoire.
+  const lines = await prisma.proposalLine.findMany({
+    where: { ean: { in: eans }, proposal: { rposShopId, generatedAt: { gte: earliestStart } } },
+    select: { ean: true, department: true, proposalId: true, proposal: { select: { generatedAt: true } } },
+  });
+  const proposalIds = [...new Set(lines.map((l) => l.proposalId))];
+  const orders = proposalIds.length
+    ? await prisma.proposalOrder.findMany({
+        where: { proposalId: { in: proposalIds }, createdAt: { gte: earliestStart } },
+        select: { proposalId: true, department: true, createdAt: true },
+      })
+    : [];
+
+  // Index proposalId+department -> commandes (triées, la plus ancienne en premier) pour un lookup
+  // O(1) par ligne plutôt qu'un .find() recalculé à chaque épisode.
+  const ordersByKey = new Map();
+  for (const o of orders) {
+    const key = `${o.proposalId}::${o.department || ''}`;
+    if (!ordersByKey.has(key)) ordersByKey.set(key, []);
+    ordersByKey.get(key).push(o);
+  }
+  for (const list of ordersByKey.values()) list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+  const linesByEan = new Map();
+  for (const l of lines) {
+    if (!linesByEan.has(l.ean)) linesByEan.set(l.ean, []);
+    linesByEan.get(l.ean).push(l);
+  }
+  for (const list of linesByEan.values()) list.sort((a, b) => a.proposal.generatedAt.getTime() - b.proposal.generatedAt.getTime());
+
+  return episodes.map((e) => {
+    const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
+
+    let orderCreatedAt = null;
+    for (const line of linesByEan.get(e.ean) || []) {
+      if (line.proposal.generatedAt < e.startedAt) continue;
+      const key = `${line.proposalId}::${line.department || ''}`;
+      const candidate = (ordersByKey.get(key) || []).find((o) => o.createdAt >= e.startedAt);
+      if (candidate) { orderCreatedAt = candidate.createdAt; break; }
+    }
+
+    const hasOrder = orderCreatedAt !== null;
+    let reactionStatus;
+    if (hasOrder) reactionStatus = 'REAGI';
+    else if (durationHours > CONFIRMED_DEADLINE_HOURS) reactionStatus = 'MAGASIN_NA_PAS_REAGI';
+    else if (durationHours > REACTION_DEADLINE_HOURS) reactionStatus = 'RETARD';
+    else reactionStatus = 'EN_ATTENTE';
+
+    return { ...e, durationHours, hasOrder, reactionStatus };
+  });
 }
 
 /**
