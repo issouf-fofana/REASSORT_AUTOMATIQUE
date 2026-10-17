@@ -6,13 +6,8 @@
  */
 const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
-const { mapWithConcurrency } = require('../utils/concurrency');
 
 const LOOKBACK_WEEKS = 8;
-// Concurrence pour le recalcul en temps réel de la perte (estimateLoss) sur les épisodes EN_COURS
-// lors d'une agrégation (par rayon/secteur/magasin) — potentiellement des centaines d'épisodes par
-// appel, chacun coûtant plusieurs requêtes SQL.
-const EPISODE_LOSS_CONCURRENCY = 8;
 const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
 
 /**
@@ -214,17 +209,14 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
     ? openEpisodes.reduce((sum, e) => sum + e.durationHours, 0) / openEpisodes.length
     : 0;
 
-  // Même bug que les autres vues agrégées (corrigé le 16/10/2026, cf. getDashboardSummaryByField/
-  // getDashboardSummaryAllShops) : caPerdueEstime n'existe en base QUE pour les épisodes déjà
-  // résolus. Cette fonction-ci alimente directement les 3 cartes KPI tout en haut de "Ce magasin" —
-  // la plus visible de toutes les vues — et avait été oubliée lors du premier correctif. Recalculé
-  // en temps réel pour chaque épisode EN_COURS.
-  const now = new Date();
-  const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
-    const loss = await estimateLoss(rposShopId, e.ean, e.startedAt, now);
-    return loss.caPerdue || 0;
-  });
-  const totalCaPerdu = resolvedEpisodes.reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0) + openLosses.reduce((s, v) => s + v, 0);
+  // caPerdueEstime est désormais TOUJOURS lu depuis la valeur stockée, jamais recalculé ici (bug de
+  // performance trouvé le 17/10/2026 : recalculer estimateLoss() pour chaque épisode EN_COURS à
+  // chaque chargement de page prenait ~3s avec plusieurs centaines de ruptures ouvertes — demande
+  // explicite : "les calcule de perte... doit etre fait au prealable... comme la vue de proposition
+  // de commande"). Un job dédié (stockoutLossRecalcJob.js, toutes les heures) maintient ce champ à
+  // jour pour les épisodes EN_COURS — avant son premier passage sur un épisode tout juste détecté,
+  // la valeur reste simplement null (page "estimation indisponible", pas une erreur).
+  const totalCaPerdu = [...openEpisodes, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
   const causeCounts = {};
   for (const e of [...openEpisodes, ...resolvedEpisodes]) {
@@ -290,14 +282,9 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
       where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
       select: { caPerdueEstime: true },
     });
-    // Même correctif que getDashboardSummaryByField (bug signalé le 16/10/2026 : "CA perdu
-    // estimé... tout les valeur ne son pas correct") — caPerdueEstime n'existe en base QUE pour les
-    // épisodes déjà résolus ; recalculé en temps réel ici pour les épisodes encore EN_COURS.
-    const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
-      const loss = await estimateLoss(shop.rposShopId, e.ean, e.startedAt, new Date(now));
-      return loss.caPerdue || 0;
-    });
-    const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0) + openLosses.reduce((s, v) => s + v, 0);
+    // caPerdueEstime lu depuis la valeur stockée pour tous les épisodes (EN_COURS inclus, maintenue
+    // à jour par stockoutLossRecalcJob.js) — plus de recalcul temps réel ici, cf. getDashboardSummary.
+    const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0) + openEpisodes.reduce((s, e) => s + (e.caPerdueEstime || 0), 0);
 
     results.push({
       rposShopId: shop.rposShopId,
@@ -357,22 +344,12 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
     return byGroup.get(key);
   }
 
-  // Bug trouvé le 16/10/2026 (signalé : "CA perdu estimé... tout les valeur ne son pas correct") :
-  // caPerdueEstime n'est calculé par detectStockoutEpisodes qu'à la RÉSOLUTION d'un épisode — un
-  // épisode encore EN_COURS a toujours caPerdueEstime=null en base, donc l'agrégation qui ne lisait
-  // QUE ce champ stocké affichait systématiquement 0 CFA dès que la majorité des ruptures était
-  // encore ouverte (cas courant : juste après une capture de stock). Recalculé ici en temps réel
-  // avec estimateLoss (même fonction que getEpisodeDetail pour un épisode individuel), en parallèle
-  // avec une concurrence limitée — potentiellement des centaines d'épisodes ouverts par magasin.
-  const openLosses = await mapWithConcurrency(openEpisodes, EPISODE_LOSS_CONCURRENCY, async (e) => {
-    const loss = await estimateLoss(rposShopId, e.ean, e.startedAt, now);
-    return { episode: e, caPerdue: loss.caPerdue || 0 };
-  });
-
-  for (const { episode: e, caPerdue } of openLosses) {
+  // caPerdueEstime lu depuis la valeur stockée (maintenue à jour par stockoutLossRecalcJob.js pour
+  // les épisodes EN_COURS) — plus de recalcul temps réel ici, cf. getDashboardSummary.
+  for (const e of openEpisodes) {
     const bucket = getBucket(e[field]);
     bucket.openEpisodes.push(e);
-    bucket.totalCaPerdu += caPerdue;
+    bucket.totalCaPerdu += e.caPerdueEstime || 0;
   }
   for (const e of resolvedEpisodes) {
     const bucket = getBucket(e[field]);
@@ -488,7 +465,7 @@ async function getEpisodeDetail(episodeId) {
   }
 
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
-  const [stockMoves, salesBefore, salesDuring, loss] = await Promise.all([
+  const [stockMoves, salesBefore, salesDuring] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
     prisma.salesLine.aggregate({
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
@@ -499,13 +476,6 @@ async function getEpisodeDetail(episodeId) {
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt, lte: endedAt } },
       _sum: { quantity: true, revenueExclTax: true },
     }),
-    // Pour un épisode RÉSOLU, episode.qtyPerdueEstimee/caPerdueEstime (déjà calculés par
-    // detectStockoutEpisodes à la fermeture) restent la source de vérité. Pour un épisode EN_COURS,
-    // ces champs sont encore null en base (calculés seulement à la clôture) — recalculé ici en
-    // temps réel avec endedAt=maintenant, pour que la perte s'affiche dès l'ouverture de la fiche
-    // plutôt que d'attendre la résolution de la rupture (bug signalé : "combien de perte la rupture
-    // ma couté... ya rien").
-    episode.status === 'EN_COURS' ? estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, endedAt) : null,
   ]);
 
   // Statut de réaction du magasin (demande explicite du 16/10/2026 : "une commande doit etre fait
@@ -578,8 +548,8 @@ async function getEpisodeDetail(episodeId) {
     causeProposee: episode.causeProposee,
     niveauConfiance: episode.niveauConfiance,
     reactionStatus,
-    qtyPerdueEstimee: loss ? loss.qtyPerdue : episode.qtyPerdueEstimee,
-    caPerdueEstime: loss ? loss.caPerdue : episode.caPerdueEstime,
+    qtyPerdueEstimee: episode.qtyPerdueEstimee,
+    caPerdueEstime: episode.caPerdueEstime,
     salesBeforeEpisode: {
       windowDays: PRE_EPISODE_CONTEXT_DAYS,
       quantity: salesBefore._sum.quantity || 0,
@@ -645,4 +615,4 @@ async function getTrend(rposShopId, { days = 30 } = {}) {
   return { found: true, points };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause };
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss };

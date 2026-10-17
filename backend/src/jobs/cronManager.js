@@ -7,6 +7,7 @@ const { runSalesDailyRecap } = require('./salesDailyRecapJob');
 const { runProductEndOfLifeSync } = require('./productEndOfLifeSyncJob');
 const { runStockMoveSync } = require('./stockMoveSyncJob');
 const { runStockSnapshotJob } = require('./stockSnapshotJob');
+const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -24,6 +25,7 @@ let currentSalesDailyRecapTask = null;
 let currentProductEolSyncTask = null;
 let currentStockMoveSyncTask = null;
 let currentStockSnapshotTask = null;
+let currentStockoutLossRecalcTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -42,6 +44,7 @@ const salesDailyRecapLock = createJobLock('Récap quotidien de couverture des ve
 const productEolSyncLock = createJobLock('Synchronisation des DLV actives');
 const stockMoveSyncLock = createJobLock('Synchronisation des mouvements de stock');
 const stockSnapshotLock = createJobLock('Capture des snapshots de stock (ruptures)');
+const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -261,6 +264,35 @@ async function startOrRestartStockSnapshotJob() {
   console.log(`⏰ Capture des snapshots de stock planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme le recalcul périodique de la perte des épisodes de rupture EN_COURS (stockoutLossRecalcJob.js). */
+async function startOrRestartStockoutLossRecalcJob() {
+  if (currentStockoutLossRecalcTask) {
+    currentStockoutLossRecalcTask.stop();
+    currentStockoutLossRecalcTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCKOUT_LOSS_RECALC_ENABLED))) {
+    console.log('⏸️  Recalcul de la perte des ruptures désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_RECALC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), recalcul de la perte des ruptures non planifié`);
+    return;
+  }
+
+  currentStockoutLossRecalcTask = cron.schedule(cronSchedule, () => {
+    stockoutLossRecalcLock(async () => {
+      console.log('[cron] Démarrage du recalcul de la perte des ruptures en cours...');
+      await trackJobRun('stockoutLossRecalc', runStockoutLossRecalcJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Recalcul de la perte des ruptures planifié: ${cronSchedule}`);
+}
+
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
 async function startOrRestartShopsSyncJob() {
   if (currentShopsSyncTask) {
@@ -476,6 +508,7 @@ module.exports = {
   startOrRestartProductEolSyncJob,
   startOrRestartStockMoveSyncJob,
   startOrRestartStockSnapshotJob,
+  startOrRestartStockoutLossRecalcJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

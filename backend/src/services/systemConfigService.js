@@ -32,6 +32,12 @@ const KEYS = {
   // durée de rupture à l'heure près sans multiplier les lignes (17505 articles orderable mesurés sur
   // 30 magasins le 16/10/2026, donc ~70k lignes/jour à ce rythme).
   STOCK_SNAPSHOT_CRON: 'STOCK_SNAPSHOT_CRON',
+  // Recalcul de la perte (qtyPerdueEstimee/caPerdueEstime) des épisodes de rupture EN_COURS,
+  // stockée en base plutôt que recalculée à la lecture (bug de performance du 17/10/2026 : ~3s par
+  // page avec plusieurs centaines de ruptures ouvertes sur un même magasin, demande explicite
+  // "calcule... doit etre fait au prealable, comme la vue de proposition de commande"). Plus fréquent
+  // que la capture de stock elle-même (toutes les heures vs 6h) pour rester à jour pendant la journée.
+  STOCKOUT_LOSS_RECALC_CRON: 'STOCKOUT_LOSS_RECALC_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -115,6 +121,7 @@ const KEYS = {
   PRODUCT_EOL_SYNC_ENABLED: 'PRODUCT_EOL_SYNC_ENABLED',
   STOCK_MOVE_SYNC_ENABLED: 'STOCK_MOVE_SYNC_ENABLED',
   STOCK_SNAPSHOT_ENABLED: 'STOCK_SNAPSHOT_ENABLED',
+  STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -229,6 +236,7 @@ const ENV_FALLBACK = {
   // multiplier les lignes de StockSnapshot (17505 articles orderable mesurés sur 30 magasins le
   // 16/10/2026, donc ~70k lignes/jour à ce rythme).
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
+  [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -330,6 +338,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.PRODUCT_EOL_SYNC_ENABLED]: () => 'true',
   [KEYS.STOCK_MOVE_SYNC_ENABLED]: () => 'true',
   [KEYS.STOCK_SNAPSHOT_ENABLED]: () => 'true',
+  [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
