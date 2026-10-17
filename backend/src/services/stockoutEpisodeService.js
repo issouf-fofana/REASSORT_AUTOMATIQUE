@@ -608,7 +608,7 @@ async function getEpisodeDetail(episodeId) {
   }
 
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
-  const [stockMoves, salesBefore, salesDuring] = await Promise.all([
+  const [stockMoves, salesBefore, salesDuring, stockAtStart, stockLatestSnapshot, productCache, stockAtEnd] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
     prisma.salesLine.aggregate({
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
@@ -619,6 +619,38 @@ async function getEpisodeDetail(episodeId) {
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt, lte: endedAt } },
       _sum: { quantity: true, revenueExclTax: true },
     }),
+    // Stock au moment précis de la détection (demande explicite du 17/10/2026 : "je veux tout les
+    // detail possibile" — voir directement si le stock constaté était à 0 ou déjà négatif à ce
+    // moment-là, cf. StockSnapshot.stock qui peut être négatif, contrairement à ProductCache.stock
+    // qui reflète toujours l'état COURANT, jamais un historique).
+    prisma.stockSnapshot.findFirst({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: episode.startedAt } },
+      orderBy: { capturedAt: 'asc' },
+      select: { stock: true, capturedAt: true },
+    }),
+    // Dernier snapshot connu (pendant la rupture si toujours EN_COURS, ou proche de la fin si
+    // résolue) — complète productCache (RPOS en temps réel) par la trace historique la plus récente.
+    prisma.stockSnapshot.findFirst({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { lte: endedAt } },
+      orderBy: { capturedAt: 'desc' },
+      select: { stock: true, capturedAt: true },
+    }),
+    // Stock RPOS "maintenant" (ProductCache, synchronisé périodiquement en tâche de fond, pas un
+    // appel RPOS direct ici) — pour un épisode EN_COURS, c'est la valeur la plus à jour disponible
+    // sans ralentir la page d'un appel réseau.
+    prisma.productCache.findUnique({
+      where: { rposShopId_ean: { rposShopId: episode.rposShopId, ean: episode.ean } },
+      select: { stock: true, syncedAt: true },
+    }),
+    // Stock au moment de la résolution (si l'épisode est déjà clos) — distinct de stockLatestSnapshot
+    // qui peut être un peu avant endedAt selon la fréquence de capture.
+    episode.endedAt
+      ? prisma.stockSnapshot.findFirst({
+          where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: episode.endedAt } },
+          orderBy: { capturedAt: 'asc' },
+          select: { stock: true, capturedAt: true },
+        })
+      : null,
   ]);
 
   // Statut de réaction du magasin (demande explicite du 16/10/2026 : "une commande doit etre fait
@@ -753,6 +785,10 @@ async function getEpisodeDetail(episodeId) {
     lossAfterOrder,
     reactionDeadlineHours,
     deliveryDeadlineHours,
+    stockAtStart: stockAtStart ? { value: stockAtStart.stock, capturedAt: stockAtStart.capturedAt } : null,
+    stockCurrent: stockLatestSnapshot ? { value: stockLatestSnapshot.stock, capturedAt: stockLatestSnapshot.capturedAt } : null,
+    stockRpos: productCache ? { value: productCache.stock, syncedAt: productCache.syncedAt } : null,
+    stockAtEnd: stockAtEnd ? { value: stockAtEnd.stock, capturedAt: stockAtEnd.capturedAt } : null,
   };
 }
 

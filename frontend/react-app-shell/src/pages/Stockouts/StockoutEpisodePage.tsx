@@ -78,6 +78,10 @@ type EpisodeDetail = {
   lossAfterOrder: Loss | null;
   reactionDeadlineHours: number;
   deliveryDeadlineHours: number;
+  stockAtStart: { value: number; capturedAt: string } | null;
+  stockCurrent: { value: number; capturedAt: string } | null;
+  stockRpos: { value: number; syncedAt: string } | null;
+  stockAtEnd: { value: number; capturedAt: string } | null;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -149,6 +153,20 @@ function formatTime(iso: string | null): string {
 function formatMoney(value: number | null): string {
   if (value === null) return '—';
   return `${Math.round(value).toLocaleString('fr-FR')} CFA`;
+}
+
+// Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
+// (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
+// l'horodatage du relevé pour qu'on sache à quel moment précis cette valeur a été constatée.
+function StockValue({ stock }: { stock: { value: number; capturedAt: string } | null }) {
+  if (!stock) return <div className="text-muted small">—</div>;
+  const tone = stock.value < 0 ? '#b8302c' : stock.value === 0 ? '#a86718' : '#2d6a3f';
+  return (
+    <div>
+      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: tone }}>{stock.value} u.</div>
+      <div className="text-muted" style={{ fontSize: '.7rem' }}>{formatDateTime(stock.capturedAt)}</div>
+    </div>
+  );
 }
 
 export function StockoutEpisodePage() {
@@ -455,6 +473,46 @@ export function StockoutEpisodePage() {
               {detail.orderQuantitySufficiency && (
                 <div className={`ep2-badge tone-${detail.orderQuantitySufficiency.sufficient ? 'success' : 'warning'} mt-3`}>
                   Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered} u) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées sur la période.
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Niveau de stock (demande explicite du 17/10/2026 : "je veux tout les detail possibile...
+              le stock pendant la rupture et le stock apres... si le stock et negative il faut
+              affiche si 0 il faut affiche") — un stock négatif révèle une désynchronisation RPOS
+              (ventes enregistrées au-delà du stock réellement disponible), distinct d'un stock à 0
+              qui est une rupture "propre". */}
+          <section className="ep2-card mb-3">
+            <div className="ep2-card-head"><iconify-icon icon="solar:box-minimalistic-bold-duotone"></iconify-icon> Niveau de stock</div>
+            <div className="ep2-card-body">
+              <div className="row g-3">
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Au début de la rupture</div>
+                  <StockValue stock={detail.stockAtStart} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>
+                    {detail.status === 'EN_COURS' ? 'Actuellement' : 'Dernier relevé pendant'}
+                  </div>
+                  <StockValue stock={detail.stockCurrent} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Stock RPOS (temps réel)</div>
+                  <StockValue stock={detail.stockRpos ? { value: detail.stockRpos.value, capturedAt: detail.stockRpos.syncedAt } : null} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Après résolution</div>
+                  {detail.status === 'EN_COURS' ? (
+                    <div className="text-muted small">Rupture toujours en cours</div>
+                  ) : (
+                    <StockValue stock={detail.stockAtEnd} />
+                  )}
+                </div>
+              </div>
+              {detail.stockAtStart && detail.stockAtStart.value < 0 && (
+                <div className="ep2-verdict tone-warning mt-3">
+                  <strong>Stock négatif détecté.</strong> Le stock constaté est descendu en dessous de 0, signe probable d'une désynchronisation RPOS (ventes enregistrées au-delà du stock réellement disponible en magasin) plutôt que d'une rupture physique classique.
                 </div>
               )}
             </div>
