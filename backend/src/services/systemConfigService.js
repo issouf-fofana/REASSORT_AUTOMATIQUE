@@ -44,6 +44,12 @@ const KEYS = {
   // reactionStatus), rendus configurables plutôt que redéployer le code pour changer ce seuil.
   STOCKOUT_REACTION_DEADLINE_HOURS: 'STOCKOUT_REACTION_DEADLINE_HOURS',
   STOCKOUT_DELIVERY_DEADLINE_HOURS: 'STOCKOUT_DELIVERY_DEADLINE_HOURS',
+  // Fenêtre de comparaison du calcul de perte des ruptures (CA perdu estimé) — demande explicite du
+  // 17/10/2026 : "il faut rendre [ça] configurable sur le UI" après avoir étendu la fenêtre par
+  // défaut de 8 à 52 semaines. Nombre de semaines de recul (même jour de semaine) et nombre minimum
+  // de semaines comparables requises pour afficher une estimation plutôt que "indisponible".
+  STOCKOUT_LOSS_LOOKBACK_WEEKS: 'STOCKOUT_LOSS_LOOKBACK_WEEKS',
+  STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS: 'STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -245,6 +251,8 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
+  [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
+  [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',

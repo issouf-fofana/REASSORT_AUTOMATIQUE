@@ -253,6 +253,8 @@ interface SystemConfigData {
   TOKEN_USAGE_ALERT_THRESHOLD_TOKENS?: string;
   STOCKOUT_REACTION_DEADLINE_HOURS?: string;
   STOCKOUT_DELIVERY_DEADLINE_HOURS?: string;
+  STOCKOUT_LOSS_LOOKBACK_WEEKS?: string;
+  STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS?: string;
 }
 
 export function SchedulingSection() {
@@ -269,6 +271,8 @@ export function SchedulingSection() {
   const [stockoutDeliveryDeadline, setStockoutDeliveryDeadline] = useState('48');
   const [stockoutDeadlinesSaving, setStockoutDeadlinesSaving] = useState(false);
   const [stockoutDeadlinesSaved, setStockoutDeadlinesSaved] = useState(false);
+  const [stockoutLossLookbackWeeks, setStockoutLossLookbackWeeks] = useState('52');
+  const [stockoutLossMinComparableWeeks, setStockoutLossMinComparableWeeks] = useState('8');
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -284,6 +288,8 @@ export function SchedulingSection() {
         setTokenUsageAlertThreshold(d.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS || '2000000');
         setStockoutReactionDeadline(d.STOCKOUT_REACTION_DEADLINE_HOURS || '24');
         setStockoutDeliveryDeadline(d.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48');
+        setStockoutLossLookbackWeeks(d.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52');
+        setStockoutLossMinComparableWeeks(d.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -592,6 +598,53 @@ export function SchedulingSection() {
                 </div>
               </div>
             </div>
+
+            <hr className="my-4" />
+
+            <div
+              className="alert alert-light border small mb-3"
+              dangerouslySetInnerHTML={{
+                __html:
+                  "<strong>À quoi ça sert :</strong> le CA perdu estimé d'une rupture compare la vente moyenne du même jour de semaine (ex: vendredis contre vendredis) sur les semaines précédentes à ce qui a été réellement vendu pendant la rupture. Ces deux réglages déterminent la fenêtre de comparaison utilisée.",
+              }}
+            />
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Fenêtre de comparaison (recul)</label>
+                <div className="input-group" style={{ maxWidth: 200 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={1}
+                    value={stockoutLossLookbackWeeks}
+                    onChange={(e) => setStockoutLossLookbackWeeks(e.target.value)}
+                  />
+                  <span className="input-group-text">sem.</span>
+                </div>
+                <div className="form-text">
+                  Nombre de semaines de recul utilisées pour calculer la vente moyenne attendue (52 = 1 an par
+                  défaut, capture la saisonnalité annuelle).
+                </div>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Minimum de semaines comparables</label>
+                <div className="input-group" style={{ maxWidth: 200 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={1}
+                    value={stockoutLossMinComparableWeeks}
+                    onChange={(e) => setStockoutLossMinComparableWeeks(e.target.value)}
+                  />
+                  <span className="input-group-text">sem.</span>
+                </div>
+                <div className="form-text">
+                  En dessous de ce nombre de semaines avec des ventes constatées, l'estimation est jugée trop
+                  fragile et affichée comme « indisponible » plutôt qu'un chiffre peu fiable.
+                </div>
+              </div>
+            </div>
+
             <button
               type="button"
               className="btn btn-primary mt-3"
@@ -602,6 +655,8 @@ export function SchedulingSection() {
                 try {
                   await saveSystemConfigKey('STOCKOUT_REACTION_DEADLINE_HOURS', stockoutReactionDeadline);
                   await saveSystemConfigKey('STOCKOUT_DELIVERY_DEADLINE_HOURS', stockoutDeliveryDeadline);
+                  await saveSystemConfigKey('STOCKOUT_LOSS_LOOKBACK_WEEKS', stockoutLossLookbackWeeks);
+                  await saveSystemConfigKey('STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS', stockoutLossMinComparableWeeks);
                   setStockoutDeadlinesSaved(true);
                 } finally {
                   setStockoutDeadlinesSaving(false);

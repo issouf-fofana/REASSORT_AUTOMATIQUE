@@ -25,12 +25,22 @@ async function getReactionDeadlines() {
   };
 }
 
-// Fenêtre de comparaison étendue à 1 an le 17/10/2026 (demande explicite : "pour les rupture le CA
-// il faut prendre cette analyse sur un an pour chaque la on aura un truc presi") — capture la
-// saisonnalité annuelle (fêtes, périodes creuses) plutôt que seulement les 8 dernières semaines,
-// avec un seuil minimum relevé en conséquence pour rester cohérent avec cette fenêtre plus large.
-const LOOKBACK_WEEKS = 52;
-const MIN_COMPARABLE_WEEKS = 8; // sous ce seuil, estimation trop fragile pour être affichée
+/**
+ * Fenêtre de comparaison du calcul de perte — configurable depuis Paramètres (demande explicite du
+ * 17/10/2026 : "il faut rendre [ça] configurable sur le UI"). 52 semaines / 8 comparables par
+ * défaut (étendu depuis 8/4 le même jour pour capturer la saisonnalité annuelle plutôt que
+ * seulement les 8 dernières semaines).
+ */
+async function getLossLookbackConfig() {
+  const [lookback, minComparable] = await Promise.all([
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS),
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS),
+  ]);
+  return {
+    lookbackWeeks: parseInt(lookback, 10) || 52,
+    minComparableWeeks: parseInt(minComparable, 10) || 8,
+  };
+}
 
 /**
  * Ouvre un nouvel épisode pour chaque article passé de stock>0 à stock<=0 depuis le dernier
@@ -136,7 +146,8 @@ async function diagnoseCause(rposShopId, ean) {
  * null si l'historique comparable est trop court (MIN_COMPARABLE_WEEKS) pour être fiable.
  */
 async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
-  const lookbackStart = new Date(referenceDate.getTime() - LOOKBACK_WEEKS * 7 * 24 * 60 * 60 * 1000);
+  const { lookbackWeeks, minComparableWeeks } = await getLossLookbackConfig();
+  const lookbackStart = new Date(referenceDate.getTime() - lookbackWeeks * 7 * 24 * 60 * 60 * 1000);
   const comparableSales = await prisma.salesLine.findMany({
     where: { rposShopId, ean, date: { gte: lookbackStart, lt: referenceDate } },
     select: { date: true, quantity: true, revenueExclTax: true },
@@ -146,7 +157,7 @@ async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
   const sameDowSales = comparableSales.filter((s) => s.date.getDay() === targetDow);
   const comparableWeeksCount = new Set(sameDowSales.map((s) => s.date.toISOString().slice(0, 10))).size;
 
-  if (comparableWeeksCount < MIN_COMPARABLE_WEEKS) return null;
+  if (comparableWeeksCount < minComparableWeeks) return null;
 
   return {
     avgDailyQty: sameDowSales.reduce((sum, s) => sum + s.quantity, 0) / comparableWeeksCount,
