@@ -243,13 +243,23 @@ async function getOpenEpisodes(rposShopId) {
       })
     : [];
 
-  // Index proposalId+department -> commandes (triées, la plus ancienne en premier) pour un lookup
-  // O(1) par ligne plutôt qu'un .find() recalculé à chaque épisode.
+  // Index proposalId -> commandes (triées, la plus ancienne en premier) pour un lookup O(1) par
+  // ligne plutôt qu'un .find() recalculé à chaque épisode.
+  //
+  // BUG CORRIGÉ le 17/10/2026 (signalé : "il n'affiche plus ceux qui son avec les commande") :
+  // la clé incluait AUSSI le département (`${proposalId}::${department || ''}`), avec un mismatch
+  // silencieux dès que line.department est null (article jamais correctement proposé, cf. le bug
+  // "Sans rayon" déjà documenté) mais que la commande, elle, a un vrai département renseigné — deux
+  // clés différentes ('id::' vs 'id::EPICERIE SUCREE') qui ne matchaient jamais, donc hasOrder
+  // restait faux pour TOUS les articles "Sans rayon" même avec une vraie commande passée dessus.
+  // getEpisodeDetail (qui, lui, fonctionnait) n'a jamais ce problème : son department: line.department
+  // || undefined désactive carrément le filtre Prisma quand null, au lieu de matcher sur chaîne vide.
+  // Indexé uniquement par proposalId ici, même principe (le filtre département n'apporte rien de
+  // plus : une proposition ne génère qu'une poignée de commandes, déjà peu nombreuses par proposalId).
   const ordersByKey = new Map();
   for (const o of orders) {
-    const key = `${o.proposalId}::${o.department || ''}`;
-    if (!ordersByKey.has(key)) ordersByKey.set(key, []);
-    ordersByKey.get(key).push(o);
+    if (!ordersByKey.has(o.proposalId)) ordersByKey.set(o.proposalId, []);
+    ordersByKey.get(o.proposalId).push(o);
   }
   for (const list of ordersByKey.values()) list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
@@ -267,8 +277,7 @@ async function getOpenEpisodes(rposShopId) {
     let matchedOrder = null;
     for (const line of linesByEan.get(e.ean) || []) {
       if (line.proposal.generatedAt < e.startedAt) continue;
-      const key = `${line.proposalId}::${line.department || ''}`;
-      const candidate = (ordersByKey.get(key) || []).find((o) => o.createdAt >= e.startedAt);
+      const candidate = (ordersByKey.get(line.proposalId) || []).find((o) => o.createdAt >= e.startedAt);
       if (candidate) { orderCreatedAt = candidate.createdAt; matchedOrder = candidate; break; }
     }
 
