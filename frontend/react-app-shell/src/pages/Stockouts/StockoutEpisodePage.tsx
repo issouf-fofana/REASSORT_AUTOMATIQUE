@@ -111,6 +111,26 @@ function formatDuration(hours: number | null): string {
   return `${days} j ${rest} h`;
 }
 
+// Avec minutes et secondes (demande explicite du 17/10/2026 : "je veux que le temps soit en live
+// modifier en temps reel") — formatDuration() arrondit à l'heure près, donc un compteur qui
+// recalcule bien chaque seconde en interne semblait visuellement figé pendant près d'une heure.
+// Réservée aux 3 compteurs live de cette page (durée totale, avant/après commande) ; le reste de
+// l'app garde formatDuration() (listes, agrégats) où cette précision serait du bruit.
+function formatDurationLive(hours: number | null): string {
+  if (hours === null || hours < 0) return '—';
+  const totalSeconds = Math.floor(hours * 3600);
+  const days = Math.floor(totalSeconds / 86400);
+  const h = Math.floor((totalSeconds % 86400) / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}j`);
+  if (days > 0 || h > 0) parts.push(`${h}h`);
+  parts.push(`${String(m).padStart(2, '0')}min`);
+  parts.push(`${String(s).padStart(2, '0')}s`);
+  return parts.join(' ');
+}
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('fr-FR');
@@ -292,7 +312,7 @@ export function StockoutEpisodePage() {
                 <div className="sub">{formatTime(detail.startedAt)}</div>
               </div>
               <div className="ep2-tile">
-                <div className={`val ${isLongDuration ? 'warn' : ''}`}>{formatDuration(liveDurations?.totalHours ?? null)}</div>
+                <div className={`val ${isLongDuration ? 'warn' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.totalHours ?? null)}</div>
                 <div className="lbl" style={{ marginTop: 4 }}>Durée totale</div>
                 <div className="sub">{detail.status === 'EN_COURS' ? 'Compteur toujours actif' : 'Rupture terminée'}</div>
               </div>
@@ -318,7 +338,7 @@ export function StockoutEpisodePage() {
             </div>
             <div className="ep2-timeline-mid">
               <iconify-icon icon="solar:arrow-right-linear" className="arrow"></iconify-icon>
-              <span className="dur">{formatDuration(liveDurations?.totalHours ?? null)}</span>
+              <span className="dur" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.totalHours ?? null)}</span>
               <span className="sub">{liveDurations ? `${Math.round(liveDurations.totalHours * 60)} minutes` : ''}</span>
             </div>
             <div className="ep2-timeline-pt end">
@@ -352,11 +372,11 @@ export function StockoutEpisodePage() {
                   <dl className="row mb-0 ep2-field">
                     <div className="col-6">
                       <dt>Rupture avant commande {!detail.order && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
-                      <dd className="accent">{formatDuration(liveDurations?.beforeOrderHours ?? null)}</dd>
+                      <dd className="accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</dd>
                     </div>
                     <div className="col-6">
                       <dt>Rupture après commande {detail.order && !detail.order.actualReceptionDate && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
-                      <dd className="money">{formatDuration(liveDurations?.afterOrderHours ?? null)}</dd>
+                      <dd className="money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</dd>
                     </div>
                     <div className="col-6"><dt>Perte avant commande</dt><dd>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</dd></div>
                     <div className="col-6"><dt>Perte après commande</dt><dd>{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</dd></div>
