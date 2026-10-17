@@ -67,6 +67,13 @@ function formatDuration(hours: number): string {
   return `${days} j ${rest} h`;
 }
 
+// Durée live depuis startedAt plutôt que le durationHours figé renvoyé au chargement — avec
+// setMinuteTick en dépendance de rendu, cette valeur se recalcule à chaque tick (demande explicite
+// du 17/10/2026 : "le user doit voir compté").
+function liveDurationHours(startedAt: string): number {
+  return (Date.now() - new Date(startedAt).getTime()) / (60 * 60 * 1000);
+}
+
 export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string }) {
   const navigate = useNavigate();
   // Secteur/rayon sélectionnés reflétés dans l'URL (?sector=&dept=), pas seulement en state local —
@@ -105,6 +112,15 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [byDepartment, setByDepartment] = useState<ByFieldSummary | null>(null);
   const [showCharts, setShowCharts] = useState(false);
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
+  // Rafraîchit la colonne Durée affichée en live (demande explicite du 17/10/2026 : "le user doit
+  // voir compté") — toutes les minutes plutôt que chaque seconde comme sur la fiche détail : des
+  // centaines de lignes potentielles ici, un tick seconde serait un gaspillage de rendu sans valeur
+  // perceptible (la colonne n'affiche jamais les secondes).
+  const [, setMinuteTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setMinuteTick((v) => v + 1), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const mountRef = useRef(true);
   // Détecte un vrai CHANGEMENT de magasin (sélecteur topbar) par opposition au premier montage —
@@ -364,7 +380,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                           <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
                             <td>{e.label || e.ean}</td>
                             <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
-                            <td>{formatDuration(e.durationHours)}</td>
+                            <td>{formatDuration(liveDurationHours(e.startedAt))}</td>
                             <td>
                               <span className={`badge ${reaction.badge} py-1 px-2`}>{reaction.label}</span>
                             </td>

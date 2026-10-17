@@ -76,6 +76,8 @@ type EpisodeDetail = {
   orderQuantitySufficiency: OrderQuantitySufficiency | null;
   lossBeforeOrder: Loss | null;
   lossAfterOrder: Loss | null;
+  reactionDeadlineHours: number;
+  deliveryDeadlineHours: number;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -152,8 +154,45 @@ export function StockoutEpisodePage() {
     return () => { cancelled = true; };
   }, [episodeId]);
 
+  // Chronomètre live (demande explicite du 17/10/2026 : "si ya rupture il doid commencé en compté
+  // sur le UI le user doit voir compté... si ya pas de commande le compteur de rupture avant la
+  // commande continue toujour de compté") — les durées ne sont plus des valeurs figées renvoyées au
+  // chargement : recalculées ici à chaque tick à partir des timestamps bruts (startedAt,
+  // order.createdAt, endedAt) tant que la rupture est EN_COURS. Une fois résolue (endedAt non nul),
+  // le tick n'a plus d'effet : les trois bornes sont fixes, pas besoin de continuer à rafraîchir.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!detail || detail.status !== 'EN_COURS') return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [detail?.status, detail?.id]);
+
   const reactionMeta = detail ? REACTION_STATUS_META[detail.reactionStatus] : null;
-  const isLongDuration = detail ? detail.totalDurationHours >= 48 : false;
+
+  // Avant commande : du début de la rupture jusqu'à la commande (si elle existe) ou jusqu'à
+  // maintenant/la fin (sinon) — continue de monter tant qu'aucune commande n'a été passée.
+  // Après commande : de la commande jusqu'à la réception (si connue) ou jusqu'à maintenant/la fin —
+  // démarre à 0 et monte dès que la commande est passée, tant que la livraison n'est pas confirmée.
+  const liveDurations = (() => {
+    if (!detail) return null;
+    const startedAt = new Date(detail.startedAt).getTime();
+    const endedAt = detail.endedAt ? new Date(detail.endedAt).getTime() : now;
+    const orderCreatedAt = detail.order ? new Date(detail.order.createdAt).getTime() : null;
+
+    const beforeOrderEnd = orderCreatedAt !== null ? orderCreatedAt : endedAt;
+    const beforeOrderHours = Math.max(0, (beforeOrderEnd - startedAt) / (60 * 60 * 1000));
+
+    let afterOrderHours = null;
+    if (orderCreatedAt !== null) {
+      afterOrderHours = Math.max(0, (endedAt - orderCreatedAt) / (60 * 60 * 1000));
+    }
+
+    const totalHours = Math.max(0, (endedAt - startedAt) / (60 * 60 * 1000));
+
+    return { beforeOrderHours, afterOrderHours, totalHours };
+  })();
+
+  const isLongDuration = liveDurations ? liveDurations.totalHours >= (detail?.deliveryDeadlineHours ?? 48) : false;
 
   return (
     <div className="container-fluid py-4">
@@ -228,7 +267,7 @@ export function StockoutEpisodePage() {
           {isLongDuration && (
             <div className="ep2-alert">
               <iconify-icon icon="solar:danger-triangle-bold-duotone" style={{ fontSize: '18px' }}></iconify-icon>
-              Durée inhabituelle détectée — cette rupture dépasse 48h ({formatDuration(detail.totalDurationHours)}). Vérifiez si une commande a été passée.
+              Durée inhabituelle détectée — cette rupture dépasse {detail.deliveryDeadlineHours}h ({formatDuration(liveDurations?.totalHours ?? null)}). Vérifiez si une commande a été passée.
             </div>
           )}
 
@@ -253,7 +292,7 @@ export function StockoutEpisodePage() {
                 <div className="sub">{formatTime(detail.startedAt)}</div>
               </div>
               <div className="ep2-tile">
-                <div className={`val ${isLongDuration ? 'warn' : ''}`}>{formatDuration(detail.totalDurationHours)}</div>
+                <div className={`val ${isLongDuration ? 'warn' : ''}`}>{formatDuration(liveDurations?.totalHours ?? null)}</div>
                 <div className="lbl" style={{ marginTop: 4 }}>Durée totale</div>
                 <div className="sub">{detail.status === 'EN_COURS' ? 'Compteur toujours actif' : 'Rupture terminée'}</div>
               </div>
@@ -279,8 +318,8 @@ export function StockoutEpisodePage() {
             </div>
             <div className="ep2-timeline-mid">
               <iconify-icon icon="solar:arrow-right-linear" className="arrow"></iconify-icon>
-              <span className="dur">{formatDuration(detail.totalDurationHours)}</span>
-              <span className="sub">{detail.durationHours ? `${Math.round(detail.durationHours * 60)} minutes` : ''}</span>
+              <span className="dur">{formatDuration(liveDurations?.totalHours ?? null)}</span>
+              <span className="sub">{liveDurations ? `${Math.round(liveDurations.totalHours * 60)} minutes` : ''}</span>
             </div>
             <div className="ep2-timeline-pt end">
               <span className="lbl">Fin de rupture</span>
@@ -311,8 +350,14 @@ export function StockoutEpisodePage() {
                 <div className="ep2-card-head"><iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> Métriques temporelles</div>
                 <div className="ep2-card-body">
                   <dl className="row mb-0 ep2-field">
-                    <div className="col-6"><dt>Rupture avant commande</dt><dd className="accent">{formatDuration(detail.reactionDelayHours)}</dd></div>
-                    <div className="col-6"><dt>Rupture après commande</dt><dd className="money">{formatDuration(detail.replenishmentDelayHours)}</dd></div>
+                    <div className="col-6">
+                      <dt>Rupture avant commande {!detail.order && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
+                      <dd className="accent">{formatDuration(liveDurations?.beforeOrderHours ?? null)}</dd>
+                    </div>
+                    <div className="col-6">
+                      <dt>Rupture après commande {detail.order && !detail.order.actualReceptionDate && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
+                      <dd className="money">{formatDuration(liveDurations?.afterOrderHours ?? null)}</dd>
+                    </div>
                     <div className="col-6"><dt>Perte avant commande</dt><dd>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</dd></div>
                     <div className="col-6"><dt>Perte après commande</dt><dd>{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</dd></div>
                   </dl>

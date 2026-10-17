@@ -251,6 +251,8 @@ interface SystemConfigData {
   TOKEN_USAGE_ALERT_CRON?: string;
   TOKEN_USAGE_ALERT_ENABLED?: string;
   TOKEN_USAGE_ALERT_THRESHOLD_TOKENS?: string;
+  STOCKOUT_REACTION_DEADLINE_HOURS?: string;
+  STOCKOUT_DELIVERY_DEADLINE_HOURS?: string;
 }
 
 export function SchedulingSection() {
@@ -263,6 +265,10 @@ export function SchedulingSection() {
   const [endOfDayRecapCron, setEndOfDayRecapCron] = useState('30 16 * * *');
   const [tokenUsageAlertCron, setTokenUsageAlertCron] = useState('10 7 * * *');
   const [tokenUsageAlertThreshold, setTokenUsageAlertThreshold] = useState('2000000');
+  const [stockoutReactionDeadline, setStockoutReactionDeadline] = useState('24');
+  const [stockoutDeliveryDeadline, setStockoutDeliveryDeadline] = useState('48');
+  const [stockoutDeadlinesSaving, setStockoutDeadlinesSaving] = useState(false);
+  const [stockoutDeadlinesSaved, setStockoutDeadlinesSaved] = useState(false);
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -276,6 +282,8 @@ export function SchedulingSection() {
         setEndOfDayRecapCron(d.END_OF_DAY_VALIDATION_RECAP_CRON || '30 16 * * *');
         setTokenUsageAlertCron(d.TOKEN_USAGE_ALERT_CRON || '10 7 * * *');
         setTokenUsageAlertThreshold(d.TOKEN_USAGE_ALERT_THRESHOLD_TOKENS || '2000000');
+        setStockoutReactionDeadline(d.STOCKOUT_REACTION_DEADLINE_HOURS || '24');
+        setStockoutDeliveryDeadline(d.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -529,6 +537,82 @@ export function SchedulingSection() {
             </div>
           </div>
         </CronJobCard>
+
+        {/* Seuils de délai du module Ruptures de stock — demande explicite du 17/10/2026 : "le delai
+            max de livrason doit etre 48h mais il faut rendre ca modifiable sur les parametre". Pas
+            un job planifié (pas de cron/onRunNow), donc carte simple plutôt que CronJobCard. */}
+        <div className="card">
+          <div className="card-header">
+            <h4 className="card-title d-flex align-items-center gap-1">
+              <iconify-icon icon="solar:box-minimalistic-bold-duotone" className="text-primary fs-20" />
+              Délais du module Ruptures de stock
+            </h4>
+          </div>
+          <div className="card-body">
+            <div
+              className="alert alert-light border small mb-3"
+              dangerouslySetInnerHTML={{
+                __html:
+                  "<strong>À quoi ça sert :</strong> détermine quand une rupture passe de « en attente de commande » à « retard », puis à « magasin n'a pas réagi » (page Ruptures de stock), et au-delà de quelle durée totale la fiche d'une rupture affiche un bandeau d'alerte.",
+              }}
+            />
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Délai de réaction attendu (commande)</label>
+                <div className="input-group" style={{ maxWidth: 200 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={1}
+                    value={stockoutReactionDeadline}
+                    onChange={(e) => setStockoutReactionDeadline(e.target.value)}
+                  />
+                  <span className="input-group-text">h</span>
+                </div>
+                <div className="form-text">
+                  Sans commande passée avant ce délai (24h par défaut), une rupture passe au statut « Retard ».
+                </div>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Délai de livraison maximum</label>
+                <div className="input-group" style={{ maxWidth: 200 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={1}
+                    value={stockoutDeliveryDeadline}
+                    onChange={(e) => setStockoutDeliveryDeadline(e.target.value)}
+                  />
+                  <span className="input-group-text">h</span>
+                </div>
+                <div className="form-text">
+                  Sans commande passée après ce délai (48h par défaut), le magasin est considéré comme n'ayant pas
+                  réagi. Sert aussi de seuil pour le bandeau d'alerte « durée inhabituelle » sur la fiche d'une
+                  rupture.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary mt-3"
+              disabled={stockoutDeadlinesSaving}
+              onClick={async () => {
+                setStockoutDeadlinesSaving(true);
+                setStockoutDeadlinesSaved(false);
+                try {
+                  await saveSystemConfigKey('STOCKOUT_REACTION_DEADLINE_HOURS', stockoutReactionDeadline);
+                  await saveSystemConfigKey('STOCKOUT_DELIVERY_DEADLINE_HOURS', stockoutDeliveryDeadline);
+                  setStockoutDeadlinesSaved(true);
+                } finally {
+                  setStockoutDeadlinesSaving(false);
+                }
+              }}
+            >
+              {stockoutDeadlinesSaving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+            {stockoutDeadlinesSaved && <span className="text-success small ms-2">Enregistré.</span>}
+          </div>
+        </div>
       </div>
     </div>
   );

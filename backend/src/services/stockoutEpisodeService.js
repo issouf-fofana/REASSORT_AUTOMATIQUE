@@ -7,6 +7,23 @@
 const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
 const rpos = require('./rposClient');
+const systemConfig = require('./systemConfigService');
+
+/**
+ * Seuils de délai (commande attendue / livraison max) utilisés par reactionStatus — configurables
+ * depuis Paramètres (demande explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais
+ * il faut rendre ca modifiable sur les parametre"), 24h/48h par défaut si jamais réglés.
+ */
+async function getReactionDeadlines() {
+  const [reaction, delivery] = await Promise.all([
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_REACTION_DEADLINE_HOURS),
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS),
+  ]);
+  return {
+    reactionDeadlineHours: parseFloat(reaction) || 24,
+    deliveryDeadlineHours: parseFloat(delivery) || 48,
+  };
+}
 
 const LOOKBACK_WEEKS = 8;
 const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
@@ -173,13 +190,6 @@ async function estimateDemand(rposShopId, ean, fromDate, coverageDays) {
   return demand.avgDailyQty * coverageDays;
 }
 
-// Seuils réaction, identiques à getEpisodeDetail (cf. reactionStatus plus bas) — dupliqués ici
-// plutôt que partagés car le calcul en masse n'a pas les ventes pendant l'épisode sous la main
-// (coûterait une agrégation SalesLine par EAN, inutile pour une simple liste) : la variante légère
-// ne distingue donc pas STOCK_PEUT_ETRE_PAS_A_JOUR, seulement "a commandé" vs seuils de durée.
-const REACTION_DEADLINE_HOURS = 24;
-const CONFIRMED_DEADLINE_HOURS = 48;
-
 /**
  * Liste les épisodes en cours d'un magasin, pour le dashboard. durationHours calculé à la volée
  * (pas stocké, puisque l'épisode est toujours ouvert).
@@ -198,6 +208,7 @@ async function getOpenEpisodes(rposShopId) {
   });
   if (!episodes.length) return [];
 
+  const { reactionDeadlineHours, deliveryDeadlineHours } = await getReactionDeadlines();
   const now = new Date();
   const eans = [...new Set(episodes.map((e) => e.ean))];
   const earliestStart = episodes.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), episodes[0].startedAt);
@@ -248,11 +259,15 @@ async function getOpenEpisodes(rposShopId) {
     const hasOrder = orderCreatedAt !== null;
     let reactionStatus;
     if (hasOrder) reactionStatus = 'REAGI';
-    else if (durationHours > CONFIRMED_DEADLINE_HOURS) reactionStatus = 'MAGASIN_NA_PAS_REAGI';
-    else if (durationHours > REACTION_DEADLINE_HOURS) reactionStatus = 'RETARD';
+    else if (durationHours > deliveryDeadlineHours) reactionStatus = 'MAGASIN_NA_PAS_REAGI';
+    else if (durationHours > reactionDeadlineHours) reactionStatus = 'RETARD';
     else reactionStatus = 'EN_ATTENTE';
 
-    return { ...e, durationHours, hasOrder, reactionStatus };
+    // startedAt/orderCreatedAt renvoyés en plus de durationHours (déjà calculé côté serveur) pour
+    // que le frontend puisse faire tourner un vrai chronomètre live (demande explicite du
+    // 17/10/2026 : "le user doit voir compté... le compteur de rupture avant commande continue
+    // toujour de compté") plutôt qu'une valeur figée au chargement de la page.
+    return { ...e, durationHours, hasOrder, reactionStatus, orderCreatedAt };
   });
 }
 
@@ -589,17 +604,16 @@ async function getEpisodeDetail(episodeId) {
   //     (MAGASIN_NA_PAS_REAGI)
   //   - une commande existe : le magasin a réagi, le statut porte sur le délai de réaction observé
   //     (REAGI)
-  const REACTION_DEADLINE_HOURS = 24;
-  const CONFIRMED_DEADLINE_HOURS = 48;
+  const { reactionDeadlineHours, deliveryDeadlineHours } = await getReactionDeadlines();
   const noSalesSinceStart = (salesDuring._sum.quantity || 0) === 0;
   let reactionStatus;
   if (order) {
     reactionStatus = 'REAGI';
   } else if (noSalesSinceStart) {
     reactionStatus = 'STOCK_PEUT_ETRE_PAS_A_JOUR';
-  } else if (durationHours > CONFIRMED_DEADLINE_HOURS) {
+  } else if (durationHours > deliveryDeadlineHours) {
     reactionStatus = 'MAGASIN_NA_PAS_REAGI';
-  } else if (durationHours > REACTION_DEADLINE_HOURS) {
+  } else if (durationHours > reactionDeadlineHours) {
     reactionStatus = 'RETARD';
   } else {
     reactionStatus = 'EN_ATTENTE';
@@ -702,6 +716,8 @@ async function getEpisodeDetail(episodeId) {
     orderQuantitySufficiency,
     lossBeforeOrder,
     lossAfterOrder,
+    reactionDeadlineHours,
+    deliveryDeadlineHours,
   };
 }
 

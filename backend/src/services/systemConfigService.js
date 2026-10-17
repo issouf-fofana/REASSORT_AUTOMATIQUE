@@ -38,6 +38,12 @@ const KEYS = {
   // "calcule... doit etre fait au prealable, comme la vue de proposition de commande"). Plus fréquent
   // que la capture de stock elle-même (toutes les heures vs 6h) pour rester à jour pendant la journée.
   STOCKOUT_LOSS_RECALC_CRON: 'STOCKOUT_LOSS_RECALC_CRON',
+  // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
+  // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
+  // modifiable sur les parametre") — en dur à 24h/48h jusqu'ici (stockoutEpisodeService.js,
+  // reactionStatus), rendus configurables plutôt que redéployer le code pour changer ce seuil.
+  STOCKOUT_REACTION_DEADLINE_HOURS: 'STOCKOUT_REACTION_DEADLINE_HOURS',
+  STOCKOUT_DELIVERY_DEADLINE_HOURS: 'STOCKOUT_DELIVERY_DEADLINE_HOURS',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -237,6 +243,8 @@ const ENV_FALLBACK = {
   // 16/10/2026, donc ~70k lignes/jour à ce rythme).
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
+  [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
+  [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
