@@ -608,7 +608,7 @@ async function getEpisodeDetail(episodeId) {
   }
 
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
-  const [stockMoves, salesBefore, salesDuring, stockAtStart, stockLatestSnapshot, productCache, stockAtEnd] = await Promise.all([
+  const [stockMoves, salesBefore, salesDuring, stockAtStart, stockLatestSnapshot, productCache, stockAtEnd, stockAfterDelivery] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
     prisma.salesLine.aggregate({
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
@@ -647,6 +647,18 @@ async function getEpisodeDetail(episodeId) {
     episode.endedAt
       ? prisma.stockSnapshot.findFirst({
           where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: episode.endedAt } },
+          orderBy: { capturedAt: 'asc' },
+          select: { stock: true, capturedAt: true },
+        })
+      : null,
+    // Stock après arrivage (demande explicite du 17/10/2026 : "si arrivage aussi tu doit metre
+    // aussi le stock apres arrivage") — distinct de stockAtEnd (qui se base sur la fin de l'épisode,
+    // potentiellement due à une vente redevenue positive sans commande) : ici ancré sur la date de
+    // réception RÉELLE de la commande, pour vérifier concrètement que l'arrivage a bien fait monter
+    // le stock côté RPOS.
+    order?.actualReceptionDate
+      ? prisma.stockSnapshot.findFirst({
+          where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: order.actualReceptionDate } },
           orderBy: { capturedAt: 'asc' },
           select: { stock: true, capturedAt: true },
         })
@@ -789,6 +801,7 @@ async function getEpisodeDetail(episodeId) {
     stockCurrent: stockLatestSnapshot ? { value: stockLatestSnapshot.stock, capturedAt: stockLatestSnapshot.capturedAt } : null,
     stockRpos: productCache ? { value: productCache.stock, syncedAt: productCache.syncedAt } : null,
     stockAtEnd: stockAtEnd ? { value: stockAtEnd.stock, capturedAt: stockAtEnd.capturedAt } : null,
+    stockAfterDelivery: stockAfterDelivery ? { value: stockAfterDelivery.stock, capturedAt: stockAfterDelivery.capturedAt } : null,
   };
 }
 

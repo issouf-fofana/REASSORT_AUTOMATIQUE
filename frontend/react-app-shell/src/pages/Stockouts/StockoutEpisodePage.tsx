@@ -82,6 +82,7 @@ type EpisodeDetail = {
   stockCurrent: { value: number; capturedAt: string } | null;
   stockRpos: { value: number; syncedAt: string } | null;
   stockAtEnd: { value: number; capturedAt: string } | null;
+  stockAfterDelivery: { value: number; capturedAt: string } | null;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -509,6 +510,16 @@ export function StockoutEpisodePage() {
                     <StockValue stock={detail.stockAtEnd} />
                   )}
                 </div>
+                {detail.order?.actualReceptionDate && (
+                  <div className="col-6 col-md-3">
+                    <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Après arrivage</div>
+                    {detail.stockAfterDelivery ? (
+                      <StockValue stock={detail.stockAfterDelivery} />
+                    ) : (
+                      <div className="text-muted small">Pas encore relevé</div>
+                    )}
+                  </div>
+                )}
               </div>
               {detail.stockAtStart && detail.stockAtStart.value < 0 && (
                 <div className="ep2-verdict tone-warning mt-3">
