@@ -151,12 +151,13 @@ export function StockoutEpisodePage() {
   return (
     <div className="container-fluid py-4">
       <style>{`
-        .ep2-crumb-back { background: none; border: none; color: #5B6B85; font-size: .82rem; display: inline-flex; align-items: center; gap: 4px; padding: 0; margin-bottom: 10px; }
+        .ep2-crumb-back { background: #fff; border: 1px solid rgba(27,42,74,.15); color: #1B2A4A; font-size: .82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; margin-bottom: 12px; }
+        .ep2-crumb-back:hover { background: #EDF1F7; }
         .ep2-alert { background: #FDF1DD; border: 1px solid rgba(168,103,24,.25); color: #7a4910; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: .85rem; margin-bottom: 16px; }
         .ep2-header { background: #1B2A4A; border-radius: 14px; padding: 22px 26px; color: #fff; margin-bottom: 14px; position: relative; overflow: hidden; }
         .ep2-header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
         .ep2-header .eyebrow { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: #9FB0CC; font-weight: 600; margin-bottom: 4px; }
-        .ep2-header h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 4px; }
+        .ep2-header h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 4px; color: #fff; }
         .ep2-header .meta { font-size: .82rem; color: #C9D2E3; }
         .ep2-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; font-size: .78rem; font-weight: 600; white-space: nowrap; }
         .ep2-status-badge.active { background: rgba(224,87,76,.22); color: #FF9D94; }
@@ -203,8 +204,18 @@ export function StockoutEpisodePage() {
         .ep2-loss-split .val { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
       `}</style>
 
-      <button type="button" className="ep2-crumb-back" onClick={() => navigate(-1)}>
-        <iconify-icon icon="solar:arrow-left-linear"></iconify-icon> Retour
+      <button
+        type="button"
+        className="ep2-crumb-back"
+        onClick={() => {
+          // navigate(-1) seul ne fonctionne pas si la page a été ouverte directement (lien partagé,
+          // rechargement) : pas d'historique React dans l'onglet dans ce cas — repli explicite sur
+          // la liste des ruptures (bug signalé le 17/10/2026 : "ya pas de retour").
+          if (window.history.length > 1) navigate(-1);
+          else navigate('/stockouts');
+        }}
+      >
+        <iconify-icon icon="solar:arrow-left-linear"></iconify-icon> Retour aux ruptures
       </button>
 
       {error ? (
