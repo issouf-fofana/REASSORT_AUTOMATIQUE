@@ -25,8 +25,12 @@ async function getReactionDeadlines() {
   };
 }
 
-const LOOKBACK_WEEKS = 8;
-const MIN_COMPARABLE_WEEKS = 4; // sous ce seuil, estimation trop fragile pour être affichée
+// Fenêtre de comparaison étendue à 1 an le 17/10/2026 (demande explicite : "pour les rupture le CA
+// il faut prendre cette analyse sur un an pour chaque la on aura un truc presi") — capture la
+// saisonnalité annuelle (fêtes, périodes creuses) plutôt que seulement les 8 dernières semaines,
+// avec un seuil minimum relevé en conséquence pour rester cohérent avec cette fenêtre plus large.
+const LOOKBACK_WEEKS = 52;
+const MIN_COMPARABLE_WEEKS = 8; // sous ce seuil, estimation trop fragile pour être affichée
 
 /**
  * Ouvre un nouvel épisode pour chaque article passé de stock>0 à stock<=0 depuis le dernier
