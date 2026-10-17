@@ -1,10 +1,9 @@
-# Passation — mise à jour du 13/10/2026 (soir)
+# Passation — mise à jour du 17/10/2026 (soir)
 
-Remplace la passation précédente du 13/10 matin (tous ses points "En cours" ont depuis été résolus
-ou dépassés, voir ci-dessous). Session longue : investigation + fix d'un bug de métriques IA,
-plusieurs bugs réels trouvés sur le shell post-fusion (sélecteur de magasin manquant, bug
-SUPERVISOR), et une très longue série d'itérations visuelles sur la page de connexion (`/login`),
-guidées en direct par l'utilisateur à coups de captures d'écran.
+Remplace la passation du 13/10/2026. Session très longue : construction complète du **module
+Ruptures de stock** (nouveau, de zéro), de la détection à une fiche de détail très riche, guidée en
+direct par l'utilisateur à coups de captures d'écran et d'allers-retours. Points hérités du 13/10
+toujours ouverts, voir section dédiée en bas.
 
 ## ⚠️ Pièges récurrents à vérifier en premier
 
@@ -12,105 +11,132 @@ guidées en direct par l'utilisateur à coups de captures d'écran.
    clé, modifier le code et déployer ne change rien tant que la ligne en base n'est pas aussi mise
    à jour/supprimée (`systemConfigService.js`).
 
-2. **Le disque du sandbox local sature très souvent pendant cette session** (`/dev/nvme0n1p5` à
-   95-100%, `/tmp` plein → échecs `ENOSPC` sur Bash/Edit/Write, y compris pendant un `docker compose
-   build`). Cause : accumulation de snapshots **Timeshift**. À chaque blocage, demander à
-   l'utilisateur de supprimer un ou plusieurs snapshots Timeshift (app graphique) — libère
-   généralement 5-6 Go et débloque tout. Pas de solution définitive trouvée cette session ; si ça se
-   reproduit systématiquement, il faudrait proposer à l'utilisateur de désactiver/espacer les
-   snapshots automatiques.
+2. **Build Docker impossible dans ce sandbox** (`docker compose build` échoue sur
+   `binaries.prisma.sh` via `getaddrinfo EAI_AGAIN`, réseau sandbox bloqué). Workaround systématique
+   utilisé toute la session : builder le frontend sur l'hôte (`npm run build` dans
+   `frontend/react-app-shell/`) puis `docker cp dist` dans le conteneur ; côté backend, `docker cp`
+   directement les fichiers `.js` modifiés + `docker restart`. **Conséquence importante** : ces
+   déploiements locaux ne touchent QUE le conteneur en cours d'exécution, jamais l'image Docker —
+   un `docker compose up -d --force-recreate` repart de l'ancienne image et perd tout. Le vrai
+   déploiement (Dokploy) reconstruit une image propre à partir du code source commité, donc c'est
+   fiable là-bas ; c'est uniquement le test local qui demande ce contournement.
 
-## En cours (à reprendre en premier)
+3. **nginx local a besoin d'un bloc par route SPA dynamique** — `location =` (match exact) pour une
+   route fixe, mais pour une route avec paramètre (`/stockouts/episode/:id`), `alias` sur une
+   location-préfixe casse le chemin (concatène le reste de l'URI après la cible) : utiliser un
+   `rewrite ... last` vers une seconde location exacte. Piège déjà rencontré une fois, documenté
+   dans `frontend/nginx.conf`.
 
-1. **Bug de précision des prévisions IA — partiellement corrigé, cause racine réelle non traitée.**
+## Ce qui a été fait (module Ruptures de stock, 16-17/10/2026)
 
-   Deux bugs distincts :
-   - ✅ **Corrigé et commité** (`9ffc976` puis fix définitif) — `predictionOutcomeJob.js` comparait
-     les ventes réelles à `predictedQuantity` (quantité à **commander**, toujours artificiellement
-     plus grande) au lieu de `predictedWeeklyDemand` (vraie prévision de vente). Un script de
-     backfill a recalculé les ~9836 lignes `AIPredictionOutcome` existantes avec la bonne formule.
-   - ❌ **PAS corrigé.** Après le fix ci-dessus, les métriques globales ont à peine bougé (WAPE
-     toujours >3000%) — preuve que le vrai problème est que `predictedWeeklyDemand` lui-même est
-     aberrant pour certains articles. Cause tracée : **117 articles** ont un `ProductCache.stock`
-     aberrant (ex: 26708, voire 231777 "unités/semaine" prédites) **ET** zéro vente historique —
-     pattern systémique (100% des cas testés), probablement un bug de synchro RPOS (mauvaise unité
-     ou flux cassé pour ces références), pas un bug du calcul IA. **Prochaine étape jamais faite** :
-     sortir la liste des 117 (EAN, magasin, stock) pour vérification terrain par l'utilisateur dans
-     RPOS/en magasin.
+Nouveau module complet, basé sur `rupture.md` (cahier des charges), **sans données entrepôt
+(Cyrus)** — diagnostic de cause volontairement simplifié (AMONT_A_PRECISER regroupe plusieurs cas
+qu'on ne peut pas distinguer sans Cyrus).
 
-2. **Page de connexion (`/login`) — très nombreuses retouches visuelles, dernier état non vérifié
-   en conditions réelles par l'utilisateur sur le dernier commit.**
+### Détection et diagnostic
+- `StockSnapshot` (capture périodique du stock, job `stockSnapshotJob.js`, 6h par défaut) +
+  `StockoutEpisode` (ouverture/fermeture automatique selon transition stock>0 ↔ stock<=0).
+- Diagnostic de cause (`diagnoseCause`) figé à l'ouverture de l'épisode, jamais réévalué —
+  distinct de `reactionStatus` (calculé à chaque lecture, toujours à jour).
+- `reactionStatus` : REAGI / EN_ATTENTE (<24h) / RETARD (24-48h) / MAGASIN_NA_PAS_REAGI (>48h sans
+  commande) / STOCK_PEUT_ETRE_PAS_A_JOUR (aucune vente ni commande depuis le début — garde-fou
+  prioritaire sur les seuils de durée, pour ne jamais accuser le magasin sans preuve).
 
-   L'utilisateur a guidé une longue série d'allers-retours de style via captures d'écran. État final
-   (commit `5d077f5`, **pas encore poussé sur `origin/master`**) :
-   - Carte centrée classique (`max-w-5xl`, deux panneaux 50/50), pas plein écran.
-   - Panneau gauche : animation canvas interactive `DotMap.tsx` (points connectés, répulsion
-     magnétique au survol de la souris) — remplace définitivement l'image statique Tiny-man.jpg
-     essayée puis rejetée entre-temps (`cc96781`).
-   - Panneau droit : logo seul (noir, `brightness-0`, sans badge/fond) au-dessus de "Bienvenue",
-     formulaire limité en largeur (`max-w-md`) et remonté vers le haut (`justify-start`, pas
-     centré verticalement).
-   - **Plusieurs tentatives de style radicalement différent ont été essayées puis explicitement
-     rejetées par l'utilisateur** ("je ne veux pas ce modèle") : carte unique fond marine plein
-     cadre avec champs en pilule, formulaire réécrit sur le modèle "sign-up-page" avec icônes
-     Mail/Lock — toutes annulées, ne pas les reproposer sans qu'il le redemande explicitement.
-   - **À faire en reprenant** : pousser le commit `5d077f5` (et tous ceux qui précèdent, non
-     poussés non plus) vers `origin/master`, puis redéployer en prod et faire confirmer par
-     l'utilisateur que le dernier état lui convient — la session s'est arrêtée en pleine itération,
-     pas de validation finale explicite reçue.
+### Pages
+- **`/stockouts`** (`Stockouts.tsx` → `StockoutShopDetail.tsx`) : navigation hiérarchique
+  Secteur → Rayon → Articles (identique à Proposition de commande), avec KPI compacts, graphes
+  repliables (courbe 30j + donut causes), et "Analyse par rayon" condensée (3 chiffres + tableau,
+  pas de grosses tuiles). Secteur/rayon sélectionnés reflétés dans l'URL (`?sector=&dept=`) pour que
+  le retour depuis la fiche de détail revienne exactement au bon niveau.
+- **`/stockouts/episode/:id`** (`StockoutEpisodePage.tsx`) : fiche de détail très riche, header
+  navy contrasté, 4 tuiles, timeline horizontale, puis sections Informations générales / Métriques
+  temporelles / **Détection-Commande-Prise en charge** (numéro de commande RPOS, qui a créé/validé
+  et quand — via appel RPOS réel `/api/supplier_order/`, pas juste nos données internes) /
+  **Niveau de stock** (voir ci-dessous) / Impact commercial / Historique des mouvements.
 
-## Ce qui a été fait (session du 13/10/2026)
+### Liste d'articles enrichie (niveau "Articles" de la navigation)
+- Colonne **Réaction** (badge commande passée/en attente/retard/sans réaction) + filtre
+  Toutes/Avec commande/Sans commande/Livrées.
+- Colonne **Livraison** (Sans commande / Commandé pas livré / Livrée) + **Livré le** (date).
+- Tout calculé **en masse** côté backend (`getOpenEpisodes`, 2 requêtes pour tout le magasin,
+  matching en mémoire) — jamais un appel par article, ~50-65ms mesurés sur 238 ruptures réelles.
 
-### Chasse aux bugs post-fusion SPA
-- **Sélecteur de magasin global manquant sur la sidebar classique** (`e681ad0`) — `Topbar.tsx`
-  n'avait jamais porté le bouton `#global-shop-selector-btn` depuis la création du shell (seul
-  `NotchNav.tsx` l'avait) ; un compte ADMIN/SUPERVISOR en mode sidebar classique n'avait donc aucun
-  moyen de changer de magasin.
-- **"Aucun magasin assigné à ce compte" affiché à tort pour un SUPERVISOR au Tableau de bord**
-  (`5ab7ba1`) — `ConformityTrendChart` se montait avant que le sélecteur de magasin global n'ait
-  résolu un magasin par défaut, partait donc sans `shop=`, backend répondait 400, erreur restée
-  figée à l'écran. Protégé par la même garde que les autres cartes KPI de la page.
-- Investigation complète du rôle SUPERVISOR (compte de test créé/supprimé) : backend et reste du
-  frontend fonctionnent correctement, pas d'autre bug de code trouvé sur ce rôle.
+### Chronomètres live
+- Les durées (totale, avant/après commande) se recalculent chaque seconde côté client à partir des
+  timestamps bruts, pas des valeurs figées au chargement. Affichage avec minutes/secondes
+  (`formatDurationLive`, ex: "1j 5h 23min 47s") sur la fiche de détail — **piège rencontré** :
+  `formatDuration()` classique arrondit à l'heure près, donc un calcul qui tourne bien semblait
+  visuellement figé pendant près d'une heure. Toujours vérifier côté affichage, pas seulement le
+  calcul, avant de conclure à un bug.
+- Liste d'articles : tick minute (pas seconde, trop coûteux pour des centaines de lignes).
 
-### Page de connexion — historique des itérations (pour contexte, pas à refaire)
-Dans l'ordre : palette noir → marine/ambre, alignement décalé corrigé, plusieurs cycles
-agrandissement/rétrécissement de la carte et des champs, plein écran puis retour à une carte
-centrée, DotMap → image Tiny-man.jpg → DotMap à nouveau (coordonnées rendues proportionnelles au
-panneau, fixant un bug où les trajets animés restaient figés dans un coin), logo déplacé du panneau
-gauche vers le panneau droit, modèle "fond marine plein cadre" et modèle "sign-up-page avec icônes"
-tous deux essayés puis rejetés. Voir le log git détaillé (`git log --oneline -- 
-frontend/react-app-shell/src/pages/Login/`) si besoin de retracer une étape précise.
+### Niveau de stock (fiche de détail)
+Section dédiée avec code couleur (rouge=négatif, ambre=0, vert=positif) : stock au début de la
+rupture, stock actuel/dernier relevé, stock RPOS temps réel (`ProductCache`), stock après
+résolution, et **stock après arrivage** (ancré sur `order.actualReceptionDate`, distinct de "après
+résolution" qui peut venir d'une vente sans commande). Bandeau d'alerte explicite si stock négatif
+détecté (signe de désynchro RPOS plutôt que rupture physique).
+
+### Perte estimée (CA perdu)
+- Méthode : vente moyenne du **même jour de semaine** (ex: vendredis vs vendredis) sur une fenêtre
+  de recul, comparée aux ventes réellement constatées pendant la rupture.
+- **Bug de performance trouvé et corrigé** : recalculer cette perte en temps réel à CHAQUE lecture
+  de page (pour tous les épisodes ouverts) faisait ~3s par endpoint avec plusieurs centaines de
+  ruptures — page bloquée sur "Chargement...". Corrigé en précalculant via un nouveau job
+  (`stockoutLossRecalcJob.js`, toutes les heures) qui stocke `qtyPerdueEstimee`/`caPerdueEstime`
+  pour les épisodes EN_COURS ; les pages ne font plus que lire ce champ stocké.
+- Perte séparée avant/après commande (`lossBeforeOrder`/`lossAfterOrder`), pas une seule perte
+  globale.
+- Fenêtre de comparaison étendue de 8 à **52 semaines** (1 an, capture la saisonnalité), seuil de
+  fiabilité minimum relevé de 4 à **8 semaines comparables**.
+
+### Paramètres ajoutés (Paramètres > Planification, carte "Délais du module Ruptures de stock")
+Tous nouveaux le 17/10/2026, suivent le patron `systemConfigService.js` existant :
+1. **Délai de réaction attendu** (défaut 24h) — seuil pour passer au statut "Retard".
+2. **Délai de livraison maximum** (défaut 48h) — seuil "magasin n'a pas réagi" + bandeau d'alerte.
+3. **Fenêtre de comparaison** (défaut 52 semaines) — recul pour le calcul de CA perdu.
+4. **Minimum de semaines comparables** (défaut 8) — en dessous, estimation affichée "indisponible".
+
+### Autres correctifs du même module
+- Bug "Sans secteur" (414/414 articles) : `diagnoseCause` ne tourne qu'à la création d'un épisode,
+  jamais en relecture — script de rattrapage `backend/scripts/backfillStockoutEpisodeSector.js`
+  créé, **pas encore lancé en production** (à faire par l'utilisateur).
+- Bug critique de routage réseau (prod) : `BACKEND_URL` vide faisait tomber le frontend sur
+  `window.location.hostname:3001` (port backend non accessible depuis d'autres postes du réseau,
+  seul le poste de l'utilisateur y avait accès) — corrigé en configurant `BACKEND_URL=/api-backend`
+  (proxy nginx déjà existant) dans `docker-compose.yml` local ; **à vérifier côté Dokploy en prod**
+  si le même symptôme apparaît ailleurs.
 
 ## Ce qui N'A PAS été fait / reste en suspens
 
-1. **Voir "En cours" ci-dessus** — bug des 117 articles à stock aberrant non traité, commits de la
-   page de connexion non poussés sur `origin/master`.
-2. **"Guide d'utilisation"** — contenu pour un magasin à rédiger avec des captures d'écran que
-   l'utilisateur doit fournir — toujours pas reçues à ce jour.
-3. Points hérités des passations antérieures non re-mentionnés ici : considérés clos sauf nouvelle
-   observation — voir historique git si besoin de détail.
+1. **Backfill secteur en production** — script prêt (`backfillStockoutEpisodeSector.js`), jamais
+   exécuté sur le serveur de prod.
+2. Hérité du 13/10, toujours ouvert :
+   - **117 articles à `ProductCache.stock` aberrant** (prévisions IA faussées) — jamais investigué
+     plus loin, liste jamais sortie pour vérification terrain.
+   - **Page de connexion (`/login`)** — dernier état (commit `5d077f5` au 13/10) à confirmer comme
+     poussé/déployé et validé par l'utilisateur ; pas re-vérifié pendant cette session.
+3. **"Guide d'utilisation"** — toujours en attente de captures d'écran de l'utilisateur.
 
 ## Repères techniques utiles pour la suite
 
+- Module Ruptures : `backend/src/services/stockoutEpisodeService.js` (cœur de toute la logique —
+  fichier conséquent, bien commenté section par section), `backend/src/jobs/stockSnapshotJob.js`
+  (détection) + `stockoutLossRecalcJob.js` (perte précalculée), routes dans
+  `backend/src/routes/reassort/insights.js`.
+- Frontend : `frontend/react-app-shell/src/pages/Stockouts/` — `Stockouts.tsx` (page racine, 2
+  onglets Ce magasin/Tous les magasins), `StockoutShopDetail.tsx` (navigation hiérarchique + liste
+  d'articles), `StockoutEpisodePage.tsx` (fiche de détail), `StockoutDepartmentAnalysis.tsx`
+  (analyse par rayon condensée).
+- Seuils configurables : `systemConfigService.js` clés `STOCKOUT_REACTION_DEADLINE_HOURS`,
+  `STOCKOUT_DELIVERY_DEADLINE_HOURS`, `STOCKOUT_LOSS_LOOKBACK_WEEKS`,
+  `STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS` — UI dans `SchedulingSection.tsx`.
 - Shell unifié : `frontend/react-app-shell/` — toutes les pages y sont, plus aucune route
   `location ^~ /<page>-app/` dans `nginx.conf`.
-- Métriques précision IA : `backend/src/services/proposalService.js` (~2806-2919, agrégation
-  MAE/Bias/WAPE), `backend/src/jobs/predictionOutcomeJob.js` (job `AIPredictionOutcome`). Modèle
-  `AIPrediction` a DEUX champs de quantité à ne pas confondre : `predictedWeeklyDemand` (vraie
-  prévision de vente) vs `predictedQuantity` (quantité à commander, inclut stock de sécurité —
-  toujours plus grande).
-- Page de connexion : `frontend/react-app-shell/src/pages/Login/SignIn.tsx` +
-  `components/DotMap.tsx` (animation canvas, routes maintenant en coordonnées fractionnaires 0-1
-  pour s'adapter à la taille réelle du panneau — ne jamais revenir à des coordonnées pixel fixes).
-- Sélecteur de magasin global : `frontend/assets/js/global-shop-selector.js` (script vanilla
-  partagé), rattaché aux composants React via `window.reassortRenderShopSelector()` appelé dans un
-  `useEffect` au montage (même pattern que la cloche de notifications) — tout nouveau composant qui
-  a besoin du sélecteur doit reproduire ce rattachement, sinon le bouton reste invisible.
 - Déploiement serveur de prod : Dokploy, accès terminal via conteneur backend (`cd /app`). Rebuild
-  standard côté sandbox local : `docker compose build <service> && docker compose up -d
-  --force-recreate <service>` depuis `/home/youssef/Documents/REASSORT_AUTO`. Bouton "Kill Build"
-  (page Deployments du service dans Dokploy) pour annuler un déploiement en cours trop lent.
-- MCP Claude in Chrome resté déconnecté toute la session — vérifications visuelles faites via
-  Puppeteer + JWT signé manuellement en début de session, puis uniquement via captures d'écran
-  collées par l'utilisateur depuis son propre navigateur pour tout le travail sur `/login`.
+  standard côté sandbox local : voir piège n°2 ci-dessus (workaround `docker cp`, jamais un vrai
+  rebuild d'image).
+- MCP Claude in Chrome resté déconnecté toute la session — aucune vérification visuelle directe
+  possible, diagnostics faits via `curl` côté serveur + scripts collés par l'utilisateur dans sa
+  propre console navigateur (ex: confirmation du chronomètre live via
+  `document.querySelectorAll('.ep2-field dd')`).
