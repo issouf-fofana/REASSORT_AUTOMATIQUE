@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
@@ -57,8 +57,34 @@ function formatDuration(hours: number): string {
 
 export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string }) {
   const navigate = useNavigate();
-  const [selectedSector, setSelectedSector] = useState<string | null>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
+  // Secteur/rayon sélectionnés reflétés dans l'URL (?sector=&dept=), pas seulement en state local —
+  // demande explicite du 17/10/2026 : "quand je fait un retour [depuis la fiche d'une rupture] il
+  // m'nevoi sur les Secteurs au debut or il doit m'envoyer dans les rayon" — le bouton Retour de
+  // StockoutEpisodePage.tsx pointe vers cette URL précise (via ?from=), donc l'état de navigation
+  // doit survivre à un remontage du composant, ce qu'un simple useState ne permet pas.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedSector, setSelectedSectorState] = useState<string | null>(() => searchParams.get('sector'));
+  const [selectedDepartment, setSelectedDepartmentState] = useState<string | null>(() => searchParams.get('dept'));
+
+  function setSelectedSector(sector: string | null) {
+    setSelectedSectorState(sector);
+    setSelectedDepartmentState(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (sector) next.set('sector', sector); else next.delete('sector');
+      next.delete('dept');
+      return next;
+    }, { replace: true });
+  }
+
+  function setSelectedDepartment(dept: string | null) {
+    setSelectedDepartmentState(dept);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (dept) next.set('dept', dept); else next.delete('dept');
+      return next;
+    }, { replace: true });
+  }
 
   const [summary, setSummary] = useState<StockoutSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +93,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [showCharts, setShowCharts] = useState(false);
 
   const mountRef = useRef(true);
+  // Détecte un vrai CHANGEMENT de magasin (sélecteur topbar) par opposition au premier montage —
+  // dans ce cas seulement, la sélection secteur/rayon restaurée depuis l'URL doit être réinitialisée
+  // (un rayon de l'ancien magasin n'a pas de sens pour le nouveau).
+  const prevShopQueryParamRef = useRef(shopQueryParam);
 
   // Résumé complet (KPI, graphes, articles) : chargé une fois par magasin, le reste navigue dedans
   // côté client, sans nouvel appel API par clic.
@@ -75,8 +105,11 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     let cancelled = false;
     setSummary(null);
     setError(null);
-    setSelectedSector(null);
-    setSelectedDepartment(null);
+    if (prevShopQueryParamRef.current && prevShopQueryParamRef.current !== shopQueryParam) {
+      setSelectedSector(null);
+      setSelectedDepartment(null);
+    }
+    prevShopQueryParamRef.current = shopQueryParam;
     mountRef.current = true;
     apiFetch<StockoutSummary>(`/reassort/stockout-episodes?${shopQueryParam}`)
       .then((data) => { if (!cancelled && mountRef.current) setSummary(data); })
@@ -287,7 +320,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                     </tr>
                   ) : (
                     articlesInDepartment.map((e) => (
-                      <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}`)}>
+                      <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
                         <td>{e.label || e.ean}</td>
                         <td>{new Date(e.startedAt).toLocaleString('fr-FR')}</td>
                         <td>{formatDuration(e.durationHours)}</td>

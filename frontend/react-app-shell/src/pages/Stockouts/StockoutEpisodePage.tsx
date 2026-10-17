@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
 // Page dédiée de détail d'une rupture. Refonte du 17/10/2026 (demande explicite, sur le modèle
@@ -131,6 +131,12 @@ function formatMoney(value: number | null): string {
 export function StockoutEpisodePage() {
   const { episodeId } = useParams<{ episodeId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // URL exacte (avec secteur/rayon) d'où on est arrivé, passée par StockoutShopDetail.tsx au clic
+  // sur l'article — demande explicite du 17/10/2026 : "quand je fait un retour il m'nevoi sur les
+  // Secteurs au debut or il doit m'envoyer dans les rayon". navigate(-1) seul ne suffit pas non
+  // plus : ouverture directe (lien partagé, rechargement) = pas d'historique React dans l'onglet.
+  const backTo = searchParams.get('from');
   const [detail, setDetail] = useState<EpisodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -207,13 +213,7 @@ export function StockoutEpisodePage() {
       <button
         type="button"
         className="ep2-crumb-back"
-        onClick={() => {
-          // navigate(-1) seul ne fonctionne pas si la page a été ouverte directement (lien partagé,
-          // rechargement) : pas d'historique React dans l'onglet dans ce cas — repli explicite sur
-          // la liste des ruptures (bug signalé le 17/10/2026 : "ya pas de retour").
-          if (window.history.length > 1) navigate(-1);
-          else navigate('/stockouts');
-        }}
+        onClick={() => navigate(backTo || '/stockouts')}
       >
         <iconify-icon icon="solar:arrow-left-linear"></iconify-icon> Retour aux ruptures
       </button>
