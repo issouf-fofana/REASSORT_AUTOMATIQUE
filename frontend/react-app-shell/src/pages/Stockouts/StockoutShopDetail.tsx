@@ -12,6 +12,7 @@ import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 // réutilisé à l'identique pour "Ce magasin" (magasin actif topbar) ET le drill-down depuis
 // "Tous les magasins" — un seul composant, un seul comportement.
 type ReactionStatusLight = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
+type DeliveryStatus = 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE';
 
 type StockoutEpisode = {
   id: string;
@@ -26,6 +27,8 @@ type StockoutEpisode = {
   hasOrder: boolean;
   reactionStatus: ReactionStatusLight;
   caPerdueEstime: number | null;
+  deliveryStatus: DeliveryStatus;
+  actualReceptionDate: string | null;
 };
 
 type StockoutSummary = {
@@ -58,7 +61,18 @@ const REACTION_LIGHT_META: Record<ReactionStatusLight, { label: string; badge: s
   MAGASIN_NA_PAS_REAGI: { label: 'Sans commande (> 48h)', badge: 'reassort-badge-soft-danger' },
 };
 
-type OrderFilter = 'all' | 'with-order' | 'without-order';
+// Statut de livraison (demande explicite du 17/10/2026 : "l'autre ou ya commande mais pas encore
+// livré ou il ya pas encore arrivage sur rpos pour metre a jour le stock") — distinct de
+// reactionStatus (qui ne dit que "une commande a-t-elle été passée ?"), ce statut-ci suit la vie de
+// la commande jusqu'à sa réception (RECUE_ESTIMEE côté RPOS — une estimation, jamais une
+// confirmation certaine, cf. ProposalOrder.receptionStatus dans schema.prisma).
+const DELIVERY_STATUS_META: Record<DeliveryStatus, { label: string; badge: string }> = {
+  SANS_COMMANDE: { label: 'Sans commande', badge: 'reassort-badge-neutral' },
+  EN_ATTENTE_LIVRAISON: { label: 'Commandé, pas livré', badge: 'reassort-badge-soft-warning' },
+  LIVREE: { label: 'Livrée', badge: 'reassort-badge-soft-success' },
+};
+
+type OrderFilter = 'all' | 'with-order' | 'without-order' | 'delivered';
 
 function formatDuration(hours: number): string {
   if (hours < 24) return `${Math.round(hours)} h`;
@@ -190,10 +204,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const articlesInDepartment = articlesInDepartmentAll.filter((e) => {
     if (orderFilter === 'with-order') return e.hasOrder;
     if (orderFilter === 'without-order') return !e.hasOrder;
+    if (orderFilter === 'delivered') return e.deliveryStatus === 'LIVREE';
     return true;
   });
   const withOrderCount = articlesInDepartmentAll.filter((e) => e.hasOrder).length;
   const withoutOrderCount = articlesInDepartmentAll.length - withOrderCount;
+  const deliveredCount = articlesInDepartmentAll.filter((e) => e.deliveryStatus === 'LIVREE').length;
 
   const showArticleList = !!selectedSector && !!selectedDepartment;
 
@@ -353,6 +369,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <button type="button" className={`btn btn-sm ${orderFilter === 'without-order' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('without-order')}>
                   Sans commande ({withoutOrderCount})
                 </button>
+                <button type="button" className={`btn btn-sm ${orderFilter === 'delivered' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('delivered')}>
+                  Livrées ({deliveredCount})
+                </button>
               </div>
               <div className="table-responsive">
                 <table className="table align-middle mb-0 table-hover table-centered">
@@ -362,6 +381,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       <th>Depuis</th>
                       <th>Durée</th>
                       <th>Réaction</th>
+                      <th>Livraison</th>
+                      <th>Livré le</th>
                       <th>CA perdu</th>
                       <th>Cause probable</th>
                     </tr>
@@ -369,13 +390,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                   <tbody>
                     {articlesInDepartment.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-center text-muted py-4">
+                        <td colSpan={8} className="text-center text-muted py-4">
                           {articlesInDepartmentAll.length === 0 ? 'Aucune rupture en cours pour ce rayon.' : 'Aucun article ne correspond à ce filtre.'}
                         </td>
                       </tr>
                     ) : (
                       articlesInDepartment.map((e) => {
                         const reaction = REACTION_LIGHT_META[e.reactionStatus];
+                        const delivery = DELIVERY_STATUS_META[e.deliveryStatus];
                         return (
                           <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
                             <td>{e.label || e.ean}</td>
@@ -384,6 +406,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                             <td>
                               <span className={`badge ${reaction.badge} py-1 px-2`}>{reaction.label}</span>
                             </td>
+                            <td>
+                              <span className={`badge ${delivery.badge} py-1 px-2`}>{delivery.label}</span>
+                            </td>
+                            <td>{e.actualReceptionDate ? new Date(e.actualReceptionDate).toLocaleString('fr-FR') : '—'}</td>
                             <td>{e.caPerdueEstime !== null ? `${Math.round(e.caPerdueEstime).toLocaleString('fr-FR')} CFA` : '—'}</td>
                             <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
                           </tr>

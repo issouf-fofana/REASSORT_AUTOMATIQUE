@@ -224,7 +224,7 @@ async function getOpenEpisodes(rposShopId) {
   const orders = proposalIds.length
     ? await prisma.proposalOrder.findMany({
         where: { proposalId: { in: proposalIds }, createdAt: { gte: earliestStart } },
-        select: { proposalId: true, department: true, createdAt: true },
+        select: { proposalId: true, department: true, createdAt: true, receptionStatus: true, actualReceptionDate: true },
       })
     : [];
 
@@ -249,11 +249,12 @@ async function getOpenEpisodes(rposShopId) {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
     let orderCreatedAt = null;
+    let matchedOrder = null;
     for (const line of linesByEan.get(e.ean) || []) {
       if (line.proposal.generatedAt < e.startedAt) continue;
       const key = `${line.proposalId}::${line.department || ''}`;
       const candidate = (ordersByKey.get(key) || []).find((o) => o.createdAt >= e.startedAt);
-      if (candidate) { orderCreatedAt = candidate.createdAt; break; }
+      if (candidate) { orderCreatedAt = candidate.createdAt; matchedOrder = candidate; break; }
     }
 
     const hasOrder = orderCreatedAt !== null;
@@ -263,11 +264,30 @@ async function getOpenEpisodes(rposShopId) {
     else if (durationHours > reactionDeadlineHours) reactionStatus = 'RETARD';
     else reactionStatus = 'EN_ATTENTE';
 
+    // Statut de livraison, distinct de reactionStatus (demande explicite du 17/10/2026 : "l'autre ou
+    // ya commande mais pas encore livré ou il ya pas encore arrivage sur rpos pour metre a jour le
+    // stock") — SANS_COMMANDE / EN_ATTENTE_LIVRAISON (commande passée, receptionStatus pas encore
+    // RECUE_ESTIMEE) / LIVREE (receptionStatus RECUE_ESTIMEE, cf. le commentaire sur ce champ dans
+    // schema.prisma : c'est une ESTIMATION basée sur le délai configuré, jamais une confirmation
+    // RPOS certaine — présenté comme tel, pas comme une preuve de réception).
+    let deliveryStatus = 'SANS_COMMANDE';
+    if (hasOrder) {
+      deliveryStatus = matchedOrder.receptionStatus === 'RECUE_ESTIMEE' ? 'LIVREE' : 'EN_ATTENTE_LIVRAISON';
+    }
+
     // startedAt/orderCreatedAt renvoyés en plus de durationHours (déjà calculé côté serveur) pour
     // que le frontend puisse faire tourner un vrai chronomètre live (demande explicite du
     // 17/10/2026 : "le user doit voir compté... le compteur de rupture avant commande continue
     // toujour de compté") plutôt qu'une valeur figée au chargement de la page.
-    return { ...e, durationHours, hasOrder, reactionStatus, orderCreatedAt };
+    return {
+      ...e,
+      durationHours,
+      hasOrder,
+      reactionStatus,
+      orderCreatedAt,
+      deliveryStatus,
+      actualReceptionDate: matchedOrder?.actualReceptionDate ?? null,
+    };
   });
 }
 
