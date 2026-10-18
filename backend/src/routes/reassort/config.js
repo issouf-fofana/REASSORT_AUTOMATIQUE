@@ -92,7 +92,7 @@ router.put('/config', requireAdmin, async (req, res) => {
 
     const {
       paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
+      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, weekendDeliveryDay, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
       autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
     } = req.body;
     const data = {};
@@ -111,6 +111,7 @@ router.put('/config', requireAdmin, async (req, res) => {
     if (seasonalityLookbackYears !== undefined) data.seasonalityLookbackYears = seasonalityLookbackYears;
     if (seasonalityAdjustmentThresholdPct !== undefined) data.seasonalityAdjustmentThresholdPct = seasonalityAdjustmentThresholdPct;
     if (receptionLeadTimeDays !== undefined) data.receptionLeadTimeDays = receptionLeadTimeDays;
+    if (weekendDeliveryDay !== undefined) data.weekendDeliveryDay = weekendDeliveryDay;
     if (useReceptionLeadTimeInCalculation !== undefined) data.useReceptionLeadTimeInCalculation = useReceptionLeadTimeInCalculation;
     if (excludeGenericArticlesBelowPrice !== undefined) data.excludeGenericArticlesBelowPrice = excludeGenericArticlesBelowPrice;
     if (recentOrderMaxAgeDays !== undefined) data.recentOrderMaxAgeDays = recentOrderMaxAgeDays;
@@ -147,7 +148,7 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
   try {
     const {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
-      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
+      treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, weekendDeliveryDay, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
       autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
@@ -170,6 +171,7 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     if (seasonalityLookbackYears !== undefined) data.seasonalityLookbackYears = seasonalityLookbackYears;
     if (seasonalityAdjustmentThresholdPct !== undefined) data.seasonalityAdjustmentThresholdPct = seasonalityAdjustmentThresholdPct;
     if (receptionLeadTimeDays !== undefined) data.receptionLeadTimeDays = receptionLeadTimeDays;
+    if (weekendDeliveryDay !== undefined) data.weekendDeliveryDay = weekendDeliveryDay;
     if (useReceptionLeadTimeInCalculation !== undefined) data.useReceptionLeadTimeInCalculation = useReceptionLeadTimeInCalculation;
     if (excludeGenericArticlesBelowPrice !== undefined) data.excludeGenericArticlesBelowPrice = excludeGenericArticlesBelowPrice;
     if (recentOrderMaxAgeDays !== undefined) data.recentOrderMaxAgeDays = recentOrderMaxAgeDays;

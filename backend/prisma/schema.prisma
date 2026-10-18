@@ -321,6 +321,16 @@ model ReassortConfig {
   // commander en avance pour ne pas tomber en rupture avant l'arrivée de la marchandise.
   receptionLeadTimeDays Int @default(1) @map("reception_lead_time_days")
 
+  // Jour de livraison des commandes passées un jour de week-end, ou un jour ouvrable après 14h
+  // (demande explicite du 18/10/2026 : "si la commande est apres 14h vendredi, il va etre perapré
+  // le dimanche soir et etre livré le lundi ou mardi selon le jour de livraison" — "les commande de
+  // weekend est livré le lundi ou mardi tu vois ?"). "LUNDI" ou "MARDI", propre à chaque magasin
+  // (le cycle entrepôt ne livre pas tous les magasins le même jour après un week-end). Utilisé par
+  // computeExpectedReceptionDate (stockoutEpisodeService.js) pour calculer une date de livraison
+  // ATTENDUE réaliste, distincte du simple receptionLeadTimeDays ci-dessus (qui reste un délai fixe
+  // en jours, utilisé pour le calcul de besoin de réassort, pas pour juger un retard de livraison).
+  weekendDeliveryDay String @default("LUNDI") @map("weekend_delivery_day")
+
   // Si vrai, le besoin est calculé pour couvrir le délai de réception (ventes/jour × délai) au
   // lieu d'une semaine fixe implicite. Désactivé par défaut : change le résultat du calcul pour
   // tous les articles du magasin, à activer explicitement après validation sur un magasin pilote.

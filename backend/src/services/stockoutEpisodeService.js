@@ -10,6 +10,103 @@ const rpos = require('./rposClient');
 const systemConfig = require('./systemConfigService');
 const { streamWithFallback } = require('./aiForecastService');
 
+// Seuil de retard de livraison : au-delà de ce nombre de jours après la date de livraison ATTENDUE
+// (computeExpectedReceptionDate ci-dessous), l'écart n'est plus "explicable" par un aléa logistique
+// normal — demande explicite du 18/10/2026 : "si non pas recu soit ca peux etre le 12 donc 2j ca
+// peux etre expliqué mais 3j il faut avoir des explication". 2 jours de marge APRÈS la date
+// attendue avant de signaler un vrai retard (donc commande attendue le 11, encore acceptable au 12,
+// 13 ; en retard à partir du 14).
+const DELIVERY_DELAY_TOLERANCE_DAYS = 2;
+
+// Créneaux quotidiens d'intégration des factures fournisseur côté entrepôt (demande explicite du
+// 18/10/2026 : "les facture son integré touts les jour et ca commence a partie de 12h00, 17h00,
+// 23h00, donc quand il commence il ya un cron qui envoi les fichier de facture et integré dans les
+// magasin a ce moment on a des mouvement de type arrivage") — un mouvement StockMove de type
+// "Arrivage"/"Arrivage manuel" après la date de commande est la preuve la plus fiable qu'on ait
+// d'une réception RÉELLE (contrairement à ProposalOrder.receptionStatus, qui n'est qu'une
+// estimation de délai, cf. le commentaire sur ce champ dans schema.prisma). Si la date de livraison
+// ATTENDUE est dépassée depuis au moins DELIVERY_DELAY_TOLERANCE_DAYS ET qu'aucun créneau
+// d'intégration passé depuis cette date n'a produit de mouvement Arrivage, le problème est plus
+// probablement une intégration de facture en échec (cron non exécuté, facture pas générée côté
+// entrepôt) qu'un simple retard de transport.
+const INVOICE_INTEGRATION_SLOTS_HOUR = [12, 17, 23];
+
+/**
+ * Date de livraison ATTENDUE (distincte de ProposalOrder.expectedReceptionDate, qui applique
+ * simplement ReassortConfig.receptionLeadTimeDays en jours calendaires sans tenir compte de l'heure
+ * ni du week-end) — règle métier réelle du cycle entrepôt (demande explicite du 18/10/2026) :
+ *   - Validée un jour OUVRABLE (lundi-vendredi) AVANT 14h -> livrable dès le LENDEMAIN.
+ *   - Validée un jour ouvrable APRÈS 14h, OU un jour de WEEK-END (samedi/dimanche) -> préparée le
+ *     dimanche soir, livrée le "weekendDeliveryDay" du magasin (LUNDI ou MARDI, configurable —
+ *     chaque magasin n'est pas livré le même jour après un week-end).
+ * `validatedAt` : date/heure de validation de la commande. `weekendDeliveryDay` : 'LUNDI' ou 'MARDI'
+ * (ReassortConfig du magasin). Retourne un DateTime à minuit (00:00) du jour attendu — la
+ * comparaison avec "maintenant" se fait ensuite en jours entiers, jamais à l'heure près.
+ */
+function computeExpectedReceptionDate(validatedAt, weekendDeliveryDay) {
+  const d = new Date(validatedAt);
+  const dayOfWeek = d.getDay(); // 0 = dimanche, 6 = samedi
+  const hour = d.getHours();
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+
+  const expected = new Date(d);
+  expected.setHours(0, 0, 0, 0);
+
+  if (isWeekday && hour < 14) {
+    // Lendemain (même si le lendemain tombe un week-end — un samedi reste un jour de réception
+    // possible pour une commande validée vendredi avant 14h, cf. règle donnée explicitement).
+    expected.setDate(expected.getDate() + 1);
+    return expected;
+  }
+
+  // Après 14h un jour ouvrable, ou un jour de week-end : livré le "weekendDeliveryDay" du magasin,
+  // le prochain lundi ou mardi à partir d'aujourd'hui (jamais dans le passé).
+  const targetDow = weekendDeliveryDay === 'MARDI' ? 2 : 1; // 1 = lundi, 2 = mardi
+  let daysUntilTarget = (targetDow - dayOfWeek + 7) % 7;
+  if (daysUntilTarget === 0) daysUntilTarget = 7; // déjà un lundi/mardi après 14h -> le suivant, pas aujourd'hui
+  expected.setDate(expected.getDate() + daysUntilTarget);
+  return expected;
+}
+
+/**
+ * Diagnostic de retard de livraison pour une commande dont la réception n'est pas confirmée comme
+ * reçue (ou dont la "réception estimée" est contredite par les faits, cf. deliveryLooksDoubtful) —
+ * demande explicite du 18/10/2026 : "si non pas recu soit ca peux etre le 12 donc 2j ca peux etre
+ * expliqué mais 3j il faut avoir des explication donc on doit nous dire que la livrasion est en
+ * retart". Retourne null si rien à signaler (livraison dans les temps, ou pas encore assez de recul
+ * pour juger). Cherche un VRAI mouvement "Arrivage" en base (StockMove, synchronisé depuis RPOS) —
+ * preuve la plus fiable disponible, jamais ProposalOrder.receptionStatus seul (une estimation).
+ */
+async function diagnoseDeliveryDelay(rposShopId, ean, validatedAt, weekendDeliveryDay) {
+  const expectedDate = computeExpectedReceptionDate(validatedAt, weekendDeliveryDay);
+  const now = new Date();
+  const daysLate = Math.floor((now.getTime() - expectedDate.getTime()) / (24 * 60 * 60 * 1000));
+  if (daysLate < DELIVERY_DELAY_TOLERANCE_DAYS) return null; // pas encore assez de recul pour juger
+
+  const arrivalMove = await prisma.stockMove.findFirst({
+    where: { rposShopId, ean, date: { gte: new Date(validatedAt) }, typeLabel: { in: ['Arrivage', 'Arrivage manuel'] } },
+    orderBy: { date: 'asc' },
+  });
+  if (arrivalMove) return null; // un arrivage a bien été détecté depuis la commande, rien à signaler
+
+  // Aucun arrivage trouvé après la date attendue + marge : cherche si un créneau d'intégration
+  // facture (12h/17h/23h) est déjà passé depuis la date attendue — distingue "en retard, en attente
+  // du prochain passage facture" d'un cas plus probable d'échec d'intégration (créneau déjà passé
+  // sans effet).
+  const slotsPassedSinceExpected = INVOICE_INTEGRATION_SLOTS_HOUR.filter((h) => {
+    const slot = new Date(expectedDate);
+    slot.setHours(h, 0, 0, 0);
+    return slot < now;
+  }).length;
+
+  return {
+    expectedReceptionDate: expectedDate,
+    daysLate,
+    invoiceSlotsPassedWithoutArrival: slotsPassedSinceExpected,
+    likelyInvoiceIntegrationIssue: slotsPassedSinceExpected >= INVOICE_INTEGRATION_SLOTS_HOUR.length,
+  };
+}
+
 /**
  * Seuils de délai (commande attendue / livraison max) utilisés par reactionStatus — configurables
  * depuis Paramètres (demande explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais
@@ -252,6 +349,8 @@ async function getOpenEpisodes(rposShopId) {
 
   const { reactionDeadlineHours, deliveryDeadlineHours } = await getReactionDeadlines();
   const now = new Date();
+  const reassortConfig = await prisma.reassortConfig.findUnique({ where: { rposShopId }, select: { weekendDeliveryDay: true } });
+  const weekendDeliveryDay = reassortConfig?.weekendDeliveryDay || 'LUNDI';
   const eans = [...new Set(episodes.map((e) => e.ean))];
   const earliestStart = episodes.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), episodes[0].startedAt);
 
@@ -346,7 +445,16 @@ async function getOpenEpisodes(rposShopId) {
       if (matchedOrder.receptionStatus === 'RECUE_ESTIMEE') {
         deliveryStatus = matchedOrder.actualReceptionDate && matchedOrder.actualReceptionDate < now ? 'LIVRAISON_DOUTEUSE' : 'LIVREE';
       } else {
-        deliveryStatus = 'EN_ATTENTE_LIVRAISON';
+        // EN_RETARD ajouté le 18/10/2026 (demande explicite : "3j il faut avoir des explication
+        // donc on doit nous dire que la livrasion est en retart") — calcul LÉGER en mémoire
+        // (computeExpectedReceptionDate, pas de requête StockMove par article ici, volontairement :
+        // cette fonction liste TOUS les épisodes d'un magasin en masse, un aller-retour DB par
+        // article romprait le correctif de performance déjà appliqué une fois sur ce module). La
+        // preuve StockMove plus coûteuse (diagnoseDeliveryDelay) reste réservée à la fiche détail
+        // d'UN seul article (getEpisodeDetail), où son coût est négligeable.
+        const expected = computeExpectedReceptionDate(matchedOrder.createdAt, weekendDeliveryDay);
+        const daysLate = Math.floor((now.getTime() - expected.getTime()) / (24 * 60 * 60 * 1000));
+        deliveryStatus = daysLate >= DELIVERY_DELAY_TOLERANCE_DAYS ? 'EN_RETARD' : 'EN_ATTENTE_LIVRAISON';
       }
     }
 
@@ -808,6 +916,15 @@ async function getEpisodeDetail(episodeId) {
     }
   }
 
+  // Diagnostic de retard de livraison (demande explicite du 18/10/2026) : seulement si une commande
+  // existe et n'est pas déjà confirmée reçue par un vrai mouvement Arrivage (sinon rien à signaler).
+  let deliveryDelay = null;
+  if (order && !order.actualReceptionDate) {
+    const effectiveValidatedAt = rposOrderDetail?.validationDate ?? matchedLine?.proposal?.validatedAt ?? order.createdAt;
+    const reassortConfig = await prisma.reassortConfig.findUnique({ where: { rposShopId: episode.rposShopId }, select: { weekendDeliveryDay: true } });
+    deliveryDelay = await diagnoseDeliveryDelay(episode.rposShopId, episode.ean, effectiveValidatedAt, reassortConfig?.weekendDeliveryDay || 'LUNDI');
+  }
+
   return {
     found: true,
     id: episode.id,
@@ -886,6 +1003,10 @@ async function getEpisodeDetail(episodeId) {
       order.actualReceptionDate &&
       order.actualReceptionDate < now
     ),
+    // Retard de livraison (commande passée, jamais reçue du tout — distinct de
+    // deliveryLooksDoubtful qui couvre le cas "marquée reçue mais rien ne le confirme"). null si
+    // pas de commande, déjà reçue, ou pas encore assez de recul pour juger un retard.
+    deliveryDelay,
   };
 }
 
@@ -1090,4 +1211,4 @@ N'invente aucun chiffre qui ne figure pas ci-dessus — "departments" reprend un
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss };
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay };

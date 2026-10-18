@@ -86,6 +86,12 @@ type EpisodeDetail = {
   sellingPrice: number | null;
   buyingPrice: number | null;
   deliveryLooksDoubtful: boolean;
+  deliveryDelay: {
+    expectedReceptionDate: string;
+    daysLate: number;
+    invoiceSlotsPassedWithoutArrival: number;
+    likelyInvoiceIntegrationIssue: boolean;
+  } | null;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -468,6 +474,24 @@ export function StockoutEpisodePage() {
               {detail.deliveryLooksDoubtful && (
                 <div className="ep2-verdict tone-critical">
                   <strong>Livraison douteuse.</strong> La réception de cette commande est estimée comme reçue depuis le {detail.order?.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : '—'}, mais la rupture est toujours en cours et aucun mouvement de réception n'apparaît dans l'historique de stock — l'article n'est probablement pas réellement revenu en rayon, malgré le statut RPOS.
+                </div>
+              )}
+
+              {/* Retard de livraison (demande explicite du 18/10/2026 : "si non pas recu soit ca
+                  peux etre le 12 donc 2j ca peux etre expliqué mais 3j il faut avoir des
+                  explication donc on doit nous dire que la livrasion est en retart") — comparaison
+                  à la date de livraison ATTENDUE (règle 14h/week-end), avec un distinguo quand
+                  aucun créneau d'intégration facture (12h/17h/23h) passé depuis cette date n'a
+                  produit de mouvement Arrivage : plus probablement un échec d'intégration côté
+                  entrepôt qu'un simple retard de transport. */}
+              {detail.deliveryDelay && (
+                <div className="ep2-verdict tone-critical">
+                  <strong>Livraison en retard ({detail.deliveryDelay.daysLate} j).</strong> Attendue le {formatDateTime(detail.deliveryDelay.expectedReceptionDate)}, toujours pas reçue.
+                  {detail.deliveryDelay.likelyInvoiceIntegrationIssue ? (
+                    <> Les 3 créneaux d'intégration des factures entrepôt (12h, 17h, 23h) sont déjà passés depuis cette date sans qu'aucun mouvement d'arrivage n'apparaisse — l'intégration de la facture a probablement échoué côté entrepôt (cron non exécuté, ou facture jamais générée), plutôt qu'un simple retard de transport.</>
+                  ) : (
+                    <> En attente du prochain créneau d'intégration facture ({detail.deliveryDelay.invoiceSlotsPassedWithoutArrival}/3 déjà passés sans arrivage détecté).</>
+                  )}
                 </div>
               )}
 

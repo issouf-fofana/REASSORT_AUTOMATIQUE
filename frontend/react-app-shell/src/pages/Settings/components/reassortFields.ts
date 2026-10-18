@@ -309,6 +309,20 @@ export const REASSORT_FIELDS: ReassortField[] = [
       '(si activé ci-dessous) à dimensionner le besoin sur cette durée plutôt que sur une semaine fixe.',
   },
   {
+    id: 'weekendDeliveryDay',
+    kind: 'select',
+    label: 'Jour de livraison après un week-end',
+    options: [
+      { value: 'LUNDI', label: 'Lundi (par défaut)' },
+      { value: 'MARDI', label: 'Mardi' },
+    ],
+    helpHtml:
+      "<strong>À quoi ça sert :</strong> une commande validée un jour ouvrable avant 14h est livrable dès le " +
+      "lendemain. Une commande validée après 14h, ou un jour de week-end, est préparée le dimanche soir et " +
+      "livrée le lundi ou le mardi selon ce magasin — ce réglage sert à calculer la date de livraison " +
+      "attendue et à détecter un vrai retard sur le module Ruptures de stock.",
+  },
+  {
     id: 'useReceptionLeadTimeInCalculation',
     kind: 'select',
     label: 'Utiliser le délai dans le calcul du besoin',

@@ -13,7 +13,7 @@ import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
 // réutilisé à l'identique pour "Ce magasin" (magasin actif topbar) ET le drill-down depuis
 // "Tous les magasins" — un seul composant, un seul comportement.
 type ReactionStatusLight = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
-type DeliveryStatus = 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE' | 'LIVRAISON_DOUTEUSE';
+type DeliveryStatus = 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE' | 'LIVRAISON_DOUTEUSE' | 'EN_RETARD';
 
 type StockoutEpisode = {
   id: string;
@@ -76,9 +76,16 @@ const REACTION_LIGHT_META: Record<ReactionStatusLight, { label: string; badge: s
 // rupture continue de compté"). "Livrée" affirmait une certitude que RECUE_ESTIMEE ne garantit
 // jamais ; LIVRAISON_DOUTEUSE signale explicitement quand la date de réception estimée est déjà
 // passée alors que l'épisode est toujours ouvert (calculé côté serveur, cf. stockoutEpisodeService.js).
+// EN_RETARD ajouté le 18/10/2026 (demande explicite : "si non pas recu soit ca peux etre le 12 donc
+// 2j ca peux etre expliqué mais 3j il faut avoir des explication donc on doit nous dire que la
+// livrasion est en retart") — commande passée, receptionStatus pas encore RECUE_ESTIMEE, et la date
+// de livraison ATTENDUE (règle 14h/week-end, cf. computeExpectedReceptionDate côté serveur) est
+// dépassée d'au moins 2 jours : un simple "pas encore livré" ne suffit plus, l'écart n'est plus
+// explicable par un aléa logistique normal.
 const DELIVERY_STATUS_META: Record<DeliveryStatus, { label: string; badge: string }> = {
   SANS_COMMANDE: { label: 'Sans commande', badge: 'reassort-badge-neutral' },
   EN_ATTENTE_LIVRAISON: { label: 'Commandé, pas livré', badge: 'reassort-badge-soft-warning' },
+  EN_RETARD: { label: 'Livraison en retard', badge: 'reassort-badge-soft-danger' },
   LIVREE: { label: 'Livraison estimée', badge: 'reassort-badge-soft-success' },
   LIVRAISON_DOUTEUSE: { label: 'Livraison douteuse', badge: 'reassort-badge-soft-danger' },
 };

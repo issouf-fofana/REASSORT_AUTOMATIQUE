@@ -23,6 +23,7 @@ const DEFAULTS = {
   seasonalityLookbackYears: 1,
   seasonalityAdjustmentThresholdPct: 15,
   receptionLeadTimeDays: 1,
+  weekendDeliveryDay: 'LUNDI',
   useReceptionLeadTimeInCalculation: false,
   excludeGenericArticlesBelowPrice: 2,
   recentOrderMaxAgeDays: 3,
