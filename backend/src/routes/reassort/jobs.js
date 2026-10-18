@@ -110,6 +110,19 @@ router.post('/run-proposal-reminder', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/run-stockout-alert - déclenche manuellement l'alerte email des ruptures de
+// stock en cours (ADMIN, pour les tests — s'exécute normalement à 8h automatiquement).
+router.post('/run-stockout-alert', requireAdmin, async (req, res) => {
+  try {
+    const { runStockoutAlertJob } = require('../../jobs/stockoutAlertJob');
+    const result = await runStockoutAlertJob();
+    res.json({ success: true, message: 'Alerte email des ruptures en cours exécutée', data: result });
+  } catch (error) {
+    console.error('Manual stockout alert error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/run-end-of-day-validation-recap - déclenche manuellement le récap admin de fin
 // de journée (ADMIN, pour les tests — s'exécute normalement à 16h30 automatiquement).
 router.post('/run-end-of-day-validation-recap', requireAdmin, async (req, res) => {

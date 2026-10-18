@@ -999,14 +999,23 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
  * les chiffres déjà calculés côté serveur, l'IA les interprète, elle ne les recalcule pas.
  */
 async function analyzePeriodLoss(shopName, shopReference, summary) {
-  const topDepartments = summary.departmentBreakdown.slice(0, 5)
-    .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus, ${d.qtyPerdue} unité(s), ${d.episodeCount} épisode(s)`)
+  // % du total perdu par rayon calculé ICI (jamais par l'IA) — même principe que le reste du
+  // prompt : le LLM interprète des chiffres déjà exacts, il n'en recalcule aucun.
+  const topDepartmentsRaw = summary.departmentBreakdown.slice(0, 5).map((d) => ({
+    ...d,
+    pctOfTotal: summary.totalCaPerdu > 0 ? Math.round((d.caPerdue / summary.totalCaPerdu) * 1000) / 10 : 0,
+  }));
+  const topDepartments = topDepartmentsRaw
+    .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus (${d.pctOfTotal} % du total), ${d.qtyPerdue} unité(s), ${d.episodeCount} épisode(s)`)
     .join('\n');
 
   // Sortie JSON structurée (demande explicite du 18/10/2026 : "c'est pas bon tu vois le style...
   // faire un truc bien fait") — un bloc de texte libre avec markdown approximatif rendait mal côté
   // UI ; un objet avec des champs distincts permet au frontend d'afficher de vraies sections/cartes
-  // (verdict + niveau, rayons concernés, recommandations en liste) au lieu d'un paragraphe continu.
+  // (verdict + niveau, rayons concernés avec %/montant/prévention, recommandations globales).
+  // Enrichi le 18/10/2026 (demande explicite : "il doit montré les pourcentage, et montant
+  // exitimé... et comment prevenir ce genre de perte") : un bloc détaillé PAR rayon, pas juste un
+  // nom, avec un conseil de prévention propre à ce rayon plutôt qu'une recommandation générique.
   const prompt = `Tu es un analyste réassort pour le magasin "${shopName}" (${shopReference}). Voici les chiffres RÉELS de pertes de rupture de stock sur la période du ${summary.period.startDate} au ${summary.period.endDate} (ne recalcule rien, utilise uniquement ces chiffres) :
 
 - CA perdu estimé sur la période (rupture de stock) : ${summary.totalCaPerdu.toLocaleString('fr-FR')} CFA
@@ -1015,27 +1024,39 @@ async function analyzePeriodLoss(shopName, shopReference, summary) {
 - CA réellement réalisé par le magasin sur la même période : ${summary.shopRevenueExclTax.toLocaleString('fr-FR')} CFA (hors taxes)
 - Ratio perte / CA réalisé : ${summary.lossRatioPct !== null ? summary.lossRatioPct + ' %' : 'non calculable (CA de la période inconnu)'}
 
-Détail par rayon (triés par perte décroissante) :
+Détail par rayon (triés par perte décroissante, pourcentage déjà calculé — reprends-le tel quel) :
 ${topDepartments || 'Aucun détail par rayon disponible.'}
 
 Réponds UNIQUEMENT avec un objet JSON strict (aucun texte avant/après, aucun bloc \`\`\`), avec exactement cette forme :
 {
   "level": "faible" | "modere" | "eleve",
   "verdict": "une phrase claire disant si la perte est élevée/modérée/faible par rapport au CA, en citant le ratio",
-  "concernedDepartments": ["nom du rayon le plus concerné", "éventuellement un 2e"],
-  "recommendations": ["recommandation concrète et actionnable 1", "recommandation concrète et actionnable 2"]
+  "departments": [
+    { "department": "nom du rayon EXACT comme listé ci-dessus", "prevention": "conseil de prévention concret et SPÉCIFIQUE à ce rayon pour éviter ce type de rupture (pas une généralité)" }
+  ],
+  "recommendations": ["recommandation globale actionnable 1", "recommandation globale actionnable 2"]
 }
 
-N'invente aucun chiffre qui ne figure pas ci-dessus. "concernedDepartments" doit reprendre des noms de rayons EXACTEMENT comme listés ci-dessus (jamais un rayon non mentionné). "recommendations" : 1 à 3 entrées, pragmatiques, jamais de généralité vague ("améliorer le suivi" ne compte pas, préfère "resserrer le délai de réassort du rayon X à Y jours" ou équivalent concret). Si une donnée manque pour conclure avec certitude sur le niveau, choisis "faible" et dis-le dans verdict plutôt que de deviner.`;
+N'invente aucun chiffre qui ne figure pas ci-dessus — "departments" reprend uniquement les rayons listés ci-dessus (1 à 5 entrées, jamais un rayon absent de la liste), le pourcentage/montant affichés viendront directement des chiffres déjà fournis, tu n'as qu'à donner le conseil "prevention" pour chacun. "recommendations" : 1 à 3 entrées globales (toutes rayons confondus), pragmatiques, jamais de généralité vague ("améliorer le suivi" ne compte pas, préfère "resserrer le délai de réassort du rayon X à Y jours" ou équivalent concret). Si une donnée manque pour conclure avec certitude sur le niveau, choisis "faible" et dis-le dans verdict plutôt que de deviner.`;
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, () => {}, 'stockout-period-analysis');
   const match = fullText.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('Réponse IA sans objet JSON reconnaissable');
   const parsed = JSON.parse(match[0]);
+
+  // Fusion : le nom + prévention viennent de l'IA, le %/montant/qté/épisodes viennent TOUJOURS du
+  // calcul serveur déjà fait (topDepartmentsRaw) — jamais une valeur numérique sortie du LLM. Un
+  // rayon cité par l'IA mais absent de topDepartmentsRaw (hallucination) est silencieusement ignoré.
+  const byName = new Map(topDepartmentsRaw.map((d) => [d.department, d]));
+  const aiDepartments = Array.isArray(parsed.departments) ? parsed.departments.slice(0, 5) : [];
+  const departments = aiDepartments
+    .filter((d) => byName.has(d.department))
+    .map((d) => ({ ...byName.get(d.department), prevention: d.prevention || '' }));
+
   return {
     level: ['faible', 'modere', 'eleve'].includes(parsed.level) ? parsed.level : 'faible',
     verdict: parsed.verdict || '',
-    concernedDepartments: Array.isArray(parsed.concernedDepartments) ? parsed.concernedDepartments.slice(0, 5) : [],
+    departments,
     recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 5) : [],
     providerUsed,
   };

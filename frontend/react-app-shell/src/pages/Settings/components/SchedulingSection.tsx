@@ -255,6 +255,8 @@ interface SystemConfigData {
   STOCKOUT_DELIVERY_DEADLINE_HOURS?: string;
   STOCKOUT_LOSS_LOOKBACK_WEEKS?: string;
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS?: string;
+  STOCKOUT_ALERT_CRON?: string;
+  STOCKOUT_ALERT_ENABLED?: string;
 }
 
 export function SchedulingSection() {
@@ -273,6 +275,7 @@ export function SchedulingSection() {
   const [stockoutDeadlinesSaved, setStockoutDeadlinesSaved] = useState(false);
   const [stockoutLossLookbackWeeks, setStockoutLossLookbackWeeks] = useState('52');
   const [stockoutLossMinComparableWeeks, setStockoutLossMinComparableWeeks] = useState('8');
+  const [stockoutAlertCron, setStockoutAlertCron] = useState('0 8 * * *');
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -290,6 +293,7 @@ export function SchedulingSection() {
         setStockoutDeliveryDeadline(d.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48');
         setStockoutLossLookbackWeeks(d.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52');
         setStockoutLossMinComparableWeeks(d.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8');
+        setStockoutAlertCron(d.STOCKOUT_ALERT_CRON || '0 8 * * *');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -668,6 +672,40 @@ export function SchedulingSection() {
             {stockoutDeadlinesSaved && <span className="text-success small ms-2">Enregistré.</span>}
           </div>
         </div>
+
+        {/* Alerte email des ruptures en cours (demande explicite du 18/10/2026 : "je veux quil ai
+            une partie la possibilité de faire un mail auto au magasin sil ya des article qui son en
+            rupture... il doit etre alecter pour ca aussi... meme si ya une propostion de commande")
+            — contrairement à la relance de proposition, celle-ci alerte sur la RUPTURE elle-même,
+            qu'une commande ait déjà été passée ou non. */}
+        <CronJobCard
+          icon="solar:letter-unread-bold-duotone"
+          title="Alerte email des ruptures en cours"
+          enabledConfigKey="STOCKOUT_ALERT_ENABLED"
+          enabledInitial={config.STOCKOUT_ALERT_ENABLED !== 'false'}
+          intro="<strong>À quoi ça sert :</strong> envoie à chaque magasin ayant des ruptures de stock EN COURS un récapitulatif par email (articles concernés, rayon, durée, statut commande/livraison). Contrairement à l'alerte de proposition, ce mail part même si une commande a déjà été passée sur l'article : tant qu'il n'est pas revenu en stock, la rupture reste signalée."
+          onSave={() => saveSystemConfigKey('STOCKOUT_ALERT_CRON', stockoutAlertCron)}
+          onRunNow={async () => {
+            const d = await apiFetch<{ alerted: number; skipped: number }>('/reassort/run-stockout-alert', { method: 'POST' });
+            return `Terminé : ${d.alerted} magasin(s) alerté(s), ${d.skipped} sans rupture ou sans destinataire.`;
+          }}
+          runLabel="Envoyer les alertes maintenant"
+        >
+          <div className="mb-3">
+            <label className="form-label fw-semibold">Expression cron</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="0 8 * * *"
+              style={{ maxWidth: 300 }}
+              value={stockoutAlertCron}
+              onChange={(e) => setStockoutAlertCron(e.target.value)}
+            />
+            <div className="form-text">
+              Exemple : "0 8 * * *" = tous les jours à 8h00 (défaut, avant l'ouverture).
+            </div>
+          </div>
+        </CronJobCard>
       </div>
     </div>
   );

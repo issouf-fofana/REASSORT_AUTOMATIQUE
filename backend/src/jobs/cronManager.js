@@ -9,6 +9,7 @@ const { runStockMoveSync } = require('./stockMoveSyncJob');
 const { runStockSnapshotJob } = require('./stockSnapshotJob');
 const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
+const { runStockoutAlertJob } = require('./stockoutAlertJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -28,6 +29,7 @@ let currentStockMoveSyncTask = null;
 let currentStockSnapshotTask = null;
 let currentStockoutLossRecalcTask = null;
 let currentStockoutSectorBackfillTask = null;
+let currentStockoutAlertTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -48,6 +50,7 @@ const stockMoveSyncLock = createJobLock('Synchronisation des mouvements de stock
 const stockSnapshotLock = createJobLock('Capture des snapshots de stock (ruptures)');
 const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
+const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -325,6 +328,35 @@ async function startOrRestartStockoutSectorBackfillJob() {
   console.log(`⏰ Résolution du secteur/rayon des ruptures planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme l'alerte email récapitulative des ruptures EN_COURS par magasin (stockoutAlertJob.js). */
+async function startOrRestartStockoutAlertJob() {
+  if (currentStockoutAlertTask) {
+    currentStockoutAlertTask.stop();
+    currentStockoutAlertTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCKOUT_ALERT_ENABLED))) {
+    console.log('⏸️  Alerte email des ruptures désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCKOUT_ALERT_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), alerte email des ruptures non planifiée`);
+    return;
+  }
+
+  currentStockoutAlertTask = cron.schedule(cronSchedule, () => {
+    stockoutAlertLock(async () => {
+      console.log('[cron] Démarrage de l\'alerte email des ruptures en cours...');
+      await trackJobRun('stockoutAlert', runStockoutAlertJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Alerte email des ruptures planifiée: ${cronSchedule}`);
+}
+
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
 async function startOrRestartShopsSyncJob() {
   if (currentShopsSyncTask) {
@@ -542,6 +574,7 @@ module.exports = {
   startOrRestartStockSnapshotJob,
   startOrRestartStockoutLossRecalcJob,
   startOrRestartStockoutSectorBackfillJob,
+  startOrRestartStockoutAlertJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

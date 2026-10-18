@@ -24,10 +24,12 @@ type PeriodSummary = {
   departmentBreakdown: { department: string; caPerdue: number; qtyPerdue: number; episodeCount: number }[];
 };
 
+type AnalysisDepartment = { department: string; caPerdue: number; qtyPerdue: number; episodeCount: number; pctOfTotal: number; prevention: string };
+
 type AnalysisResult = {
   level: 'faible' | 'modere' | 'eleve';
   verdict: string;
-  concernedDepartments: string[];
+  departments: AnalysisDepartment[];
   recommendations: string[];
   providerUsed: string;
 };
@@ -124,7 +126,9 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
         .stockout-ai-block ul { margin: 0; padding-left: 1.1rem; }
         .stockout-ai-block li { margin-bottom: 4px; }
         .stockout-ai-block li:last-child { margin-bottom: 0; }
-        .stockout-ai-dept-chip { display: inline-block; background: #EDF1F7; color: #1B2A4A; border-radius: 999px; padding: 3px 10px; font-size: .78rem; font-weight: 600; margin: 0 6px 6px 0; }
+        .stockout-ai-dept-card { background: #fff; border: 1px solid rgba(27,42,74,.1); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+        .stockout-ai-dept-card:last-child { margin-bottom: 0; }
+        .stockout-ai-dept-prevention { font-size: .82rem; color: #2A2F45; margin-top: 4px; display: flex; gap: 6px; align-items: flex-start; }
       `}</style>
       <div className="card-body">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
@@ -214,15 +218,28 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
                   </div>
                 </div>
 
-                {/* Bloc 2 : rayons concernés */}
-                {analysis.concernedDepartments.length > 0 && (
+                {/* Bloc 2 : rayons concernés — %, montant estimé et conseil de prévention par rayon
+                    (demande explicite du 18/10/2026 : "il doit montré les pourcentage, et montant
+                    exitimé... et comment prevenir ce genre de perte"). */}
+                {analysis.departments.length > 0 && (
                   <div className="stockout-ai-block" style={{ background: '#f8fafb' }}>
                     <div className="stockout-ai-block-title" style={{ color: '#5B6B85' }}>Rayons concernés</div>
-                    <div>
-                      {analysis.concernedDepartments.map((d) => (
-                        <span key={d} className="stockout-ai-dept-chip">{d}</span>
-                      ))}
-                    </div>
+                    {analysis.departments.map((d) => (
+                      <div key={d.department} className="stockout-ai-dept-card">
+                        <div className="d-flex align-items-baseline justify-content-between flex-wrap gap-2">
+                          <strong style={{ color: '#1B2A4A', fontSize: '.88rem' }}>{d.department}</strong>
+                          <span className="text-muted small">
+                            {d.caPerdue.toLocaleString('fr-FR')} CFA ({d.pctOfTotal} % du total) · {d.qtyPerdue} unité(s) · {d.episodeCount} épisode(s)
+                          </span>
+                        </div>
+                        {d.prevention && (
+                          <div className="stockout-ai-dept-prevention">
+                            <iconify-icon icon="solar:shield-plus-bold-duotone" style={{ color: '#2d6a3f', flexShrink: 0, marginTop: 1 }}></iconify-icon>
+                            <span>{d.prevention}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
 

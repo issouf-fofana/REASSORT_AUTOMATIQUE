@@ -54,6 +54,11 @@ const KEYS = {
   // de semaines comparables requises pour afficher une estimation plutôt que "indisponible".
   STOCKOUT_LOSS_LOOKBACK_WEEKS: 'STOCKOUT_LOSS_LOOKBACK_WEEKS',
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS: 'STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS',
+  // Alerte email récapitulative des ruptures EN_COURS, par magasin (demande explicite du
+  // 18/10/2026 : "je veux quil ai une partie la possibilité de faire un mail auto au magasin...
+  // meme si ya une propostion de commande") — 1x/jour par défaut, pas trop fréquent pour ne pas
+  // spammer un magasin dont la situation de rupture change peu dans la journée.
+  STOCKOUT_ALERT_CRON: 'STOCKOUT_ALERT_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -139,6 +144,7 @@ const KEYS = {
   STOCK_SNAPSHOT_ENABLED: 'STOCK_SNAPSHOT_ENABLED',
   STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
+  STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -259,6 +265,9 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
   [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8',
+  // 8h du matin, avant l'ouverture — le magasin démarre sa journée avec la situation de rupture à
+  // jour plutôt qu'en pleine journée de vente.
+  [KEYS.STOCKOUT_ALERT_CRON]: () => process.env.STOCKOUT_ALERT_CRON || '0 8 * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -362,6 +371,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCK_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
+  [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
