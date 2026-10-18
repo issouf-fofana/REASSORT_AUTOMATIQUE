@@ -6,7 +6,11 @@ import { apiFetch } from '../../shared/api/client';
 // chargé globalement (assets/vendor/apexcharts), pas un import npm.
 type TrendPoint = { date: string; openCount: number };
 
-export function StockoutTrendChart({ shopQueryParam }: { shopQueryParam: string }) {
+// startDate/endDate ajoutés le 18/10/2026 (demande explicite : "le filtre doit etre pour tout a
+// emme temps... ne donne pas un filtre par detaut qui n'est pas modifialbe comme Ruptures en cours
+// — 30 derniers jours") — la fenêtre fixe de 30 jours est remplacée par la période choisie dans le
+// sélecteur unique du parent (StockoutShopDetail), qui pilote aussi l'analyse des pertes.
+export function StockoutTrendChart({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<any>(null);
   const [points, setPoints] = useState<TrendPoint[] | null>(null);
@@ -17,11 +21,13 @@ export function StockoutTrendChart({ shopQueryParam }: { shopQueryParam: string 
     let cancelled = false;
     setPoints(null);
     setError(null);
-    apiFetch<{ points: TrendPoint[] }>(`/reassort/stockout-episodes/trend?${shopQueryParam}`)
+    const start = encodeURIComponent(new Date(startDate).toISOString());
+    const end = encodeURIComponent(new Date(endDate + 'T23:59:59').toISOString());
+    apiFetch<{ points: TrendPoint[] }>(`/reassort/stockout-episodes/trend?start=${start}&end=${end}&${shopQueryParam}`)
       .then((data) => { if (!cancelled) setPoints(data.points); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [shopQueryParam]);
+  }, [shopQueryParam, startDate, endDate]);
 
   useEffect(() => {
     if (!points || !chartRef.current || !window.ApexCharts) return;
@@ -51,7 +57,7 @@ export function StockoutTrendChart({ shopQueryParam }: { shopQueryParam: string 
     <div className="card h-100">
       <div className="card-body">
         <h5 className="mb-3" style={{ color: '#1B2A4A', fontWeight: 600, fontSize: '.95rem' }}>
-          Ruptures en cours — 30 derniers jours
+          Ruptures en cours — {new Date(startDate).toLocaleDateString('fr-FR')} au {new Date(endDate).toLocaleDateString('fr-FR')}
         </h5>
         {error ? (
           <div className="text-danger small">Erreur : {error}</div>

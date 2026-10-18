@@ -145,6 +145,13 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   // Graphes affichés par défaut (demande explicite du 18/10/2026 : "affiche le graph par defaut et
   // donne la possibilité de masque") — inversé depuis la version précédente, repliée par défaut.
   const [showCharts, setShowCharts] = useState(true);
+  // Période unique pilotant à la fois le graphe de tendance et l'analyse des pertes (demande
+  // explicite du 18/10/2026 : "le filtre il faut aiffché en haut et le filtre doit etre pour tout
+  // a emme temps... ne donne pas un filtre par detaut qui n'est pas modifialbe") — remplace les
+  // deux systèmes de dates séparés et incohérents qui existaient avant (graphe figé à 30 jours,
+  // sélecteur propre à StockoutPeriodAnalysis plus bas sur la page).
+  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
   // Rafraîchit la colonne Durée affichée en live (demande explicite du 17/10/2026 : "le user doit
   // voir compté") — toutes les minutes plutôt que chaque seconde comme sur la fiche détail : des
@@ -262,6 +269,21 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         <div className="text-muted small mb-3">Chargement des données de rupture...</div>
       ) : (
         <>
+          {/* Filtre de période UNIQUE, en haut de page, modifiable (demande explicite du
+              18/10/2026 : "le filtre il faut aiffché en haut et le filtre doit etre pour tout a
+              emme temps tu vois ne donne pas un filtre par detaut qui n'est pas modifialbe comme
+              Ruptures en cours — 30 derniers jours") — pilote à la fois le graphe de tendance et
+              l'analyse des pertes plus bas, qui utilisaient auparavant deux systèmes de dates
+              séparés et incohérents (l'un figé à 30j, l'autre son propre sélecteur). */}
+          <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <div className="text-muted small">Période affichée sur cette page</div>
+            <div className="d-flex align-items-end gap-2 flex-wrap">
+              <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
+              <span className="text-muted small">au</span>
+              <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+            </div>
+          </div>
+
           {/* Ordre des sections revu le 18/10/2026 (demande explicite : "met cette carte en
               premier et Ruptures en cours — 30 derniers jours et Analyse des pertes sur une
               période en deuxieme") — Situation actuelle (KPI + graphes) passe avant l'analyse de
@@ -306,7 +328,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           {showCharts && (
             <div className="row row-cols-1 row-cols-md-2 g-3 mb-3">
               <div className="col">
-                <StockoutTrendChart shopQueryParam={shopQueryParam} />
+                <StockoutTrendChart shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} />
               </div>
               <div className="col">
                 <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
@@ -314,7 +336,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             </div>
           )}
 
-          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
+          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} />
 
           {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
               sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →

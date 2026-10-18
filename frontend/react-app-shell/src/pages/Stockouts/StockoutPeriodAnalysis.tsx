@@ -40,20 +40,11 @@ const LEVEL_META: Record<AnalysisResult['level'], { label: string; color: string
   faible: { label: 'Perte faible', color: '#2d6a3f', bg: '#e9f3ec', icon: 'solar:shield-check-bold-duotone' },
 };
 
-function formatIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function defaultRange(): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
-  return { start: formatIsoDate(start), end: formatIsoDate(end) };
-}
-
-export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: string }) {
-  const defaults = defaultRange();
-  const [startDate, setStartDate] = useState(defaults.start);
-  const [endDate, setEndDate] = useState(defaults.end);
+// Dates pilotées par le parent (StockoutShopDetail) via un seul sélecteur en haut de page (demande
+// explicite du 18/10/2026 : "le filtre doit etre pour tout a emme temps tu vois ne donne pas un
+// filtre par detaut qui n'est pas modifialbe") — plus de sélecteur propre à ce composant, qui
+// dupliquait un second système de dates distinct de celui du graphe de tendance.
+export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
   const [summary, setSummary] = useState<PeriodSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,13 +70,14 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
     }
   }
 
-  // Chargement automatique à l'arrivée sur la page et à chaque changement de magasin (demande
-  // explicite : affichage par défaut, sans action préalable de l'utilisateur).
+  // Chargement automatique à l'arrivée sur la page, à chaque changement de magasin, ET à chaque
+  // changement de la période choisie dans le sélecteur unique du parent (demande explicite :
+  // affichage par défaut, sans action préalable de l'utilisateur).
   useEffect(() => {
     if (!shopQueryParam) return;
     loadSummary(startDate, endDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shopQueryParam]);
+  }, [shopQueryParam, startDate, endDate]);
 
   async function runAnalysis() {
     if (!shopQueryParam) return;
@@ -136,11 +128,6 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
             <iconify-icon icon="solar:chart-square-bold-duotone" style={{ color: '#F5A623', fontSize: '1.2rem' }}></iconify-icon>
             Analyse des pertes sur une période
           </h6>
-          <div className="d-flex align-items-end gap-2 flex-wrap">
-            <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={startDate} max={endDate} onChange={(e) => { setStartDate(e.target.value); loadSummary(e.target.value, endDate); }} />
-            <span className="text-muted small">au</span>
-            <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={endDate} min={startDate} max={formatIsoDate(new Date())} onChange={(e) => { setEndDate(e.target.value); loadSummary(startDate, e.target.value); }} />
-          </div>
         </div>
 
         {error && <div className="text-danger small mb-2">Erreur : {error}</div>}

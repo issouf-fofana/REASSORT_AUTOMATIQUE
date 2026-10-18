@@ -358,16 +358,29 @@ router.get('/stockout-episodes/by-department', async (req, res) => {
   }
 });
 
-// GET /api/reassort/stockout-episodes/trend - module Ruptures, évolution du nombre de ruptures en
-// cours jour par jour sur les 30 derniers jours (demande du 16/10/2026 : même niveau de détail
+// GET /api/reassort/stockout-episodes/trend?start=&end= - module Ruptures, évolution du nombre de
+// ruptures en cours jour par jour sur une période (demande du 16/10/2026 : même niveau de détail
 // visuel que TableauDeBord.tsx, courbe de tendance). Placée AVANT /stockout-episodes/:id.
+//
+// start/end optionnels ajoutés le 18/10/2026 (demande explicite : "le filtre doit etre pour tout a
+// emme temps... ne donne pas un filtre par detaut qui n'est pas modifialbe comme Ruptures en cours
+// — 30 derniers jours") — remplace la fenêtre fixe à 30 jours : un seul sélecteur de période côté
+// page pilote désormais ce graphe ET l'analyse des pertes (period-summary/period-analysis
+// ci-dessous), plutôt que deux systèmes de dates séparés et incohérents. Sans start/end, retombe
+// sur le défaut historique (30 derniers jours) pour ne jamais casser un appel existant.
 router.get('/stockout-episodes/trend', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getStockoutTrend(shopId);
+    const { start, end } = req.query;
+    let days = 30;
+    if (start && end) {
+      const diffMs = new Date(end).getTime() - new Date(start).getTime();
+      days = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
+    }
+    const result = await getStockoutTrend(shopId, { days });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
