@@ -9,12 +9,6 @@ const { getMovesFromLocal } = require('./stockMoveAnalysisService');
 const rpos = require('./rposClient');
 const systemConfig = require('./systemConfigService');
 const { streamWithFallback } = require('./aiForecastService');
-const { mapWithConcurrency } = require('../utils/concurrency');
-
-// Concurrence pour le recalcul au prorata des épisodes EN_COURS chevauchant une période
-// personnalisée (getPeriodLossSummary) — jamais plus d'une poignée d'épisodes à la fois, calcul à
-// la demande (bouton, pas un job périodique sur tout le réseau).
-const EPISODE_LOSS_CONCURRENCY = 8;
 
 /**
  * Seuils de délai (commande attendue / livraison max) utilisés par reactionStatus — configurables
@@ -924,7 +918,7 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     }),
     prisma.stockoutEpisode.findMany({
       where: { rposShopId, status: 'EN_COURS', startedAt: { lte: end } },
-      select: { id: true, department: true, sector: true, ean: true, label: true, startedAt: true },
+      select: { id: true, department: true, sector: true, ean: true, label: true, startedAt: true, caPerdueEstime: true, qtyPerdueEstimee: true },
     }),
     prisma.salesLine.aggregate({
       where: { rposShopId, date: { gte: start, lte: end } },
@@ -932,16 +926,27 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     }),
   ]);
 
-  // Part de la perte d'un épisode encore ouvert qui tombe DANS la période demandée (prorata temps),
-  // recalculée en temps réel sur cette seule portion — jamais la perte totale depuis le début de la
-  // rupture, qui déborderait largement de la période choisie.
+  // Part de la perte d'un épisode encore ouvert qui tombe DANS la période demandée (prorata temps)
+  // — lue depuis caPerdueEstime/qtyPerdueEstimee déjà PRÉCALCULÉS par stockoutLossRecalcJob (perte
+  // totale depuis le début de la rupture), jamais recalculée en direct via estimateLoss() ici : avec
+  // plusieurs centaines d'épisodes ouverts, un appel estimateLoss() par épisode (même avec
+  // concurrence) fait exploser le temps de réponse de cette page (même bug de performance déjà
+  // corrigé ailleurs le 17/10/2026, cf. stockoutLossRecalcJob.js). Approximation : la perte totale
+  // de l'épisode est répartie linéairement sur sa durée, on ne garde que la part qui tombe dans la
+  // période demandée.
   const now = new Date();
-  const openLosses = await mapWithConcurrency(openOverlapping, EPISODE_LOSS_CONCURRENCY, async (e) => {
+  const openLosses = openOverlapping.map((e) => {
     const overlapStart = e.startedAt > start ? e.startedAt : start;
     const overlapEnd = end < now ? end : now;
     if (overlapEnd <= overlapStart) return { episode: e, qtyPerdue: 0, caPerdue: 0 };
-    const loss = await estimateLoss(rposShopId, e.ean, overlapStart, overlapEnd);
-    return { episode: e, qtyPerdue: loss.qtyPerdue || 0, caPerdue: loss.caPerdue || 0 };
+    const totalDurationMs = now.getTime() - e.startedAt.getTime();
+    const overlapMs = overlapEnd.getTime() - overlapStart.getTime();
+    const ratio = totalDurationMs > 0 ? Math.min(1, overlapMs / totalDurationMs) : 0;
+    return {
+      episode: e,
+      qtyPerdue: (e.qtyPerdueEstimee || 0) * ratio,
+      caPerdue: (e.caPerdueEstime || 0) * ratio,
+    };
   });
 
   const byDepartment = new Map();
