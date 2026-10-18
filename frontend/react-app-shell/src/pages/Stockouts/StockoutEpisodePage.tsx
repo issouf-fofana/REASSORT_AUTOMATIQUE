@@ -341,6 +341,26 @@ export function StockoutEpisodePage() {
         .ep2-badge:hover { transform: scale(1.05); }
         .ep2-status-badge { transition: transform .15s ease, box-shadow .15s ease; }
         .ep2-status-badge:hover { transform: scale(1.03); box-shadow: 0 2px 8px rgba(27,42,74,.1); }
+
+        /* Blocs "Avant/Après commande" de Métriques temporelles (demande explicite du 18/10/2026 :
+           "affiche heure de debut et fin... bien separe les info") — chaque bloc est une carte à
+           part entière (bordure + fond légèrement distinct), regroupant borne de temps, durée et
+           perte, plutôt que 4 chiffres isolés dans une grille sans contexte visuel. */
+        .ep2-metric-block { border: 1px solid #EEF1F6; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: #FAFBFD; transition: box-shadow .2s ease; }
+        .ep2-metric-block:last-child { margin-bottom: 0; }
+        .ep2-metric-block:hover { box-shadow: 0 4px 14px rgba(27,42,74,.07); }
+        .ep2-metric-block.before { border-left: 3px solid #2f5a85; }
+        .ep2-metric-block.after { border-left: 3px solid #C0392B; }
+        .ep2-metric-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; color: #1B2A4A; margin-bottom: 8px; }
+        .ep2-live-dot { color: #C0392B; font-size: .68rem; font-weight: 700; }
+        .ep2-metric-range { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: #5B6B85; font-weight: 600; margin-bottom: 12px; flex-wrap: wrap; }
+        .ep2-metric-range iconify-icon { color: #B8C1CE; font-size: .9rem; }
+        .ep2-metric-figures { display: flex; gap: 20px; }
+        .ep2-metric-lbl { font-size: .64rem; text-transform: uppercase; letter-spacing: .04em; color: #8591A0; font-weight: 700; margin-bottom: 3px; }
+        .ep2-metric-val { font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+        .ep2-metric-val.accent { color: #2f5a85; }
+        .ep2-metric-val.money { color: #C0392B; }
+        .ep2-metric-empty { font-size: .78rem; color: #8591A0; font-style: italic; }
       `}</style>
 
       <button
@@ -444,18 +464,60 @@ export function StockoutEpisodePage() {
               <section className="ep2-card">
                 <div className="ep2-card-head"><iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> Métriques temporelles</div>
                 <div className="ep2-card-body">
-                  <dl className="row mb-0 ep2-field">
-                    <div className="col-6">
-                      <dt>Rupture avant commande {!detail.order && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
-                      <dd className="accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</dd>
+                  {/* Refondu le 18/10/2026 (demande explicite : "affiche heure de debut et fin le
+                      nombre de minuque qu'il a fait... et le style il faut bien separe les info") —
+                      chaque bloc avant/après commande regroupe maintenant sa propre borne de temps
+                      (début → fin), sa durée et sa perte au même endroit, au lieu de 4 valeurs
+                      dispersées dans une grille 2x2 sans lien visuel évident entre elles. */}
+                  <div className="ep2-metric-block before">
+                    <div className="ep2-metric-head">
+                      <span>Avant commande</span>
+                      {!detail.order && detail.status === 'EN_COURS' && <span className="ep2-live-dot">● en direct</span>}
                     </div>
-                    <div className="col-6">
-                      <dt>Rupture après commande {detail.order && !detail.order.actualReceptionDate && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
-                      <dd className="money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</dd>
+                    <div className="ep2-metric-range">
+                      {formatDateTime(detail.startedAt)}
+                      <iconify-icon icon="solar:arrow-right-linear"></iconify-icon>
+                      {detail.order ? formatDateTime(detail.order.createdAt) : (detail.status === 'EN_COURS' ? 'maintenant' : formatDateTime(detail.endedAt))}
                     </div>
-                    <div className="col-6"><dt>Perte avant commande</dt><dd>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</dd></div>
-                    <div className="col-6"><dt>Perte après commande</dt><dd>{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</dd></div>
-                  </dl>
+                    <div className="ep2-metric-figures">
+                      <div>
+                        <div className="ep2-metric-lbl">Durée</div>
+                        <div className="ep2-metric-val accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</div>
+                      </div>
+                      <div>
+                        <div className="ep2-metric-lbl">Perte estimée</div>
+                        <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="ep2-metric-block after">
+                    <div className="ep2-metric-head">
+                      <span>Après commande</span>
+                      {detail.order && !detail.order.actualReceptionDate && detail.status === 'EN_COURS' && <span className="ep2-live-dot">● en direct</span>}
+                    </div>
+                    {detail.order ? (
+                      <>
+                        <div className="ep2-metric-range">
+                          {formatDateTime(detail.order.createdAt)}
+                          <iconify-icon icon="solar:arrow-right-linear"></iconify-icon>
+                          {detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : (detail.status === 'EN_COURS' ? 'maintenant' : formatDateTime(detail.endedAt))}
+                        </div>
+                        <div className="ep2-metric-figures">
+                          <div>
+                            <div className="ep2-metric-lbl">Durée</div>
+                            <div className="ep2-metric-val money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
+                          </div>
+                          <div>
+                            <div className="ep2-metric-lbl">Perte estimée</div>
+                            <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="ep2-metric-empty">Pas encore de commande — rien à mesurer sur cette période.</div>
+                    )}
+                  </div>
                 </div>
               </section>
             </div>
