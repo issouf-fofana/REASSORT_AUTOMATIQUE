@@ -165,20 +165,20 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
                 </div>
               </div>
               <div className="col-6 col-md-3">
-                <div className="text-muted small">Épisodes concernés</div>
+                <div className="text-muted small">Ruptures d'article</div>
                 <div className="fs-5 fw-semibold">{summary.episodeCount}</div>
               </div>
             </div>
 
             {summary.departmentBreakdown.length > 0 && (
-              <div className="table-responsive mb-3">
+              <div className="table-responsive mb-1">
                 <table className="table table-sm align-middle mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
                       <th>Rayon</th>
                       <th>CA perdu</th>
                       <th>Qté perdue</th>
-                      <th>Épisodes</th>
+                      <th>Ruptures d'article</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -192,6 +192,12 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {summary.departmentBreakdown.length > 0 && (
+              <div className="text-muted mb-3" style={{ fontSize: '.76rem' }}>
+                <iconify-icon icon="solar:info-circle-linear" className="align-middle me-1"></iconify-icon>
+                Une « rupture d'article » = une période continue où un article a manqué en rayon. Un même article qui tombe en rupture plusieurs fois dans la période compte autant de fois.
               </div>
             )}
 
@@ -229,7 +235,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
                         <div className="d-flex align-items-baseline justify-content-between flex-wrap gap-2">
                           <strong style={{ color: '#1B2A4A', fontSize: '.88rem' }}>{d.department}</strong>
                           <span className="text-muted small">
-                            {d.caPerdue.toLocaleString('fr-FR')} CFA ({d.pctOfTotal} % du total) · {d.qtyPerdue} unité(s) · {d.episodeCount} épisode(s)
+                            {d.caPerdue.toLocaleString('fr-FR')} CFA ({d.pctOfTotal} % du total) · {d.qtyPerdue} unité(s) perdue(s) · {d.episodeCount} rupture(s) d'article
                           </span>
                         </div>
                         {d.prevention && (
@@ -240,6 +246,13 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
                         )}
                       </div>
                     ))}
+                    {/* Légende explicative (demande explicite du 18/10/2026 : "epidode c'est quoi
+                        fait plus explicative") — "épisode"/"rupture" n'est pas évident sans contexte :
+                        un article en rupture 3 fois dans le mois compte pour 3, pas 1. */}
+                    <div className="text-muted" style={{ fontSize: '.76rem', marginTop: 8, paddingTop: 8, borderTop: '1px dashed rgba(27,42,74,.12)' }}>
+                      <iconify-icon icon="solar:info-circle-linear" className="align-middle me-1"></iconify-icon>
+                      Une « rupture d'article » correspond à une période continue où UN article donné a été en rupture de stock. Un même article qui tombe en rupture 3 fois dans le mois compte pour 3 ruptures, pas 1.
+                    </div>
                   </div>
                 )}
 

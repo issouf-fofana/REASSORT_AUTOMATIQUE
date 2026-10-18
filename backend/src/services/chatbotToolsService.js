@@ -49,6 +49,7 @@ const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { listAnomalies } = require('./orderAnomalyService');
 const aiForecastService = require('./aiForecastService');
+const stockoutEpisodeService = require('./stockoutEpisodeService');
 
 // Arrondit une vente moyenne hebdomadaire à 1 décimale (demande du 12/10/2026, bug observé en
 // conditions réelles : le chatbot recopiait "2,26" directement depuis avgWeeklySales transmis sans
@@ -2532,6 +2533,69 @@ async function getShopUsers(rposShopId) {
   };
 }
 
+/**
+ * getStockoutEpisodes(rposShopId) — ruptures de stock EN COURS du module Ruptures (demande
+ * explicite du 18/10/2026 : "il doit me donner tout les infos sur les rupture, si je demande il
+ * doit me donner les info comme temps de rupture, avant apres"). Distinct de getStockoutRisks
+ * (risque de rupture FUTURE, calculé depuis la dernière proposition) : ceci porte sur des ruptures
+ * RÉELLEMENT constatées aujourd'hui (StockoutEpisode), avec durée, cause, CA perdu, statut
+ * commande/livraison déjà calculés par le module.
+ */
+async function getStockoutEpisodes(rposShopId, { department } = {}) {
+  const summary = await stockoutEpisodeService.getOpenEpisodes(rposShopId);
+  const filtered = department ? summary.filter((e) => (e.department || 'Sans rayon') === department) : summary;
+  if (!filtered.length) return { found: true, count: 0, episodes: [], message: 'Aucune rupture de stock en cours actuellement.' };
+
+  return {
+    found: true,
+    count: filtered.length,
+    episodes: filtered.slice(0, 50).map((e) => ({
+      ean: e.ean,
+      label: e.label,
+      department: e.department || 'Sans rayon',
+      sector: e.sector || 'Sans secteur',
+      startedAt: e.startedAt,
+      durationHours: Math.round(e.durationHours),
+      causeProposee: e.causeProposee,
+      hasOrder: e.hasOrder,
+      deliveryStatus: e.deliveryStatus,
+      actualReceptionDate: e.actualReceptionDate,
+      caPerdueEstime: e.caPerdueEstime,
+      qtyPerdueEstimee: e.qtyPerdueEstimee,
+      sellingPrice: e.sellingPrice,
+    })),
+  };
+}
+
+/**
+ * getStockoutEpisodeDetail(rposShopId, ean) — détail complet de la rupture EN COURS d'un article
+ * précis : stock avant/pendant/après (y compris après livraison réelle si déjà reçue), cause,
+ * commande associée. Cherche d'abord l'épisode EN_COURS pour cet EAN, puis délègue à
+ * getEpisodeDetail (même fonction que la fiche détail de la page Ruptures) pour ne jamais dupliquer
+ * la logique d'enrichissement stock/commande.
+ */
+async function getStockoutEpisodeDetail(rposShopId, ean) {
+  const episode = await prisma.stockoutEpisode.findFirst({
+    where: { rposShopId, ean, status: 'EN_COURS' },
+    orderBy: { startedAt: 'desc' },
+    select: { id: true },
+  });
+  if (!episode) return { found: false, message: 'Aucune rupture en cours trouvée pour cet article sur ce magasin.' };
+  return stockoutEpisodeService.getEpisodeDetail(episode.id);
+}
+
+/**
+ * getStockoutPeriodSummary(rposShopId, {startDate, endDate}) — synthèse des pertes de rupture sur
+ * une période (même calcul que la page Ruptures > Analyse des pertes sur une période) : CA perdu,
+ * comparé au CA réellement réalisé par le magasin, répartition par rayon. Permet au chatbot de
+ * répondre à "quelle a été ma perte le mois dernier" sans que l'utilisateur passe par l'UI.
+ */
+async function getStockoutPeriodSummary(rposShopId, { startDate, endDate } = {}) {
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  return stockoutEpisodeService.getPeriodLossSummary(rposShopId, { startDate: start.toISOString(), endDate: end.toISOString() });
+}
+
 module.exports = {
   getStoreStock,
   getShopUsers,
@@ -2571,4 +2635,7 @@ module.exports = {
   getDataAvailability,
   getShopDepartments,
   getShopSuppliers,
+  getStockoutEpisodes,
+  getStockoutEpisodeDetail,
+  getStockoutPeriodSummary,
 };

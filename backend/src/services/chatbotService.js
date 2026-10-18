@@ -26,6 +26,7 @@ const VALID_INTENT_TOOLS = new Set([
   'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
+  'getStockoutEpisodes',
 ]);
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
@@ -720,7 +721,8 @@ const TOOL_CATALOG = [
   { name: 'getStockMoveHistoryAllShops', description: 'Mouvements de stock (casse, cession, retour, vente...) d\'un article précis dans TOUS les magasins accessibles à l\'utilisateur (réservé aux comptes multi-magasins) — utile pour "les mouvements de l\'article X dans tous les magasins", jamais pour une question sur UN seul magasin précis.', params: { ean: 'code EAN article, requis', dateRangeStart: 'date ISO de début, optionnel', dateRangeEnd: 'date ISO de fin, optionnel' } },
   { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
   { name: 'explainProposalQuantity', description: 'Raisonnement IA en direct expliquant POURQUOI une quantité précise est suggérée pour UN article de la proposition en attente (pas juste "quelle quantité", une vraie explication). Nécessite un article identifié (EAN explicite ou dernier article mentionné dans la conversation).', params: { ean: 'code EAN article, OBLIGATOIRE' } },
-  { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement.', params: { department: 'rayon, optionnel' } },
+  { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement (risque FUTUR, calculé depuis la dernière proposition — jamais une rupture déjà constatée).', params: { department: 'rayon, optionnel' } },
+  { name: 'getStockoutEpisodes', description: 'Ruptures de stock EN COURS, RÉELLEMENT constatées aujourd\'hui (module Ruptures de stock) — pour chaque article : depuis quand il est en rupture, durée, rayon, cause probable, statut de commande/livraison, CA perdu déjà estimé. Utiliser pour "quels articles sont en rupture en ce moment", "depuis combien de temps tel article est en rupture", "combien de temps dure cette rupture", "quelle est la perte liée aux ruptures" — jamais getStockoutRisks qui porte sur un risque futur, pas une rupture déjà là.', params: { department: 'rayon, optionnel' } },
   { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
@@ -855,7 +857,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // les magasins" sans EAN explicite ne réutilisait jamais le dernier EAN de la conversation,
   // contrairement à getArticleStock pour un seul magasin — la question échouait en demandant de
   // préciser un EAN qui venait pourtant d'être donné juste avant).
-  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getArticleStockAllShops', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue', 'explainProposalQuantity']);
+  const ARTICLE_SCOPED_TOOLS = new Set(['getArticleDetails', 'getPriceChangeHistory', 'getArticleStock', 'getArticleStockAllShops', 'getSalesHistory', 'getStockMoveHistory', 'getRevenue', 'explainProposalQuantity', 'getStockoutEpisodes']);
 
   // Filet de sécurité n°1 : un EAN explicite dans la question mais aucun mot-clé reconnu (ex: "tu
   // peux me dire tout sur cet article : 100446452 ?", formulation imprévue) — plutôt que de
@@ -1257,6 +1259,18 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         // Même bug que getOrders/getPredictionAccuracy (period ignorée) : "risque de rupture sur
         // 2 semaines/un mois" retombait silencieusement sur le défaut de l'outil (3 jours).
         return { toolName, toolResult: await tools.getStockoutRisks(rposShopId, { department, maxDays: daysQuery || 3 }) };
+      case 'getStockoutEpisodes': {
+        // Si un article précis est identifié (EAN explicite, ou réutilisé depuis la conversation
+        // via ARTICLE_SCOPED_TOOLS/`ean` déjà résolu plus haut), on bascule sur le détail complet de
+        // SA rupture (stock avant/pendant/après) plutôt que la liste générale — demande explicite du
+        // 18/10/2026 : "il doit me donner les info comme temps de rupture, avant apres" pour UN
+        // article en particulier.
+        if (ean) {
+          const detail = await tools.getStockoutEpisodeDetail(rposShopId, ean);
+          return { toolName: 'getStockoutEpisodeDetail', toolResult: detail };
+        }
+        return { toolName, toolResult: await tools.getStockoutEpisodes(rposShopId, { department }) };
+      }
       case 'getOverstockArticles':
         return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
       case 'getPredictionAccuracy':

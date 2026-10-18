@@ -48,6 +48,7 @@ const TOOL_CAPABILITY = {
   getArticleStock: 'stock',
   getStoreStock: 'stock',
   getStockoutRisks: 'stock',
+  getStockoutEpisodes: 'stock',
   getOverstockArticles: 'stock',
   getStockoutRisksAllShops: 'stock', // même capacité que la version single-shop, restriction ADMIN/SUPERVISOR appliquée dans chatbotService.js
   getOverstockArticlesAllShops: 'stock',

@@ -53,6 +53,14 @@ const FALLBACK_INTENT_RULES = [
   // aucun mot-clé — ni "ca" isolé ni "chiffre d'affaires" en toutes lettres — et tombait sur le
   // filet LLM de routage, ajoutant ~5s avant même la réponse pour une formulation pourtant courante).
   { keywords: ['chiffre d\'affaires', 'chiffre daffaire', 'chiffre d affaire', 'le ca', 'du ca', 'au ca', 'ton ca', 'mon ca', 'quel ca', 'ca du', 'ca le', 'ca est', 'ca de', 'combien on a fait', 'combien jai fait', 'combien on a vendu en argent', 'recette du jour', 'recette de', 'les chiffres du jour', 'chiffres du jour', 'chiffres d\'aujourd\'hui', 'chiffres daujourdhui', 'les chiffres d\'aujourd\'hui'], tool: 'getRevenue' },
+  // Ruptures RÉELLEMENT en cours (module Ruptures de stock, StockoutEpisode), ajouté le 18/10/2026
+  // (demande explicite : "il doit me donner tout les infos sur les rupture, si je demande il doit
+  // me donner les info comme temps de rupture, avant apres") — DOIT rester AVANT la règle
+  // getStockoutRisks générique juste en dessous : "rupture" seul matcherait sinon TOUJOURS en
+  // premier et empêcherait jamais d'atteindre cette règle plus précise. getStockoutRisks porte sur
+  // un risque FUTUR (calculé depuis la dernière proposition, "va manquer"), celle-ci porte sur des
+  // ruptures RÉELLES déjà constatées aujourd'hui (durée, cause, CA perdu déjà mesurés).
+  { keywords: ['rupture en cours', 'ruptures en cours', 'actuellement en rupture', 'déjà en rupture', 'deja en rupture', 'est en rupture', 'sont en rupture', 'en rupture depuis', 'depuis combien de temps en rupture', 'depuis quand en rupture', 'depuis quand il est en rupture', 'depuis quand elle est en rupture', 'combien de temps en rupture', 'combien de temps dure', 'combien de temps il est en rupture', 'temps de rupture', 'durée de rupture', 'duree de rupture', 'durée de la rupture', 'duree de la rupture', 'combien d\'articles en rupture', 'combien darticles en rupture', 'quels articles sont en rupture', 'quels articles en rupture', 'articles qui manquent en rayon', 'stock avant la rupture', 'stock avant rupture', 'stock après la rupture', 'stock apres la rupture', 'perte de ca lié aux ruptures', 'perte de ca liée aux ruptures', 'perte liée aux ruptures', 'ca perdu rupture', 'ca perdu à cause des ruptures'], tool: 'getStockoutEpisodes' },
   { keywords: ['rupture', 'stock critique', 'risque de rupture', 'va manquer', 'vont manquer', 'plus de stock', 'articles en manque', 'articles manquants', 'quoi va manquer'], tool: 'getStockoutRisks' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
   { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', 'lia se trompe', 'l\'ia se trompe', 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
