@@ -443,7 +443,15 @@ async function getOpenEpisodes(rposShopId) {
     let deliveryStatus = 'SANS_COMMANDE';
     if (hasOrder) {
       if (matchedOrder.receptionStatus === 'RECUE_ESTIMEE') {
-        deliveryStatus = matchedOrder.actualReceptionDate && matchedOrder.actualReceptionDate < now ? 'LIVRAISON_DOUTEUSE' : 'LIVREE';
+        // CORRIGÉ le 18/10/2026 (revue de code) : comparait directement à actualReceptionDate, qui
+        // vient du délai fixe receptionLeadTimeDays (ignorant le week-end/14h) — une commande du
+        // samedi pouvait tomber "douteuse" ici dès le dimanche, alors que getEpisodeDetail (qui
+        // exige maintenant deliveryDelay via computeExpectedReceptionDate) n'affichait plus ce faux
+        // positif. Même garde-fou LÉGER que EN_RETARD ci-dessous (pas de requête StockMove ici,
+        // volontairement, pour les mêmes raisons de performance).
+        const expected = computeExpectedReceptionDate(matchedOrder.createdAt, weekendDeliveryDay);
+        const daysLate = Math.floor((now.getTime() - expected.getTime()) / (24 * 60 * 60 * 1000));
+        deliveryStatus = daysLate >= DELIVERY_DELAY_TOLERANCE_DAYS ? 'LIVRAISON_DOUTEUSE' : 'LIVREE';
       } else {
         // EN_RETARD ajouté le 18/10/2026 (demande explicite : "3j il faut avoir des explication
         // donc on doit nous dire que la livrasion est en retart") — calcul LÉGER en mémoire

@@ -185,17 +185,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   }, [shopQueryParam]);
 
   // Niveau Secteurs : chargé une fois par magasin.
-  useEffect(() => {
-    if (!shopQueryParam) return;
-    let cancelled = false;
-    setBySector(null);
-    apiFetch<ByFieldSummary>(`/reassort/stockout-episodes/by-sector?${shopQueryParam}`)
-      .then((data) => { if (!cancelled) setBySector(data); })
-      .catch(() => { /* non bloquant : la liste d'articles reste consultable sans ce niveau */ });
-    return () => { cancelled = true; };
-  }, [shopQueryParam]);
-
-  // Niveau Secteurs : chargé une fois par magasin.
+  // (bug corrigé le 18/10/2026 : ce useEffect était dupliqué deux fois à l'identique, doublant
+  // inutilement l'appel réseau vers /by-sector à chaque chargement de la page.)
   useEffect(() => {
     if (!shopQueryParam) return;
     let cancelled = false;
