@@ -907,10 +907,16 @@ async function getEpisodeDetail(episodeId) {
     }
   }
 
-  // Diagnostic de retard de livraison (demande explicite du 18/10/2026) : seulement si une commande
-  // existe et n'est pas déjà confirmée reçue par un vrai mouvement Arrivage (sinon rien à signaler).
+  // Diagnostic de retard de livraison (demande explicite du 18/10/2026) : appelé pour toute commande
+  // pas encore confirmée reçue par un vrai mouvement Arrivage — que receptionStatus soit déjà passé
+  // à RECUE_ESTIMEE (actualReceptionDate alors non-null, une simple ESTIMATION de délai, cf.
+  // schema.prisma) ou non. CORRIGÉ le 18/10/2026 (bug signalé : commande validée un samedi,
+  // "Livraison douteuse" affichée alors que l'échéance réelle n'était même pas encore arrivée) —
+  // avant ce correctif, la condition `!order.actualReceptionDate` sautait ce diagnostic dès que
+  // receptionStatus passait à RECUE_ESTIMEE, empêchant deliveryLooksDoubtful de jamais vérifier la
+  // VRAIE date attendue (règle week-end/14h) avant de signaler un doute.
   let deliveryDelay = null;
-  if (order && !order.actualReceptionDate) {
+  if (order) {
     const effectiveValidatedAt = rposOrderDetail?.validationDate ?? matchedLine?.proposal?.validatedAt ?? order.createdAt;
     const reassortConfig = await prisma.reassortConfig.findUnique({ where: { rposShopId: episode.rposShopId }, select: { weekendDeliveryDay: true } });
     deliveryDelay = await diagnoseDeliveryDelay(episode.rposShopId, episode.ean, effectiveValidatedAt, reassortConfig?.weekendDeliveryDay || 'LUNDI');
@@ -988,11 +994,22 @@ async function getEpisodeDetail(episodeId) {
     // confirmation ; la preuve la plus fiable ici est que CET épisode est toujours EN_COURS après la
     // date de réception estimée — si l'article était vraiment revenu, le job de détection l'aurait
     // déjà résolu.
+    //
+    // CORRIGÉ le 18/10/2026 (bug signalé avec capture : commande validée un samedi, livraison
+    // affichée comme "douteuse" alors que l'échéance réelle n'était même pas encore arrivée —
+    // "cette commande a ete passer le weekend donc l'entrepot va donc livre etre dand la semaine
+    // prochoine soit lundi, mardi"). order.actualReceptionDate vient du délai fixe
+    // ReassortConfig.receptionLeadTimeDays (receptionSyncJob.js), qui ignore le week-end et la
+    // coupure 14h — comparer directement à cette date déclenchait le doute un jour en avance sur la
+    // vraie échéance. On exige maintenant aussi que deliveryDelay soit non-null : cette valeur est
+    // calculée via computeExpectedReceptionDate (règle réelle du cycle entrepôt) + une marge de
+    // tolérance de 2 jours avant de juger quoi que ce soit (cf. diagnoseDeliveryDelay ci-dessus).
     deliveryLooksDoubtful: !!(
       episode.status === 'EN_COURS' &&
       order?.receptionStatus === 'RECUE_ESTIMEE' &&
       order.actualReceptionDate &&
-      order.actualReceptionDate < now
+      order.actualReceptionDate < now &&
+      deliveryDelay
     ),
     // Retard de livraison (commande passée, jamais reçue du tout — distinct de
     // deliveryLooksDoubtful qui couvre le cas "marquée reçue mais rien ne le confirme"). null si

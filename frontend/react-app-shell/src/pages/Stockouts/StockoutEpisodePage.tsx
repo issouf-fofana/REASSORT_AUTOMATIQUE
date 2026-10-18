@@ -594,8 +594,13 @@ export function StockoutEpisodePage() {
                   compté"). RECUE_ESTIMEE est une estimation de délai, jamais une confirmation
                   (cf. schema.prisma) ; deliveryLooksDoubtful est calculé côté serveur à partir du
                   fait le plus fiable disponible ici : l'épisode est toujours ouvert après la date de
-                  réception estimée. */}
-              {detail.deliveryLooksDoubtful && (
+                  réception estimée.
+                  N'affiche PAS ce bloc quand deliveryDelay est déjà présent juste en dessous : les
+                  deux sont désormais toujours vrais ensemble côté serveur (deliveryLooksDoubtful
+                  exige maintenant deliveryDelay non-null, cf. stockoutEpisodeService.js) — afficher
+                  les deux serait redondant, celui-ci redit juste la même chose avec moins de détail
+                  (pas de vraie date attendue ni de diagnostic facture). */}
+              {detail.deliveryLooksDoubtful && !detail.deliveryDelay && (
                 <div className="ep2-verdict tone-critical">
                   <strong>Livraison douteuse.</strong> La réception de cette commande est estimée comme reçue depuis le {detail.order?.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : '—'}, mais la rupture est toujours en cours et aucun mouvement de réception n'apparaît dans l'historique de stock — l'article n'est probablement pas réellement revenu en rayon, malgré le statut RPOS.
                 </div>
