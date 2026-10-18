@@ -672,7 +672,7 @@ async function getEpisodeDetail(episodeId) {
     // sans ralentir la page d'un appel réseau.
     prisma.productCache.findUnique({
       where: { rposShopId_ean: { rposShopId: episode.rposShopId, ean: episode.ean } },
-      select: { stock: true, syncedAt: true },
+      select: { stock: true, syncedAt: true, sellingPrice: true, buyingPrice: true },
     }),
     // Stock au moment de la résolution (si l'épisode est déjà clos) — distinct de stockLatestSnapshot
     // qui peut être un peu avant endedAt selon la fréquence de capture.
@@ -832,6 +832,8 @@ async function getEpisodeDetail(episodeId) {
     stockAtStart: stockAtStart ? { value: stockAtStart.stock, capturedAt: stockAtStart.capturedAt } : null,
     stockCurrent: stockLatestSnapshot ? { value: stockLatestSnapshot.stock, capturedAt: stockLatestSnapshot.capturedAt } : null,
     stockRpos: productCache ? { value: productCache.stock, syncedAt: productCache.syncedAt } : null,
+    sellingPrice: productCache?.sellingPrice ?? null,
+    buyingPrice: productCache?.buyingPrice ?? null,
     stockAtEnd: stockAtEnd ? { value: stockAtEnd.stock, capturedAt: stockAtEnd.capturedAt } : null,
     stockAfterDelivery: stockAfterDelivery ? { value: stockAfterDelivery.stock, capturedAt: stockAfterDelivery.capturedAt } : null,
   };

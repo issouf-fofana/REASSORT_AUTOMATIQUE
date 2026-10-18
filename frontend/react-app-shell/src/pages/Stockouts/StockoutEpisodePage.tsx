@@ -83,6 +83,8 @@ type EpisodeDetail = {
   stockRpos: { value: number; syncedAt: string } | null;
   stockAtEnd: { value: number; capturedAt: string } | null;
   stockAfterDelivery: { value: number; capturedAt: string } | null;
+  sellingPrice: number | null;
+  buyingPrice: number | null;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -378,6 +380,8 @@ export function StockoutEpisodePage() {
                     <div className="col-6"><dt>EAN</dt><dd style={{ fontFamily: 'monospace', fontSize: '.78rem' }}>{detail.ean}</dd></div>
                     <div className="col-6"><dt>Rayon</dt><dd>{detail.department || 'Sans rayon'}</dd></div>
                     <div className="col-6"><dt>Secteur</dt><dd>{detail.sector || 'Sans secteur'}</dd></div>
+                    <div className="col-6"><dt>Prix de vente</dt><dd>{formatMoney(detail.sellingPrice)}</dd></div>
+                    <div className="col-6"><dt>Marge unitaire</dt><dd>{detail.sellingPrice !== null && detail.buyingPrice !== null ? formatMoney(detail.sellingPrice - detail.buyingPrice) : '—'}</dd></div>
                     <div className="col-6"><dt>Cause probable</dt><dd>{CAUSE_LABELS[detail.causeProposee] || detail.causeProposee}</dd></div>
                     <div className="col-6"><dt>Confiance</dt><dd>{detail.niveauConfiance.toLowerCase()}</dd></div>
                   </dl>
