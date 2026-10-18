@@ -155,6 +155,11 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('fr-FR');
 }
 
+function formatTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
 function formatMoney(value: number | null): string {
   if (value === null) return '—';
   return `${Math.round(value).toLocaleString('fr-FR')} CFA`;
@@ -163,14 +168,13 @@ function formatMoney(value: number | null): string {
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
 // (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
 // l'horodatage du relevé pour qu'on sache à quel moment précis cette valeur a été constatée.
-// Rendu dans le style "rp3-stock" de rapport_rupture_stock_v3.html (demande du 18/10/2026).
-function StockValueRp3({ stock }: { stock: { value: number; capturedAt: string } | null }) {
-  if (!stock) return <div className="num" style={{ fontSize: 14, color: 'var(--rp3-muted)' }}>—</div>;
-  const tone = stock.value < 0 ? 'red' : stock.value === 0 ? 'amber' : 'green';
+function StockValue({ stock }: { stock: { value: number; capturedAt: string } | null }) {
+  if (!stock) return <div className="text-muted small">—</div>;
+  const tone = stock.value < 0 ? '#b8302c' : stock.value === 0 ? '#a86718' : '#2d6a3f';
   return (
     <div>
-      <div className={`num ${tone}`}>{stock.value} u.</div>
-      <small>{formatDateTime(stock.capturedAt)}</small>
+      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: tone }}>{stock.value} u.</div>
+      <div className="text-muted" style={{ fontSize: '.7rem' }}>{formatDateTime(stock.capturedAt)}</div>
     </div>
   );
 }
@@ -238,141 +242,67 @@ export function StockoutEpisodePage() {
 
   const isLongDuration = liveDurations ? liveDurations.totalHours >= (detail?.deliveryDeadlineHours ?? 48) : false;
 
-  // Barres de ventilation perte avant/après commande (panel "Impact estimé") et écart entre la
-  // somme des deux périodes et le total affiché par caPerdueEstime — même logique que la maquette
-  // rapport_rupture_stock_v3.html ("Le total affiché... présente un écart à expliquer"), calculée
-  // ici plutôt qu'en dur : le total vient d'un calcul de perte globale (lookback 52 semaines),
-  // distinct de la somme avant/après (deux fenêtres estimées séparément), un écart est donc normal
-  // et attendu, pas une erreur à corriger silencieusement.
-  const lossBefore = detail?.lossBeforeOrder?.caPerdue ?? 0;
-  const lossAfter = detail?.lossAfterOrder?.caPerdue ?? 0;
-  const lossSum = lossBefore + lossAfter;
-  const lossGap = detail?.caPerdueEstime !== null && detail?.caPerdueEstime !== undefined ? detail.caPerdueEstime - lossSum : null;
-  const lossMax = Math.max(lossBefore, lossAfter, 1);
-  const lossBarWidths = {
-    before: `${Math.min(100, Math.round((lossBefore / lossMax) * 100))}%`,
-    after: `${Math.min(100, Math.round((lossAfter / lossMax) * 100))}%`,
-  };
-
-  // Actions recommandées, dérivées de l'état réel de l'épisode (jamais une liste fixe) — même
-  // principe que les callouts ci-dessus : chaque action répond à un fait constaté sur CET épisode
-  // précis (livraison douteuse, retard, stock négatif, pas de commande...), pas un texte générique.
-  const recommendedActions = (() => {
-    if (!detail) return [];
-    const actions: { title: string; desc: string }[] = [];
-    if (detail.deliveryLooksDoubtful || detail.deliveryDelay) {
-      actions.push({ title: 'Vérifier la réception réelle', desc: detail.order ? `Comparer le bon de livraison à la commande ${detail.order.rposOrderReference || detail.order.id.slice(0, 10)} et enregistrer l'entrée si elle a eu lieu.` : 'Vérifier si une commande a réellement été passée et reçue.' });
-    }
-    if (detail.stockAtStart && detail.stockAtStart.value < 0) {
-      actions.push({ title: 'Réconcilier le stock négatif', desc: "Comparer l'inventaire physique, les ventes et les mouvements de stock synchronisés." });
-    }
-    if (!detail.order && detail.status === 'EN_COURS') {
-      actions.push({ title: 'Passer une commande', desc: "Aucune commande n'a encore été passée depuis le début de la rupture." });
-    }
-    if (lossGap !== null && Math.abs(lossGap) > 1) {
-      actions.push({ title: 'Contrôler le calcul des pertes', desc: `Expliquer l'écart de ${formatMoney(Math.abs(lossGap))} entre le total affiché et les deux périodes.` });
-    }
-    if (!actions.length) {
-      actions.push({ title: 'Suivre la résolution', desc: detail.status === 'EN_COURS' ? "La rupture reste active, continuer à surveiller l'évolution du stock." : 'Rupture résolue, aucune action supplémentaire nécessaire.' });
-    }
-    return actions;
-  })();
-
   return (
-    <div className="container-fluid py-4" style={{ maxWidth: 1580, fontFamily: '"Segoe UI",Arial,sans-serif' }}>
-      {/* Style repris de rapport_rupture_stock_v3.html (demande explicite du 18/10/2026 : "je veux
-          que tu applique le style sur cette page") — palette navy/rouge/ambre/vert, panels blancs à
-          bordure fine, "callout" d'alerte, tuiles KPI, timeline à 3 événements, badges "tag". Noms
-          de classe conservés tels quels (préfixe rp3-) pour rester identifiables face à la maquette
-          source en cas de futur ajustement visuel. */}
+    <div className="container-fluid py-4">
       <style>{`
-        :root{--rp3-navy:#1d3557;--rp3-ink:#263548;--rp3-muted:#718096;--rp3-line:#dce3eb;--rp3-bg:#f3f5f8;--rp3-red:#b42318;--rp3-red-bg:#fff0ef;--rp3-orange:#9a5b0c;--rp3-orange-bg:#fff4e2;--rp3-green:#246747;--rp3-green-bg:#e9f5ed;--rp3-blue:#315b89;--rp3-blue-bg:#edf3f9;--rp3-shadow:0 1px 3px #152d4b0b}
-        .rp3 { color: var(--rp3-ink); font-size: 13px; line-height: 1.45; }
-        .rp3-back { background: #fff; border: 1px solid var(--rp3-line); color: var(--rp3-ink); font-size: .82rem; font-weight: 650; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; margin-bottom: 15px; }
-        .rp3-back:hover { background: #fafbfd; }
-        .rp3-crumb { color: var(--rp3-muted); font-size: 11px; margin-bottom: 15px; }
-        .rp3-crumb b { color: var(--rp3-ink); }
-        .rp3-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 15px; flex-wrap: wrap; }
-        .rp3-ref { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; font-weight: 800; color: var(--rp3-muted); }
-        .rp3-header h2 { margin: 5px 0; font-size: 23px; line-height: 1.25; color: var(--rp3-navy); font-weight: 800; }
-        .rp3-sub { font-size: 12px; color: var(--rp3-muted); }
-        .rp3-status { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #efc4c1; background: var(--rp3-red-bg); color: var(--rp3-red); padding: 7px 10px; border-radius: 5px; font-size: 10px; font-weight: 800; white-space: nowrap; }
-        .rp3-status.resolved { border-color: #c8e3d1; background: var(--rp3-green-bg); color: var(--rp3-green); }
-        .rp3-dot { width: 7px; height: 7px; background: var(--rp3-red); border-radius: 50%; }
-        .rp3-status.resolved .rp3-dot { background: var(--rp3-green); }
-        .rp3-callout { padding: 11px 13px; border-radius: 5px; margin-bottom: 14px; display: flex; gap: 10px; align-items: flex-start; font-size: 11px; }
-        .rp3-callout.warn { background: var(--rp3-orange-bg); border: 1px solid #efd5a8; color: #7d4b0b; }
-        .rp3-callout.danger { background: var(--rp3-red-bg); border: 1px solid #efc7c4; color: #8d211a; }
-        .rp3-callout.good { background: var(--rp3-green-bg); border: 1px solid #c8e3d1; color: #225b40; }
-        .rp3-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--rp3-muted); font-weight: 850; margin: 21px 0 9px; }
-        .rp3-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-bottom: 16px; }
-        @media (max-width: 860px) { .rp3-kpis { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-        .rp3-kpi { background: #fff; border: 1px solid var(--rp3-line); border-radius: 6px; padding: 13px 14px; box-shadow: var(--rp3-shadow); min-width: 0; }
-        .rp3-kpi-label { color: var(--rp3-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; font-weight: 800; }
-        .rp3-kpi-value { font-size: 22px; font-weight: 850; color: var(--rp3-navy); margin: 7px 0 2px; letter-spacing: -.03em; overflow-wrap: anywhere; }
-        .rp3-kpi-value.red { color: var(--rp3-red); }
-        .rp3-kpi-value.orange { color: var(--rp3-orange); }
-        .rp3-kpi-foot { font-size: 10px; color: var(--rp3-muted); }
-        .rp3-kpi-foot b { color: var(--rp3-ink); }
-        .rp3-panel { background: #fff; border: 1px solid var(--rp3-line); border-radius: 6px; box-shadow: var(--rp3-shadow); min-width: 0; height: 100%; }
-        .rp3-panelhead { padding: 12px 15px; border-bottom: 1px solid var(--rp3-line); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-        .rp3-panelhead h3 { margin: 0; color: var(--rp3-navy); font-size: 11px; text-transform: uppercase; letter-spacing: .055em; font-weight: 800; }
-        .rp3-panelhead span { font-size: 10px; color: var(--rp3-muted); }
-        .rp3-panelbody { padding: 15px; }
-        .rp3-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 18px; }
-        .rp3-label { font-size: 9px; text-transform: uppercase; letter-spacing: .065em; color: var(--rp3-muted); font-weight: 800; margin-bottom: 4px; }
-        .rp3-value { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
-        .rp3-value.red { color: var(--rp3-red); }
-        .rp3-value.muted { font-weight: 500; color: var(--rp3-muted); }
-        .rp3-tag { display: inline-block; border-radius: 4px; padding: 3px 6px; background: #edf1f6; color: #4a5a70; font-size: 9px; font-weight: 800; }
-        .rp3-tag.red { background: var(--rp3-red-bg); color: var(--rp3-red); }
-        .rp3-tag.orange { background: var(--rp3-orange-bg); color: var(--rp3-orange); }
-        .rp3-tag.green { background: var(--rp3-green-bg); color: var(--rp3-green); }
-        .rp3-impact-top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .rp3-impact { padding: 11px; border: 1px solid var(--rp3-line); border-radius: 5px; background: #fbfcfd; }
-        .rp3-impact strong { display: block; font-size: 17px; color: var(--rp3-navy); margin-top: 4px; }
-        .rp3-impact strong.red { color: var(--rp3-red); }
-        .rp3-barrow { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; margin: 12px 0 5px; }
-        .rp3-barrow span { color: var(--rp3-muted); }
-        .rp3-track { height: 7px; background: #edf0f4; border-radius: 99px; overflow: hidden; }
-        .rp3-fill { height: 100%; border-radius: 99px; background: var(--rp3-orange); }
-        .rp3-fill.after { background: var(--rp3-red); }
-        .rp3-note { font-size: 10px; color: var(--rp3-muted); margin-top: 9px; line-height: 1.5; }
-        .rp3-timeline { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; padding: 15px; }
-        @media (max-width: 860px) { .rp3-timeline { grid-template-columns: 1fr; } }
-        .rp3-event { border: 1px solid var(--rp3-line); border-radius: 5px; overflow: hidden; }
-        .rp3-eventhead { padding: 9px 11px; background: #fafbfd; border-bottom: 1px solid var(--rp3-line); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-        .rp3-eventhead b { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
-        .rp3-eventbody { padding: 12px; }
-        .rp3-eventdate { font-size: 12px; font-weight: 800; color: var(--rp3-navy); margin: 2px 0 7px; }
-        .rp3-eventdesc { font-size: 10px; color: var(--rp3-muted); line-height: 1.65; }
-        .rp3-event.detect .rp3-eventhead { border-top: 3px solid #668b78; }
-        .rp3-event.order .rp3-eventhead { border-top: 3px solid #d2a04a; }
-        .rp3-event.delivery .rp3-eventhead { border-top: 3px solid var(--rp3-red); }
-        .rp3-stockrow { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; padding: 14px; }
-        @media (max-width: 860px) { .rp3-stockrow { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-        .rp3-stock { border: 1px solid var(--rp3-line); background: #fafbfd; border-radius: 5px; padding: 11px; min-width: 0; }
-        .rp3-stock .num { font-size: 19px; font-weight: 850; margin: 4px 0; color: var(--rp3-navy); }
-        .rp3-stock .num.red { color: var(--rp3-red); }
-        .rp3-stock .num.amber { color: var(--rp3-orange); }
-        .rp3-stock .num.green { color: var(--rp3-green); }
-        .rp3-stock small { font-size: 10px; color: var(--rp3-muted); line-height: 1.5; display: block; }
-        .rp3-actions { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-        .rp3-todo { border: 1px solid var(--rp3-line); border-radius: 5px; padding: 12px; display: flex; gap: 10px; }
-        .rp3-todo .n { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; border-radius: 5px; background: var(--rp3-blue-bg); color: var(--rp3-blue); font-weight: 850; }
-        .rp3-todo b { font-size: 11px; display: block; margin-bottom: 4px; }
-        .rp3-todo p { font-size: 10px; color: var(--rp3-muted); margin: 0; line-height: 1.55; }
-        .rp3-tablewrap { overflow: auto; }
-        .rp3-tablewrap table { border-collapse: collapse; width: 100%; font-size: 10px; }
-        .rp3-tablewrap th, .rp3-tablewrap td { padding: 11px 13px; text-align: left; border-bottom: 1px solid var(--rp3-line); white-space: nowrap; }
-        .rp3-tablewrap th { background: #fafbfd; color: var(--rp3-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 9px; font-weight: 700; }
-        .rp3-tablewrap tbody tr:last-child td { border-bottom: 0; }
-        .rp3-tablewrap tbody tr:hover { background: #fafbfd; }
-        .rp3-footer { display: flex; justify-content: space-between; gap: 12px; color: var(--rp3-muted); font-size: 10px; margin-top: 13px; }
-        @media (max-width: 700px) { .rp3-footer { display: block; } .rp3-footer span { display: block; margin-top: 5px; } }
+        .ep2-crumb-back { background: #fff; border: 1px solid rgba(27,42,74,.15); color: #1B2A4A; font-size: .82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; margin-bottom: 12px; }
+        .ep2-crumb-back:hover { background: #EDF1F7; }
+        .ep2-alert { background: #FDF1DD; border: 1px solid rgba(168,103,24,.25); color: #7a4910; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: .85rem; margin-bottom: 16px; }
+        .ep2-header { background: #1B2A4A; border-radius: 14px; padding: 22px 26px; color: #fff; margin-bottom: 14px; position: relative; overflow: hidden; }
+        .ep2-header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+        .ep2-header .eyebrow { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: #9FB0CC; font-weight: 600; margin-bottom: 4px; }
+        .ep2-header h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 4px; color: #fff; }
+        .ep2-header .meta { font-size: .82rem; color: #C9D2E3; }
+        .ep2-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; font-size: .78rem; font-weight: 600; white-space: nowrap; }
+        .ep2-status-badge.active { background: rgba(224,87,76,.22); color: #FF9D94; }
+        .ep2-status-badge.resolved { background: rgba(76,175,130,.22); color: #7FE0A8; }
+        .ep2-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+        @media (max-width: 860px) { .ep2-tiles { grid-template-columns: repeat(2, 1fr); } }
+        .ep2-tile { background: rgba(255,255,255,.06); border-radius: 10px; padding: 12px 14px; }
+        .ep2-tile .lbl { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: #9FB0CC; margin-bottom: 4px; }
+        .ep2-tile .val { font-size: 1.1rem; font-weight: 700; }
+        .ep2-tile .val.warn { color: #FFC164; }
+        .ep2-tile .sub { font-size: .68rem; color: #9FB0CC; margin-top: 2px; }
+
+        .ep2-timeline { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 12px; padding: 18px 20px; margin-bottom: 14px; display: flex; align-items: center; gap: 0; }
+        .ep2-timeline-pt { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+        .ep2-timeline-pt.end { text-align: right; align-items: flex-end; }
+        .ep2-timeline-pt .lbl { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: #8591A0; font-weight: 600; }
+        .ep2-timeline-pt .date { font-size: .85rem; color: #1B2A4A; font-weight: 600; }
+        .ep2-timeline-pt .time { font-size: .95rem; font-weight: 700; }
+        .ep2-timeline-mid { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 16px; }
+        .ep2-timeline-mid .arrow { color: #C6D0D8; font-size: 1.1rem; }
+        .ep2-timeline-mid .dur { font-size: 1.15rem; font-weight: 700; color: #b8302c; }
+        .ep2-timeline-mid .sub { font-size: .68rem; color: #8591A0; }
+
+        .ep2-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 12px; height: 100%; }
+        .ep2-card-head { padding: 12px 18px; border-bottom: 1px solid #eef1f4; font-weight: 700; font-size: .82rem; color: #1B2A4A; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .03em; }
+        .ep2-card-body { padding: 16px 18px; }
+        .ep2-field dt { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: #8591A0; font-weight: 600; margin-bottom: 2px; }
+        .ep2-field dd { font-size: .85rem; color: #1B2A4A; font-weight: 600; margin: 0 0 12px; }
+        .ep2-field dd.accent { color: #2f5a85; }
+        .ep2-field dd.money { color: #b8302c; }
+        .ep2-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: .74rem; font-weight: 600; }
+        .ep2-badge.tone-critical { background: #fbe6e4; color: #8a221e; }
+        .ep2-badge.tone-warning { background: #faecd3; color: #7a4910; }
+        .ep2-badge.tone-success { background: #e0efe4; color: #2d6a3f; }
+        .ep2-badge.tone-info { background: #e2ecf5; color: #2f5a85; }
+        .ep2-verdict { border-radius: 10px; padding: 12px 14px; font-size: .82rem; margin-top: 10px; }
+        .ep2-verdict.tone-critical { background: #fbe6e4; color: #8a221e; }
+        .ep2-verdict.tone-warning { background: #faecd3; color: #7a4910; }
+        .ep2-verdict.tone-success { background: #e0efe4; color: #2d6a3f; }
+        .ep2-verdict.tone-info { background: #e2ecf5; color: #2f5a85; }
+        .ep2-loss-split { display: flex; gap: 10px; }
+        .ep2-loss-split > div { flex: 1; border-radius: 8px; padding: 10px 12px; background: #f8fafb; }
+        .ep2-loss-split .lbl { font-size: .66rem; text-transform: uppercase; color: #8591A0; font-weight: 600; margin-bottom: 2px; }
+        .ep2-loss-split .val { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
       `}</style>
 
-      <button type="button" className="rp3-back" onClick={() => navigate(backTo || '/stockouts')}>
+      <button
+        type="button"
+        className="ep2-crumb-back"
+        onClick={() => navigate(backTo || '/stockouts')}
+      >
         <iconify-icon icon="solar:arrow-left-linear"></iconify-icon> Retour aux ruptures
       </button>
 
@@ -381,252 +311,288 @@ export function StockoutEpisodePage() {
       ) : detail === null ? (
         <div className="text-muted small">Chargement des données de rupture...</div>
       ) : (
-        <div className="rp3">
-          <div className="rp3-crumb">Pilotage / Ruptures de stock / {detail.sector || 'Sans secteur'} / <b>{detail.label || detail.ean}</b></div>
-
-          <div className="rp3-header">
-            <div>
-              <div className="rp3-ref">Rapport incident · N° {detail.ean} · EAN {detail.ean}</div>
-              <h2>{detail.label || detail.ean}</h2>
-              <div className="rp3-sub">{detail.department || 'Sans rayon'} · {detail.sector || 'Sans secteur'}</div>
-            </div>
-            <span className={`rp3-status ${detail.status !== 'EN_COURS' ? 'resolved' : ''}`}>
-              <span className="rp3-dot"></span>
-              {detail.status === 'EN_COURS' ? 'RUPTURE ACTIVE' : 'RÉSOLUE'}
-            </span>
-          </div>
-
+        <>
           {isLongDuration && (
-            <div className="rp3-callout warn">
-              <span>⚠</span>
-              <div><b>Incident à traiter.</b> Cette rupture dépasse {detail.deliveryDeadlineHours}h ({formatDuration(liveDurations?.totalHours ?? null)}) — vérifiez si une commande a été passée.</div>
+            <div className="ep2-alert">
+              <iconify-icon icon="solar:danger-triangle-bold-duotone" style={{ fontSize: '18px' }}></iconify-icon>
+              Durée inhabituelle détectée — cette rupture dépasse {detail.deliveryDeadlineHours}h ({formatDuration(liveDurations?.totalHours ?? null)}). Vérifiez si une commande a été passée.
             </div>
           )}
 
-          {detail.deliveryLooksDoubtful && (
-            <div className="rp3-callout danger">
-              <span>⚠</span>
-              <div><b>Livraison douteuse.</b> Réception estimée depuis le {detail.order?.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : '—'}, mais la rupture est toujours en cours et aucun mouvement de réception n'apparaît dans l'historique — l'article n'est probablement pas réellement revenu en rayon, malgré le statut RPOS.</div>
-            </div>
-          )}
-
-          {detail.deliveryDelay && (
-            <div className="rp3-callout danger">
-              <span>⚠</span>
+          {/* Header */}
+          <div className="ep2-header">
+            <div className="ep2-header-top">
               <div>
-                <b>Livraison en retard ({detail.deliveryDelay.daysLate} j).</b> Attendue le {formatDateTime(detail.deliveryDelay.expectedReceptionDate)}, toujours pas reçue.
-                {detail.deliveryDelay.likelyInvoiceIntegrationIssue
-                  ? " Les 3 créneaux d'intégration des factures entrepôt (12h, 17h, 23h) sont déjà passés depuis cette date sans qu'aucun arrivage n'apparaisse — l'intégration a probablement échoué côté entrepôt plutôt qu'un simple retard de transport."
-                  : ` En attente du prochain créneau d'intégration facture (${detail.deliveryDelay.invoiceSlotsPassedWithoutArrival}/3 déjà passés sans arrivage détecté).`}
+                <div className="eyebrow">Rupture n° {detail.ean}</div>
+                <h2>{detail.label || detail.ean}</h2>
+                <div className="meta">{detail.department || 'Sans rayon'} · {detail.sector || 'Sans secteur'}</div>
+              </div>
+              <span className={`ep2-status-badge ${detail.status === 'EN_COURS' ? 'active' : 'resolved'}`}>
+                <iconify-icon icon={detail.status === 'EN_COURS' ? 'solar:alert-bold' : 'solar:check-circle-bold'}></iconify-icon>
+                {detail.status === 'EN_COURS' ? 'Rupture active' : 'Résolue'}
+              </span>
+            </div>
+
+            <div className="ep2-tiles">
+              <div className="ep2-tile">
+                <div className="lbl">Détectée le</div>
+                <div className="val" style={{ fontSize: '.95rem' }}>{formatDate(detail.startedAt)}</div>
+                <div className="sub">{formatTime(detail.startedAt)}</div>
+              </div>
+              <div className="ep2-tile">
+                <div className={`val ${isLongDuration ? 'warn' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.totalHours ?? null)}</div>
+                <div className="lbl" style={{ marginTop: 4 }}>Durée totale</div>
+                <div className="sub">{detail.status === 'EN_COURS' ? 'Compteur toujours actif' : 'Rupture terminée'}</div>
+              </div>
+              <div className="ep2-tile">
+                <div className="val">{formatMoney(detail.caPerdueEstime)}</div>
+                <div className="lbl" style={{ marginTop: 4 }}>CA perdu estimé</div>
+                <div className="sub">{detail.qtyPerdueEstimee !== null ? `${Math.round(detail.qtyPerdueEstimee)} unité(s)` : 'Estimation indisponible'}</div>
+              </div>
+              <div className="ep2-tile">
+                <div className="val">{detail.order ? (detail.order.quantityOrdered ?? '—') : '—'}</div>
+                <div className="lbl" style={{ marginTop: 4 }}>Quantité commandée</div>
+                <div className="sub">{detail.order ? detail.order.rposOrderReference || `Commande ${detail.order.id.slice(0, 8)}` : 'Aucune commande'}</div>
               </div>
             </div>
-          )}
+          </div>
 
-          {reactionMeta && (
-            <div className={`rp3-callout ${reactionMeta.tone === 'critical' ? 'danger' : reactionMeta.tone === 'warning' ? 'warn' : reactionMeta.tone === 'success' ? 'good' : 'warn'}`}>
-              <span>{reactionMeta.tone === 'success' ? '✓' : '⚠'}</span>
-              <div><b>{reactionMeta.label}.</b> {reactionMeta.verdict}</div>
+          {/* Timeline horizontale début → durée → fin */}
+          <div className="ep2-timeline">
+            <div className="ep2-timeline-pt">
+              <span className="lbl">Début de rupture</span>
+              <span className="date">{formatDate(detail.startedAt)}</span>
+              <span className="time" style={{ color: '#2f5a85' }}>{formatTime(detail.startedAt)}</span>
             </div>
-          )}
+            <div className="ep2-timeline-mid">
+              <iconify-icon icon="solar:arrow-right-linear" className="arrow"></iconify-icon>
+              <span className="dur" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.totalHours ?? null)}</span>
+              <span className="sub">{liveDurations ? `${Math.round(liveDurations.totalHours * 60)} minutes` : ''}</span>
+            </div>
+            <div className="ep2-timeline-pt end">
+              <span className="lbl">Fin de rupture</span>
+              <span className="date">{detail.endedAt ? formatDate(detail.endedAt) : 'En cours'}</span>
+              <span className="time" style={{ color: detail.endedAt ? '#2d6a3f' : '#b8302c' }}>{detail.endedAt ? formatTime(detail.endedAt) : '—'}</span>
+            </div>
+          </div>
 
-          <div className="rp3-section-title">Synthèse opérationnelle</div>
-          <section className="rp3-kpis">
-            <div className="rp3-kpi">
-              <div className="rp3-kpi-label">Durée depuis détection</div>
-              <div className={`rp3-kpi-value ${isLongDuration ? 'orange' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.totalHours ?? null)}</div>
-              <div className="rp3-kpi-foot">Début : <b>{formatDateTime(detail.startedAt)}</b></div>
-            </div>
-            <div className="rp3-kpi">
-              <div className="rp3-kpi-label">CA perdu estimé</div>
-              <div className="rp3-kpi-value red">{formatMoney(detail.caPerdueEstime)}</div>
-              <div className="rp3-kpi-foot">{detail.qtyPerdueEstimee !== null ? `${Math.round(detail.qtyPerdueEstimee)} unité(s)` : 'Estimation indisponible'}</div>
-            </div>
-            <div className="rp3-kpi">
-              <div className="rp3-kpi-label">Commande pendant la rupture</div>
-              <div className="rp3-kpi-value">{detail.order ? (detail.order.quantityOrdered ?? '—') : '—'}</div>
-              <div className="rp3-kpi-foot">{detail.order ? <>N° <b>{detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</b> · {formatDate(detail.order.createdAt)}</> : 'Aucune commande'}</div>
-            </div>
-            <div className="rp3-kpi">
-              <div className="rp3-kpi-label">Stock actuel signalé</div>
-              <div className={`rp3-kpi-value ${detail.stockRpos && detail.stockRpos.value < 0 ? 'red' : ''}`}>{detail.stockRpos ? `${detail.stockRpos.value} u.` : '—'}</div>
-              <div className="rp3-kpi-foot">{detail.stockRpos && detail.stockRpos.value < 0 ? 'Anomalie de stock à investiguer' : 'Stock RPOS temps réel'}</div>
-            </div>
-          </section>
-
-          <div className="rp3-section-title">Comprendre l'incident</div>
+          {/* Informations générales + Métriques temporelles */}
           <div className="row g-3 mb-3">
             <div className="col-12 col-lg-6">
-              <section className="rp3-panel">
-                <div className="rp3-panelhead"><h3>Référentiel article</h3><span>Identification &amp; prix</span></div>
-                <div className="rp3-panelbody">
-                  <div className="rp3-fields">
-                    <div><div className="rp3-label">Article</div><div className="rp3-value">{detail.label || detail.ean}</div></div>
-                    <div><div className="rp3-label">EAN</div><div className="rp3-value">{detail.ean}</div></div>
-                    <div><div className="rp3-label">Rayon</div><div className="rp3-value">{detail.department || 'Sans rayon'}</div></div>
-                    <div><div className="rp3-label">Secteur</div><div className="rp3-value">{detail.sector || 'Sans secteur'}</div></div>
-                    <div><div className="rp3-label">Prix de vente unitaire</div><div className="rp3-value">{formatMoney(detail.sellingPrice)}</div></div>
-                    <div><div className="rp3-label">Marge unitaire</div><div className="rp3-value">{detail.sellingPrice !== null && detail.buyingPrice !== null ? formatMoney(detail.sellingPrice - detail.buyingPrice) : '—'}</div></div>
-                    <div><div className="rp3-label">Cause probable</div><div className="rp3-value">{CAUSE_LABELS[detail.causeProposee] || detail.causeProposee}</div></div>
-                    <div><div className="rp3-label">Confiance</div><div className="rp3-value">{detail.niveauConfiance.toLowerCase()} <span className="rp3-tag">À confirmer</span></div></div>
-                  </div>
+              <section className="ep2-card">
+                <div className="ep2-card-head"><iconify-icon icon="solar:document-text-bold-duotone"></iconify-icon> Informations générales</div>
+                <div className="ep2-card-body">
+                  <dl className="row mb-0 ep2-field">
+                    <div className="col-6"><dt>Article</dt><dd>{detail.label || detail.ean}</dd></div>
+                    <div className="col-6"><dt>EAN</dt><dd style={{ fontFamily: 'monospace', fontSize: '.78rem' }}>{detail.ean}</dd></div>
+                    <div className="col-6"><dt>Rayon</dt><dd>{detail.department || 'Sans rayon'}</dd></div>
+                    <div className="col-6"><dt>Secteur</dt><dd>{detail.sector || 'Sans secteur'}</dd></div>
+                    <div className="col-6"><dt>Prix de vente</dt><dd>{formatMoney(detail.sellingPrice)}</dd></div>
+                    <div className="col-6"><dt>Marge unitaire</dt><dd>{detail.sellingPrice !== null && detail.buyingPrice !== null ? formatMoney(detail.sellingPrice - detail.buyingPrice) : '—'}</dd></div>
+                    <div className="col-6"><dt>Cause probable</dt><dd>{CAUSE_LABELS[detail.causeProposee] || detail.causeProposee}</dd></div>
+                    <div className="col-6"><dt>Confiance</dt><dd>{detail.niveauConfiance.toLowerCase()}</dd></div>
+                  </dl>
                 </div>
               </section>
             </div>
             <div className="col-12 col-lg-6">
-              <section className="rp3-panel">
-                <div className="rp3-panelhead"><h3>Impact estimé de la rupture</h3><span>Ventilation temporelle</span></div>
-                <div className="rp3-panelbody">
-                  <div className="rp3-impact-top">
-                    <div className="rp3-impact">
-                      <div className="rp3-label">Avant commande</div>
-                      <strong>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</strong>
-                      <div className="rp3-note">{formatDurationLive(liveDurations?.beforeOrderHours ?? null)} de rupture</div>
+              <section className="ep2-card">
+                <div className="ep2-card-head"><iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> Métriques temporelles</div>
+                <div className="ep2-card-body">
+                  <dl className="row mb-0 ep2-field">
+                    <div className="col-6">
+                      <dt>Rupture avant commande {!detail.order && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
+                      <dd className="accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</dd>
                     </div>
-                    <div className="rp3-impact">
-                      <div className="rp3-label">Après commande</div>
-                      <strong className="red">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</strong>
-                      <div className="rp3-note">{formatDurationLive(liveDurations?.afterOrderHours ?? null)} de rupture</div>
+                    <div className="col-6">
+                      <dt>Rupture après commande {detail.order && !detail.order.actualReceptionDate && detail.status === 'EN_COURS' && <span className="text-danger">● en direct</span>}</dt>
+                      <dd className="money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</dd>
                     </div>
-                  </div>
-                  <div className="rp3-barrow"><span>Perte avant commande</span><b>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</b></div>
-                  <div className="rp3-track"><div className="rp3-fill" style={{ width: lossBarWidths.before }}></div></div>
-                  <div className="rp3-barrow"><span>Perte après commande</span><b>{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</b></div>
-                  <div className="rp3-track"><div className="rp3-fill after" style={{ width: lossBarWidths.after }}></div></div>
-                  <div className="rp3-note">Somme des deux périodes : <b>{formatMoney(lossSum)}</b>.{lossGap !== null && Math.abs(lossGap) > 1 ? <> Le total affiché de {formatMoney(detail.caPerdueEstime)} présente un écart de <b>{formatMoney(Math.abs(lossGap))}</b> à expliquer.</> : null}</div>
+                    <div className="col-6"><dt>Perte avant commande</dt><dd>{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</dd></div>
+                    <div className="col-6"><dt>Perte après commande</dt><dd>{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</dd></div>
+                  </dl>
                 </div>
               </section>
             </div>
           </div>
 
-          <section className="rp3-panel mb-3">
-            <div className="rp3-panelhead"><h3>Chronologie et prise en charge</h3><span>Dates enregistrées</span></div>
-            <div className="rp3-timeline">
-              <article className="rp3-event detect">
-                <div className="rp3-eventhead"><b>1 · Détection</b><span className="rp3-tag green">Confirmée</span></div>
-                <div className="rp3-eventbody">
-                  <div className="rp3-label">Début de rupture</div>
-                  <div className="rp3-eventdate">{formatDateTime(detail.startedAt)}</div>
-                  <div className="rp3-eventdesc">Le système détecte une rupture. Compteur {detail.status === 'EN_COURS' ? 'toujours actif' : 'arrêté à la résolution'}.</div>
+          {/* Détection / Commande / Prise en charge — toute la traçabilité demandée */}
+          <section className="ep2-card mb-3">
+            <div className="ep2-card-head"><iconify-icon icon="solar:magnifer-bold-duotone"></iconify-icon> Détection / Commande / Prise en charge</div>
+            <div className="ep2-card-body">
+              <div className="row g-4">
+                <div className="col-12 col-md-4">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Détection de la rupture</div>
+                  <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{formatDateTime(detail.startedAt)}</div>
+                  <div className="small text-muted">Stock passé à 0 — compteur {detail.status === 'EN_COURS' ? 'toujours actif' : 'arrêté à la réception'}.</div>
                 </div>
-              </article>
-              <article className="rp3-event order">
-                <div className="rp3-eventhead"><b>2 · Commande fournisseur</b><span className={`rp3-tag ${detail.order?.validatedAt ? 'green' : 'orange'}`}>{detail.order ? (detail.order.validatedAt ? 'Validée' : 'À valider') : 'Aucune'}</span></div>
-                <div className="rp3-eventbody">
+                <div className="col-12 col-md-4">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Commande passée</div>
                   {detail.order ? (
                     <>
-                      <div className="rp3-label">Commande n° {detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</div>
-                      <div className="rp3-eventdate">{formatDateTime(detail.order.createdAt)}</div>
-                      <div className="rp3-eventdesc">
-                        Quantité : {detail.order.quantityOrdered ?? '—'} unité(s)<br />
-                        Fournisseur : {detail.order.supplierName || '—'}{detail.order.deliveryType ? ` (${detail.order.deliveryType})` : ''}<br />
-                        Créée par : {detail.order.createdBy || 'inconnu'}<br />
-                        Statut : {detail.order.validatedAt ? `validée le ${formatDateTime(detail.order.validatedAt)}${detail.order.validatedBy ? ` par ${detail.order.validatedBy}` : ''}` : 'pas encore validée'}
-                      </div>
+                      <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{formatDateTime(detail.order.createdAt)}</div>
+                      <div className="small text-muted">N° {detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</div>
+                      <div className="small text-muted">Fournisseur : {detail.order.supplierName || '—'}{detail.order.deliveryType ? ` (${detail.order.deliveryType})` : ''}</div>
+                      <div className="small text-muted">Créée par {detail.order.createdBy || 'inconnu'}</div>
+                      {detail.order.validatedAt ? (
+                        <div className="small text-muted">Validée le {formatDateTime(detail.order.validatedAt)}{detail.order.validatedBy ? ` par ${detail.order.validatedBy}` : ''}</div>
+                      ) : (
+                        <div className="small text-muted">Pas encore validée</div>
+                      )}
                     </>
                   ) : (
-                    <div className="rp3-eventdesc">Aucune commande passée depuis le début de la rupture.</div>
+                    <div className="small text-muted">Aucune commande passée depuis le début de la rupture.</div>
                   )}
                 </div>
-              </article>
-              <article className="rp3-event delivery">
-                <div className="rp3-eventhead"><b>3 · Livraison</b><span className={`rp3-tag ${detail.deliveryLooksDoubtful || detail.deliveryDelay ? 'red' : detail.order?.actualReceptionDate ? 'green' : 'orange'}`}>{detail.deliveryLooksDoubtful ? 'À rapprocher' : detail.deliveryDelay ? 'En retard' : detail.order?.actualReceptionDate ? 'Estimée reçue' : 'En attente'}</span></div>
-                <div className="rp3-eventbody">
+                <div className="col-12 col-md-4">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Livraison</div>
                   {detail.order ? (
                     <>
-                      <div className="rp3-label">{detail.order.actualReceptionDate ? 'Date de réception' : 'Date prévue'}</div>
-                      <div className="rp3-eventdate">{detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : detail.order.expectedReceptionDate ? formatDate(detail.order.expectedReceptionDate) : '—'}</div>
-                      <div className="rp3-eventdesc">
+                      <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : 'En attente'}</div>
+                      <div className="small text-muted">
                         {detail.order.actualReceptionDate
-                          ? `Statut déclaré « ${RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus} ». ${detail.deliveryLooksDoubtful ? "Aucun mouvement de réception ne le confirme dans les données visibles." : ''}`
-                          : 'Pas encore reçue.'}
+                          ? `Reçue — ${RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus}`
+                          : detail.order.expectedReceptionDate
+                            ? `Prévue le ${formatDate(detail.order.expectedReceptionDate)}`
+                            : 'Date prévue inconnue'}
                       </div>
                     </>
                   ) : (
-                    <div className="rp3-eventdesc">—</div>
+                    <div className="small text-muted">—</div>
                   )}
                 </div>
-              </article>
-            </div>
-            {(detail.deliveryLooksDoubtful || detail.deliveryDelay) && (
-              <div className="rp3-callout danger" style={{ margin: '0 15px 15px' }}>
-                <span>⚠</span>
-                <div><b>Incohérence commande / réception :</b> ne pas considérer la rupture comme résolue tant qu'un mouvement de réception ou un stock magasin cohérent n'a pas été observé.</div>
               </div>
-            )}
+
+              {/* Alerte "livraison douteuse" ajoutée le 18/10/2026 (bug signalé avec capture : le
+                  champ "Livraison" affichait "Reçue — Reçue (estimée)" alors que la rupture reste
+                  EN_COURS et qu'aucun mouvement de réception n'apparaît dans l'historique — "il me
+                  dis les quantité livré or si je vais dessu le temps de rupture continue de
+                  compté"). RECUE_ESTIMEE est une estimation de délai, jamais une confirmation
+                  (cf. schema.prisma) ; deliveryLooksDoubtful est calculé côté serveur à partir du
+                  fait le plus fiable disponible ici : l'épisode est toujours ouvert après la date de
+                  réception estimée. */}
+              {detail.deliveryLooksDoubtful && (
+                <div className="ep2-verdict tone-critical">
+                  <strong>Livraison douteuse.</strong> La réception de cette commande est estimée comme reçue depuis le {detail.order?.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : '—'}, mais la rupture est toujours en cours et aucun mouvement de réception n'apparaît dans l'historique de stock — l'article n'est probablement pas réellement revenu en rayon, malgré le statut RPOS.
+                </div>
+              )}
+
+              {/* Retard de livraison (demande explicite du 18/10/2026 : "si non pas recu soit ca
+                  peux etre le 12 donc 2j ca peux etre expliqué mais 3j il faut avoir des
+                  explication donc on doit nous dire que la livrasion est en retart") — comparaison
+                  à la date de livraison ATTENDUE (règle 14h/week-end), avec un distinguo quand
+                  aucun créneau d'intégration facture (12h/17h/23h) passé depuis cette date n'a
+                  produit de mouvement Arrivage : plus probablement un échec d'intégration côté
+                  entrepôt qu'un simple retard de transport. */}
+              {detail.deliveryDelay && (
+                <div className="ep2-verdict tone-critical">
+                  <strong>Livraison en retard ({detail.deliveryDelay.daysLate} j).</strong> Attendue le {formatDateTime(detail.deliveryDelay.expectedReceptionDate)}, toujours pas reçue.
+                  {detail.deliveryDelay.likelyInvoiceIntegrationIssue ? (
+                    <> Les 3 créneaux d'intégration des factures entrepôt (12h, 17h, 23h) sont déjà passés depuis cette date sans qu'aucun mouvement d'arrivage n'apparaisse — l'intégration de la facture a probablement échoué côté entrepôt (cron non exécuté, ou facture jamais générée), plutôt qu'un simple retard de transport.</>
+                  ) : (
+                    <> En attente du prochain créneau d'intégration facture ({detail.deliveryDelay.invoiceSlotsPassedWithoutArrival}/3 déjà passés sans arrivage détecté).</>
+                  )}
+                </div>
+              )}
+
+              {reactionMeta && (
+                <div className={`ep2-verdict tone-${reactionMeta.tone}`}>
+                  <strong>{reactionMeta.label}.</strong> {reactionMeta.verdict}
+                </div>
+              )}
+
+              {detail.order && (
+                <div className="ep2-loss-split mt-3">
+                  <div>
+                    <div className="lbl">CA perdu avant commande</div>
+                    <div className="val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
+                  </div>
+                  <div>
+                    <div className="lbl">CA perdu après commande</div>
+                    <div className="val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
+                  </div>
+                </div>
+              )}
+
+              {detail.orderQuantitySufficiency && (
+                <div className={`ep2-badge tone-${detail.orderQuantitySufficiency.sufficient ? 'success' : 'warning'} mt-3`}>
+                  Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered} u) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées sur la période.
+                </div>
+              )}
+            </div>
           </section>
 
-          <div className="row g-3 mb-3">
-            <div className="col-12 col-lg-6">
-              <section className="rp3-panel">
-                <div className="rp3-panelhead"><h3>Contrôle des stocks</h3><span>Valeurs de la fiche</span></div>
-                <div className="rp3-stockrow">
-                  <div className="rp3-stock">
-                    <div className="rp3-label">Au début</div>
-                    <StockValueRp3 stock={detail.stockAtStart} />
+          {/* Niveau de stock (demande explicite du 17/10/2026 : "je veux tout les detail possibile...
+              le stock pendant la rupture et le stock apres... si le stock et negative il faut
+              affiche si 0 il faut affiche") — un stock négatif révèle une désynchronisation RPOS
+              (ventes enregistrées au-delà du stock réellement disponible), distinct d'un stock à 0
+              qui est une rupture "propre". */}
+          <section className="ep2-card mb-3">
+            <div className="ep2-card-head"><iconify-icon icon="solar:box-minimalistic-bold-duotone"></iconify-icon> Niveau de stock</div>
+            <div className="ep2-card-body">
+              <div className="row g-3">
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Au début de la rupture</div>
+                  <StockValue stock={detail.stockAtStart} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>
+                    {detail.status === 'EN_COURS' ? 'Actuellement' : 'Dernier relevé pendant'}
                   </div>
-                  <div className="rp3-stock">
-                    <div className="rp3-label">{detail.status === 'EN_COURS' ? 'Actuellement' : 'Dernier relevé'}</div>
-                    <StockValueRp3 stock={detail.stockCurrent} />
-                  </div>
-                  <div className="rp3-stock">
-                    <div className="rp3-label">RPOS (temps réel)</div>
-                    <StockValueRp3 stock={detail.stockRpos ? { value: detail.stockRpos.value, capturedAt: detail.stockRpos.syncedAt } : null} />
-                  </div>
-                  <div className="rp3-stock">
-                    <div className="rp3-label">{detail.order?.actualReceptionDate ? 'Après arrivage' : 'Résolution'}</div>
-                    {detail.status === 'EN_COURS' && !detail.order?.actualReceptionDate ? (
-                      <div className="num" style={{ fontSize: '14px', color: 'var(--rp3-muted)' }}>En cours</div>
-                    ) : detail.order?.actualReceptionDate ? (
-                      detail.stockAfterDelivery ? <StockValueRp3 stock={detail.stockAfterDelivery} /> : <div className="num" style={{ fontSize: '14px', color: 'var(--rp3-muted)' }}>Pas encore relevé</div>
+                  <StockValue stock={detail.stockCurrent} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Stock RPOS (temps réel)</div>
+                  <StockValue stock={detail.stockRpos ? { value: detail.stockRpos.value, capturedAt: detail.stockRpos.syncedAt } : null} />
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Après résolution</div>
+                  {detail.status === 'EN_COURS' ? (
+                    <div className="text-muted small">Rupture toujours en cours</div>
+                  ) : (
+                    <StockValue stock={detail.stockAtEnd} />
+                  )}
+                </div>
+                {detail.order?.actualReceptionDate && (
+                  <div className="col-6 col-md-3">
+                    <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Après arrivage</div>
+                    {detail.stockAfterDelivery ? (
+                      <StockValue stock={detail.stockAfterDelivery} />
                     ) : (
-                      <StockValueRp3 stock={detail.stockAtEnd} />
+                      <div className="text-muted small">Pas encore relevé</div>
                     )}
                   </div>
-                </div>
-                {detail.stockAtStart && detail.stockAtStart.value < 0 && (
-                  <div className="rp3-callout warn" style={{ margin: '0 15px 15px' }}>
-                    <span>⚠</span>
-                    <div><b>Stock négatif :</b> signe probable d'une désynchronisation RPOS (ventes enregistrées au-delà du stock réellement disponible) plutôt que d'une rupture physique classique. Vérifier la synchronisation RPOS, les ventes et l'inventaire.</div>
-                  </div>
                 )}
-              </section>
-            </div>
-            <div className="col-12 col-lg-6">
-              <section className="rp3-panel">
-                <div className="rp3-panelhead"><h3>Actions recommandées</h3><span>Ordre de priorité</span></div>
-                <div className="rp3-actions">
-                  {recommendedActions.map((a, i) => (
-                    <div className="rp3-todo" key={i}>
-                      <div className="n">{i + 1}</div>
-                      <div><b>{a.title}</b><p>{a.desc}</p></div>
-                    </div>
-                  ))}
+              </div>
+              {detail.stockAtStart && detail.stockAtStart.value < 0 && (
+                <div className="ep2-verdict tone-warning mt-3">
+                  <strong>Stock négatif détecté.</strong> Le stock constaté est descendu en dessous de 0, signe probable d'une désynchronisation RPOS (ventes enregistrées au-delà du stock réellement disponible en magasin) plutôt que d'une rupture physique classique.
                 </div>
-              </section>
+              )}
             </div>
-          </div>
+          </section>
 
-          {detail.orderQuantitySufficiency && (
-            <div className={`rp3-callout ${detail.orderQuantitySufficiency.sufficient ? 'good' : 'warn'} mb-3`}>
-              <span>{detail.orderQuantitySufficiency.sufficient ? '✓' : '⚠'}</span>
-              <div>Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered} u) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées sur la période.</div>
-            </div>
-          )}
-
-          <section className="rp3-panel" id="journal">
-            <div className="rp3-panelhead"><h3>Journal des mouvements de stock</h3><span>Historique récent</span></div>
-            <div className="rp3-tablewrap">
-              <table>
-                <thead><tr><th>Date / heure</th><th>Type</th><th>Quantité</th></tr></thead>
+          {/* Historique des mouvements */}
+          <section className="ep2-card mb-4">
+            <div className="ep2-card-head"><iconify-icon icon="solar:history-bold-duotone"></iconify-icon> Mouvements de stock récents</div>
+            <div className="table-responsive">
+              <table className="table align-middle mb-0 table-hover table-centered">
+                <thead className="bg-light-subtle">
+                  <tr>
+                    <th>Date / heure</th>
+                    <th>Type</th>
+                    <th className="text-end">Quantité</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {detail.stockMoves.length === 0 ? (
-                    <tr><td colSpan={3} style={{ textAlign: 'center', color: 'var(--rp3-muted)', padding: '24px 0' }}>Aucun mouvement enregistré sur la période.</td></tr>
+                    <tr><td colSpan={3} className="text-center text-muted py-4">Aucun mouvement enregistré sur la période.</td></tr>
                   ) : (
                     detail.stockMoves.slice(0, 40).map((m, i) => (
                       <tr key={i}>
-                        <td>{formatDateTime(m.date)}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '.8rem' }}>{formatDateTime(m.date)}</td>
                         <td>{m.typeLabel}{m.isScrap ? ' (casse)' : ''}</td>
-                        <td>{m.quantity}</td>
+                        <td className="text-end" style={{ fontFamily: 'monospace' }}>{m.quantity}</td>
                       </tr>
                     ))
                   )}
@@ -634,12 +600,7 @@ export function StockoutEpisodePage() {
               </table>
             </div>
           </section>
-
-          <div className="rp3-footer">
-            <span>Réassort automatique · Analyse de rupture de stock</span>
-            <span>Données réelles · Vérifier avant décision opérationnelle.</span>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
