@@ -173,7 +173,7 @@ function StockValue({ stock }: { stock: { value: number; capturedAt: string } | 
   const tone = stock.value < 0 ? '#b8302c' : stock.value === 0 ? '#a86718' : '#2d6a3f';
   return (
     <div>
-      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: tone }}>{stock.value} u.</div>
+      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: tone }}>{stock.value} {Math.abs(stock.value) === 1 ? 'unité' : 'unités'}</div>
       <div className="text-muted" style={{ fontSize: '.7rem' }}>{formatDateTime(stock.capturedAt)}</div>
     </div>
   );
