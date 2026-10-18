@@ -330,10 +330,24 @@ async function getOpenEpisodes(rposShopId) {
     // stock") — SANS_COMMANDE / EN_ATTENTE_LIVRAISON (commande passée, receptionStatus pas encore
     // RECUE_ESTIMEE) / LIVREE (receptionStatus RECUE_ESTIMEE, cf. le commentaire sur ce champ dans
     // schema.prisma : c'est une ESTIMATION basée sur le délai configuré, jamais une confirmation
-    // RPOS certaine — présenté comme tel, pas comme une preuve de réception).
+    // RPOS certaine) / LIVRAISON_DOUTEUSE.
+    //
+    // LIVRAISON_DOUTEUSE ajoutée le 18/10/2026 (bug signalé avec capture : badge "Livrée" affiché
+    // alors que la fiche détail montre "compteur toujours actif", stock RPOS toujours négatif, et
+    // AUCUN mouvement de réception en base — "il me dis les quantité livré or si je vais dessu le
+    // temps de rupture continue de compté"). RECUE_ESTIMEE est une estimation de délai, jamais une
+    // preuve ; la preuve la plus fiable qu'on a réellement ICI est l'épisode LUI-MÊME : il reste
+    // EN_COURS (cette fonction ne liste QUE les épisodes EN_COURS) alors que la réception estimée
+    // est déjà passée — si l'article était vraiment revenu en stock, le job de détection l'aurait
+    // déjà résolu. Ne jamais affirmer "Livrée" dans ce cas, mais signaler l'écart au lieu de le
+    // masquer derrière un badge vert rassurant.
     let deliveryStatus = 'SANS_COMMANDE';
     if (hasOrder) {
-      deliveryStatus = matchedOrder.receptionStatus === 'RECUE_ESTIMEE' ? 'LIVREE' : 'EN_ATTENTE_LIVRAISON';
+      if (matchedOrder.receptionStatus === 'RECUE_ESTIMEE') {
+        deliveryStatus = matchedOrder.actualReceptionDate && matchedOrder.actualReceptionDate < now ? 'LIVRAISON_DOUTEUSE' : 'LIVREE';
+      } else {
+        deliveryStatus = 'EN_ATTENTE_LIVRAISON';
+      }
     }
 
     // startedAt/orderCreatedAt renvoyés en plus de durationHours (déjà calculé côté serveur) pour
@@ -858,6 +872,20 @@ async function getEpisodeDetail(episodeId) {
     buyingPrice: productCache?.buyingPrice ?? null,
     stockAtEnd: stockAtEnd ? { value: stockAtEnd.stock, capturedAt: stockAtEnd.capturedAt } : null,
     stockAfterDelivery: stockAfterDelivery ? { value: stockAfterDelivery.stock, capturedAt: stockAfterDelivery.capturedAt } : null,
+    // Signale une incohérence RÉELLE plutôt que de la masquer derrière "Reçue" (bug signalé le
+    // 18/10/2026 avec capture : badge "Livrée" affiché alors que l'épisode reste EN_COURS, le stock
+    // RPOS temps réel reste négatif, et aucun mouvement de réception n'apparaît — "il me dis les
+    // quantité livré or si je vais dessu le temps de rupture continue de compté"). RECUE_ESTIMEE
+    // n'est qu'une estimation de délai (cf. commentaire sur ce champ dans schema.prisma), jamais une
+    // confirmation ; la preuve la plus fiable ici est que CET épisode est toujours EN_COURS après la
+    // date de réception estimée — si l'article était vraiment revenu, le job de détection l'aurait
+    // déjà résolu.
+    deliveryLooksDoubtful: !!(
+      episode.status === 'EN_COURS' &&
+      order?.receptionStatus === 'RECUE_ESTIMEE' &&
+      order.actualReceptionDate &&
+      order.actualReceptionDate < now
+    ),
   };
 }
 

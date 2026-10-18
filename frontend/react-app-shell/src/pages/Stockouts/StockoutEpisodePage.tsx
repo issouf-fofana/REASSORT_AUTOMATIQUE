@@ -85,6 +85,7 @@ type EpisodeDetail = {
   stockAfterDelivery: { value: number; capturedAt: string } | null;
   sellingPrice: number | null;
   buyingPrice: number | null;
+  deliveryLooksDoubtful: boolean;
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -455,6 +456,20 @@ export function StockoutEpisodePage() {
                   )}
                 </div>
               </div>
+
+              {/* Alerte "livraison douteuse" ajoutée le 18/10/2026 (bug signalé avec capture : le
+                  champ "Livraison" affichait "Reçue — Reçue (estimée)" alors que la rupture reste
+                  EN_COURS et qu'aucun mouvement de réception n'apparaît dans l'historique — "il me
+                  dis les quantité livré or si je vais dessu le temps de rupture continue de
+                  compté"). RECUE_ESTIMEE est une estimation de délai, jamais une confirmation
+                  (cf. schema.prisma) ; deliveryLooksDoubtful est calculé côté serveur à partir du
+                  fait le plus fiable disponible ici : l'épisode est toujours ouvert après la date de
+                  réception estimée. */}
+              {detail.deliveryLooksDoubtful && (
+                <div className="ep2-verdict tone-critical">
+                  <strong>Livraison douteuse.</strong> La réception de cette commande est estimée comme reçue depuis le {detail.order?.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : '—'}, mais la rupture est toujours en cours et aucun mouvement de réception n'apparaît dans l'historique de stock — l'article n'est probablement pas réellement revenu en rayon, malgré le statut RPOS.
+                </div>
+              )}
 
               {reactionMeta && (
                 <div className={`ep2-verdict tone-${reactionMeta.tone}`}>

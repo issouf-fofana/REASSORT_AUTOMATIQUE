@@ -13,7 +13,7 @@ import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
 // réutilisé à l'identique pour "Ce magasin" (magasin actif topbar) ET le drill-down depuis
 // "Tous les magasins" — un seul composant, un seul comportement.
 type ReactionStatusLight = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI';
-type DeliveryStatus = 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE';
+type DeliveryStatus = 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE' | 'LIVRAISON_DOUTEUSE';
 
 type StockoutEpisode = {
   id: string;
@@ -69,10 +69,18 @@ const REACTION_LIGHT_META: Record<ReactionStatusLight, { label: string; badge: s
 // reactionStatus (qui ne dit que "une commande a-t-elle été passée ?"), ce statut-ci suit la vie de
 // la commande jusqu'à sa réception (RECUE_ESTIMEE côté RPOS — une estimation, jamais une
 // confirmation certaine, cf. ProposalOrder.receptionStatus dans schema.prisma).
+//
+// "Livrée" renommé en "Livraison estimée" + LIVRAISON_DOUTEUSE ajouté le 18/10/2026 (bug signalé
+// avec capture : badge "Livrée" affiché alors que la fiche détail montre "compteur toujours actif"
+// et aucun mouvement de réception — "il me dis les quantité livré or si je vais dessu le temps de
+// rupture continue de compté"). "Livrée" affirmait une certitude que RECUE_ESTIMEE ne garantit
+// jamais ; LIVRAISON_DOUTEUSE signale explicitement quand la date de réception estimée est déjà
+// passée alors que l'épisode est toujours ouvert (calculé côté serveur, cf. stockoutEpisodeService.js).
 const DELIVERY_STATUS_META: Record<DeliveryStatus, { label: string; badge: string }> = {
   SANS_COMMANDE: { label: 'Sans commande', badge: 'reassort-badge-neutral' },
   EN_ATTENTE_LIVRAISON: { label: 'Commandé, pas livré', badge: 'reassort-badge-soft-warning' },
-  LIVREE: { label: 'Livrée', badge: 'reassort-badge-soft-success' },
+  LIVREE: { label: 'Livraison estimée', badge: 'reassort-badge-soft-success' },
+  LIVRAISON_DOUTEUSE: { label: 'Livraison douteuse', badge: 'reassort-badge-soft-danger' },
 };
 
 type OrderFilter = 'all' | 'with-order' | 'without-order' | 'delivered';
