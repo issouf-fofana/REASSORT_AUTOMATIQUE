@@ -380,8 +380,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             ) : !bySector.groups || bySector.groups.length === 0 ? (
               <div className="text-muted small py-3">{bySector.message || 'Aucune rupture en cours.'}</div>
             ) : (
+              // Masque les secteurs à 0 article en rupture (demande explicite du 18/10/2026 : "il
+              // faut donc masque le sans rayon si c'est vide") — un secteur peut apparaître dans
+              // l'agrégation (ex: résolu entre-temps par stockoutSectorBackfillJob) sans plus avoir
+              // aucun épisode EN_COURS associé, une tuile à 0 n'apporte rien à afficher.
               <div className="row g-3">
-                {bySector.groups.map((s) => (
+                {bySector.groups.filter((s) => s.openCount > 0).map((s) => (
                   <div className="col-12 col-md-4" key={s.group}>
                     <div className="card h-100" role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedSector(s.group)}>
                       <div className="card-body">
@@ -400,8 +404,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             ) : !byDepartment.groups || byDepartment.groups.length === 0 ? (
               <div className="text-muted small py-3">{byDepartment.message || 'Aucune rupture en cours pour ce secteur.'}</div>
             ) : (
+              // Même correctif que pour les secteurs ci-dessus : masque les rayons à 0 article.
               <div className="row g-3">
-                {byDepartment.groups.map((d) => (
+                {byDepartment.groups.filter((d) => d.openCount > 0).map((d) => (
                   <div className="col-12 col-md-4" key={d.group}>
                     <div className="card h-100" role="button" style={{ cursor: 'pointer' }} onClick={() => setSelectedDepartment(d.group)}>
                       <div className="card-body">
