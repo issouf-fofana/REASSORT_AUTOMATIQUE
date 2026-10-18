@@ -262,8 +262,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         <div className="text-muted small mb-3">Chargement des données de rupture...</div>
       ) : (
         <>
-          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
-
+          {/* Ordre des sections revu le 18/10/2026 (demande explicite : "met cette carte en
+              premier et Ruptures en cours — 30 derniers jours et Analyse des pertes sur une
+              période en deuxieme") — Situation actuelle (KPI + graphes) passe avant l'analyse de
+              période, qui était auparavant tout en haut. */}
           <div className="stockout-section-title">Situation actuelle</div>
           <div className="row row-cols-2 row-cols-md-4 g-2 mb-3">
             <div className="col">
@@ -311,6 +313,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               </div>
             </div>
           )}
+
+          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
 
           {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
               sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →
