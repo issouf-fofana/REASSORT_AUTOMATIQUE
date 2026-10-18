@@ -109,12 +109,17 @@ const RECEPTION_STATUS_LABELS: Record<string, string> = {
   ANNULEE: 'Annulée',
 };
 
+// Formulations réécrites le 18/10/2026 (demande explicite : "met un texte bien explicative au pdg
+// et dg... pas un struc supperieur") — un mot sec comme "magasin fautif" n'explique ni le contexte
+// ni l'enjeu à un lecteur de direction qui n'a pas forcément le détail opérationnel sous les yeux.
+// Chaque verdict explique maintenant le FAIT constaté, le DÉLAI de référence et la CONSÉQUENCE
+// business, en une phrase complète et autoportante.
 const REACTION_STATUS_META: Record<ReactionStatus, { label: string; tone: 'critical' | 'warning' | 'success' | 'info'; verdict: string }> = {
-  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: "Une commande a été passée : sa responsabilité n'est pas engagée pour la période suivant cette réaction." },
-  EN_ATTENTE: { label: 'En attente de commande (< 24h)', tone: 'info', verdict: 'Délai normal, pas encore de jugement possible.' },
-  RETARD: { label: 'Retard de commande (24-48h)', tone: 'warning', verdict: 'Retard constaté, pas encore confirmé fautif.' },
-  MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", tone: 'critical', verdict: 'Aucune commande passée après 48h de rupture avec ventes constatées — magasin fautif.' },
-  STOCK_PEUT_ETRE_PAS_A_JOUR: { label: 'Stock potentiellement pas à jour', tone: 'info', verdict: "Aucune vente ni commande depuis le début — le stock à 0 n'est peut-être pas réel, pas de jugement possible." },
+  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: "Une commande de réassort a bien été passée pendant la rupture. À partir de cette commande, le magasin a rempli son rôle : toute perte constatée ensuite relève d'un délai de livraison fournisseur, pas d'un manque de réaction en magasin." },
+  EN_ATTENTE: { label: 'En attente de commande (< 24h)', tone: 'info', verdict: "La rupture dure depuis moins de 24 heures et aucune commande n'a encore été passée. Ce délai reste dans la norme opérationnelle ; aucune conclusion ne peut être tirée à ce stade." },
+  RETARD: { label: 'Retard de commande (24-48h)', tone: 'warning', verdict: "La rupture dure depuis 24 à 48 heures sans qu'aucune commande n'ait été passée. Le délai normal de réaction est dépassé, mais pas encore le seuil (48h) à partir duquel la situation est considérée comme anormale." },
+  MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", tone: 'critical', verdict: "Plus de 48 heures se sont écoulées depuis le début de la rupture, avec des ventes constatées sur l'article, sans qu'aucune commande de réassort n'ait été passée. Ce délai dépasse largement le temps de réaction attendu d'un magasin et explique directement la perte de chiffre d'affaires enregistrée sur cette période." },
+  STOCK_PEUT_ETRE_PAS_A_JOUR: { label: 'Stock potentiellement pas à jour', tone: 'info', verdict: "Aucune vente ni commande n'a été enregistrée depuis le début de la rupture, ce qui peut signifier que le stock à zéro affiché par le système ne reflète pas la réalité du rayon (désynchronisation informatique). Une vérification physique est nécessaire avant de conclure." },
 };
 
 function formatDuration(hours: number | null): string {
