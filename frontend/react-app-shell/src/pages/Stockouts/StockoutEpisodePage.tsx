@@ -110,7 +110,7 @@ const RECEPTION_STATUS_LABELS: Record<string, string> = {
 };
 
 const REACTION_STATUS_META: Record<ReactionStatus, { label: string; tone: 'critical' | 'warning' | 'success' | 'info'; verdict: string }> = {
-  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: "Le magasin a réagi en passant une commande : sa responsabilité n'est pas engagée pour la période suivant cette réaction." },
+  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: "Une commande a été passée : sa responsabilité n'est pas engagée pour la période suivant cette réaction." },
   EN_ATTENTE: { label: 'En attente de commande (< 24h)', tone: 'info', verdict: 'Délai normal, pas encore de jugement possible.' },
   RETARD: { label: 'Retard de commande (24-48h)', tone: 'warning', verdict: 'Retard constaté, pas encore confirmé fautif.' },
   MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", tone: 'critical', verdict: 'Aucune commande passée après 48h de rupture avec ventes constatées — magasin fautif.' },
@@ -311,7 +311,12 @@ export function StockoutEpisodePage() {
 
         .ep2-card { background: #fff; border: 1px solid #E8ECF2; border-radius: 16px; height: 100%; box-shadow: 0 2px 10px rgba(27,42,74,.04); }
         .ep2-card-head { padding: 14px 20px; border-bottom: 1px solid #F0F3F7; font-weight: 700; font-size: .8rem; color: #1B2A4A; display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .04em; }
-        .ep2-card-head iconify-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: #FEF3E2; color: #D98324; font-size: 15px; }
+        .ep2-card-head > iconify-icon:first-child, .ep2-card-head > span > iconify-icon:first-child { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: #FEF3E2; color: #D98324; font-size: 15px; }
+        /* Header avec titre + action (demande explicite du 18/10/2026 : "le bouton analyse ai il
+           faut le bien placé en haut") — bouton "Analyser avec l'IA" aligné à droite du titre de
+           section plutôt qu'enterré en bas de carte. */
+        .ep2-card-head-row { justify-content: space-between; text-transform: none; letter-spacing: normal; }
+        .ep2-card-head-row > span { display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .04em; }
         .ep2-card-body { padding: 18px 20px; }
         .ep2-field dt { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: #8591A0; font-weight: 700; margin-bottom: 3px; }
         .ep2-field dd { font-size: .86rem; color: #1B2A4A; font-weight: 600; margin: 0 0 14px; }
@@ -389,11 +394,12 @@ export function StockoutEpisodePage() {
         .ep2-metric-empty { font-size: .78rem; color: #8591A0; font-style: italic; }
 
         /* Analyse IA à la demande sur la fiche d'un épisode (demande explicite du 18/10/2026). */
-        .ep2-ai-box { background: #f8fafb; border-left: 3px solid #4A3FB8; border-radius: 0 10px 10px 0; padding: 14px 16px; }
-        .ep2-ai-head { display: flex; align-items: center; gap: 7px; color: #4A3FB8; font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
-        .ep2-ai-summary { font-size: .86rem; color: #2A2F45; line-height: 1.6; margin: 0 0 10px; }
-        .ep2-ai-action { display: flex; gap: 8px; align-items: flex-start; background: #EEF0FB; border-radius: 8px; padding: 10px 12px; font-size: .82rem; color: #1B2A4A; font-weight: 600; }
-        .ep2-ai-action iconify-icon { color: #4A3FB8; flex-shrink: 0; margin-top: 1px; }
+        .ep2-ai-box { background: #f8fafb; border-left: 3px solid #4A3FB8; border-radius: 0 10px 10px 0; padding: 16px 18px; box-shadow: 0 2px 10px rgba(74,63,184,.06); animation: ep2-fade-in-up .25s ease-out; }
+        .ep2-ai-head { display: flex; align-items: center; gap: 7px; color: #4A3FB8; font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 10px; }
+        .ep2-ai-section-lbl { font-size: .64rem; text-transform: uppercase; letter-spacing: .05em; color: #8591A0; font-weight: 700; margin-bottom: 4px; }
+        .ep2-ai-summary { font-size: .88rem; color: #2A2F45; line-height: 1.65; margin: 0 0 14px; }
+        .ep2-ai-action { display: flex; gap: 10px; align-items: flex-start; background: #EEF0FB; border-radius: 8px; padding: 11px 13px; font-size: .84rem; color: #1B2A4A; font-weight: 600; line-height: 1.5; }
+        .ep2-ai-action iconify-icon { color: #4A3FB8; flex-shrink: 0; margin-top: 2px; font-size: 1.05rem; }
       `}</style>
 
       <button
@@ -567,7 +573,18 @@ export function StockoutEpisodePage() {
               style je veux sur cette partie") — chaque étape a sa propre carte avec bordure colorée
               en haut et badge de statut, au lieu de 3 colonnes de texte brut. */}
           <section className="ep2-card mb-3">
-            <div className="ep2-card-head"><iconify-icon icon="solar:magnifer-bold-duotone"></iconify-icon> Détection / Commande / Prise en charge</div>
+            <div className="ep2-card-head ep2-card-head-row">
+              <span><iconify-icon icon="solar:magnifer-bold-duotone"></iconify-icon> Détection / Commande / Prise en charge</span>
+              {/* Bouton "Analyser avec l'IA" déplacé en haut de la section (demande explicite du
+                  18/10/2026 : "le bouton analyse ai il faut le bien placé en haut") — jamais
+                  déclenché automatiquement, pour maîtriser le coût des appels IA. */}
+              {!episodeAnalysis && (
+                <button type="button" className="btn btn-sm btn-outline-primary" disabled={analyzingEpisode} onClick={runEpisodeAnalysis}>
+                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" className="align-middle me-1"></iconify-icon>
+                  {analyzingEpisode ? 'Analyse en cours...' : "Analyser avec l'IA"}
+                </button>
+              )}
+            </div>
             <div className="ep2-card-body">
               <div className="ep2-steps">
                 <div className="ep2-step detect">
@@ -625,6 +642,31 @@ export function StockoutEpisodePage() {
                   </div>
                 </div>
               </div>
+
+              {/* Résultat de l'analyse IA (demande explicite du 18/10/2026 : "le restal de ia doit
+                  etre affiche aussi bien formaté et affiché") — placé juste après les 3 cartes
+                  timeline, avant les callouts déterministes, pour rester bien visible sans scroller
+                  une fois l'analyse lancée depuis le bouton du header. */}
+              {episodeAnalysisError && <div className="text-danger small mt-3">Erreur : {episodeAnalysisError}</div>}
+              {episodeAnalysis && (
+                <div className="ep2-ai-box mt-3">
+                  <div className="ep2-ai-head">
+                    <iconify-icon icon="solar:magic-stick-3-bold-duotone"></iconify-icon>
+                    Analyse IA
+                  </div>
+                  <div className="ep2-ai-section-lbl">Résumé</div>
+                  <p className="ep2-ai-summary">{episodeAnalysis.summary}</p>
+                  {episodeAnalysis.action && (
+                    <>
+                      <div className="ep2-ai-section-lbl">Action recommandée</div>
+                      <div className="ep2-ai-action">
+                        <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
+                        <span>{episodeAnalysis.action}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Alerte "livraison douteuse" ajoutée le 18/10/2026 (bug signalé avec capture : le
                   champ "Livraison" affichait "Reçue — Reçue (estimée)" alors que la rupture reste
@@ -685,33 +727,6 @@ export function StockoutEpisodePage() {
               {detail.orderQuantitySufficiency && (
                 <div className={`ep2-badge tone-${detail.orderQuantitySufficiency.sufficient ? 'success' : 'warning'} mt-3`}>
                   Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered} u) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées sur la période.
-                </div>
-              )}
-
-              {/* Analyse IA à la demande (demande explicite du 18/10/2026 : "cette partie aussi on
-                  doit avoir une analyse Ia") — synthèse en langage naturel + une action concrète,
-                  jamais déclenchée automatiquement pour maîtriser le coût des appels IA (même
-                  principe que l'analyse de période plus bas sur la page). */}
-              {!episodeAnalysis && (
-                <button type="button" className="btn btn-sm btn-outline-primary mt-3" disabled={analyzingEpisode} onClick={runEpisodeAnalysis}>
-                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" className="align-middle me-1"></iconify-icon>
-                  {analyzingEpisode ? 'Analyse en cours...' : "Analyser avec l'IA"}
-                </button>
-              )}
-              {episodeAnalysisError && <div className="text-danger small mt-2">Erreur : {episodeAnalysisError}</div>}
-              {episodeAnalysis && (
-                <div className="ep2-ai-box mt-3">
-                  <div className="ep2-ai-head">
-                    <iconify-icon icon="solar:magic-stick-3-bold-duotone"></iconify-icon>
-                    Analyse IA
-                  </div>
-                  <p className="ep2-ai-summary">{episodeAnalysis.summary}</p>
-                  {episodeAnalysis.action && (
-                    <div className="ep2-ai-action">
-                      <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
-                      <span>{episodeAnalysis.action}</span>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
