@@ -721,7 +721,7 @@ export function SchedulingSection() {
           title="Résolution du secteur/rayon des ruptures"
           enabledConfigKey="STOCKOUT_SECTOR_BACKFILL_ENABLED"
           enabledInitial={config.STOCKOUT_SECTOR_BACKFILL_ENABLED !== 'false'}
-          intro="<strong>À quoi ça sert :</strong> un épisode de rupture dont le secteur/rayon n'a jamais pu être résolu localement (article jamais vu par une proposition) s'affiche « Sans secteur ». Ce job interroge RPOS pour résoudre ces cas en continu, en filet de sécurité derrière la résolution faite à la création de chaque épisode."
+          intro="<strong>À quoi ça sert :</strong> une rupture d'article dont le secteur/rayon n'a jamais pu être résolu localement (article jamais vu par une proposition) s'affiche « Sans secteur ». Ce job interroge RPOS pour résoudre ces cas en continu, en filet de sécurité derrière la résolution faite à la création de chaque rupture."
           onSave={() => saveSystemConfigKey('STOCKOUT_SECTOR_BACKFILL_CRON', stockoutSectorBackfillCron)}
           onRunNow={async () => {
             const d = await apiFetch<{ total: number; resolved: number; stillNull: number }>('/reassort/run-stockout-sector-backfill', { method: 'POST' });

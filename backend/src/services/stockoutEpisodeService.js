@@ -700,7 +700,7 @@ const PRE_EPISODE_CONTEXT_DAYS = 14;
  */
 async function getEpisodeDetail(episodeId) {
   const episode = await prisma.stockoutEpisode.findUnique({ where: { id: episodeId } });
-  if (!episode) return { found: false, message: 'Épisode de rupture introuvable.' };
+  if (!episode) return { found: false, message: "Rupture d'article introuvable." };
 
   const now = new Date();
   const endedAt = episode.endedAt || now;
@@ -1163,7 +1163,7 @@ async function analyzePeriodLoss(shopName, shopReference, summary) {
     pctOfTotal: summary.totalCaPerdu > 0 ? Math.round((d.caPerdue / summary.totalCaPerdu) * 1000) / 10 : 0,
   }));
   const topDepartments = topDepartmentsRaw
-    .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus (${d.pctOfTotal} % du total), ${d.qtyPerdue} unité(s), ${d.episodeCount} épisode(s)`)
+    .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus (${d.pctOfTotal} % du total), ${d.qtyPerdue} unité(s), ${d.episodeCount} rupture(s) d'article`)
     .join('\n');
 
   // Sortie JSON structurée (demande explicite du 18/10/2026 : "c'est pas bon tu vois le style...
@@ -1177,7 +1177,7 @@ async function analyzePeriodLoss(shopName, shopReference, summary) {
 
 - CA perdu estimé sur la période (rupture de stock) : ${summary.totalCaPerdu.toLocaleString('fr-FR')} CFA
 - Quantité perdue estimée : ${summary.totalQtyPerdue} unité(s)
-- Nombre d'épisodes de rupture concernés : ${summary.episodeCount}
+- Nombre de ruptures d'article concernées : ${summary.episodeCount}
 - CA réellement réalisé par le magasin sur la même période : ${summary.shopRevenueExclTax.toLocaleString('fr-FR')} CFA (hors taxes)
 - Ratio perte / CA réalisé : ${summary.lossRatioPct !== null ? summary.lossRatioPct + ' %' : 'non calculable (CA de la période inconnu)'}
 

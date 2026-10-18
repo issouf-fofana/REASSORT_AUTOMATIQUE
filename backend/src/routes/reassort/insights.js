@@ -427,7 +427,7 @@ router.post('/stockout-episodes/period-analysis', async (req, res) => {
 router.post('/stockout-episodes/:id/analyze', async (req, res) => {
   try {
     const episode = await prisma.stockoutEpisode.findUnique({ where: { id: req.params.id }, select: { rposShopId: true } });
-    if (!episode) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+    if (!episode) return res.status(404).json({ success: false, message: "Rupture d'article introuvable." });
 
     const shopIdFilter = await getAccessibleShopIds(req);
     const ownShopId = resolveShopId(req);
@@ -437,7 +437,7 @@ router.post('/stockout-episodes/:id/analyze', async (req, res) => {
     }
 
     const detail = await getEpisodeDetail(req.params.id);
-    if (!detail.found) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+    if (!detail.found) return res.status(404).json({ success: false, message: "Rupture d'article introuvable." });
     const analysis = await analyzeEpisode(detail);
     res.json({ success: true, data: analysis });
   } catch (error) {
@@ -453,7 +453,7 @@ router.post('/stockout-episodes/:id/analyze', async (req, res) => {
 router.get('/stockout-episodes/:id', async (req, res) => {
   try {
     const episode = await prisma.stockoutEpisode.findUnique({ where: { id: req.params.id }, select: { rposShopId: true } });
-    if (!episode) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+    if (!episode) return res.status(404).json({ success: false, message: "Rupture d'article introuvable." });
 
     const shopIdFilter = await getAccessibleShopIds(req);
     const ownShopId = resolveShopId(req);

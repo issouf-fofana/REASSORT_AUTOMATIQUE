@@ -104,7 +104,7 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
               <tr>
                 <th>Magasin</th>
                 <th>Ruptures en cours</th>
-                <th>Épisodes (total)</th>
+                <th>Ruptures d'article (total)</th>
                 <th>Durée moyenne</th>
                 <th>Ruptures longues (≥48h)</th>
                 <th>Sans commande identifiée</th>

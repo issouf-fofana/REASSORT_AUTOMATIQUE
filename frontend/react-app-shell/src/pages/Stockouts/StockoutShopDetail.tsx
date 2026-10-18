@@ -218,8 +218,17 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     return () => { cancelled = true; };
   }, [shopQueryParam, selectedSector]);
 
+  // BUG CORRIGÉ le 18/10/2026 (signalé avec capture : "sans rayon affiche mais ya rien mais dans
+  // le clique il ya contenu" — en réalité l'inverse : la tuile "0 article(s)" était correcte, la
+  // liste qui s'affichait au clic (77 articles) était FAUSSE) : ce filtre ne tenait compte QUE du
+  // rayon sélectionné, jamais du secteur — un clic sur "EPICERIE SUCREE" sous "Sans secteur"
+  // affichait donc TOUS les articles EPICERIE SUCREE du magasin, y compris ceux ayant un vrai
+  // secteur connu, au lieu des seuls articles réellement "Sans secteur" de ce rayon (0 ici).
   const articlesInDepartmentAll = selectedDepartment
-    ? (summary?.openEpisodes || []).filter((e) => (e.department || 'Sans rayon') === selectedDepartment)
+    ? (summary?.openEpisodes || []).filter((e) =>
+        (e.department || 'Sans rayon') === selectedDepartment &&
+        (e.sector || 'Sans secteur') === (selectedSector || 'Sans secteur')
+      )
     : [];
   const articlesInDepartment = articlesInDepartmentAll.filter((e) => {
     if (orderFilter === 'with-order') return e.hasOrder;
