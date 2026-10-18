@@ -74,9 +74,30 @@ export function Stockouts() {
         .reassort-badge-soft-info { background-color: #E9EEF6 !important; color: #2E4870 !important; }
       `}</style>
 
-      <div className="d-flex align-items-center justify-content-between mb-3">
+      <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-2">
         <h2 className="mb-0">Ruptures de stock</h2>
         <span className="text-muted small">Sans données entrepôt (Cyrus) — diagnostic simplifié</span>
+      </div>
+      {/* Contexte explicite du magasin consulté (demande explicite du 18/10/2026 : "quand je viens
+          dans tout les magasin et il doit me dire je suis sur quel magasin") — le sélecteur global
+          de la topbar reste visible même sur l'onglet "Tous les magasins", où il n'a aucun effet :
+          ce rappel évite de croire que la vue réseau est filtrée sur ce magasin. */}
+      <div className="mb-3">
+        {activeTab === 'all' && !isSingleShop ? (
+          <span className="badge reassort-badge-soft-info py-1 px-2">
+            <iconify-icon icon="solar:buildings-2-bold-duotone" className="align-middle me-1"></iconify-icon>
+            Vue réseau — tous les magasins accessibles
+          </span>
+        ) : (
+          <span className="badge reassort-badge-neutral py-1 px-2">
+            <iconify-icon icon="solar:shop-bold-duotone" className="align-middle me-1"></iconify-icon>
+            {isSingleShop
+              ? (user?.rposShopName || 'Votre magasin')
+              : selectedShop
+                ? (window.reassortGetActiveShop?.()?.name || 'Magasin sélectionné')
+                : 'Aucun magasin sélectionné'}
+          </span>
+        )}
       </div>
 
       {!isSingleShop && (

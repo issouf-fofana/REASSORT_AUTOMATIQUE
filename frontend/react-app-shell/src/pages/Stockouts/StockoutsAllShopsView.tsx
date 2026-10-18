@@ -16,6 +16,21 @@ type ShopSummary = {
   totalCaPerduEstime: number;
 };
 
+// Cumuls réseau (demande explicite du 18/10/2026 : "me faire le cumul des CA de rupture le temps
+// de rupture et combien en perte") — calculés côté client à partir des lignes déjà reçues, pas un
+// appel API supplémentaire : la liste par magasin contient déjà tout ce qu'il faut.
+function computeNetworkTotals(shops: ShopSummary[]) {
+  const totalOpen = shops.reduce((s, sh) => s + sh.openCount, 0);
+  const totalCaPerdu = shops.reduce((s, sh) => s + sh.totalCaPerduEstime, 0);
+  // Moyenne pondérée par le nombre de ruptures en cours de chaque magasin, pas une simple moyenne
+  // des moyennes (un magasin à 1 rupture ne doit pas peser autant qu'un magasin à 1500).
+  const weightedDurationSum = shops.reduce((s, sh) => s + sh.avgDurationHours * sh.openCount, 0);
+  const avgDurationHours = totalOpen > 0 ? weightedDurationSum / totalOpen : 0;
+  const totalLongEpisodes = shops.reduce((s, sh) => s + sh.longEpisodesCount, 0);
+  const totalNoOrder = shops.reduce((s, sh) => s + sh.noOrderCount, 0);
+  return { totalOpen, totalCaPerdu, avgDurationHours, totalLongEpisodes, totalNoOrder };
+}
+
 type AllShopsSummary = {
   found: boolean;
   shopCount: number;
@@ -49,18 +64,37 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
   if (summary === null) return <div className="text-muted small">Chargement...</div>;
 
   const shops = summary.shops || [];
+  const totals = computeNetworkTotals(shops);
 
   return (
     <div className="card">
       <div className="card-body">
         <div className="row g-3 mb-4">
-          <div className="col-12 col-md-6">
+          <div className="col-6 col-md-3">
             <div className="text-muted small">Magasins avec au moins une rupture</div>
             <div className="fs-4 fw-semibold">{summary.shopCount}</div>
           </div>
-          <div className="col-12 col-md-6">
+          <div className="col-6 col-md-3">
             <div className="text-muted small">Total ruptures en cours (réseau)</div>
             <div className="fs-4 fw-semibold">{summary.totalOpenAcrossShops}</div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="text-muted small">CA perdu estimé (30j, réseau)</div>
+            <div className="fs-4 fw-semibold">{totals.totalCaPerdu.toLocaleString('fr-FR')} CFA</div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="text-muted small">Durée moyenne (réseau)</div>
+            <div className="fs-4 fw-semibold">{formatDuration(totals.avgDurationHours)}</div>
+          </div>
+        </div>
+        <div className="row g-3 mb-4">
+          <div className="col-6 col-md-3">
+            <div className="text-muted small">Ruptures longues (≥48h, réseau)</div>
+            <div className="fs-5 fw-semibold">{totals.totalLongEpisodes}</div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="text-muted small">Sans commande identifiée (réseau)</div>
+            <div className="fs-5 fw-semibold">{totals.totalNoOrder}</div>
           </div>
         </div>
 

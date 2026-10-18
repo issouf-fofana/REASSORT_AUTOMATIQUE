@@ -16,14 +16,26 @@ const prisma = require('../utils/prisma');
 const { estimateLoss } = require('../services/stockoutEpisodeService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
-const RECALC_CONCURRENCY = 8;
+// Relevé de 8 à 25 le 18/10/2026 (bug signalé : "CA perdu estimé" à 0 CFA sur la quasi-totalité du
+// réseau — 20310 épisodes ouverts au total en prod, 8 en parallèle ne finissait jamais un passage
+// complet avant le déclenchement suivant, verrouillé par stockoutLossRecalcLock). 25 reste
+// raisonnable pour la base (chaque calcul fait 2 requêtes SQL), mais couvre le réseau nettement
+// plus vite — combiné à la priorisation ci-dessous.
+const RECALC_CONCURRENCY = 25;
 
 async function runStockoutLossRecalcJob() {
   console.log('[stockoutLossRecalcJob] Recalcul démarré...');
 
+  // Priorise les épisodes JAMAIS calculés (caPerdueEstime encore null) avant ceux déjà à jour —
+  // demande explicite du 18/10/2026 : "je veux mettre a jour tout un coup et le job doit faire a
+  // tout moment". Avec 20000+ épisodes ouverts sur tout le réseau, un passage ne couvre pas
+  // forcément tout en une heure (fréquence du cron) : sans cet ordre, les magasins traités en
+  // dernier (toujours les mêmes, triés par id) restaient indéfiniment à 0 CFA pendant que les
+  // premiers étaient recalculés en boucle pour rien (valeur déjà correcte).
   const openEpisodes = await prisma.stockoutEpisode.findMany({
     where: { status: 'EN_COURS' },
-    select: { id: true, rposShopId: true, ean: true, startedAt: true },
+    select: { id: true, rposShopId: true, ean: true, startedAt: true, caPerdueEstime: true },
+    orderBy: [{ caPerdueEstime: { sort: 'asc', nulls: 'first' } }],
   });
 
   const now = new Date();
