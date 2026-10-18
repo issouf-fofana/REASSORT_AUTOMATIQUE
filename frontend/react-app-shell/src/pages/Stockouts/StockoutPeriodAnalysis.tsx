@@ -24,7 +24,19 @@ type PeriodSummary = {
   departmentBreakdown: { department: string; caPerdue: number; qtyPerdue: number; episodeCount: number }[];
 };
 
-type AnalysisResult = { analysis: string; providerUsed: string; summary: PeriodSummary };
+type AnalysisResult = {
+  level: 'faible' | 'modere' | 'eleve';
+  verdict: string;
+  concernedDepartments: string[];
+  recommendations: string[];
+  providerUsed: string;
+};
+
+const LEVEL_META: Record<AnalysisResult['level'], { label: string; color: string; bg: string; icon: string }> = {
+  eleve: { label: 'Perte élevée', color: '#8a221e', bg: '#f9ecea', icon: 'solar:danger-triangle-bold-duotone' },
+  modere: { label: 'Perte modérée', color: '#7a4910', bg: '#fdf1dd', icon: 'solar:shield-warning-bold-duotone' },
+  faible: { label: 'Perte faible', color: '#2d6a3f', bg: '#e9f3ec', icon: 'solar:shield-check-bold-duotone' },
+};
 
 function formatIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -34,23 +46,6 @@ function defaultRange(): { start: string; end: string } {
   const end = new Date();
   const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
   return { start: formatIsoDate(start), end: formatIsoDate(end) };
-}
-
-// Rendu minimal du texte IA (gras **x** et listes numérotées/à tirets) sans dépendance markdown —
-// le prompt ne produit qu'un texte simple, pas besoin d'un vrai parseur.
-function renderAiText(text: string) {
-  const lines = text.split('\n').filter((l) => l.trim());
-  return lines.map((line, i) => {
-    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, j) =>
-      part.startsWith('**') && part.endsWith('**') ? <strong key={j}>{part.slice(2, -2)}</strong> : part
-    );
-    const isListItem = /^\d+\.\s|^[-•]\s/.test(line.trim());
-    return (
-      <p key={i} className={isListItem ? 'mb-1 ps-2' : 'mb-2'}>
-        {parts}
-      </p>
-    );
-  });
 }
 
 export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: string }) {
@@ -123,8 +118,13 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
         .stockout-period-ratio.tone-warning { color: #7a4910; }
         .stockout-period-ratio.tone-success { color: #2d6a3f; }
         .stockout-period-ratio.tone-muted { color: #8591A0; }
-        .stockout-ai-box { background: #f8fafb; border-left: 3px solid #4A3FB8; border-radius: 0 8px 8px 0; padding: 16px 18px; font-size: .88rem; line-height: 1.6; }
-        .stockout-ai-box p:last-child { margin-bottom: 0 !important; }
+        .stockout-ai-block { border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+        .stockout-ai-block:last-child { margin-bottom: 0; }
+        .stockout-ai-block-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; opacity: .85; }
+        .stockout-ai-block ul { margin: 0; padding-left: 1.1rem; }
+        .stockout-ai-block li { margin-bottom: 4px; }
+        .stockout-ai-block li:last-child { margin-bottom: 0; }
+        .stockout-ai-dept-chip { display: inline-block; background: #EDF1F7; color: #1B2A4A; border-radius: 999px; padding: 3px 10px; font-size: .78rem; font-weight: 600; margin: 0 6px 6px 0; }
       `}</style>
       <div className="card-body">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
@@ -198,12 +198,45 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
             {analysisError && <div className="text-danger small mt-2">Erreur : {analysisError}</div>}
 
             {analysis && (
-              <div className="stockout-ai-box">
-                <div className="d-flex align-items-center gap-2 mb-2">
-                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" style={{ color: '#4A3FB8' }}></iconify-icon>
-                  <strong style={{ color: '#4A3FB8', fontSize: '.8rem', textTransform: 'uppercase', letterSpacing: '.03em' }}>Analyse IA</strong>
+              <div>
+                {/* Bloc 1 : verdict + niveau de sévérité */}
+                <div
+                  className="stockout-ai-block d-flex align-items-start gap-2"
+                  style={{ background: LEVEL_META[analysis.level].bg, color: LEVEL_META[analysis.level].color }}
+                >
+                  <iconify-icon icon={LEVEL_META[analysis.level].icon} style={{ fontSize: '1.3rem', flexShrink: 0, marginTop: 1 }}></iconify-icon>
+                  <div>
+                    <div className="stockout-ai-block-title">{LEVEL_META[analysis.level].label}</div>
+                    <div style={{ fontSize: '.9rem', lineHeight: 1.5 }}>{analysis.verdict}</div>
+                  </div>
                 </div>
-                {renderAiText(analysis.analysis)}
+
+                {/* Bloc 2 : rayons concernés */}
+                {analysis.concernedDepartments.length > 0 && (
+                  <div className="stockout-ai-block" style={{ background: '#f8fafb' }}>
+                    <div className="stockout-ai-block-title" style={{ color: '#5B6B85' }}>Rayons concernés</div>
+                    <div>
+                      {analysis.concernedDepartments.map((d) => (
+                        <span key={d} className="stockout-ai-dept-chip">{d}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Bloc 3 : recommandations actionnables */}
+                {analysis.recommendations.length > 0 && (
+                  <div className="stockout-ai-block" style={{ background: '#EEF0FB' }}>
+                    <div className="stockout-ai-block-title" style={{ color: '#4A3FB8' }}>
+                      <iconify-icon icon="solar:magic-stick-3-bold-duotone" className="align-middle me-1"></iconify-icon>
+                      Recommandations
+                    </div>
+                    <ul style={{ fontSize: '.88rem', color: '#2A2F45' }}>
+                      {analysis.recommendations.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </>

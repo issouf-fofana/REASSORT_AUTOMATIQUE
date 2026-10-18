@@ -998,6 +998,10 @@ async function analyzePeriodLoss(shopName, shopReference, summary) {
     .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus, ${d.qtyPerdue} unité(s), ${d.episodeCount} épisode(s)`)
     .join('\n');
 
+  // Sortie JSON structurée (demande explicite du 18/10/2026 : "c'est pas bon tu vois le style...
+  // faire un truc bien fait") — un bloc de texte libre avec markdown approximatif rendait mal côté
+  // UI ; un objet avec des champs distincts permet au frontend d'afficher de vraies sections/cartes
+  // (verdict + niveau, rayons concernés, recommandations en liste) au lieu d'un paragraphe continu.
   const prompt = `Tu es un analyste réassort pour le magasin "${shopName}" (${shopReference}). Voici les chiffres RÉELS de pertes de rupture de stock sur la période du ${summary.period.startDate} au ${summary.period.endDate} (ne recalcule rien, utilise uniquement ces chiffres) :
 
 - CA perdu estimé sur la période (rupture de stock) : ${summary.totalCaPerdu.toLocaleString('fr-FR')} CFA
@@ -1009,15 +1013,27 @@ async function analyzePeriodLoss(shopName, shopReference, summary) {
 Détail par rayon (triés par perte décroissante) :
 ${topDepartments || 'Aucun détail par rayon disponible.'}
 
-Rédige une analyse courte et actionnable (5-8 phrases maximum) en français, structurée ainsi :
-1. Un verdict clair : cette perte est-elle élevée, modérée ou faible par rapport au CA du magasin sur la période (base-toi sur le ratio perte/CA réalisé) ?
-2. Le ou les rayons qui concentrent le plus le problème.
-3. Une ou deux recommandations concrètes et actionnables pour le magasin (ex: sensibilisation sur tel rayon, délai de réassort à resserrer, etc.) — reste pragmatique, pas de généralité vague.
+Réponds UNIQUEMENT avec un objet JSON strict (aucun texte avant/après, aucun bloc \`\`\`), avec exactement cette forme :
+{
+  "level": "faible" | "modere" | "eleve",
+  "verdict": "une phrase claire disant si la perte est élevée/modérée/faible par rapport au CA, en citant le ratio",
+  "concernedDepartments": ["nom du rayon le plus concerné", "éventuellement un 2e"],
+  "recommendations": ["recommandation concrète et actionnable 1", "recommandation concrète et actionnable 2"]
+}
 
-N'invente aucun chiffre qui ne figure pas ci-dessus. Si une donnée manque pour conclure avec certitude, dis-le plutôt que de deviner.`;
+N'invente aucun chiffre qui ne figure pas ci-dessus. "concernedDepartments" doit reprendre des noms de rayons EXACTEMENT comme listés ci-dessus (jamais un rayon non mentionné). "recommendations" : 1 à 3 entrées, pragmatiques, jamais de généralité vague ("améliorer le suivi" ne compte pas, préfère "resserrer le délai de réassort du rayon X à Y jours" ou équivalent concret). Si une donnée manque pour conclure avec certitude sur le niveau, choisis "faible" et dis-le dans verdict plutôt que de deviner.`;
 
   const { fullText, providerUsed } = await streamWithFallback(prompt, () => {}, 'stockout-period-analysis');
-  return { analysis: fullText.trim(), providerUsed };
+  const match = fullText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Réponse IA sans objet JSON reconnaissable');
+  const parsed = JSON.parse(match[0]);
+  return {
+    level: ['faible', 'modere', 'eleve'].includes(parsed.level) ? parsed.level : 'faible',
+    verdict: parsed.verdict || '',
+    concernedDepartments: Array.isArray(parsed.concernedDepartments) ? parsed.concernedDepartments.slice(0, 5) : [],
+    recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 5) : [],
+    providerUsed,
+  };
 }
 
 module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss };

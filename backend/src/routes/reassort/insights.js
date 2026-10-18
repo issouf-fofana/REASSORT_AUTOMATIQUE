@@ -411,8 +411,8 @@ router.post('/stockout-episodes/period-analysis', async (req, res) => {
     }
     const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { name: true, reference: true } });
     const summary = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
-    const { analysis, providerUsed } = await analyzePeriodLoss(shop?.name || 'Magasin', shop?.reference || shopId, summary);
-    res.json({ success: true, data: { analysis, providerUsed, summary } });
+    const analysis = await analyzePeriodLoss(shop?.name || 'Magasin', shop?.reference || shopId, summary);
+    res.json({ success: true, data: { ...analysis, summary } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
