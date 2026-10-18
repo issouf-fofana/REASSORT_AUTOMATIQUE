@@ -6,6 +6,11 @@
  * déploiement restaient bloqués à sector=null pour toujours (bug signalé : 414/414 articles
  * "Sans secteur" sur un magasin où des propositions existent pourtant bien).
  *
+ * Mis à jour le 18/10/2026 : diagnoseCause() accepte maintenant rposPosId pour résoudre le rayon
+ * via RPOS (rpos.getDepartmentHierarchy) quand l'article n'a jamais été intégré à une proposition
+ * localement — avant, ces articles restaient "Sans rayon" pour toujours même si RPOS connaissait
+ * très bien leur département (ProductCache.departmentId existe presque toujours).
+ *
  * Usage : node scripts/backfillStockoutEpisodeSector.js
  * Ne touche jamais les épisodes déjà RESOLUE (leur diagnostic reste un instantané historique,
  * cohérent avec le principe que causeProposee n'est normalement jamais réévalué après coup).
@@ -16,7 +21,7 @@ const { diagnoseCause } = require('../src/services/stockoutEpisodeService');
 async function main() {
   const episodes = await prisma.stockoutEpisode.findMany({
     where: { status: 'EN_COURS', sector: null },
-    select: { id: true, rposShopId: true, ean: true },
+    select: { id: true, rposShopId: true, ean: true, rposPosId: true },
   });
 
   console.log(`[backfill] ${episodes.length} épisode(s) EN_COURS avec sector=null à corriger...`);
@@ -24,7 +29,7 @@ async function main() {
   let updated = 0;
   let stillNull = 0;
   for (const ep of episodes) {
-    const diagnosis = await diagnoseCause(ep.rposShopId, ep.ean);
+    const diagnosis = await diagnoseCause(ep.rposShopId, ep.ean, ep.rposPosId);
     await prisma.stockoutEpisode.update({
       where: { id: ep.id },
       data: {

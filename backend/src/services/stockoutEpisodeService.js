@@ -63,7 +63,7 @@ async function detectStockoutEpisodes(rposShopId) {
     const open = openByEan.get(snap.ean);
 
     if (snap.stock <= 0 && !open) {
-      const diagnosis = await diagnoseCause(rposShopId, snap.ean);
+      const diagnosis = await diagnoseCause(rposShopId, snap.ean, snap.rposPosId);
       await prisma.stockoutEpisode.create({
         data: {
           rposPosId: snap.rposPosId,
@@ -99,8 +99,16 @@ async function detectStockoutEpisodes(rposShopId) {
  * article existe, et à quel stade de receptionStatus elle est. Prend la ProposalLine la plus récente
  * pour (shop, ean) comme point d'entrée, puis cherche le ProposalOrder correspondant (même
  * proposalId + department).
+ *
+ * `rposPosId` optionnel (demande explicite du 18/10/2026 : "comment tu peux resoudre pour affiché
+ * les rayon ?") — un article jamais intégré à une proposition (ProposalLine absente) n'a AUCUN nom
+ * de rayon connu localement, même si RPOS le connaît très bien (ProductCache.departmentId existe
+ * presque toujours). Repli sur rpos.getDepartmentHierarchy (déjà utilisé ailleurs dans le projet,
+ * avec son propre cache mémoire) plutôt que d'abandonner sur "Sans rayon" — un vrai appel RPOS, mais
+ * seulement pour CET article précis, pas en masse, et seulement quand on n'a vraiment aucune autre
+ * source locale.
  */
-async function diagnoseCause(rposShopId, ean) {
+async function diagnoseCause(rposShopId, ean, rposPosId) {
   const recentLine = await prisma.proposalLine.findFirst({
     where: { ean, proposal: { rposShopId } },
     orderBy: { proposal: { generatedAt: 'desc' } },
@@ -108,10 +116,25 @@ async function diagnoseCause(rposShopId, ean) {
   });
 
   const label = recentLine?.label || null;
-  const department = recentLine?.department || null;
-  const sector = recentLine?.sector || null;
+  let department = recentLine?.department || null;
+  let sector = recentLine?.sector || null;
 
   if (!recentLine) {
+    if (rposPosId) {
+      try {
+        const cache = await prisma.productCache.findUnique({
+          where: { rposShopId_ean: { rposShopId, ean } },
+          select: { departmentId: true },
+        });
+        if (cache?.departmentId) {
+          const hierarchy = await rpos.getDepartmentHierarchy(rposPosId, cache.departmentId);
+          sector = hierarchy.sector !== 'Sans secteur' ? hierarchy.sector : null;
+          department = hierarchy.rayon !== 'Sans rayon' ? hierarchy.rayon : null;
+        }
+      } catch (err) {
+        console.error(`[stockoutEpisodeService] Échec résolution rayon RPOS pour ${ean} :`, err.message);
+      }
+    }
     return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department, sector };
   }
 
