@@ -22,6 +22,15 @@ node prisma/create-admin.js
 echo "[docker-entrypoint] Correction des dates de livraison estimées (règle week-end entrepôt)..."
 node scripts/fixWeekendReceptionDates.js || echo "[docker-entrypoint] Correction des dates de livraison : échec non bloquant, voir logs ci-dessus."
 
+# Même principe pour "Sans secteur" (demande explicite : "faut pour les sans secteur comme ca") —
+# le job planifié stockoutSectorBackfillJob.js tourne déjà toutes les 6h avec une concurrence de 8
+# (cf. commentaire dans ce fichier), mais attendre le prochain passage après un déploiement laisse
+# le problème visible plus longtemps que nécessaire. Appelé ici via son module (pas le script
+# scripts/backfillStockoutEpisodeSector.js, resté séquentiel) pour bénéficier de la même concurrence
+# qu'en cron plutôt que de risquer de bloquer le démarrage sur un grand nombre d'épisodes.
+echo "[docker-entrypoint] Résolution du secteur/rayon des ruptures encore \"Sans secteur\"..."
+node -e "require('./src/jobs/stockoutSectorBackfillJob').runStockoutSectorBackfillJob().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); })" || echo "[docker-entrypoint] Résolution secteur/rayon : échec non bloquant, voir logs ci-dessus."
+
 echo ""
 echo "═══════════════════════════════════════════════════════"
 echo "  🚀 REASSORT AUTOMATIQUE — ACCÈS"
