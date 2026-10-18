@@ -124,7 +124,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [error, setError] = useState<string | null>(null);
   const [bySector, setBySector] = useState<ByFieldSummary | null>(null);
   const [byDepartment, setByDepartment] = useState<ByFieldSummary | null>(null);
-  const [showCharts, setShowCharts] = useState(false);
+  // Graphes affichés par défaut (demande explicite du 18/10/2026 : "affiche le graph par defaut et
+  // donne la possibilité de masque") — inversé depuis la version précédente, repliée par défaut.
+  const [showCharts, setShowCharts] = useState(true);
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
   // Rafraîchit la colonne Durée affichée en live (demande explicite du 17/10/2026 : "le user doit
   // voir compté") — toutes les minutes plutôt que chaque seconde comme sur la fiche détail : des
