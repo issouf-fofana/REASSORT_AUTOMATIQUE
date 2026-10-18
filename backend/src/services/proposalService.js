@@ -13,6 +13,7 @@ const orderAnomalyService = require('./orderAnomalyService');
 const stockMoveAnalysis = require('./stockMoveAnalysisService');
 const { PRIORITY_RANK } = require('./improvementService');
 const aiForecastService = require('./aiForecastService');
+const { computeExpectedReceptionDate } = require('./stockoutEpisodeService');
 
 
 // En dessous de cette tolérance (heures), un léger décalage entre le début réel des données
@@ -1741,8 +1742,15 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     throw new Error(`Les ${skippedIneligible.length} article(s) sélectionné(s) pour le rayon "${department}" n'ont aucun fournisseur valide — aucune commande ne peut être créée.`);
   }
 
-  const leadDays = config.receptionLeadTimeDays ?? 1;
-  const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
+  // expectedReceptionDate calculée via la vraie règle du cycle entrepôt (avant 14h un jour
+  // ouvrable -> lendemain ; après 14h ou un week-end -> lundi/mardi selon le magasin) plutôt qu'un
+  // délai fixe en jours calendaires — bug signalé le 18/10/2026 avec capture : une commande validée
+  // le samedi affichait "Reçue (estimée)" dès le dimanche, jour où l'entrepôt ne travaille jamais
+  // ("la relge si une commande et fait le samedi, il va ertre livré lundi ou mardi si non la
+  // commande est en retart dans entrepot"). receptionLeadTimeDays reste utilisé tel quel pour le
+  // calcul du besoin de réassort (couverture de stock), uniquement cette date d'affichage/suivi
+  // change de méthode de calcul.
+  const expectedReceptionDate = computeExpectedReceptionDate(new Date(), config.weekendDeliveryDay || 'LUNDI');
 
   // Une commande RPOS PAR GROUPE (fournisseur), jamais tout-ou-rien : l'échec d'un groupe
   // (ex: SATOCI injoignable) n'empêche jamais les autres (ex: central) d'être créés. Résultats
@@ -2246,10 +2254,11 @@ async function runValidationInBackground({ proposalId, posId, shopId, userEmail,
   let firstOrder = null;
   let overallValidated = null;
 
-  // Date de réception prévue = maintenant + délai de réception configuré pour ce magasin, figée
-  // au moment de la validation (readme évolution, gestion des délais de réception par magasin).
-  const leadDays = receptionLeadTimeDays ?? 1;
-  const expectedReceptionDate = new Date(Date.now() + leadDays * 24 * 60 * 60 * 1000);
+  // expectedReceptionDate calculée via la vraie règle du cycle entrepôt, pas un délai fixe en jours
+  // calendaires — même correctif que validateProposalDepartment ci-dessus (bug signalé le
+  // 18/10/2026 : commande du samedi affichée "reçue" dès le dimanche).
+  const reassortConfigForDelivery = await prisma.reassortConfig.findUnique({ where: { rposShopId: shopId }, select: { weekendDeliveryDay: true } });
+  const expectedReceptionDate = computeExpectedReceptionDate(new Date(), reassortConfigForDelivery?.weekendDeliveryDay || 'LUNDI');
 
   for (const [department, departmentLines] of departmentGroups) {
     const { groups: supplierGroups, unresolved } = groupLinesByResolvedSupplier(departmentLines);

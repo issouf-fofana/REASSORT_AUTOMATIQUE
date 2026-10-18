@@ -8,11 +8,15 @@
  * MAIS les commandes de cette plateforme passent par le fournisseur central, qui ne génère jamais
  * d'enregistrement de réception dans RPOS (confirmé : 0 delivery liée au fournisseur central).
  *
- * En l'absence de confirmation fiable pour ce type de commande, le seul repère disponible est le
- * délai de réception configuré par magasin (ReassortConfig.receptionLeadTimeDays) : une commande
- * passe en "reçue (estimée)" une fois ce délai écoulé depuis la validation. Ce n'est PAS une
- * confirmation réelle et doit toujours être présenté comme tel à l'utilisateur (cf. frontend,
- * badge "estimé" jamais un badge de certitude).
+ * En l'absence de confirmation fiable pour ce type de commande, le seul repère disponible est
+ * ProposalOrder.expectedReceptionDate — calculée à la création de la commande (proposalService.js)
+ * via computeExpectedReceptionDate (stockoutEpisodeService.js), la vraie règle du cycle entrepôt
+ * (avant 14h un jour ouvrable -> lendemain ; après 14h ou un week-end -> lundi/mardi selon le
+ * magasin), PAS un simple délai fixe en jours calendaires comme avant le 18/10/2026 (bug signalé :
+ * une commande validée le samedi passait "reçue (estimée)" dès le dimanche, jour où l'entrepôt ne
+ * travaille jamais). Une commande passe en "reçue (estimée)" une fois cette date dépassée. Ce n'est
+ * PAS une confirmation réelle et doit toujours être présenté comme tel à l'utilisateur (cf.
+ * frontend, badge "estimé" jamais un badge de certitude).
  *
  * Seule exception fiable : l'annulation. Le statut RPOS 6 (annulée) reste vérifié, car une
  * commande annulée n'a par définition jamais pu être livrée.
