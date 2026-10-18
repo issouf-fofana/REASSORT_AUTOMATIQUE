@@ -112,7 +112,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
   const ratioTone = summary?.lossRatioPct === null ? 'muted' : summary && summary.lossRatioPct! >= 5 ? 'danger' : summary && summary.lossRatioPct! >= 2 ? 'warning' : 'success';
 
   return (
-    <div className="card mb-3">
+    <div className="card mb-3" style={{ borderTop: '3px solid #F5A623' }}>
       <style>{`
         .stockout-period-ratio.tone-danger { color: #8a221e; }
         .stockout-period-ratio.tone-warning { color: #7a4910; }
@@ -128,7 +128,10 @@ export function StockoutPeriodAnalysis({ shopQueryParam }: { shopQueryParam: str
       `}</style>
       <div className="card-body">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-          <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Analyse des pertes sur une période</h6>
+          <h6 className="mb-0 d-flex align-items-center gap-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>
+            <iconify-icon icon="solar:chart-square-bold-duotone" style={{ color: '#F5A623', fontSize: '1.2rem' }}></iconify-icon>
+            Analyse des pertes sur une période
+          </h6>
           <div className="d-flex align-items-end gap-2 flex-wrap">
             <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={startDate} max={endDate} onChange={(e) => { setStartDate(e.target.value); loadSummary(e.target.value, endDate); }} />
             <span className="text-muted small">au</span>

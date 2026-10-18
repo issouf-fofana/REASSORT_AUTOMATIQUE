@@ -227,11 +227,19 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .stockout-mini-kpi .value { font-size: 1.15rem; font-weight: 700; color: #1B2A4A; line-height: 1.1; }
         .stockout-toggle-charts { font-size: .76rem; color: #5B6B85; background: none; border: none; display: inline-flex; align-items: center; gap: 4px; padding: 0; }
         .stockout-toggle-charts:hover { color: #1B2A4A; }
+        .stockout-section-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #8591A0; margin: 20px 0 10px; padding-top: 10px; border-top: 1px solid rgba(27,42,74,.08); }
+        .stockout-section-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
       `}</style>
 
-      {/* KPI condensés en une seule bande mince + Analyse par rayon juste en dessous — tout doit
-          tenir sans scroll (demande explicite du 17/10/2026 : "si on viens on doit tous voir sans
-          scroller"). Les graphes (courbe 30j, causes) sont repliés par défaut, ouverts à la demande. */}
+      {/* Organisation de la page revue le 18/10/2026 (demande explicite : "il faut mettre en haut
+          tu vois c'est trop caché... donne moi une organisation du dash... bien placé... affiché en
+          vrac un coup") — ordre de lecture du dashboard, du plus synthétique/stratégique vers le
+          plus détaillé/opérationnel :
+          1. Analyse de période + IA (filtres de date tout en haut, visibles sans scroll)
+          2. KPI instantanés (situation "maintenant")
+          3. Graphes (tendance + causes, masquables)
+          4. Analyse par rayon (priorisation)
+          5. Navigation Secteur → Rayon → Articles (détail opérationnel, en bas) */}
       {error ? (
         <div className="text-danger small mb-3">Erreur : {error}</div>
       ) : !mountRef.current ? null :
@@ -239,6 +247,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         <div className="text-muted small mb-3">Chargement des données de rupture...</div>
       ) : (
         <>
+          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
+
+          <div className="stockout-section-title">Situation actuelle</div>
           <div className="row row-cols-2 row-cols-md-4 g-2 mb-3">
             <div className="col">
               <div className="stockout-mini-kpi">
@@ -289,13 +300,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
               sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →
               Articles juste en dessous, qui sert au drill-down vers les articles). */}
+          <div className="stockout-section-title">Priorisation par rayon</div>
           <div className="mb-3">
             <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} />
           </div>
 
-          {/* Analyse des pertes sur période personnalisée + IA à la demande (demande explicite du
-              18/10/2026). */}
-          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
+          <div className="stockout-section-title">Détail par article</div>
         </>
       )}
 
