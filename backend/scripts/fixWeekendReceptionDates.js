@@ -20,12 +20,16 @@
  *      prématuré mais la conclusion reste correcte aujourd'hui) — corrige juste
  *      expectedReceptionDate pour que l'affichage soit cohérent avec la vraie règle.
  *
- * Usage : node scripts/fixWeekendReceptionDates.js
+ * Usage en script autonome : node scripts/fixWeekendReceptionDates.js
+ * Exporté aussi comme runWeekendReceptionDatesFix() pour être appelé depuis server.js au démarrage
+ * (en arrière-plan, après que le serveur ait commencé à écouter — jamais depuis
+ * docker-entrypoint.sh : un vrai incident de prod a montré que l'exécuter de façon synchrone AVANT
+ * le démarrage du serveur HTTP rendait le service injoignable le temps de son exécution).
  */
 const prisma = require('../src/utils/prisma');
 const { computeExpectedReceptionDate } = require('../src/services/stockoutEpisodeService');
 
-async function main() {
+async function runWeekendReceptionDatesFix() {
   // Commandes RECUE_ESTIMEE liées à un épisode encore EN_COURS — celles liées à un épisode déjà
   // RESOLUE n'ont plus d'impact pratique (la rupture est terminée, peu importe la date exacte).
   const openEpisodes = await prisma.stockoutEpisode.findMany({
@@ -84,10 +88,18 @@ async function main() {
   }
 
   console.log(`[fix-weekend] Terminé : ${revertedToWaiting} commande(s) repassée(s) en attente (date prématurée corrigée), ${dateCorrectedOnly} date(s) alignée(s) sans changement de statut, ${skipped} ignorée(s) (pas de rupture en cours liée).`);
-  await prisma.$disconnect();
+  return { revertedToWaiting, dateCorrectedOnly, skipped };
 }
 
-main().catch((err) => {
-  console.error('[fix-weekend] Échec :', err);
-  process.exit(1);
-});
+module.exports = { runWeekendReceptionDatesFix };
+
+// Exécution directe en script autonome (node scripts/fixWeekendReceptionDates.js) uniquement —
+// quand require()-é comme module depuis server.js, require.main !== module et ce bloc ne tourne pas.
+if (require.main === module) {
+  runWeekendReceptionDatesFix()
+    .then(() => prisma.$disconnect())
+    .catch((err) => {
+      console.error('[fix-weekend] Échec :', err);
+      process.exit(1);
+    });
+}

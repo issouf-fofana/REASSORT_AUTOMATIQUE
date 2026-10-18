@@ -251,6 +251,19 @@ async function start() {
     await startOrRestartEndOfDayValidationRecapJob();
     // Chien de garde consommation de tokens IA, alerte les ADMIN en cas de pic (horaire configurable, 7h10 par défaut).
     await startOrRestartTokenUsageWatchdogJob();
+
+    // Rattrapages ponctuels déclenchés une fois par démarrage (demandes explicites du 18/10/2026 :
+    // "fait dans le code et quand je deploi et mais a jour pour tout a meme temps" / "faut pour les
+    // sans secteur comme ca") — EN ARRIÈRE-PLAN, jamais attendus (pas de `await`) : le serveur est
+    // déjà en écoute depuis app.listen() plus haut, ces rattrapages ne doivent jamais retarder ni
+    // bloquer l'exposition du port. CORRIGÉ suite à un incident réel : les avoir mis dans
+    // docker-entrypoint.sh, AVANT le démarrage du serveur, a rendu le service injoignable le temps
+    // de leur exécution (le job secteur/rayon fait de vrais appels RPOS un par un, potentiellement
+    // des dizaines de minutes avec plusieurs milliers d'épisodes sur tout le réseau).
+    const { runStockoutSectorBackfillJob } = require('./jobs/stockoutSectorBackfillJob');
+    runStockoutSectorBackfillJob().catch((err) => console.error('[startup] Résolution secteur/rayon en arrière-plan : échec non bloquant —', err.message));
+    const { runWeekendReceptionDatesFix } = require('../scripts/fixWeekendReceptionDates');
+    runWeekendReceptionDatesFix().catch((err) => console.error('[startup] Correction des dates de livraison en arrière-plan : échec non bloquant —', err.message));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

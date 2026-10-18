@@ -12,24 +12,14 @@ npx prisma migrate deploy
 echo "[docker-entrypoint] Vérification du compte administrateur..."
 node prisma/create-admin.js
 
-# Rattrapage ponctuel (18/10/2026, demande explicite : "fait dans le code et quand je deploi et mais
-# a jour pour tout a meme temps") : corrige les commandes déjà marquées à tort "reçue (estimée)"
-# avant le correctif de computeExpectedReceptionDate (règle week-end/14h du cycle entrepôt, cf.
-# proposalService.js) — tourne automatiquement à chaque démarrage pour ne jamais dépendre d'une
-# étape manuelle après déploiement. Idempotent (ne touche que ce qui est encore incorrect), donc
-# sans effet sur une base déjà à jour — peut rester ici en continu plutôt que d'être retiré après
-# le premier passage.
-echo "[docker-entrypoint] Correction des dates de livraison estimées (règle week-end entrepôt)..."
-node scripts/fixWeekendReceptionDates.js || echo "[docker-entrypoint] Correction des dates de livraison : échec non bloquant, voir logs ci-dessus."
-
-# Même principe pour "Sans secteur" (demande explicite : "faut pour les sans secteur comme ca") —
-# le job planifié stockoutSectorBackfillJob.js tourne déjà toutes les 6h avec une concurrence de 8
-# (cf. commentaire dans ce fichier), mais attendre le prochain passage après un déploiement laisse
-# le problème visible plus longtemps que nécessaire. Appelé ici via son module (pas le script
-# scripts/backfillStockoutEpisodeSector.js, resté séquentiel) pour bénéficier de la même concurrence
-# qu'en cron plutôt que de risquer de bloquer le démarrage sur un grand nombre d'épisodes.
-echo "[docker-entrypoint] Résolution du secteur/rayon des ruptures encore \"Sans secteur\"..."
-node -e "require('./src/jobs/stockoutSectorBackfillJob').runStockoutSectorBackfillJob().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); })" || echo "[docker-entrypoint] Résolution secteur/rayon : échec non bloquant, voir logs ci-dessus."
+# Les rattrapages de données (dates de livraison week-end, secteur/rayon "Sans secteur") tournent
+# désormais APRÈS le démarrage du serveur, en arrière-plan (cf. server.js) — jamais ici, avant
+# `exec "$@"`. CORRIGÉ le 18/10/2026 suite à un vrai incident : les lancer ici, synchrones et
+# bloquants avant le démarrage du serveur HTTP, a rendu le service injoignable en prod le temps de
+# leur exécution (le job secteur/rayon fait de vrais appels RPOS un par un, potentiellement des
+# dizaines de minutes avec plusieurs milliers d'épisodes sur le réseau — Dokploy/le healthcheck
+# voyait alors le port 3001 refuser toute connexion et considérait le service mort). Voir
+# server.js pour le déclenchement différé.
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
