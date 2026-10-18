@@ -305,6 +305,42 @@ export function StockoutEpisodePage() {
         .ep2-loss-split > div { flex: 1; border-radius: 10px; padding: 12px 14px; background: #FAFBFD; border: 1px solid #EEF1F6; }
         .ep2-loss-split .lbl { font-size: .66rem; text-transform: uppercase; color: #8591A0; font-weight: 700; margin-bottom: 3px; }
         .ep2-loss-split .val { font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+
+        /* 3 cartes timeline "Détection / Commande / Livraison" (demande explicite du 18/10/2026,
+           sur le modèle de rapport_rupture_stock_v3.html) + animations/hover plus visibles sur
+           l'ensemble de la page ("il faut faire un bon style avec les hover visible et dan
+           animation"). fadeInUp joue une seule fois à l'arrivée sur la fiche (pas en boucle, pas
+           sur les mises à jour du chronomètre live) — chaque carte démarre décalée pour un effet de
+           cascade léger plutôt que tout qui apparaît d'un coup.
+        */
+        @keyframes ep2-fade-in-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .ep2-card, .ep2-header, .ep2-timeline { animation: ep2-fade-in-up .35s ease-out backwards; }
+
+        .ep2-card { transition: box-shadow .2s ease, transform .2s ease; }
+        .ep2-card:hover { box-shadow: 0 6px 20px rgba(27,42,74,.09); transform: translateY(-2px); }
+
+        .ep2-steps { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+        @media (max-width: 860px) { .ep2-steps { grid-template-columns: 1fr; } }
+        .ep2-step { border: 1px solid #E8ECF2; border-radius: 12px; overflow: hidden; background: #fff; transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease; }
+        .ep2-step:hover { box-shadow: 0 6px 18px rgba(27,42,74,.1); transform: translateY(-3px); border-color: #DCE3EC; }
+        .ep2-step-head { padding: 11px 14px; background: #FAFBFD; border-bottom: 1px solid #F0F3F7; display: flex; justify-content: space-between; align-items: center; gap: 8px; position: relative; }
+        .ep2-step-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+        .ep2-step.detect .ep2-step-head::before { background: #4FA87A; }
+        .ep2-step.order .ep2-step-head::before { background: #D2A04A; }
+        .ep2-step.delivery .ep2-step-head::before { background: #C0392B; }
+        .ep2-step-head b { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #1B2A4A; }
+        .ep2-step-body { padding: 14px; }
+        .ep2-step-lbl { font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: #8591A0; font-weight: 700; margin-bottom: 3px; }
+        .ep2-step-date { font-size: .88rem; font-weight: 800; color: #1B2A4A; margin-bottom: 7px; }
+        .ep2-step-desc { font-size: .76rem; color: #5B6B85; line-height: 1.6; }
+
+        /* Hover visible sur tuiles/badges/boutons déjà présents sur la page — manquait de feedback
+           interactif sur les éléments non cliquables mais survolables ("c'est trop simple on a pas
+           de bon style"). */
+        .ep2-badge { transition: transform .15s ease; }
+        .ep2-badge:hover { transform: scale(1.05); }
+        .ep2-status-badge { transition: transform .15s ease, box-shadow .15s ease; }
+        .ep2-status-badge:hover { transform: scale(1.03); box-shadow: 0 2px 8px rgba(27,42,74,.1); }
       `}</style>
 
       <button
@@ -425,50 +461,67 @@ export function StockoutEpisodePage() {
             </div>
           </div>
 
-          {/* Détection / Commande / Prise en charge — toute la traçabilité demandée */}
+          {/* Détection / Commande / Prise en charge — refondu en 3 cartes timeline (demande
+              explicite du 18/10/2026, sur le modèle de rapport_rupture_stock_v3.html : "tu vois ce
+              style je veux sur cette partie") — chaque étape a sa propre carte avec bordure colorée
+              en haut et badge de statut, au lieu de 3 colonnes de texte brut. */}
           <section className="ep2-card mb-3">
             <div className="ep2-card-head"><iconify-icon icon="solar:magnifer-bold-duotone"></iconify-icon> Détection / Commande / Prise en charge</div>
             <div className="ep2-card-body">
-              <div className="row g-4">
-                <div className="col-12 col-md-4">
-                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Détection de la rupture</div>
-                  <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{formatDateTime(detail.startedAt)}</div>
-                  <div className="small text-muted">Stock passé à 0 — compteur {detail.status === 'EN_COURS' ? 'toujours actif' : 'arrêté à la réception'}.</div>
+              <div className="ep2-steps">
+                <div className="ep2-step detect">
+                  <div className="ep2-step-head">
+                    <b>1 · Détection</b>
+                    <span className="ep2-badge tone-success">Confirmée</span>
+                  </div>
+                  <div className="ep2-step-body">
+                    <div className="ep2-step-lbl">Début de rupture</div>
+                    <div className="ep2-step-date">{formatDateTime(detail.startedAt)}</div>
+                    <div className="ep2-step-desc">Stock passé à 0 — compteur {detail.status === 'EN_COURS' ? 'toujours actif' : 'arrêté à la réception'}.</div>
+                  </div>
                 </div>
-                <div className="col-12 col-md-4">
-                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Commande passée</div>
-                  {detail.order ? (
-                    <>
-                      <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{formatDateTime(detail.order.createdAt)}</div>
-                      <div className="small text-muted">N° {detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</div>
-                      <div className="small text-muted">Fournisseur : {detail.order.supplierName || '—'}{detail.order.deliveryType ? ` (${detail.order.deliveryType})` : ''}</div>
-                      <div className="small text-muted">Créée par {detail.order.createdBy || 'inconnu'}</div>
-                      {detail.order.validatedAt ? (
-                        <div className="small text-muted">Validée le {formatDateTime(detail.order.validatedAt)}{detail.order.validatedBy ? ` par ${detail.order.validatedBy}` : ''}</div>
-                      ) : (
-                        <div className="small text-muted">Pas encore validée</div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="small text-muted">Aucune commande passée depuis le début de la rupture.</div>
-                  )}
+                <div className="ep2-step order">
+                  <div className="ep2-step-head">
+                    <b>2 · Commande fournisseur</b>
+                    <span className={`ep2-badge ${detail.order ? (detail.order.validatedAt ? 'tone-success' : 'tone-warning') : 'tone-info'}`}>{detail.order ? (detail.order.validatedAt ? 'Validée' : 'À valider') : 'Aucune'}</span>
+                  </div>
+                  <div className="ep2-step-body">
+                    {detail.order ? (
+                      <>
+                        <div className="ep2-step-lbl">Commande n° {detail.order.rposOrderReference || detail.order.id.slice(0, 10)}</div>
+                        <div className="ep2-step-date">{formatDateTime(detail.order.createdAt)}</div>
+                        <div className="ep2-step-desc">
+                          Quantité : {detail.order.quantityOrdered ?? '—'} unité(s)<br />
+                          Fournisseur : {detail.order.supplierName || '—'}{detail.order.deliveryType ? ` (${detail.order.deliveryType})` : ''}<br />
+                          Créée par : {detail.order.createdBy || 'inconnu'}<br />
+                          Statut : {detail.order.validatedAt ? `validée le ${formatDateTime(detail.order.validatedAt)}${detail.order.validatedBy ? ` par ${detail.order.validatedBy}` : ''}` : 'pas encore validée'}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="ep2-step-desc">Aucune commande passée depuis le début de la rupture.</div>
+                    )}
+                  </div>
                 </div>
-                <div className="col-12 col-md-4">
-                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: '.68rem', fontWeight: 600 }}>Livraison</div>
-                  {detail.order ? (
-                    <>
-                      <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : 'En attente'}</div>
-                      <div className="small text-muted">
-                        {detail.order.actualReceptionDate
-                          ? `Reçue — ${RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus}`
-                          : detail.order.expectedReceptionDate
-                            ? `Prévue le ${formatDate(detail.order.expectedReceptionDate)}`
-                            : 'Date prévue inconnue'}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="small text-muted">—</div>
-                  )}
+                <div className="ep2-step delivery">
+                  <div className="ep2-step-head">
+                    <b>3 · Livraison</b>
+                    <span className={`ep2-badge ${detail.deliveryLooksDoubtful || detail.deliveryDelay ? 'tone-critical' : detail.order?.actualReceptionDate ? 'tone-success' : 'tone-warning'}`}>{detail.deliveryLooksDoubtful ? 'À rapprocher' : detail.deliveryDelay ? 'En retard' : detail.order?.actualReceptionDate ? 'Estimée reçue' : 'En attente'}</span>
+                  </div>
+                  <div className="ep2-step-body">
+                    {detail.order ? (
+                      <>
+                        <div className="ep2-step-lbl">{detail.order.actualReceptionDate ? 'Date de réception' : 'Date prévue'}</div>
+                        <div className="ep2-step-date">{detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : detail.order.expectedReceptionDate ? formatDate(detail.order.expectedReceptionDate) : '—'}</div>
+                        <div className="ep2-step-desc">
+                          {detail.order.actualReceptionDate
+                            ? `Statut déclaré « ${RECEPTION_STATUS_LABELS[detail.order.receptionStatus] || detail.order.receptionStatus} ». ${detail.deliveryLooksDoubtful ? "Aucun mouvement de réception ne le confirme dans l'historique." : ''}`
+                            : 'Pas encore reçue.'}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="ep2-step-desc">—</div>
+                    )}
+                  </div>
                 </div>
               </div>
 
