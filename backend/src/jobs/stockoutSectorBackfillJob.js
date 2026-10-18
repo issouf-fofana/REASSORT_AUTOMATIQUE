@@ -57,6 +57,7 @@ async function runStockoutSectorBackfillJob() {
   });
 
   console.log(`[stockoutSectorBackfillJob] Terminé : ${resolved} résolu(s), ${stillNull} resté(s) sans secteur (article jamais vu ni par une proposition ni par RPOS — rare).`);
+  return { total: episodes.length, resolved, stillNull };
 }
 
 module.exports = { runStockoutSectorBackfillJob };

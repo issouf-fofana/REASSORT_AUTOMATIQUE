@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rupture de stock | Rapport opérationnel</title>
+<style>
+:root{--navy:#1d3557;--navy-dark:#142844;--ink:#263548;--muted:#718096;--line:#dce3eb;--bg:#f3f5f8;--white:#fff;--red:#b42318;--red-bg:#fff0ef;--orange:#9a5b0c;--orange-bg:#fff4e2;--green:#246747;--green-bg:#e9f5ed;--blue:#315b89;--blue-bg:#edf3f9;--shadow:0 1px 3px #152d4b0b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 "Segoe UI",Arial,sans-serif}button{font:inherit;cursor:pointer}
+.app{min-height:100vh;display:grid;grid-template-columns:226px minmax(0,1fr)}
+aside{background:var(--navy-dark);color:#eaf0f7;padding:18px 12px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:10px;padding:5px 8px 20px;border-bottom:1px solid #ffffff20}.logo{width:38px;height:38px;border:1px solid #ffffff55;border-radius:8px;display:grid;place-items:center;font-size:23px}.brand b{font-size:11px;letter-spacing:.1em;line-height:1.5}.brand small{display:block;color:#aebdd0;font-size:10px;letter-spacing:0;margin-top:3px}
+.navtitle{font-size:9px;color:#91a5c0;font-weight:800;letter-spacing:.14em;margin:22px 10px 8px}.nav{display:grid;gap:3px}.nav a{color:#dbe4ef;text-decoration:none;padding:9px 10px;border-radius:5px;display:flex;align-items:center;gap:11px;font-size:12px}.nav a.active{background:#2b4263;border-left:3px solid #d5a45b;padding-left:7px;color:#fff}.nav a:hover{background:#ffffff0c}.ico{width:17px;text-align:center;color:#b9c9dd;font-size:15px}.sidebottom{margin-top:auto;padding:14px 9px 0;border-top:1px solid #ffffff20;color:#aebdd0;font-size:10px}
+main{min-width:0}.top{height:61px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 25px;gap:15px}.top h1{font-size:16px;margin:0;font-weight:750;color:var(--navy)}.topright{display:flex;align-items:center;gap:14px;font-size:11px;color:var(--muted)}.store{border:1px solid var(--line);border-radius:5px;padding:7px 9px;color:var(--ink);white-space:nowrap}.avatar{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e8edf4;color:var(--navy);font-weight:800;margin-right:5px}.username{display:flex;align-items:center;color:var(--ink);font-weight:650;white-space:nowrap}
+.content{max-width:1580px;margin:auto;padding:21px 25px 36px}.crumb{color:var(--muted);font-size:11px;margin-bottom:15px}.crumb b{color:var(--ink)}
+.header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:15px}.ref{font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--muted)}h2{margin:5px 0;font-size:23px;line-height:1.25;color:var(--navy)}.sub{font-size:12px;color:var(--muted)}.status{display:inline-flex;align-items:center;gap:7px;border:1px solid #efc4c1;background:var(--red-bg);color:var(--red);padding:7px 10px;border-radius:5px;font-size:10px;font-weight:800;white-space:nowrap}.dot{width:7px;height:7px;background:var(--red);border-radius:50%}
+.header-actions{display:flex;gap:7px;margin-top:12px}.btn{border:1px solid var(--line);border-radius:5px;padding:7px 10px;background:white;color:var(--ink);font-size:11px;font-weight:650}.btn.primary{background:var(--navy);border-color:var(--navy);color:white}
+.callout{padding:11px 13px;border-radius:5px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start;font-size:11px}.callout.warn{background:var(--orange-bg);border:1px solid #efd5a8;color:#7d4b0b}.callout.danger{background:var(--red-bg);border:1px solid #efc7c4;color:#8d211a}.callout.good{background:var(--green-bg);border:1px solid #c8e3d1;color:#225b40}
+.section-title{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:850;margin:21px 0 9px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}.kpi{background:white;border:1px solid var(--line);border-radius:6px;padding:13px 14px;box-shadow:var(--shadow);min-width:0}.kpi-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.07em;font-weight:800}.kpi-value{font-size:22px;font-weight:850;color:var(--navy);margin:7px 0 2px;letter-spacing:-.03em;overflow-wrap:anywhere}.kpi-value.red{color:var(--red)}.kpi-value.orange{color:var(--orange)}.kpi-foot{font-size:10px;color:var(--muted)}.kpi-foot b{color:var(--ink)}
+.panel{background:white;border:1px solid var(--line);border-radius:6px;box-shadow:var(--shadow);min-width:0}.panelhead{padding:12px 15px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}.panelhead h3{margin:0;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.055em}.panelhead span{font-size:10px;color:var(--muted)}.panelbody{padding:15px}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:14px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:15px 18px}.label{font-size:9px;text-transform:uppercase;letter-spacing:.065em;color:var(--muted);font-weight:800;margin-bottom:4px}.value{font-size:12px;font-weight:700;overflow-wrap:anywhere}.value.red{color:var(--red)}.value.muted{font-weight:500;color:var(--muted)}.tag{display:inline-block;border-radius:4px;padding:3px 6px;background:#edf1f6;color:#4a5a70;font-size:9px;font-weight:800}.tag.red{background:var(--red-bg);color:var(--red)}.tag.orange{background:var(--orange-bg);color:var(--orange)}.tag.green{background:var(--green-bg);color:var(--green)}
+.impact-top{display:grid;grid-template-columns:1fr 1fr;gap:12px}.impact{padding:11px;border:1px solid var(--line);border-radius:5px;background:#fbfcfd}.impact strong{display:block;font-size:17px;color:var(--navy);margin-top:4px}.impact strong.red{color:var(--red)}.barrow{display:flex;justify-content:space-between;gap:10px;font-size:10px;margin:12px 0 5px}.barrow span{color:var(--muted)}.track{height:7px;background:#edf0f4;border-radius:99px;overflow:hidden}.fill{height:100%;border-radius:99px}.fill.a{width:33.3%;background:#d4a04a}.fill.b{width:52.7%;background:#b42318}.fill.total{width:100%;background:#315b89}.note{font-size:10px;color:var(--muted);margin-top:9px;line-height:1.5}
+.timeline{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:15px}.event{border:1px solid var(--line);border-radius:5px;overflow:hidden}.eventhead{padding:9px 11px;background:#fafbfd;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:center}.eventhead b{font-size:10px;text-transform:uppercase;letter-spacing:.05em}.eventbody{padding:12px}.eventdate{font-size:12px;font-weight:800;color:var(--navy);margin:2px 0 7px}.eventdesc{font-size:10px;color:var(--muted);line-height:1.65}.event.detect .eventhead{border-top:3px solid #668b78}.event.order .eventhead{border-top:3px solid #d2a04a}.event.delivery .eventhead{border-top:3px solid var(--red)}
+.stockrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}.stock{border:1px solid var(--line);background:#fafbfd;border-radius:5px;padding:11px;min-width:0}.stock .num{font-size:19px;font-weight:850;margin:4px 0;color:var(--navy)}.stock .num.red{color:var(--red)}.stock small{font-size:10px;color:var(--muted);line-height:1.5;display:block}
+.actions-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px}.todo{border:1px solid var(--line);border-radius:5px;padding:12px;display:flex;gap:10px}.todo .n{width:24px;height:24px;flex:0 0 24px;display:grid;place-items:center;border-radius:5px;background:var(--blue-bg);color:var(--blue);font-weight:850}.todo b{font-size:11px;display:block;margin-bottom:4px}.todo p{font-size:10px;color:var(--muted);margin:0;line-height:1.55}
+.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:10px}th,td{padding:11px 13px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}th{background:#fafbfd;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:9px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#fafbfd}
+.footer{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;margin-top:13px}
+@media(max-width:1080px){.app{grid-template-columns:200px minmax(0,1fr)}.content{padding:17px}.top{padding:0 17px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.twocol{grid-template-columns:1fr}.stockrow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.app{grid-template-columns:1fr}aside{padding:10px}.brand{padding-bottom:10px}.navtitle,.nav a:not(.active),.sidebottom{display:none}.nav{margin-top:7px}.top{height:auto;padding:12px;align-items:flex-start}.topright{gap:7px}.store{display:none}.content{padding:13px}.header{display:block}.status{margin-top:12px}h2{font-size:20px}.kpis,.twocol,.fields,.impact-top,.timeline,.actions-grid{grid-template-columns:1fr}.stockrow{grid-template-columns:1fr 1fr}.footer{display:block}.footer span{display:block;margin-top:5px}}
+@media print{aside,.top,.header-actions{display:none}.app{display:block}.content{padding:0;max-width:none}.panel,.kpi{box-shadow:none;break-inside:avoid}body{background:white}.footer{margin-top:8px}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+  <div class="brand"><div class="logo">↻</div><div><b>RÉASSORT<br>AUTOMATIQUE</b><small>Console de pilotage · v26.0.1</small></div></div>
+  <div class="navtitle">PILOTAGE</div>
+  <nav class="nav">
+    <a href="#"><span class="ico">▦</span>Tableau de bord</a><a class="active" href="#"><span class="ico">▣</span>Ruptures de stock</a><a href="#"><span class="ico">▱</span>Assistant IA</a><a href="#"><span class="ico">ⓘ</span>Mon accès</a><a href="#"><span class="ico">▤</span>Guide du projet</a><a href="#"><span class="ico">▣</span>Guide d’utilisation</a>
+  </nav>
+  <div class="navtitle">RÉASSORT</div>
+  <nav class="nav">
+    <a href="#"><span class="ico">🛒</span>Proposition de commande</a><a href="#"><span class="ico">◷</span>Historique</a><a href="#"><span class="ico">⌁</span>Résultat de l’analyse</a><a href="#"><span class="ico">▥</span>Ventes synchronisées</a><a href="#"><span class="ico">✧</span>IA &amp; Prédictions</a><a href="#"><span class="ico">ϟ</span>Qualité &amp; IA</a><a href="#"><span class="ico">♧</span>Mémoire du modèle</a>
+  </nav>
+  <div class="sidebottom">CASH IVOIRE · Environnement magasin</div>
+</aside>
+<main>
+  <header class="top"><h1>Ruptures de stock / Fiche d’analyse</h1><div class="topright"><div class="store">CASH IVOIRE U PORT-BOUËT (414) ▾</div><span>♢</span><div class="username"><span class="avatar">I</span>ifofana — Admin</div></div></header>
+  <div class="content">
+    <div class="crumb">Pilotage / Ruptures de stock / Produits frais / <b>Saucisson porc à l’ail 1 kg</b></div>
+    <div class="header">
+      <div><div class="ref">Rapport incident · N° 100689598 · EAN 100689598</div><h2>SAUCISSON PORC À L’AIL 1 KG</h2><div class="sub">Charcuterie coupe · Produits frais · Magasin 414 — Port-Bouët</div><div class="header-actions"><button class="btn primary" onclick="window.print()">Imprimer le rapport</button><button class="btn" onclick="document.getElementById('journal').scrollIntoView({behavior:'smooth'})">Consulter le journal ↓</button></div></div>
+      <div class="status"><span class="dot"></span>RUPTURE ACTIVE</div>
+    </div>
+    <div class="callout warn"><span>⚠</span><div><b>Incident à traiter.</b> La rupture est toujours active après plus de deux jours. Une commande de 11 unités a été passée, mais la réception n’est pas corroborée par un mouvement de stock. La priorité est de vérifier la livraison et l’inventaire physique.</div></div>
+
+    <div class="section-title">Synthèse opérationnelle</div>
+    <section class="kpis">
+      <div class="kpi"><div class="kpi-label">Durée depuis détection</div><div class="kpi-value orange">2 j 2 h 21 min</div><div class="kpi-foot">Début : <b>16/10/2026 à 12:02</b></div></div>
+      <div class="kpi"><div class="kpi-label">CA perdu estimé · total affiché</div><div class="kpi-value red">25 697 CFA</div><div class="kpi-foot">À réconcilier avec les pertes par période</div></div>
+      <div class="kpi"><div class="kpi-label">Commande pendant la rupture</div><div class="kpi-value">11 unités</div><div class="kpi-foot">N° <b>10810605</b> · passée le 17/10</div></div>
+      <div class="kpi"><div class="kpi-label">Stock actuel signalé</div><div class="kpi-value red">−8 unités</div><div class="kpi-foot">Anomalie de stock à investiguer</div></div>
+    </section>
+
+    <div class="section-title">Comprendre l’incident</div>
+    <div class="twocol">
+      <section class="panel"><div class="panelhead"><h3>Référentiel article</h3><span>Identification &amp; prix</span></div><div class="panelbody"><div class="fields">
+        <div><div class="label">Article</div><div class="value">Saucisson porc à l’ail 1 kg</div></div><div><div class="label">EAN</div><div class="value">100689598</div></div>
+        <div><div class="label">Rayon</div><div class="value">Charcuterie coupe</div></div><div><div class="label">Secteur</div><div class="value">Produits frais</div></div>
+        <div><div class="label">Prix de vente unitaire</div><div class="value">5 990 CFA</div></div><div><div class="label">Marge unitaire</div><div class="value">2 183 CFA</div></div>
+        <div><div class="label">Cause probable</div><div class="value">Magasin / réassort</div></div><div><div class="label">Confiance</div><div class="value">Probable <span class="tag">À confirmer</span></div></div>
+      </div></div></section>
+      <section class="panel"><div class="panelhead"><h3>Impact estimé de la rupture</h3><span>Ventilation temporelle</span></div><div class="panelbody">
+        <div class="impact-top"><div class="impact"><div class="label">Avant commande</div><strong>8 566 CFA</strong><div class="note">21 h 25 min 37 s de rupture</div></div><div class="impact"><div class="label">Après commande</div><strong class="red">13 536 CFA</strong><div class="note">1 j 4 h 55 min 36 s de rupture</div></div></div>
+        <div class="barrow"><span>Perte avant commande</span><b>8 566 CFA</b></div><div class="track"><div class="fill a"></div></div>
+        <div class="barrow"><span>Perte après commande</span><b>13 536 CFA</b></div><div class="track"><div class="fill b"></div></div>
+        <div class="note">Somme des deux périodes : <b>22 102 CFA</b>. Le total affiché de 25 697 CFA présente un écart de <b>3 595 CFA</b> à expliquer. Ne pas additionner automatiquement sans vérifier les règles de calcul.</div>
+      </div></section>
+    </div>
+
+    <section class="panel" style="margin-bottom:14px"><div class="panelhead"><h3>Chronologie et prise en charge</h3><span>Dates enregistrées</span></div><div class="timeline">
+      <article class="event detect"><div class="eventhead"><b>1 · Détection</b><span class="tag green">Confirmée</span></div><div class="eventbody"><div class="label">Début de rupture</div><div class="eventdate">16/10/2026 · 12:02:22</div><div class="eventdesc">Le système détecte une rupture. La fiche mentionne un stock initial de −8 unités, alors que l’événement de détection indique un passage à zéro : cette différence mérite un contrôle.</div></div></article>
+      <article class="event order"><div class="eventhead"><b>2 · Commande fournisseur</b><span class="tag orange">À valider</span></div><div class="eventbody"><div class="label">Commande n° 10810605</div><div class="eventdate">17/10/2026 · 09:28:00</div><div class="eventdesc">Quantité : 11 unités<br>Fournisseur : FOURNISSEUR CENTRALE (LC)<br>Créée par : inconnu<br>Statut : pas encore validée</div></div></article>
+      <article class="event delivery"><div class="eventhead"><b>3 · Livraison estimée</b><span class="tag red">À rapprocher</span></div><div class="eventbody"><div class="label">Date annoncée</div><div class="eventdate">18/10/2026 · 10:00:00</div><div class="eventdesc">Statut déclaré « reçue », mais aucun mouvement de réception n’apparaît dans les données visibles. La rupture demeure active et le stock reste négatif.</div></div></article>
+    </div><div class="callout danger"><b>Incohérence commande / réception :</b> ne pas considérer la rupture comme résolue tant qu’un mouvement de réception ou un stock magasin cohérent n’a pas été observé.</div></section>
+
+    <div class="twocol">
+      <section class="panel"><div class="panelhead"><h3>Contrôle des stocks</h3><span>Valeurs de la fiche</span></div><div class="stockrow">
+        <div class="stock"><div class="label">Au début</div><div class="num red">−8 u.</div><small>16/10 · 12:02:22</small></div>
+        <div class="stock"><div class="label">Actuellement</div><div class="num red">−8 u.</div><small>18/10 · 12:00:17</small></div>
+        <div class="stock"><div class="label">RPOS affiché</div><div class="num red">−8 u.</div><small>18/09 · 05:15:40 — date à confirmer</small></div>
+        <div class="stock"><div class="label">Résolution</div><div class="num">En cours</div><small>Aucun retour à un stock positif</small></div>
+      </div><div class="callout warn"><b>Stock négatif :</b> vérifier la synchronisation RPOS, les ventes, les corrections d’inventaire et la réception physique. La donnée seule ne permet pas de conclure à une rupture physique certaine.</div></section>
+      <section class="panel"><div class="panelhead"><h3>Actions recommandées</h3><span>Ordre de priorité</span></div><div class="actions-grid" style="grid-template-columns:1fr">
+        <div class="todo"><div class="n">1</div><div><b>Vérifier la réception réelle</b><p>Comparer le bon de livraison à la commande 10810605 et enregistrer l’entrée si elle a eu lieu.</p></div></div>
+        <div class="todo"><div class="n">2</div><div><b>Réconcilier le stock négatif</b><p>Comparer l’inventaire physique, les ventes et les mouvements synchronisés.</p></div></div>
+        <div class="todo"><div class="n">3</div><div><b>Contrôler le calcul des pertes</b><p>Expliquer l’écart de 3 595 CFA entre le total affiché et les deux périodes.</p></div></div>
+      </div></section>
+    </div>
+
+    <section class="panel" id="journal"><div class="panelhead"><h3>Journal des événements et mouvements</h3><span>Extrait illustratif — à connecter aux données réelles</span></div><div class="tablewrap"><table>
+      <thead><tr><th>Date / heure</th><th>Événement</th><th>Quantité</th><th>Stock constaté</th><th>Source / référence</th><th>Lecture opérationnelle</th></tr></thead>
+      <tbody>
+        <tr><td>18/10/2026 · 12:00:17</td><td>Dernier état de stock</td><td>—</td><td>−8 unités</td><td>Stock magasin</td><td><span class="tag red">Anomalie à vérifier</span></td></tr>
+        <tr><td>18/10/2026 · 10:00:00</td><td>Livraison estimée</td><td>11 attendues</td><td>Non confirmé</td><td>Commande 10810605</td><td><span class="tag orange">Pas de réception visible</span></td></tr>
+        <tr><td>17/10/2026 · 09:28:00</td><td>Commande fournisseur</td><td>11 unités</td><td>−8 unités</td><td>Fournisseur centrale (LC)</td><td><span class="tag orange">Validation à contrôler</span></td></tr>
+        <tr><td>16/10/2026 · 12:02:22</td><td>Rupture détectée</td><td>—</td><td>−8 unités dans la fiche</td><td>Rupture n° 100689598</td><td><span class="tag red">Toujours active</span></td></tr>
+      </tbody>
+    </table></div></section>
+    <div class="footer"><span>Réassort automatique · Analyse de rupture de stock</span><span>Maquette statique · Vérifier les valeurs avant décision opérationnelle.</span></div>
+  </div>
+</main>
+</div>
+</body>
+</html>

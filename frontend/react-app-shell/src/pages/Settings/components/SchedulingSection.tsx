@@ -256,6 +256,8 @@ interface SystemConfigData {
   STOCKOUT_LOSS_LOOKBACK_WEEKS?: string;
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS?: string;
   STOCKOUT_ALERT_CRON?: string;
+  STOCKOUT_SECTOR_BACKFILL_CRON?: string;
+  STOCKOUT_SECTOR_BACKFILL_ENABLED?: string;
   STOCKOUT_ALERT_ENABLED?: string;
 }
 
@@ -276,6 +278,7 @@ export function SchedulingSection() {
   const [stockoutLossLookbackWeeks, setStockoutLossLookbackWeeks] = useState('52');
   const [stockoutLossMinComparableWeeks, setStockoutLossMinComparableWeeks] = useState('8');
   const [stockoutAlertCron, setStockoutAlertCron] = useState('0 8 * * *');
+  const [stockoutSectorBackfillCron, setStockoutSectorBackfillCron] = useState('30 */6 * * *');
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -294,6 +297,7 @@ export function SchedulingSection() {
         setStockoutLossLookbackWeeks(d.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52');
         setStockoutLossMinComparableWeeks(d.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8');
         setStockoutAlertCron(d.STOCKOUT_ALERT_CRON || '0 8 * * *');
+        setStockoutSectorBackfillCron(d.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -703,6 +707,40 @@ export function SchedulingSection() {
             />
             <div className="form-text">
               Exemple : "0 8 * * *" = tous les jours à 8h00 (défaut, avant l'ouverture).
+            </div>
+          </div>
+        </CronJobCard>
+
+        {/* Résolution secteur/rayon des ruptures — carte ajoutée le 18/10/2026 (le job existait
+            déjà, mais sans carte dans Paramètres, donc aucun moyen de forcer un rattrapage immédiat
+            depuis l'UI ; bug signalé : "en prod j'ai des sans secteur encore" — avec plusieurs
+            milliers d'épisodes sur le réseau, attendre le prochain passage toutes les 6h est trop
+            lent après un correctif). */}
+        <CronJobCard
+          icon="solar:tag-bold-duotone"
+          title="Résolution du secteur/rayon des ruptures"
+          enabledConfigKey="STOCKOUT_SECTOR_BACKFILL_ENABLED"
+          enabledInitial={config.STOCKOUT_SECTOR_BACKFILL_ENABLED !== 'false'}
+          intro="<strong>À quoi ça sert :</strong> un épisode de rupture dont le secteur/rayon n'a jamais pu être résolu localement (article jamais vu par une proposition) s'affiche « Sans secteur ». Ce job interroge RPOS pour résoudre ces cas en continu, en filet de sécurité derrière la résolution faite à la création de chaque épisode."
+          onSave={() => saveSystemConfigKey('STOCKOUT_SECTOR_BACKFILL_CRON', stockoutSectorBackfillCron)}
+          onRunNow={async () => {
+            const d = await apiFetch<{ total: number; resolved: number; stillNull: number }>('/reassort/run-stockout-sector-backfill', { method: 'POST' });
+            return `Terminé : ${d.resolved}/${d.total} résolu(s), ${d.stillNull} resté(s) sans secteur.`;
+          }}
+          runLabel="Résoudre maintenant"
+        >
+          <div className="mb-3">
+            <label className="form-label fw-semibold">Expression cron</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="30 */6 * * *"
+              style={{ maxWidth: 300 }}
+              value={stockoutSectorBackfillCron}
+              onChange={(e) => setStockoutSectorBackfillCron(e.target.value)}
+            />
+            <div className="form-text">
+              Exemple : "30 */6 * * *" = toutes les 6 heures (défaut).
             </div>
           </div>
         </CronJobCard>

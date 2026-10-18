@@ -123,6 +123,20 @@ router.post('/run-stockout-alert', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/reassort/run-stockout-sector-backfill - déclenche manuellement la résolution du
+// secteur/rayon des ruptures EN_COURS encore à null (ADMIN, pour rattraper immédiatement le retard
+// accumulé en prod — s'exécute normalement toutes les 6h automatiquement).
+router.post('/run-stockout-sector-backfill', requireAdmin, async (req, res) => {
+  try {
+    const { runStockoutSectorBackfillJob } = require('../../jobs/stockoutSectorBackfillJob');
+    const result = await runStockoutSectorBackfillJob();
+    res.json({ success: true, message: 'Résolution du secteur/rayon des ruptures exécutée', data: result });
+  } catch (error) {
+    console.error('Manual stockout sector backfill error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // POST /api/reassort/run-end-of-day-validation-recap - déclenche manuellement le récap admin de fin
 // de journée (ADMIN, pour les tests — s'exécute normalement à 16h30 automatiquement).
 router.post('/run-end-of-day-validation-recap', requireAdmin, async (req, res) => {
