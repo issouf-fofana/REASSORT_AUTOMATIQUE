@@ -8,6 +8,13 @@ const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
 const rpos = require('./rposClient');
 const systemConfig = require('./systemConfigService');
+const { streamWithFallback } = require('./aiForecastService');
+const { mapWithConcurrency } = require('../utils/concurrency');
+
+// Concurrence pour le recalcul au prorata des épisodes EN_COURS chevauchant une période
+// personnalisée (getPeriodLossSummary) — jamais plus d'une poignée d'épisodes à la fois, calcul à
+// la demande (bouton, pas un job périodique sur tout le réseau).
+const EPISODE_LOSS_CONCURRENCY = 8;
 
 /**
  * Seuils de délai (commande attendue / livraison max) utilisés par reactionStatus — configurables
@@ -893,4 +900,124 @@ async function getTrend(rposShopId, { days = 30 } = {}) {
   return { found: true, points };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss };
+/**
+ * Synthèse des pertes de rupture sur une période personnalisée, comparée au CA réellement réalisé
+ * par le magasin sur cette même période — demande explicite du 18/10/2026 : "il faut me donne la
+ * possiblité de faire les filtre sur une periode personalisé pour voir sur quel periode les perte
+ * que j'ai eu pendant les rupture... vs mon CA du mag sur cette periode".
+ *
+ * CA perdu sur la période = somme de caPerdueEstime pour tout épisode RÉSOLU dont endedAt tombe
+ * dans la période, PLUS la part de perte des épisodes ENCORE OUVERTS qui chevauchent la période
+ * (recalculée au prorata du temps de chevauchement, car caPerdueEstime stocké sur un épisode ouvert
+ * couvre toute sa durée depuis le début, pas seulement la portion dans la période demandée).
+ * CA magasin = somme de SalesLine.revenueExclTax sur la période (déjà synchronisé, même source que
+ * le reste de l'app, cf. demande explicite "réutiliser les ventes déjà synchronisées").
+ */
+async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  const [resolvedInPeriod, openOverlapping, shopRevenue] = await Promise.all([
+    prisma.stockoutEpisode.findMany({
+      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: start, lte: end } },
+      select: { department: true, sector: true, ean: true, label: true, caPerdueEstime: true, qtyPerdueEstimee: true, startedAt: true, endedAt: true },
+    }),
+    prisma.stockoutEpisode.findMany({
+      where: { rposShopId, status: 'EN_COURS', startedAt: { lte: end } },
+      select: { id: true, department: true, sector: true, ean: true, label: true, startedAt: true },
+    }),
+    prisma.salesLine.aggregate({
+      where: { rposShopId, date: { gte: start, lte: end } },
+      _sum: { revenueExclTax: true, quantity: true },
+    }),
+  ]);
+
+  // Part de la perte d'un épisode encore ouvert qui tombe DANS la période demandée (prorata temps),
+  // recalculée en temps réel sur cette seule portion — jamais la perte totale depuis le début de la
+  // rupture, qui déborderait largement de la période choisie.
+  const now = new Date();
+  const openLosses = await mapWithConcurrency(openOverlapping, EPISODE_LOSS_CONCURRENCY, async (e) => {
+    const overlapStart = e.startedAt > start ? e.startedAt : start;
+    const overlapEnd = end < now ? end : now;
+    if (overlapEnd <= overlapStart) return { episode: e, qtyPerdue: 0, caPerdue: 0 };
+    const loss = await estimateLoss(rposShopId, e.ean, overlapStart, overlapEnd);
+    return { episode: e, qtyPerdue: loss.qtyPerdue || 0, caPerdue: loss.caPerdue || 0 };
+  });
+
+  const byDepartment = new Map();
+  function addToDept(key, caPerdue, qtyPerdue) {
+    const dept = key || 'Sans rayon';
+    if (!byDepartment.has(dept)) byDepartment.set(dept, { department: dept, caPerdue: 0, qtyPerdue: 0, episodeCount: 0 });
+    const bucket = byDepartment.get(dept);
+    bucket.caPerdue += caPerdue;
+    bucket.qtyPerdue += qtyPerdue;
+    bucket.episodeCount += 1;
+  }
+
+  let totalCaPerdu = 0;
+  let totalQtyPerdue = 0;
+  for (const e of resolvedInPeriod) {
+    const ca = e.caPerdueEstime || 0;
+    const qty = e.qtyPerdueEstimee || 0;
+    totalCaPerdu += ca;
+    totalQtyPerdue += qty;
+    addToDept(e.department, ca, qty);
+  }
+  for (const { episode, caPerdue, qtyPerdue } of openLosses) {
+    totalCaPerdu += caPerdue;
+    totalQtyPerdue += qtyPerdue;
+    addToDept(episode.department, caPerdue, qtyPerdue);
+  }
+
+  const departmentBreakdown = Array.from(byDepartment.values()).sort((a, b) => b.caPerdue - a.caPerdue);
+  const shopRevenueExclTax = shopRevenue._sum.revenueExclTax || 0;
+  const lossRatioPct = shopRevenueExclTax > 0 ? (totalCaPerdu / shopRevenueExclTax) * 100 : null;
+
+  return {
+    found: true,
+    period: { startDate, endDate },
+    totalCaPerdu: Math.round(totalCaPerdu),
+    totalQtyPerdue: Math.round(totalQtyPerdue),
+    episodeCount: resolvedInPeriod.length + openOverlapping.length,
+    shopRevenueExclTax: Math.round(shopRevenueExclTax),
+    lossRatioPct: lossRatioPct !== null ? Math.round(lossRatioPct * 100) / 100 : null,
+    departmentBreakdown: departmentBreakdown.map((d) => ({ ...d, caPerdue: Math.round(d.caPerdue), qtyPerdue: Math.round(d.qtyPerdue) })),
+  };
+}
+
+/**
+ * Analyse IA à la demande (bouton "Analyser", jamais automatique — demande explicite du
+ * 18/10/2026 : coût IA maîtrisé, pas un appel systématique) : prend la synthèse déjà calculée par
+ * getPeriodLossSummary et demande au LLM un verdict en langage naturel — la perte est-elle
+ * anormalement élevée par rapport au CA, quel(s) rayon(s) concentrent le problème, et une piste de
+ * sensibilisation concrète pour le magasin. Jamais de nombre inventé : le prompt ne contient QUE
+ * les chiffres déjà calculés côté serveur, l'IA les interprète, elle ne les recalcule pas.
+ */
+async function analyzePeriodLoss(shopName, shopReference, summary) {
+  const topDepartments = summary.departmentBreakdown.slice(0, 5)
+    .map((d) => `- ${d.department} : ${d.caPerdue.toLocaleString('fr-FR')} CFA perdus, ${d.qtyPerdue} unité(s), ${d.episodeCount} épisode(s)`)
+    .join('\n');
+
+  const prompt = `Tu es un analyste réassort pour le magasin "${shopName}" (${shopReference}). Voici les chiffres RÉELS de pertes de rupture de stock sur la période du ${summary.period.startDate} au ${summary.period.endDate} (ne recalcule rien, utilise uniquement ces chiffres) :
+
+- CA perdu estimé sur la période (rupture de stock) : ${summary.totalCaPerdu.toLocaleString('fr-FR')} CFA
+- Quantité perdue estimée : ${summary.totalQtyPerdue} unité(s)
+- Nombre d'épisodes de rupture concernés : ${summary.episodeCount}
+- CA réellement réalisé par le magasin sur la même période : ${summary.shopRevenueExclTax.toLocaleString('fr-FR')} CFA (hors taxes)
+- Ratio perte / CA réalisé : ${summary.lossRatioPct !== null ? summary.lossRatioPct + ' %' : 'non calculable (CA de la période inconnu)'}
+
+Détail par rayon (triés par perte décroissante) :
+${topDepartments || 'Aucun détail par rayon disponible.'}
+
+Rédige une analyse courte et actionnable (5-8 phrases maximum) en français, structurée ainsi :
+1. Un verdict clair : cette perte est-elle élevée, modérée ou faible par rapport au CA du magasin sur la période (base-toi sur le ratio perte/CA réalisé) ?
+2. Le ou les rayons qui concentrent le plus le problème.
+3. Une ou deux recommandations concrètes et actionnables pour le magasin (ex: sensibilisation sur tel rayon, délai de réassort à resserrer, etc.) — reste pragmatique, pas de généralité vague.
+
+N'invente aucun chiffre qui ne figure pas ci-dessus. Si une donnée manque pour conclure avec certitude, dis-le plutôt que de deviner.`;
+
+  const { fullText, providerUsed } = await streamWithFallback(prompt, () => {}, 'stockout-period-analysis');
+  return { analysis: fullText.trim(), providerUsed };
+}
+
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss };

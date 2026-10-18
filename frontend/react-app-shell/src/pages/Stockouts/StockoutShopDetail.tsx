@@ -4,6 +4,7 @@ import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
 import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
+import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
 
 // Détail d'un magasin pour le module Ruptures (demande explicite du 16/10/2026 : "je dois faire
 // comme pour les commande, les article son classer par rayon et quand je clique je peux voir les
@@ -291,6 +292,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           <div className="mb-3">
             <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} />
           </div>
+
+          {/* Analyse des pertes sur période personnalisée + IA à la demande (demande explicite du
+              18/10/2026). */}
+          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} />
         </>
       )}
 

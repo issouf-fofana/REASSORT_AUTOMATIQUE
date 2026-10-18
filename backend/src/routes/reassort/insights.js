@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -369,6 +369,50 @@ router.get('/stockout-episodes/trend', async (req, res) => {
     }
     const result = await getStockoutTrend(shopId);
     res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/stockout-episodes/period-summary?start=&end= - module Ruptures, synthèse des
+// pertes sur une période personnalisée comparée au CA réellement réalisé par le magasin sur la même
+// période (demande explicite du 18/10/2026 : "filtre sur une periode personalisé pour voir sur
+// quel periode les perte que j'ai eu... vs mon CA du mag"). Placée AVANT /stockout-episodes/:id.
+router.get('/stockout-episodes/period-summary', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const { start, end } = req.query;
+    if (!start || !end) {
+      return res.status(400).json({ success: false, message: 'Paramètres start et end (dates) requis.' });
+    }
+    const result = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/stockout-episodes/period-analysis - module Ruptures, analyse IA À LA DEMANDE
+// (bouton "Analyser", jamais automatique) de la synthèse de pertes sur une période — body: { start,
+// end }. Recalcule la synthèse côté serveur (jamais les chiffres envoyés par le client) avant de les
+// transmettre à l'IA, pour ne jamais faire interpréter par le LLM des chiffres non vérifiés.
+router.post('/stockout-episodes/period-analysis', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const { start, end } = req.body || {};
+    if (!start || !end) {
+      return res.status(400).json({ success: false, message: 'Paramètres start et end (dates) requis.' });
+    }
+    const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { name: true, reference: true } });
+    const summary = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
+    const { analysis, providerUsed } = await analyzePeriodLoss(shop?.name || 'Magasin', shop?.reference || shopId, summary);
+    res.json({ success: true, data: { analysis, providerUsed, summary } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
