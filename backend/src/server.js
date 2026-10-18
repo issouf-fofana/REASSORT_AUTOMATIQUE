@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -231,6 +231,10 @@ async function start() {
     // Recalcul de la perte (qtyPerdueEstimee/caPerdueEstime) des épisodes EN_COURS, stocké en base
     // pour que les pages du module Ruptures restent rapides (horaire configurable, toutes les heures par défaut).
     await startOrRestartStockoutLossRecalcJob();
+    // Résout automatiquement secteur/rayon pour les épisodes EN_COURS encore à null (anciens,
+    // ouverts avant le correctif RPOS, ou tout cas résiduel) — filet de sécurité en continu, pas
+    // seulement à la création d'un épisode (horaire configurable, toutes les 6h par défaut).
+    await startOrRestartStockoutSectorBackfillJob();
     // Synchronisation locale de la liste des magasins RPOS (horaire configurable).
     await startOrRestartShopsSyncJob();
     // Réajustement quotidien continu des plans hebdomadaires non encore validés (horaire configurable).

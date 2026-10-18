@@ -38,6 +38,10 @@ const KEYS = {
   // "calcule... doit etre fait au prealable, comme la vue de proposition de commande"). Plus fréquent
   // que la capture de stock elle-même (toutes les heures vs 6h) pour rester à jour pendant la journée.
   STOCKOUT_LOSS_RECALC_CRON: 'STOCKOUT_LOSS_RECALC_CRON',
+  // Résolution automatique en continu du secteur/rayon des épisodes EN_COURS encore à null —
+  // demande explicite du 18/10/2026 : "fais en sorte quil s'applique a tout ancien comme nouveau"
+  // (filet de sécurité, en plus de la résolution déjà faite à la création d'un épisode).
+  STOCKOUT_SECTOR_BACKFILL_CRON: 'STOCKOUT_SECTOR_BACKFILL_CRON',
   // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
   // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
   // modifiable sur les parametre") — en dur à 24h/48h jusqu'ici (stockoutEpisodeService.js,
@@ -134,6 +138,7 @@ const KEYS = {
   STOCK_MOVE_SYNC_ENABLED: 'STOCK_MOVE_SYNC_ENABLED',
   STOCK_SNAPSHOT_ENABLED: 'STOCK_SNAPSHOT_ENABLED',
   STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
+  STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -249,6 +254,7 @@ const ENV_FALLBACK = {
   // 16/10/2026, donc ~70k lignes/jour à ce rythme).
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
+  [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
@@ -355,6 +361,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCK_MOVE_SYNC_ENABLED]: () => 'true',
   [KEYS.STOCK_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
+  [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',
