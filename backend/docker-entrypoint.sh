@@ -12,6 +12,16 @@ npx prisma migrate deploy
 echo "[docker-entrypoint] Vérification du compte administrateur..."
 node prisma/create-admin.js
 
+# Rattrapage ponctuel (18/10/2026, demande explicite : "fait dans le code et quand je deploi et mais
+# a jour pour tout a meme temps") : corrige les commandes déjà marquées à tort "reçue (estimée)"
+# avant le correctif de computeExpectedReceptionDate (règle week-end/14h du cycle entrepôt, cf.
+# proposalService.js) — tourne automatiquement à chaque démarrage pour ne jamais dépendre d'une
+# étape manuelle après déploiement. Idempotent (ne touche que ce qui est encore incorrect), donc
+# sans effet sur une base déjà à jour — peut rester ici en continu plutôt que d'être retiré après
+# le premier passage.
+echo "[docker-entrypoint] Correction des dates de livraison estimées (règle week-end entrepôt)..."
+node scripts/fixWeekendReceptionDates.js || echo "[docker-entrypoint] Correction des dates de livraison : échec non bloquant, voir logs ci-dessus."
+
 echo ""
 echo "═══════════════════════════════════════════════════════"
 echo "  🚀 REASSORT AUTOMATIQUE — ACCÈS"
