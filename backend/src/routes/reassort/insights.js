@@ -23,7 +23,7 @@ const productInsightCache = require('../../services/productInsightCacheService')
 const productAnalyticsService = require('../../services/productAnalyticsService');
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
-const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss } = require('../../services/stockoutEpisodeService');
+const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -413,6 +413,33 @@ router.post('/stockout-episodes/period-analysis', async (req, res) => {
     const summary = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
     const analysis = await analyzePeriodLoss(shop?.name || 'Magasin', shop?.reference || shopId, summary);
     res.json({ success: true, data: { ...analysis, summary } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/stockout-episodes/:id/analyze - module Ruptures, analyse IA À LA DEMANDE
+// (bouton, jamais automatique) de la section "Détection / Commande / Prise en charge" d'UN épisode
+// précis (demande explicite du 18/10/2026 : "cette partie aussi on doit avoir une analyse Ia").
+// Recalcule le détail côté serveur avant de le transmettre à l'IA — jamais les chiffres envoyés par
+// le client. Placée AVANT /stockout-episodes/:id ci-dessous (piège Express déjà documenté : un
+// chemin plus spécifique doit toujours précéder :id, sinon Express le confondrait avec un id).
+router.post('/stockout-episodes/:id/analyze', async (req, res) => {
+  try {
+    const episode = await prisma.stockoutEpisode.findUnique({ where: { id: req.params.id }, select: { rposShopId: true } });
+    if (!episode) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const ownShopId = resolveShopId(req);
+    const allowed = shopIdFilter === null ? true : shopIdFilter.includes(episode.rposShopId);
+    if (!allowed && episode.rposShopId !== ownShopId) {
+      return res.status(403).json({ success: false, message: 'Accès refusé à ce magasin.' });
+    }
+
+    const detail = await getEpisodeDetail(req.params.id);
+    if (!detail.found) return res.status(404).json({ success: false, message: 'Épisode introuvable.' });
+    const analysis = await analyzeEpisode(detail);
+    res.json({ success: true, data: analysis });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

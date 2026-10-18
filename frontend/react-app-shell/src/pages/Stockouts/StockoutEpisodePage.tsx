@@ -110,7 +110,7 @@ const RECEPTION_STATUS_LABELS: Record<string, string> = {
 };
 
 const REACTION_STATUS_META: Record<ReactionStatus, { label: string; tone: 'critical' | 'warning' | 'success' | 'info'; verdict: string }> = {
-  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: 'Une commande a été passée — magasin non fautif pour la période après réaction.' },
+  REAGI: { label: 'Le magasin a réagi', tone: 'success', verdict: "Le magasin a réagi en passant une commande : sa responsabilité n'est pas engagée pour la période suivant cette réaction." },
   EN_ATTENTE: { label: 'En attente de commande (< 24h)', tone: 'info', verdict: 'Délai normal, pas encore de jugement possible.' },
   RETARD: { label: 'Retard de commande (24-48h)', tone: 'warning', verdict: 'Retard constaté, pas encore confirmé fautif.' },
   MAGASIN_NA_PAS_REAGI: { label: "Le magasin n'a pas réagi (> 48h)", tone: 'critical', verdict: 'Aucune commande passée après 48h de rupture avec ventes constatées — magasin fautif.' },
@@ -191,16 +191,42 @@ export function StockoutEpisodePage() {
   const [detail, setDetail] = useState<EpisodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Analyse IA à la demande (bouton, jamais automatique) de la section "Détection / Commande /
+  // Prise en charge" — demande explicite du 18/10/2026 : "cette partie aussi on doit avoir une
+  // analyse Ia". Réinitialisée à chaque changement d'épisode, jamais conservée d'une fiche à l'autre.
+  const [episodeAnalysis, setEpisodeAnalysis] = useState<{ summary: string; action: string; providerUsed: string } | null>(null);
+  const [analyzingEpisode, setAnalyzingEpisode] = useState(false);
+  const [episodeAnalysisError, setEpisodeAnalysisError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!episodeId) return;
     let cancelled = false;
     setDetail(null);
     setError(null);
+    setEpisodeAnalysis(null);
+    setEpisodeAnalysisError(null);
     apiFetch<EpisodeDetail>(`/reassort/stockout-episodes/${episodeId}`)
       .then((data) => { if (!cancelled) setDetail(data); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
   }, [episodeId]);
+
+  async function runEpisodeAnalysis() {
+    if (!episodeId) return;
+    setAnalyzingEpisode(true);
+    setEpisodeAnalysisError(null);
+    try {
+      const data = await apiFetch<{ summary: string; action: string; providerUsed: string }>(
+        `/reassort/stockout-episodes/${episodeId}/analyze`,
+        { method: 'POST' }
+      );
+      setEpisodeAnalysis(data);
+    } catch (err) {
+      setEpisodeAnalysisError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzingEpisode(false);
+    }
+  }
 
   // Chronomètre live (demande explicite du 17/10/2026 : "si ya rupture il doid commencé en compté
   // sur le UI le user doit voir compté... si ya pas de commande le compteur de rupture avant la
@@ -361,6 +387,13 @@ export function StockoutEpisodePage() {
         .ep2-metric-val.accent { color: #2f5a85; }
         .ep2-metric-val.money { color: #C0392B; }
         .ep2-metric-empty { font-size: .78rem; color: #8591A0; font-style: italic; }
+
+        /* Analyse IA à la demande sur la fiche d'un épisode (demande explicite du 18/10/2026). */
+        .ep2-ai-box { background: #f8fafb; border-left: 3px solid #4A3FB8; border-radius: 0 10px 10px 0; padding: 14px 16px; }
+        .ep2-ai-head { display: flex; align-items: center; gap: 7px; color: #4A3FB8; font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
+        .ep2-ai-summary { font-size: .86rem; color: #2A2F45; line-height: 1.6; margin: 0 0 10px; }
+        .ep2-ai-action { display: flex; gap: 8px; align-items: flex-start; background: #EEF0FB; border-radius: 8px; padding: 10px 12px; font-size: .82rem; color: #1B2A4A; font-weight: 600; }
+        .ep2-ai-action iconify-icon { color: #4A3FB8; flex-shrink: 0; margin-top: 1px; }
       `}</style>
 
       <button
@@ -506,7 +539,13 @@ export function StockoutEpisodePage() {
                         <div className="ep2-metric-figures">
                           <div>
                             <div className="ep2-metric-lbl">Durée</div>
-                            <div className="ep2-metric-val money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
+                            {/* Rouge UNIQUEMENT si la livraison est en retard ou douteuse (demande
+                                explicite du 18/10/2026 : "a quelle moment le temps qui compte
+                                deviens rougé ?") — avant ce correctif, cette durée était toujours
+                                affichée en rouge quelle que soit sa valeur, une simple couleur de
+                                bloc sans rapport avec un vrai seuil d'alerte, ce qui laissait croire
+                                à tort à un signal. */}
+                            <div className={`ep2-metric-val ${detail.deliveryDelay || detail.deliveryLooksDoubtful ? 'money' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
                           </div>
                           <div>
                             <div className="ep2-metric-lbl">Perte estimée</div>
@@ -646,6 +685,33 @@ export function StockoutEpisodePage() {
               {detail.orderQuantitySufficiency && (
                 <div className={`ep2-badge tone-${detail.orderQuantitySufficiency.sufficient ? 'success' : 'warning'} mt-3`}>
                   Quantité commandée ({detail.orderQuantitySufficiency.quantityOrdered} u) {detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~{Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées sur la période.
+                </div>
+              )}
+
+              {/* Analyse IA à la demande (demande explicite du 18/10/2026 : "cette partie aussi on
+                  doit avoir une analyse Ia") — synthèse en langage naturel + une action concrète,
+                  jamais déclenchée automatiquement pour maîtriser le coût des appels IA (même
+                  principe que l'analyse de période plus bas sur la page). */}
+              {!episodeAnalysis && (
+                <button type="button" className="btn btn-sm btn-outline-primary mt-3" disabled={analyzingEpisode} onClick={runEpisodeAnalysis}>
+                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" className="align-middle me-1"></iconify-icon>
+                  {analyzingEpisode ? 'Analyse en cours...' : "Analyser avec l'IA"}
+                </button>
+              )}
+              {episodeAnalysisError && <div className="text-danger small mt-2">Erreur : {episodeAnalysisError}</div>}
+              {episodeAnalysis && (
+                <div className="ep2-ai-box mt-3">
+                  <div className="ep2-ai-head">
+                    <iconify-icon icon="solar:magic-stick-3-bold-duotone"></iconify-icon>
+                    Analyse IA
+                  </div>
+                  <p className="ep2-ai-summary">{episodeAnalysis.summary}</p>
+                  {episodeAnalysis.action && (
+                    <div className="ep2-ai-action">
+                      <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
+                      <span>{episodeAnalysis.action}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

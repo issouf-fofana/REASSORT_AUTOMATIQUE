@@ -1219,4 +1219,56 @@ N'invente aucun chiffre qui ne figure pas ci-dessus — "departments" reprend un
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay };
+/**
+ * Analyse IA à la demande (bouton, jamais automatique) de la section "Détection / Commande / Prise
+ * en charge" d'UN épisode précis — demande explicite du 18/10/2026 : "cette partie aussi on doit
+ * avoir une analyse Ia". Les callouts déterministes déjà présents (retard, livraison douteuse,
+ * verdict "magasin fautif") donnent l'essentiel ; cette analyse synthétise l'ensemble en langage
+ * naturel et propose UNE action concrète, sur le même principe que analyzePeriodLoss : le prompt ne
+ * contient QUE des chiffres déjà calculés côté serveur (par getEpisodeDetail), l'IA interprète, elle
+ * n'invente ni ne recalcule rien.
+ */
+async function analyzeEpisode(detail) {
+  const facts = [
+    `Article : ${detail.label || detail.ean} (${detail.department || 'Sans rayon'} / ${detail.sector || 'Sans secteur'})`,
+    `Statut : ${detail.status === 'EN_COURS' ? 'rupture toujours en cours' : 'rupture résolue'}, détectée le ${new Date(detail.startedAt).toLocaleString('fr-FR')}`,
+    `Durée totale : ${Math.round(detail.totalDurationHours)} h`,
+    `CA perdu estimé : ${detail.caPerdueEstime !== null ? Math.round(detail.caPerdueEstime).toLocaleString('fr-FR') + ' CFA' : 'non calculable'}`,
+    detail.order
+      ? `Commande passée le ${new Date(detail.order.createdAt).toLocaleString('fr-FR')} (${detail.order.quantityOrdered ?? '?'} unité(s), fournisseur ${detail.order.supplierName || 'inconnu'}), ${detail.order.validatedAt ? `validée le ${new Date(detail.order.validatedAt).toLocaleString('fr-FR')}` : 'pas encore validée'}.`
+      : "Aucune commande n'a été passée depuis le début de la rupture.",
+    detail.deliveryDelay
+      ? `Livraison en retard de ${detail.deliveryDelay.daysLate} jour(s) par rapport à la date attendue (${new Date(detail.deliveryDelay.expectedReceptionDate).toLocaleString('fr-FR')})${detail.deliveryDelay.likelyInvoiceIntegrationIssue ? ', probable échec d\'intégration facture côté entrepôt' : ''}.`
+      : detail.deliveryLooksDoubtful
+        ? "La livraison est déclarée reçue mais aucun mouvement de stock ne le confirme — doute sérieux sur une réception réelle."
+        : detail.order?.actualReceptionDate
+          ? `Livraison estimée reçue le ${new Date(detail.order.actualReceptionDate).toLocaleString('fr-FR')}.`
+          : null,
+    detail.stockAtStart && detail.stockAtStart.value < 0 ? `Stock négatif détecté (${detail.stockAtStart.value} au début de la rupture) — signe probable de désynchronisation RPOS.` : null,
+    detail.reactionStatus ? `Statut de réaction du magasin : ${detail.reactionStatus}.` : null,
+    detail.orderQuantitySufficiency ? `Quantité commandée (${detail.orderQuantitySufficiency.quantityOrdered} u) ${detail.orderQuantitySufficiency.sufficient ? 'suffisante' : 'probablement insuffisante'} face à ~${Math.round(detail.orderQuantitySufficiency.expectedDemand)} u estimées.` : null,
+  ].filter(Boolean).join('\n- ');
+
+  const prompt = `Tu es un analyste réassort. Voici les faits RÉELS déjà établis pour une rupture de stock précise (ne recalcule rien, utilise uniquement ces informations) :
+- ${facts}
+
+Réponds UNIQUEMENT avec un objet JSON strict (aucun texte avant/après, aucun bloc \`\`\`), de cette forme :
+{
+  "summary": "2 à 3 phrases résumant la situation de cette rupture en langage clair pour un responsable magasin (ce qui s'est passé, où ça en est)",
+  "action": "UNE recommandation concrète et actionnable à faire MAINTENANT pour cet épisode précis (jamais une généralité comme 'surveiller la situation' — donne une action précise : vérifier quoi, contacter qui, faire quoi)"
+}
+N'invente aucun fait, aucune date, aucun montant qui ne figure pas ci-dessus.`;
+
+  const { fullText, providerUsed } = await streamWithFallback(prompt, () => {}, 'stockout-episode-analysis');
+  const match = fullText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Réponse IA sans objet JSON reconnaissable');
+  const parsed = JSON.parse(match[0]);
+
+  return {
+    summary: parsed.summary || '',
+    action: parsed.action || '',
+    providerUsed,
+  };
+}
+
+module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };
