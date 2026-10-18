@@ -785,6 +785,20 @@ model ProposalOrder {
   lastRposStatus Int?      @map("last_rpos_status")
   lastSyncedAt   DateTime? @map("last_synced_at")
 
+  // Qui a créé/validé la commande fournisseur RÉELLE côté RPOS, et sa date de validation réelle
+  // (demande du 17/10/2026 : "date e validation et heure puis il qui a cree et validé") — distinct
+  // de Proposal.validatedBy (qui ne dit que qui a validé la PROPOSITION côté plateforme, peut
+  // différer : validation auto par la génération nocturne, ou commande ensuite revalidée
+  // manuellement sur RPOS). Synchronisé périodiquement par receptionSyncJob.js (même fenêtre que
+  // receptionStatus) plutôt qu'appelé en direct à chaque lecture de la fiche détail d'un épisode de
+  // rupture — bug de performance trouvé le 18/10/2026 : getSupplierOrders (liste paginée 200) était
+  // appelé EN LIGNE à chaque chargement de page, ralentissant/bloquant l'affichage, et laissant la
+  // page sans aucune donnée si RPOS était injoignable à cet instant précis ("je veux les info soit
+  // stocke... par appel api a tout moments si api n'est pas dispo je dois pouvoir fonctionné").
+  rposCreatedBy      String?   @map("rpos_created_by")
+  rposValidatedBy    String?   @map("rpos_validated_by")
+  rposValidationDate DateTime? @map("rpos_validation_date")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   receptionEvents ReceptionEvent[]

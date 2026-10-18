@@ -59,6 +59,12 @@ const KEYS = {
   // meme si ya une propostion de commande") — 1x/jour par défaut, pas trop fréquent pour ne pas
   // spammer un magasin dont la situation de rupture change peu dans la journée.
   STOCKOUT_ALERT_CRON: 'STOCKOUT_ALERT_CRON',
+  // Synchronisation de l'identité RPOS des commandes (qui a créé/validé, quand) — précalculée en
+  // tâche de fond au lieu d'un appel RPOS en direct à chaque lecture de la fiche détail d'un
+  // épisode de rupture (bug de performance corrigé le 18/10/2026). Toutes les 30 min par défaut :
+  // léger (liste réduite aux commandes jamais encore synchronisées), pas besoin d'être aussi
+  // fréquent que receptionSyncJob.
+  ORDER_IDENTITY_SYNC_CRON: 'ORDER_IDENTITY_SYNC_CRON',
   // Réajustement quotidien continu (CAHIER_DES_CHARGES.md §15-16, étape 3) : noms alignés sur la
   // configuration recommandée §54 (DAILY_REVIEW_CRON, REVISION_CHANGE_THRESHOLD).
   DAILY_REVIEW_CRON: 'DAILY_REVIEW_CRON',
@@ -145,6 +151,7 @@ const KEYS = {
   STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
+  ORDER_IDENTITY_SYNC_ENABLED: 'ORDER_IDENTITY_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
   IMPROVEMENTS_ENABLED: 'IMPROVEMENTS_ENABLED',
@@ -268,6 +275,7 @@ const ENV_FALLBACK = {
   // 8h du matin, avant l'ouverture — le magasin démarre sa journée avec la situation de rupture à
   // jour plutôt qu'en pleine journée de vente.
   [KEYS.STOCKOUT_ALERT_CRON]: () => process.env.STOCKOUT_ALERT_CRON || '0 8 * * *',
+  [KEYS.ORDER_IDENTITY_SYNC_CRON]: () => process.env.ORDER_IDENTITY_SYNC_CRON || '*/30 * * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -372,6 +380,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
+  [KEYS.ORDER_IDENTITY_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',
   [KEYS.PROPOSAL_REMINDER_ENABLED]: () => 'true',

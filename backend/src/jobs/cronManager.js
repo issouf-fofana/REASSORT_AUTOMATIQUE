@@ -10,6 +10,7 @@ const { runStockSnapshotJob } = require('./stockSnapshotJob');
 const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutAlertJob } = require('./stockoutAlertJob');
+const { runOrderIdentitySync } = require('./orderIdentitySyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
 const { runPredictionOutcomeEvaluation } = require('./predictionOutcomeJob');
@@ -30,6 +31,7 @@ let currentStockSnapshotTask = null;
 let currentStockoutLossRecalcTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutAlertTask = null;
+let currentOrderIdentitySyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
 let currentPredictionOutcomeTask = null;
@@ -51,6 +53,7 @@ const stockSnapshotLock = createJobLock('Capture des snapshots de stock (rupture
 const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
+const orderIdentitySyncLock = createJobLock('Synchronisation identité RPOS des commandes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
 const predictionOutcomeLock = createJobLock('Évaluation des prédictions');
@@ -357,6 +360,37 @@ async function startOrRestartStockoutAlertJob() {
   console.log(`⏰ Alerte email des ruptures planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme la synchronisation de l'identité RPOS des commandes (qui a créé/validé, quand) —
+ * orderIdentitySyncJob.js, précalcule ce que getEpisodeDetail affichait avant via un appel RPOS en
+ * direct à chaque lecture (bug de performance corrigé le 18/10/2026). */
+async function startOrRestartOrderIdentitySyncJob() {
+  if (currentOrderIdentitySyncTask) {
+    currentOrderIdentitySyncTask.stop();
+    currentOrderIdentitySyncTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.ORDER_IDENTITY_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation identité RPOS des commandes désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.ORDER_IDENTITY_SYNC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), synchronisation identité RPOS des commandes non planifiée`);
+    return;
+  }
+
+  currentOrderIdentitySyncTask = cron.schedule(cronSchedule, () => {
+    orderIdentitySyncLock(async () => {
+      console.log('[cron] Démarrage de la synchronisation identité RPOS des commandes...');
+      await trackJobRun('orderIdentitySync', runOrderIdentitySync);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Synchronisation identité RPOS des commandes planifiée: ${cronSchedule}`);
+}
+
 /** (Re)programme le job de synchronisation locale de la liste des magasins RPOS. */
 async function startOrRestartShopsSyncJob() {
   if (currentShopsSyncTask) {
@@ -575,6 +609,7 @@ module.exports = {
   startOrRestartStockoutLossRecalcJob,
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutAlertJob,
+  startOrRestartOrderIdentitySyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
   startOrRestartPredictionOutcomeJob,

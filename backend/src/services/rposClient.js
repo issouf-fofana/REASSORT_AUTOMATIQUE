@@ -1077,6 +1077,28 @@ async function getSupplierOrderStatus(posId, orderId) {
 }
 
 /**
+ * Détail d'UNE commande fournisseur précise (qui l'a créée/validée, date de validation) — ajouté
+ * le 18/10/2026 pour remplacer l'appel à getSupplierOrders (liste PAGINÉE de 200 commandes) qui
+ * était fait en direct dans getEpisodeDetail juste pour retrouver UNE commande par sa référence,
+ * ralentissant/bloquant le chargement de la fiche détail d'un épisode de rupture à chaque
+ * consultation. Même endpoint que getSupplierOrderStatus (/api/supplier_order/{id}/), qui renvoie
+ * déjà tout le détail de la commande, pas que son statut.
+ */
+async function getSupplierOrderDetail(posId, orderId) {
+  try {
+    const data = await rposGet(posId, `/api/supplier_order/${orderId}/`, {});
+    return {
+      createdBy: data.created_by || null,
+      validatedBy: data.validated_by || null,
+      validationDate: data.validation_date || null,
+    };
+  } catch (err) {
+    if (err.message.includes('404')) return null;
+    throw err;
+  }
+}
+
+/**
  * Liste les commandes fournisseur d'un magasin, les plus récentes en premier.
  * Filtre uniquement les commandes créées par notre plateforme (marqueur dans external_reference),
  * pour ne pas mélanger avec les commandes créées manuellement dans RPOS.
@@ -1427,6 +1449,7 @@ module.exports = {
   fetchProductLinesPage,
   supplierOrderExists,
   getSupplierOrderStatus,
+  getSupplierOrderDetail,
   getLastPurchaseForProduct,
   getRecentUndeliveredOrderedQuantity,
   getPurchaseHistoryForProduct,

@@ -745,26 +745,17 @@ async function getEpisodeDetail(episodeId) {
   // ne stocke QUE qui a validé la proposition côté plateforme (Proposal.validatedBy), pas forcément
   // qui a créé/validé la commande fournisseur réelle côté RPOS (peut être différent : validation
   // automatique par la génération nocturne, ou commande ensuite revalidée manuellement sur RPOS).
-  // Même principe que getValidatedOrders (chatbotToolsService.js) : created_by/validated_by/
-  // validation_date ne sont disponibles QUE via l'API RPOS /api/supplier_order/, jamais en base
-  // locale — recherche par référence (rposOrderReference) dans un lot paginé, jamais un échec
-  // bloquant (RPOS injoignable = champs simplement absents, pas une erreur de la page).
-  let rposOrderDetail = null;
-  if (order && order.rposOrderReference) {
-    try {
-      const { results } = await rpos.getSupplierOrders(episode.rposPosId, { shopId: episode.rposShopId, pageSize: 200, platformOnly: false });
-      const match = results.find((o) => o.reference === order.rposOrderReference);
-      if (match) {
-        rposOrderDetail = {
-          createdBy: match.created_by || null,
-          validatedBy: match.validated_by || null,
-          validationDate: match.validation_date || null,
-        };
-      }
-    } catch (err) {
-      console.error(`[stockoutEpisodeService] RPOS injoignable pour le détail de commande ${order.rposOrderReference} :`, err.message);
-    }
-  }
+  //
+  // Lu directement depuis ProposalOrder.rposCreatedBy/rposValidatedBy/rposValidationDate, PRÉCALCULÉS
+  // par orderIdentitySyncJob.js — plus aucun appel RPOS en direct ici (bug de performance corrigé le
+  // 18/10/2026 : getSupplierOrders, liste paginée de 200 commandes, était appelé EN LIGNE à chaque
+  // chargement de cette fiche, ralentissant/bloquant l'affichage et laissant la page sans donnée si
+  // RPOS était injoignable à cet instant précis — "je veux les info soit stocke... si api n'est pas
+  // dispo je dois pouvoir fonctionné"). null tant que le job n'a pas encore synchronisé cette
+  // commande (ex: commande très récente), jamais une erreur bloquante.
+  const rposOrderDetail = order && order.rposValidationDate
+    ? { createdBy: order.rposCreatedBy, validatedBy: order.rposValidatedBy, validationDate: order.rposValidationDate }
+    : null;
 
   if (order) {
     receptionEvents = await prisma.receptionEvent.findMany({

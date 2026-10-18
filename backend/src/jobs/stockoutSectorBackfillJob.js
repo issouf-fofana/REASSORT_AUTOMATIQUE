@@ -12,9 +12,20 @@
  * diagnoseCause() fait un vrai appel RPOS par article concerné (jamais en masse) — volontairement
  * peu fréquent (toutes les 6h, aligné sur la capture de stock) pour rester léger : le nombre
  * d'épisodes encore non résolus décroît à chaque passage, jamais un gros lot répété inutilement.
+ *
+ * Concurrence ajoutée le 18/10/2026 (bug signalé : "en prod j'ai des sans secteur encore" — sur tout
+ * le réseau, potentiellement plusieurs milliers d'épisodes "Sans secteur" au premier passage,
+ * traités un par un en SÉQUENTIEL ne finissait jamais un passage complet avant le déclenchement
+ * suivant (6h plus tard) — même piège de performance déjà rencontré et corrigé pour
+ * stockoutLossRecalcJob.js). 8 en parallèle : diagnoseCause() fait un VRAI appel RPOS (plus lourd
+ * qu'une simple requête SQL), donc une concurrence plus prudente que les 25 du job de recalcul
+ * (purement local) pour ne pas saturer RPOS.
  */
 const prisma = require('../utils/prisma');
 const { diagnoseCause } = require('../services/stockoutEpisodeService');
+const { mapWithConcurrency } = require('../utils/concurrency');
+
+const SECTOR_BACKFILL_CONCURRENCY = 8;
 
 async function runStockoutSectorBackfillJob() {
   console.log('[stockoutSectorBackfillJob] Résolution démarrée...');
@@ -28,7 +39,7 @@ async function runStockoutSectorBackfillJob() {
 
   let resolved = 0;
   let stillNull = 0;
-  for (const ep of episodes) {
+  await mapWithConcurrency(episodes, SECTOR_BACKFILL_CONCURRENCY, async (ep) => {
     const diagnosis = await diagnoseCause(ep.rposShopId, ep.ean, ep.rposPosId);
     await prisma.stockoutEpisode.update({
       where: { id: ep.id },
@@ -43,7 +54,7 @@ async function runStockoutSectorBackfillJob() {
     });
     if (diagnosis.sector) resolved += 1;
     else stillNull += 1;
-  }
+  });
 
   console.log(`[stockoutSectorBackfillJob] Terminé : ${resolved} résolu(s), ${stillNull} resté(s) sans secteur (article jamais vu ni par une proposition ni par RPOS — rare).`);
 }
