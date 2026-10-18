@@ -138,8 +138,11 @@ async function diagnoseCause(rposShopId, ean, rposPosId) {
     return { cause: 'MAGASIN_REASSORT', confiance: 'PROBABLE', label, department, sector };
   }
 
+  // Même correctif que getEpisodeDetail/getOpenEpisodes : filtré uniquement par proposalId, pas par
+  // department (mismatch silencieux dès que recentLine.department est null mais que la commande a
+  // un vrai département).
   const order = await prisma.proposalOrder.findFirst({
-    where: { proposalId: recentLine.proposalId, department: recentLine.department || undefined },
+    where: { proposalId: recentLine.proposalId },
     orderBy: { createdAt: 'desc' },
   });
 
@@ -266,6 +269,16 @@ async function getOpenEpisodes(rposShopId) {
       })
     : [];
 
+  // Prix de vente pour la colonne "Prix" du tableau d'articles (demande explicite du 18/10/2026 :
+  // "je veux ici le prix de l'article aficcher dans le colonne") — en masse pour tout le magasin,
+  // jamais un appel par article.
+  const priceByEan = new Map(
+    (await prisma.productCache.findMany({
+      where: { rposShopId, ean: { in: eans } },
+      select: { ean: true, sellingPrice: true },
+    })).map((p) => [p.ean, p.sellingPrice])
+  );
+
   // Index proposalId -> commandes (triées, la plus ancienne en premier) pour un lookup O(1) par
   // ligne plutôt qu'un .find() recalculé à chaque épisode.
   //
@@ -334,6 +347,7 @@ async function getOpenEpisodes(rposShopId) {
       orderCreatedAt,
       deliveryStatus,
       actualReceptionDate: matchedOrder?.actualReceptionDate ?? null,
+      sellingPrice: priceByEan.get(e.ean) ?? null,
     };
   });
 }
@@ -582,12 +596,19 @@ async function getEpisodeDetail(episodeId) {
     include: { proposal: true },
   });
 
+  // BUG CORRIGÉ le 18/10/2026 (même cause que celui déjà corrigé dans getOpenEpisodes : "j'ai fais
+  // le filtre avec commande, quand je viens on me dis sans commande") : filtrer la commande par
+  // `department: line.department || undefined` matche sur chaîne vide dès que line.department est
+  // null (article jamais correctement proposé) — si la COMMANDE, elle, a un vrai département non
+  // nul (cas courant : plusieurs rayons d'une même proposition peuvent partager une commande), le
+  // filtre élimine silencieusement cette commande pourtant réelle. Filtré uniquement par proposalId
+  // désormais, comme getOpenEpisodes.
   let order = null;
   let matchedLine = null;
   let receptionEvents = [];
   for (const line of candidateLines) {
     const candidateOrder = await prisma.proposalOrder.findFirst({
-      where: { proposalId: line.proposalId, department: line.department || undefined, createdAt: { gte: episode.startedAt } },
+      where: { proposalId: line.proposalId, createdAt: { gte: episode.startedAt } },
       orderBy: { createdAt: 'asc' },
     });
     if (candidateOrder) {

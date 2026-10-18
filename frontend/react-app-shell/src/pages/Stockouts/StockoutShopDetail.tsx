@@ -27,6 +27,8 @@ type StockoutEpisode = {
   hasOrder: boolean;
   reactionStatus: ReactionStatusLight;
   caPerdueEstime: number | null;
+  qtyPerdueEstimee: number | null;
+  sellingPrice: number | null;
   deliveryStatus: DeliveryStatus;
   actualReceptionDate: string | null;
 };
@@ -385,14 +387,16 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       <th>Réaction</th>
                       <th>Livraison</th>
                       <th>Livré le</th>
-                      <th>CA perdu</th>
+                      <th>Prix</th>
+                      <th>Qté perdue</th>
+                      <th>Valorisation (CA perdu)</th>
                       <th>Cause probable</th>
                     </tr>
                   </thead>
                   <tbody>
                     {articlesInDepartment.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="text-center text-muted py-4">
+                        <td colSpan={10} className="text-center text-muted py-4">
                           {articlesInDepartmentAll.length === 0 ? 'Aucune rupture en cours pour ce rayon.' : 'Aucun article ne correspond à ce filtre.'}
                         </td>
                       </tr>
@@ -412,6 +416,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                               <span className={`badge ${delivery.badge} py-1 px-2`}>{delivery.label}</span>
                             </td>
                             <td>{e.actualReceptionDate ? new Date(e.actualReceptionDate).toLocaleString('fr-FR') : '—'}</td>
+                            <td>{e.sellingPrice !== null ? `${Math.round(e.sellingPrice).toLocaleString('fr-FR')} CFA` : '—'}</td>
+                            <td>{e.qtyPerdueEstimee !== null ? Math.round(e.qtyPerdueEstimee) : '—'}</td>
                             <td>{e.caPerdueEstime !== null ? `${Math.round(e.caPerdueEstime).toLocaleString('fr-FR')} CFA` : '—'}</td>
                             <td>{CAUSE_LABELS[e.causeProposee] || e.causeProposee}</td>
                           </tr>
