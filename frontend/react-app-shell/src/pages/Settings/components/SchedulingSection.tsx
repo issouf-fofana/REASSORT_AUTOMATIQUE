@@ -253,6 +253,7 @@ interface SystemConfigData {
   TOKEN_USAGE_ALERT_THRESHOLD_TOKENS?: string;
   STOCKOUT_REACTION_DEADLINE_HOURS?: string;
   STOCKOUT_DELIVERY_DEADLINE_HOURS?: string;
+  STOCKOUT_LOSS_METHOD?: string;
   STOCKOUT_LOSS_LOOKBACK_WEEKS?: string;
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS?: string;
   STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS?: string;
@@ -282,6 +283,11 @@ export function SchedulingSection() {
   // Méthode de calcul configurable (demande explicite du 19/10/2026 : "l'analyse peux ce faire sur
   // les meme jour, la la possiblité de configuré sur la validité des donner en fonction de la
   // moyenne global sur une periode").
+  // Choix EXPLICITE de méthode (demande explicite du 19/10/2026, après clarification : "si tu dois
+  // les meme jour c'est quoi les meme jour de la rupture ou c'est quoi ? [...] si je veux pas passer
+  // sur les meme jour mais les 52 semaine") — 'SAME_WEEKDAY' ou 'ALL_DAYS', toujours appliqué tel
+  // quel, pas juste un repli de dernier recours.
+  const [stockoutLossMethod, setStockoutLossMethod] = useState<'SAME_WEEKDAY' | 'ALL_DAYS'>('SAME_WEEKDAY');
   const [stockoutLossFallbackToAllDays, setStockoutLossFallbackToAllDays] = useState(true);
   const [stockoutLossMinComparableDaysAll, setStockoutLossMinComparableDaysAll] = useState('14');
   const [stockoutAlertCron, setStockoutAlertCron] = useState('0 8 * * *');
@@ -303,6 +309,7 @@ export function SchedulingSection() {
         setStockoutDeliveryDeadline(d.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48');
         setStockoutLossLookbackWeeks(d.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52');
         setStockoutLossMinComparableWeeks(d.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8');
+        setStockoutLossMethod(d.STOCKOUT_LOSS_METHOD === 'ALL_DAYS' ? 'ALL_DAYS' : 'SAME_WEEKDAY');
         setStockoutLossFallbackToAllDays(d.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS !== 'false');
         setStockoutLossMinComparableDaysAll(d.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL || '14');
         setStockoutAlertCron(d.STOCKOUT_ALERT_CRON || '0 8 * * *');
@@ -668,43 +675,63 @@ export function SchedulingSection() {
               className="alert alert-light border small mb-3"
               dangerouslySetInnerHTML={{
                 __html:
-                  "<strong>Repli sur la moyenne globale :</strong> un article à faible rotation peut avoir trop peu de semaines du même jour pour une estimation fiable, même avec assez de jours de vente au total. Si activé, le calcul utilise alors la vente moyenne « tous jours confondus » plutôt que d'afficher « indisponible » — moins précis (ignore les écarts entre jours de semaine) mais couvre plus de cas.",
+                  "<strong>Méthode de calcul :</strong> « Même jour de semaine » compare la rupture aux semaines précédentes DU MÊME JOUR (ex: une rupture démarrée un vendredi est comparée aux vendredis précédents, jamais aux autres jours) — plus précis mais exige plus d'historique. « Tous les jours confondus » fait une moyenne quotidienne sur toute la fenêtre de recul (52 semaines par défaut), sans distinguer les jours — moins précis (ignore qu'un samedi peut différer fortement d'un mardi) mais toujours disponible, même avec peu d'historique.",
               }}
             />
-            <div className="row g-3 align-items-end">
+            <div className="row g-3 align-items-end mb-3">
               <div className="col-md-6">
-                <div className="form-check form-switch">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    role="switch"
-                    id="stockoutLossFallbackToAllDays"
-                    checked={stockoutLossFallbackToAllDays}
-                    onChange={(e) => setStockoutLossFallbackToAllDays(e.target.checked)}
-                  />
-                  <label className="form-check-label fw-semibold" htmlFor="stockoutLossFallbackToAllDays">
-                    Autoriser le repli sur la moyenne tous jours confondus
-                  </label>
-                </div>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label fw-semibold">Minimum de jours comparables (repli)</label>
-                <div className="input-group" style={{ maxWidth: 200 }}>
-                  <input
-                    type="number"
-                    className="form-control"
-                    min={1}
-                    disabled={!stockoutLossFallbackToAllDays}
-                    value={stockoutLossMinComparableDaysAll}
-                    onChange={(e) => setStockoutLossMinComparableDaysAll(e.target.value)}
-                  />
-                  <span className="input-group-text">j.</span>
-                </div>
-                <div className="form-text">
-                  Nombre minimum de jours de vente constatés (tous jours confondus) requis pour accepter ce repli.
-                </div>
+                <label className="form-label fw-semibold">Méthode</label>
+                <select
+                  className="form-select"
+                  value={stockoutLossMethod}
+                  onChange={(e) => setStockoutLossMethod(e.target.value as 'SAME_WEEKDAY' | 'ALL_DAYS')}
+                >
+                  <option value="SAME_WEEKDAY">Même jour de semaine (recommandé)</option>
+                  <option value="ALL_DAYS">Tous les jours confondus (moyenne sur toute la fenêtre)</option>
+                </select>
               </div>
             </div>
+
+            {stockoutLossMethod === 'SAME_WEEKDAY' && (
+              <div className="row g-3 align-items-end">
+                <div className="col-md-6">
+                  <div className="form-check form-switch">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      role="switch"
+                      id="stockoutLossFallbackToAllDays"
+                      checked={stockoutLossFallbackToAllDays}
+                      onChange={(e) => setStockoutLossFallbackToAllDays(e.target.checked)}
+                    />
+                    <label className="form-check-label fw-semibold" htmlFor="stockoutLossFallbackToAllDays">
+                      Autoriser le repli sur la moyenne tous jours confondus
+                    </label>
+                  </div>
+                  <div className="form-text">
+                    Si un article précis n'a pas assez de semaines comparables du même jour, bascule automatiquement
+                    sur « tous les jours confondus » pour CET article seulement, plutôt que d'afficher « indisponible ».
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label fw-semibold">Minimum de jours comparables (repli)</label>
+                  <div className="input-group" style={{ maxWidth: 200 }}>
+                    <input
+                      type="number"
+                      className="form-control"
+                      min={1}
+                      disabled={!stockoutLossFallbackToAllDays}
+                      value={stockoutLossMinComparableDaysAll}
+                      onChange={(e) => setStockoutLossMinComparableDaysAll(e.target.value)}
+                    />
+                    <span className="input-group-text">j.</span>
+                  </div>
+                  <div className="form-text">
+                    Nombre minimum de jours de vente constatés (tous jours confondus) requis pour accepter ce repli.
+                  </div>
+                </div>
+              </div>
+            )}
 
             <button
               type="button"
@@ -718,6 +745,7 @@ export function SchedulingSection() {
                   await saveSystemConfigKey('STOCKOUT_DELIVERY_DEADLINE_HOURS', stockoutDeliveryDeadline);
                   await saveSystemConfigKey('STOCKOUT_LOSS_LOOKBACK_WEEKS', stockoutLossLookbackWeeks);
                   await saveSystemConfigKey('STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS', stockoutLossMinComparableWeeks);
+                  await saveSystemConfigKey('STOCKOUT_LOSS_METHOD', stockoutLossMethod);
                   await saveSystemConfigKey('STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS', stockoutLossFallbackToAllDays ? 'true' : 'false');
                   await saveSystemConfigKey('STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL', stockoutLossMinComparableDaysAll);
                   setStockoutDeadlinesSaved(true);

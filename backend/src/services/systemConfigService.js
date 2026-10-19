@@ -59,12 +59,16 @@ const KEYS = {
   // de semaines comparables requises pour afficher une estimation plutôt que "indisponible".
   STOCKOUT_LOSS_LOOKBACK_WEEKS: 'STOCKOUT_LOSS_LOOKBACK_WEEKS',
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS: 'STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS',
-  // Méthode de calcul de la demande attendue (demande explicite du 19/10/2026 : "l'analyse peux ce
-  // faire sur les meme jour, la la possiblité de configuré sur la validité des donner en fonction de
-  // la moyenne global sur une periode") — 'SAME_WEEKDAY' (même jour de semaine, plus précis mais
-  // exige plus d'historique) avec repli automatique sur 'ALL_DAYS' (moyenne tous jours confondus,
-  // moins précis mais disponible avec moins de données) si STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS=true
-  // et que le nombre de semaines comparables du même jour est insuffisant.
+  // Méthode de calcul de la demande attendue (demande explicite du 19/10/2026, précisée après
+  // question de clarification : "si tu dois les meme jour c'est quoi les meme jour de la rupture ou
+  // c'est quoi ?" → choix explicite demandé, pas seulement un repli) — 'SAME_WEEKDAY' (même jour de
+  // semaine que le début de la fenêtre analysée, ex: compare les vendredis aux vendredis précédents —
+  // plus précis mais exige plus d'historique) ou 'ALL_DAYS' (moyenne quotidienne tous jours de
+  // semaine confondus sur toute la fenêtre de recul — moins précis mais toujours disponible avec
+  // moins de données). STOCKOUT_LOSS_METHOD fixe le choix PRINCIPAL, toujours appliqué en priorité ;
+  // STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS reste un filet de sécurité qui ne s'active QUE si la méthode
+  // choisie est SAME_WEEKDAY et que son historique s'avère insuffisant pour CET article précis.
+  STOCKOUT_LOSS_METHOD: 'STOCKOUT_LOSS_METHOD',
   STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS: 'STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS',
   // Nombre minimum de JOURS (pas semaines) de ventes disponibles dans la fenêtre de lookback pour
   // accepter la moyenne "tous jours confondus" en repli — distinct de
@@ -290,6 +294,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
   [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8',
+  [KEYS.STOCKOUT_LOSS_METHOD]: () => process.env.STOCKOUT_LOSS_METHOD || 'SAME_WEEKDAY',
   [KEYS.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS]: () => process.env.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS || 'true',
   [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL || '14',
   // 8h du matin, avant l'ouverture — le magasin démarre sa journée avec la situation de rupture à

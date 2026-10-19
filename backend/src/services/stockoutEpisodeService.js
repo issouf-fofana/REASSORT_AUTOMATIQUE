@@ -131,13 +131,20 @@ async function getReactionDeadlines() {
  * seulement les 8 dernières semaines).
  */
 async function getLossLookbackConfig() {
-  const [lookback, minComparable, fallbackToAllDays, minComparableDaysAll] = await Promise.all([
+  const [method, lookback, minComparable, fallbackToAllDays, minComparableDaysAll] = await Promise.all([
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_METHOD),
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS),
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS),
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS),
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL),
   ]);
   return {
+    // Choix EXPLICITE de méthode (demande explicite du 19/10/2026, après clarification : "si tu dois
+    // les meme jour c'est quoi les meme jour de la rupture ou c'est quoi ?" → l'utilisateur veut
+    // pouvoir forcer 'tous les jours confondus' même quand l'historique du même jour serait
+    // suffisant, pas seulement un repli de dernier recours). 'ALL_DAYS' explicitement choisi
+    // n'essaie JAMAIS 'SAME_WEEKDAY' — fallbackToAllDays ne s'applique qu'à method='SAME_WEEKDAY'.
+    method: method === 'ALL_DAYS' ? 'ALL_DAYS' : 'SAME_WEEKDAY',
     lookbackWeeks: parseInt(lookback, 10) || 52,
     minComparableWeeks: parseInt(minComparable, 10) || 8,
     fallbackToAllDays: fallbackToAllDays !== 'false',
@@ -275,12 +282,34 @@ async function diagnoseCause(rposShopId, ean, rposPosId) {
  * null si l'historique comparable est trop court (MIN_COMPARABLE_WEEKS) pour être fiable.
  */
 async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
-  const { lookbackWeeks, minComparableWeeks, fallbackToAllDays, minComparableDaysAll } = await getLossLookbackConfig();
+  const { method, lookbackWeeks, minComparableWeeks, fallbackToAllDays, minComparableDaysAll } = await getLossLookbackConfig();
   const lookbackStart = new Date(referenceDate.getTime() - lookbackWeeks * 7 * 24 * 60 * 60 * 1000);
   const comparableSales = await prisma.salesLine.findMany({
     where: { rposShopId, ean, date: { gte: lookbackStart, lt: referenceDate } },
     select: { date: true, quantity: true, revenueExclTax: true },
   });
+
+  function allDaysAverage() {
+    const comparableDaysCount = new Set(comparableSales.map((s) => s.date.toISOString().slice(0, 10))).size;
+    if (comparableDaysCount < minComparableDaysAll) return null;
+    return {
+      avgDailyQty: comparableSales.reduce((sum, s) => sum + s.quantity, 0) / comparableDaysCount,
+      avgDailyRevenue: comparableSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableDaysCount,
+      method: 'ALL_DAYS',
+    };
+  }
+
+  // Choix EXPLICITE de méthode (demande explicite du 19/10/2026, après clarification : "si tu dois
+  // les meme jour c'est quoi les meme jour de la rupture ou c'est quoi ?" → l'utilisateur veut
+  // pouvoir forcer 'tous les jours confondus' sur toute la fenêtre de 52 semaines, même quand
+  // l'historique du même jour serait suffisant). "Même jour" = même jour de semaine que
+  // `referenceDate` (le DÉBUT de la fenêtre analysée — startedAt pour la perte avant commande,
+  // order.createdAt pour la perte après commande), comparé aux semaines précédentes dans
+  // `lookbackWeeks` — PAS "le jour de la semaine où la rupture est survenue" au sens large, mais
+  // précisément ce jour-ci, répété sur l'historique.
+  if (method === 'ALL_DAYS') {
+    return allDaysAverage();
+  }
 
   const targetDow = referenceDate.getDay();
   const sameDowSales = comparableSales.filter((s) => s.date.getDay() === targetDow);
@@ -294,25 +323,16 @@ async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
     };
   }
 
-  // Repli "tous les jours confondus" (demande explicite du 19/10/2026 : "l'analyse peux ce faire sur
-  // les meme jour, la la possiblité de configuré sur la validité des donner en fonction de la
-  // moyenne global sur une periode") — activé par défaut (STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS),
-  // désactivable dans Paramètres. Un article à faible rotation peut avoir assez de JOURS de vente
-  // dans la fenêtre de lookback sans avoir assez de SEMAINES du même jour précis — plutôt que
-  // d'afficher "—" (non calculable), on utilise la moyenne quotidienne tous jours confondus dès que
-  // STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL jours de vente sont disponibles. Moins précis (ignore les
-  // effets de jour de semaine) mais couvre des cas aujourd'hui non calculables — le champ `method`
-  // renvoyé permet à l'UI de distinguer clairement les deux méthodes utilisées.
+  // Repli "tous les jours confondus" quand method='SAME_WEEKDAY' (choisi explicitement ou par
+  // défaut) mais que son historique s'avère insuffisant POUR CET ARTICLE précis — activé par défaut
+  // (STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS), désactivable dans Paramètres. Un article à faible rotation
+  // peut avoir assez de JOURS de vente dans la fenêtre de lookback sans avoir assez de SEMAINES du
+  // même jour précis — plutôt que d'afficher "—" (non calculable), on utilise la moyenne quotidienne
+  // tous jours confondus dès que STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL jours de vente sont
+  // disponibles. Le champ `method` renvoyé permet à l'UI de distinguer clairement les deux méthodes
+  // réellement utilisées pour CE calcul.
   if (!fallbackToAllDays) return null;
-
-  const comparableDaysCount = new Set(comparableSales.map((s) => s.date.toISOString().slice(0, 10))).size;
-  if (comparableDaysCount < minComparableDaysAll) return null;
-
-  return {
-    avgDailyQty: comparableSales.reduce((sum, s) => sum + s.quantity, 0) / comparableDaysCount,
-    avgDailyRevenue: comparableSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableDaysCount,
-    method: 'ALL_DAYS',
-  };
+  return allDaysAverage();
 }
 
 /**
