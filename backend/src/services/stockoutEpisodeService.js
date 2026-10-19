@@ -1142,6 +1142,14 @@ async function getEpisodeDetail(episodeId) {
     deliveryDelay = await diagnoseDeliveryDelay(episode.rposShopId, episode.ean, effectiveValidatedAt, reassortConfig?.weekendDeliveryDay || 'LUNDI');
   }
 
+  // Un VRAI mouvement Arrivage depuis la commande — réutilise stockMoves déjà chargé plus haut (pas
+  // de requête supplémentaire), même logique que diagnoseDeliveryDelay. Utilisé ci-dessous pour ne
+  // jamais afficher "À rapprocher" (douteux) quand un arrivage a bien été détecté (cf. commentaire
+  // sur deliveryLooksDoubtful).
+  const hasRealArrival = order
+    ? stockMoves.some((m) => ['Arrivage', 'Arrivage manuel'].includes(m.typeLabel) && new Date(m.date) >= order.createdAt)
+    : false;
+
   return {
     found: true,
     id: episode.id,
@@ -1235,11 +1243,25 @@ async function getEpisodeDetail(episodeId) {
     // fin. Résultat : pendant ces 2 jours, le badge restait "Estimée reçue" (vert) au lieu de
     // "douteuse". Supprimé cette condition : l'épisode toujours EN_COURS après la date de réception
     // estimée est déjà, à lui seul, la preuve que l'estimation est en défaut — dès le jour même.
+    //
+    // RE-CORRIGÉ une 3e fois le 19/10/2026 (bug signalé avec capture : badge "À rapprocher"
+    // (douteux) affiché alors que la section "Mouvements de stock récents" montre bien un VRAI
+    // mouvement Arrivage après la commande — "j'ai arrivage mais il n'a pas detecter il me dis que
+    // 'À rapprocher'"). Le badge se basait uniquement sur "l'épisode est toujours EN_COURS", sans
+    // jamais vérifier si un arrivage réel avait eu lieu depuis — ici l'arrivage a bien eu lieu, mais
+    // le stock reste négatif malgré tout (probable désynchronisation RPOS plutôt qu'un vrai doute
+    // sur la livraison, cf. le bandeau "Stock négatif détecté" déjà affiché plus bas sur cette même
+    // fiche). "À rapprocher" doit rester réservé au cas où AUCUN arrivage n'a été détecté du tout —
+    // sinon le badge contredit directement les mouvements de stock affichés juste en dessous, ce qui
+    // sème la confusion plutôt que d'aider. hasRealArrival (calculé juste avant ce return) réutilise
+    // stockMoves déjà chargé plus haut (pas de requête supplémentaire), même logique que
+    // diagnoseDeliveryDelay.
     deliveryLooksDoubtful: !!(
       episode.status === 'EN_COURS' &&
       order?.receptionStatus === 'RECUE_ESTIMEE' &&
       order.actualReceptionDate &&
-      order.actualReceptionDate < now
+      order.actualReceptionDate < now &&
+      !hasRealArrival
     ),
     // Retard de livraison (commande passée, jamais reçue du tout — distinct de
     // deliveryLooksDoubtful qui couvre le cas "marquée reçue mais rien ne le confirme"). null si
