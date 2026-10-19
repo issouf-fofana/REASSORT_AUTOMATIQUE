@@ -535,8 +535,22 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
   // la valeur reste simplement null (page "estimation indisponible", pas une erreur).
   const totalCaPerdu = [...openEpisodes, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
+  // CORRIGÉ le 19/10/2026 (bug signalé avec capture : donut "99% sans commande" au global, alors
+  // que le détail par rayon montrait clairement de nombreux articles "Avec commande") — causeProposee
+  // est un champ STOCKÉ en base, calculé UNE SEULE FOIS par diagnoseCause() au moment de la
+  // détection de la rupture, jamais réévalué ensuite. Un article sans commande au moment de la
+  // détection reste donc étiqueté "MAGASIN_REASSORT" pour toujours, même si une commande est passée
+  // dessus juste après — causeCounts se désynchronisait ainsi du vrai statut (hasOrder/deliveryStatus,
+  // recalculés dynamiquement à chaque lecture par getOpenEpisodes). Pour les épisodes EN_COURS, on
+  // reclasse donc sur deliveryStatus (vrai statut actuel), pas sur l'instantané figé causeProposee —
+  // seuls les épisodes RÉSOLUS (où plus rien ne peut changer) gardent causeProposee tel quel, un
+  // instantané historique cohérent avec le principe du reste du module (jamais réévalué après coup).
   const causeCounts = {};
-  for (const e of [...openEpisodes, ...resolvedEpisodes]) {
+  for (const e of openEpisodes) {
+    const cause = DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE';
+    causeCounts[cause] = (causeCounts[cause] || 0) + 1;
+  }
+  for (const e of resolvedEpisodes) {
     causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
   }
 
@@ -560,6 +574,19 @@ const LONG_EPISODE_HOURS = 48;
 // "Nombre de ruptures sans commande de réapprovisionnement identifiée") — distinct de
 // MAGASIN_COMMANDE_NON_VALIDEE, où une commande EXISTE mais n'a pas été validée.
 const NO_ORDER_CAUSES = new Set(['MAGASIN_REASSORT', 'INDETERMINEE']);
+
+// Reclasse deliveryStatus (calculé dynamiquement par getOpenEpisodes, toujours à jour) vers une
+// "cause" au même vocabulaire que causeProposee (champ stocké, figé à la détection) — utilisé par
+// getDashboardSummary et getDashboardSummaryByField pour ne plus se baser sur l'instantané figé dès
+// qu'un épisode est encore EN_COURS (cf. le bug corrigé le 19/10/2026 : donut/tableau "Sans
+// commande" à tort pour des articles ayant pourtant une vraie commande passée après la détection).
+const DELIVERY_STATUS_TO_CAUSE = {
+  SANS_COMMANDE: 'MAGASIN_REASSORT',
+  EN_ATTENTE_LIVRAISON: 'AMONT_A_PRECISER',
+  EN_RETARD: 'AMONT_A_PRECISER',
+  LIVREE: 'ECART_STOCK_RAYON',
+  LIVRAISON_DOUTEUSE: 'ECART_STOCK_RAYON',
+};
 
 /**
  * Vue réseau (spec rupture.md §2, 16/10/2026) : pour chaque magasin accessible, une ligne-résumé
@@ -640,13 +667,23 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
   const now = new Date();
   const resolvedSince = new Date(now.getTime() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
 
-  const [openEpisodes, resolvedEpisodes] = await Promise.all([
-    prisma.stockoutEpisode.findMany({ where: { rposShopId, status: 'EN_COURS', ...extraWhere } }),
-    prisma.stockoutEpisode.findMany({
-      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince }, ...extraWhere },
-      select: { [field]: true, caPerdueEstime: true },
-    }),
-  ]);
+  // openEpisodes vient de getOpenEpisodes (et non d'une requête Prisma brute) depuis le 19/10/2026
+  // (bug signalé avec capture : "Priorisation par rayon" affichait quasi 100% "Sans commande" sur
+  // tous les rayons, alors que le détail par article montrait clairement de nombreux articles avec
+  // commande) — getOpenEpisodes calcule hasOrder DYNAMIQUEMENT à chaque lecture (matching commande
+  // réel), contrairement à causeProposee (champ stocké, figé au moment de la détection de la
+  // rupture, jamais réévalué). Un filtre supplémentaire par field/extraWhere reste appliqué après
+  // coup en mémoire, cette fonction opérant toujours sur UN SEUL magasin (coût raisonnable,
+  // contrairement à getDashboardSummaryAllShops qui reste sur l'ancienne requête brute pour cette
+  // raison).
+  const allOpenEpisodes = await getOpenEpisodes(rposShopId);
+  const openEpisodes = extraWhere.sector !== undefined
+    ? allOpenEpisodes.filter((e) => (e.sector || null) === extraWhere.sector)
+    : allOpenEpisodes;
+  const resolvedEpisodes = await prisma.stockoutEpisode.findMany({
+    where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince }, ...extraWhere },
+    select: { [field]: true, caPerdueEstime: true },
+  });
 
   if (!openEpisodes.length && !resolvedEpisodes.length) {
     return { found: true, groupCount: 0, groups: [], message: noDataLabel || 'Aucune rupture détectée pour ce magasin sur la période.' };
@@ -680,10 +717,15 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
     const durations = bucket.openEpisodes.map((e) => (now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000));
     const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
     const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
-    const noOrderCount = bucket.openEpisodes.filter((e) => NO_ORDER_CAUSES.has(e.causeProposee)).length;
+    // hasOrder (fiable, recalculé dynamiquement) au lieu de causeProposee (figé) — même correctif
+    // que getDashboardSummary ci-dessus.
+    const noOrderCount = bucket.openEpisodes.filter((e) => !e.hasOrder).length;
 
     const causeCounts = {};
-    for (const e of bucket.openEpisodes) causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
+    for (const e of bucket.openEpisodes) {
+      const cause = DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE';
+      causeCounts[cause] = (causeCounts[cause] || 0) + 1;
+    }
 
     return {
       group: bucket.group,
