@@ -251,6 +251,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .stockout-toggle-charts:hover { color: #1B2A4A; }
         .stockout-section-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #8591A0; margin: 20px 0 10px; padding-top: 10px; border-top: 1px solid rgba(27,42,74,.08); }
         .stockout-section-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+        .stockout-period-filter-card { background: linear-gradient(135deg, #FFF8ED 0%, #FDF1DD 100%); border: 1px solid rgba(245,166,35,.25); border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+        .stockout-period-filter-icon { width: 38px; height: 38px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 19px; color: #F5A623; flex-shrink: 0; box-shadow: 0 2px 6px rgba(245,166,35,.18); }
+        .stockout-period-preset { border: 1px solid rgba(245,166,35,.35); background: #fff; color: #8a5a10; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 999px; transition: background .15s, color .15s; }
+        .stockout-period-preset:hover { background: #F5A623; color: #fff; border-color: #F5A623; }
       `}</style>
 
       {/* Organisation de la page revue le 18/10/2026 (demande explicite : "il faut mettre en haut
@@ -275,12 +279,46 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               Ruptures en cours — 30 derniers jours") — pilote à la fois le graphe de tendance et
               l'analyse des pertes plus bas, qui utilisaient auparavant deux systèmes de dates
               séparés et incohérents (l'un figé à 30j, l'autre son propre sélecteur). */}
-          <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-            <div className="text-muted small">Période affichée sur cette page</div>
-            <div className="d-flex align-items-end gap-2 flex-wrap">
-              <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
-              <span className="text-muted small">au</span>
-              <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+          {/* Habillage visuel ajouté le 19/10/2026 (demande explicite : "le haut est vide il faut
+              fait un jolie style pour comblet le vide") — le bandeau nu (juste un label + 2 champs
+              date) laissait un grand espace blanc sous l'onglet "Ce magasin". Transformé en une
+              vraie carte avec icône, fond distinct et des raccourcis de période courants, pour
+              occuper l'espace utilement plutôt que de le combler avec de la décoration gratuite. */}
+          <div className="stockout-period-filter-card mb-3">
+            <div className="d-flex align-items-center gap-2">
+              <span className="stockout-period-filter-icon">
+                <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon>
+              </span>
+              <div>
+                <div className="fw-semibold" style={{ color: '#1B2A4A', fontSize: '.88rem' }}>Période affichée sur cette page</div>
+                <div className="text-muted" style={{ fontSize: '.74rem' }}>Pilote le graphe de tendance et l'analyse des pertes ci-dessous</div>
+              </div>
+            </div>
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              {[
+                { label: '7 j', days: 7 },
+                { label: '30 j', days: 30 },
+                { label: '90 j', days: 90 },
+              ].map((preset) => (
+                <button
+                  key={preset.days}
+                  type="button"
+                  className="stockout-period-preset"
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date(end.getTime() - preset.days * 24 * 60 * 60 * 1000);
+                    setPeriodEnd(end.toISOString().slice(0, 10));
+                    setPeriodStart(start.toISOString().slice(0, 10));
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
+                <span className="text-muted small">au</span>
+                <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+              </div>
             </div>
           </div>
 
