@@ -1247,19 +1247,41 @@ async function getEpisodeDetail(episodeId) {
   // à la demande (consultation d'un seul épisode, pas une agrégation de centaines) : avant = du
   // début de la rupture à la commande, après = de la commande à la fin (ou maintenant si toujours
   // en cours). Null si aucune commande (rien à séparer) ou historique de ventes insuffisant.
+  //
+  // 3e période ajoutée le 19/10/2026 (demande explicite, confirmée après clarification : "apres
+  // arrive on a le temps apres commande et quand ya arrivage il bloque et le temps s'arrete si ca
+  // continue peutre que le stock est negative... ce temps la n'est plus calculé") — bien que
+  // lossAfterOrder couvre déjà correctement TOUT le temps jusqu'à la résolution (rien n'est perdu
+  // dans le calcul lui-même), l'utilisateur ne pouvait pas voir si le temps "après commande" qui
+  // continuait de courir était dû à un simple délai de livraison (pas encore d'arrivage) ou à un
+  // vrai problème de stock résiduel APRÈS un arrivage déjà survenu. lossAfterArrival isole cette
+  // 3e tranche (de l'arrivage à maintenant/fin) quand un arrivage réel existe ET que l'épisode est
+  // encore EN_COURS après — lossAfterOrder reste alors borné à "commande → arrivage" plutôt que
+  // "commande → maintenant", pour que les 3 tranches ne se chevauchent jamais et somment à la
+  // durée totale.
   let lossBeforeOrder = null;
   let lossAfterOrder = null;
+  let lossAfterArrival = null;
   if (order) {
-    const [before, after] = await Promise.all([
+    // Dernier arrivage réel depuis la commande, APRÈS lequel la rupture est pourtant restée
+    // ouverte — latestArrivalMove est déjà chargé plus haut (même requête que stockAfterDelivery).
+    const arrivalStillOpen = latestArrivalMove && episode.status === 'EN_COURS' ? new Date(latestArrivalMove.date) : null;
+    const afterOrderEnd = arrivalStillOpen && arrivalStillOpen.getTime() < endedAt.getTime() ? arrivalStillOpen : endedAt;
+
+    const [before, after, afterArrival] = await Promise.all([
       order.createdAt.getTime() > episode.startedAt.getTime()
         ? estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, order.createdAt)
         : { qtyPerdue: 0, caPerdue: 0 },
-      endedAt.getTime() > order.createdAt.getTime()
-        ? estimateLoss(episode.rposShopId, episode.ean, order.createdAt, endedAt)
+      afterOrderEnd.getTime() > order.createdAt.getTime()
+        ? estimateLoss(episode.rposShopId, episode.ean, order.createdAt, afterOrderEnd)
         : { qtyPerdue: 0, caPerdue: 0 },
+      arrivalStillOpen && endedAt.getTime() > arrivalStillOpen.getTime()
+        ? estimateLoss(episode.rposShopId, episode.ean, arrivalStillOpen, endedAt)
+        : null,
     ]);
     lossBeforeOrder = before;
     lossAfterOrder = after;
+    lossAfterArrival = afterArrival;
   }
 
   // Suffisance de la quantité commandée (demande explicite : "déterminer si la quantité commandée
@@ -1362,6 +1384,11 @@ async function getEpisodeDetail(episodeId) {
     orderQuantitySufficiency,
     lossBeforeOrder,
     lossAfterOrder,
+    // 3e tranche "après arrivage, toujours en rupture" (cf. commentaire sur lossAfterArrival
+    // ci-dessus) — null si aucun arrivage réel n'a eu lieu, ou si l'épisode est déjà résolu (plus
+    // besoin de distinguer, la rupture est terminée).
+    lossAfterArrival,
+    arrivalStillOpenAt: order && latestArrivalMove && episode.status === 'EN_COURS' ? latestArrivalMove.date : null,
     reactionDeadlineHours,
     deliveryDeadlineHours,
     stockAtStart: stockAtStart ? { value: stockAtStart.stock, capturedAt: stockAtStart.capturedAt } : null,

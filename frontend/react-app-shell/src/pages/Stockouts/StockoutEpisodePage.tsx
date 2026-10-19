@@ -77,6 +77,12 @@ type EpisodeDetail = {
   orderQuantitySufficiency: OrderQuantitySufficiency | null;
   lossBeforeOrder: Loss | null;
   lossAfterOrder: Loss | null;
+  // 3e tranche "après arrivage, toujours en rupture" (ajoutée le 19/10/2026, demande explicite :
+  // "apres arrive on a le temps apres commande et quand ya arrivage il bloque... ce temps la n'est
+  // plus calculé") — non-null uniquement si un vrai arrivage a eu lieu mais que la rupture est
+  // restée ouverte après (stock résiduel négatif).
+  lossAfterArrival: Loss | null;
+  arrivalStillOpenAt: string | null;
   reactionDeadlineHours: number;
   deliveryDeadlineHours: number;
   stockAtStart: { value: number; capturedAt: string } | null;
@@ -459,18 +465,28 @@ export function StockoutEpisodePage() {
     const startedAt = new Date(detail.startedAt).getTime();
     const endedAt = detail.endedAt ? new Date(detail.endedAt).getTime() : now;
     const orderCreatedAt = detail.order ? new Date(detail.order.createdAt).getTime() : null;
+    // 3e tranche (ajoutée le 19/10/2026) : si un arrivage réel a eu lieu mais que la rupture est
+    // restée ouverte, "après commande" se borne désormais à l'arrivage (cohérent avec
+    // lossAfterOrder/lossAfterArrival côté backend), et une tranche distincte prend le relais.
+    const arrivalAt = detail.arrivalStillOpenAt ? new Date(detail.arrivalStillOpenAt).getTime() : null;
 
     const beforeOrderEnd = orderCreatedAt !== null ? orderCreatedAt : endedAt;
     const beforeOrderHours = Math.max(0, (beforeOrderEnd - startedAt) / (60 * 60 * 1000));
 
     let afterOrderHours = null;
     if (orderCreatedAt !== null) {
-      afterOrderHours = Math.max(0, (endedAt - orderCreatedAt) / (60 * 60 * 1000));
+      const afterOrderEnd = arrivalAt !== null && arrivalAt < endedAt ? arrivalAt : endedAt;
+      afterOrderHours = Math.max(0, (afterOrderEnd - orderCreatedAt) / (60 * 60 * 1000));
+    }
+
+    let afterArrivalHours = null;
+    if (arrivalAt !== null) {
+      afterArrivalHours = Math.max(0, (endedAt - arrivalAt) / (60 * 60 * 1000));
     }
 
     const totalHours = Math.max(0, (endedAt - startedAt) / (60 * 60 * 1000));
 
-    return { beforeOrderHours, afterOrderHours, totalHours };
+    return { beforeOrderHours, afterOrderHours, afterArrivalHours, totalHours };
   })();
 
   const isLongDuration = liveDurations ? liveDurations.totalHours >= (detail?.deliveryDeadlineHours ?? 48) : false;
@@ -755,7 +771,11 @@ export function StockoutEpisodePage() {
                         <div className="ep2-metric-range">
                           {formatDateTime(detail.order.createdAt)}
                           <iconify-icon icon="solar:arrow-right-linear"></iconify-icon>
-                          {detail.order.actualReceptionDate ? formatDateTime(detail.order.actualReceptionDate) : (detail.status === 'EN_COURS' ? 'maintenant' : formatDateTime(detail.endedAt))}
+                          {detail.arrivalStillOpenAt
+                            ? formatDateTime(detail.arrivalStillOpenAt)
+                            : detail.order.actualReceptionDate
+                              ? formatDateTime(detail.order.actualReceptionDate)
+                              : (detail.status === 'EN_COURS' ? 'maintenant' : formatDateTime(detail.endedAt))}
                         </div>
                         <div className="ep2-metric-figures">
                           <div>
@@ -786,6 +806,48 @@ export function StockoutEpisodePage() {
                       <div className="ep2-metric-empty">Pas encore de commande — rien à mesurer sur cette période.</div>
                     )}
                   </div>
+
+                  {/* 3e tranche "Après arrivage, toujours en rupture" — ajoutée le 19/10/2026
+                      (demande explicite : "apres arrive on a le temps apres commande et quand ya
+                      arrivage il bloque et le temps s'arrete si ca continue peutre que le stock est
+                      negative... ce temps la n'est plus calculé"). N'apparaît QUE si un vrai
+                      arrivage a eu lieu (StockMove type Arrivage) mais que la rupture est restée
+                      ouverte après — signale explicitement que le compteur continue à cause d'un
+                      problème de STOCK RÉSIDUEL, pas d'un simple délai de livraison. */}
+                  {detail.arrivalStillOpenAt && (
+                    <div className="ep2-metric-block after" style={{ borderLeftColor: '#b8302c' }}>
+                      <div className="ep2-metric-head">
+                        <span>Après arrivage, toujours en rupture</span>
+                        <span className="ep2-live-dot">● en direct</span>
+                      </div>
+                      <div className="ep2-metric-range">
+                        {formatDateTime(detail.arrivalStillOpenAt)}
+                        <iconify-icon icon="solar:arrow-right-linear"></iconify-icon>
+                        {detail.status === 'EN_COURS' ? 'maintenant' : formatDateTime(detail.endedAt)}
+                      </div>
+                      <div className="ep2-metric-figures">
+                        <div>
+                          <div className="ep2-metric-lbl">Durée</div>
+                          <div className="ep2-metric-val money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterArrivalHours ?? null)}</div>
+                        </div>
+                        <div>
+                          <div className="ep2-metric-lbl">
+                            Perte estimée
+                            <FormulaInfoButton
+                              title={LOSS_FORMULA_TITLE}
+                              steps={buildLossFormulaSteps(detail.lossConfig)}
+                              example={buildLossFormulaExample(detail.lossConfig)}
+                              note={buildLossFormulaNote(detail.lossConfig)}
+                            />
+                          </div>
+                          <div className="ep2-metric-val">{formatMoney(detail.lossAfterArrival?.caPerdue ?? null)}</div>
+                        </div>
+                      </div>
+                      <div className="ep2-metric-empty" style={{ color: '#b8302c', marginTop: 8 }}>
+                        Un arrivage a bien été détecté, mais le stock est resté en-dessous de 0 depuis — probable désynchronisation RPOS plutôt qu'un simple retard de livraison.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </section>
             </div>
