@@ -460,15 +460,18 @@ async function getOpenEpisodes(rposShopId) {
     let deliveryStatus = 'SANS_COMMANDE';
     if (hasOrder) {
       if (matchedOrder.receptionStatus === 'RECUE_ESTIMEE') {
-        // CORRIGÉ le 18/10/2026 (revue de code) : comparait directement à actualReceptionDate, qui
-        // vient du délai fixe receptionLeadTimeDays (ignorant le week-end/14h) — une commande du
-        // samedi pouvait tomber "douteuse" ici dès le dimanche, alors que getEpisodeDetail (qui
-        // exige maintenant deliveryDelay via computeExpectedReceptionDate) n'affichait plus ce faux
-        // positif. Même garde-fou LÉGER que EN_RETARD ci-dessous (pas de requête StockMove ici,
-        // volontairement, pour les mêmes raisons de performance).
-        const expected = computeExpectedReceptionDate(matchedOrder.createdAt, weekendDeliveryDay);
-        const daysLate = Math.floor((now.getTime() - expected.getTime()) / (24 * 60 * 60 * 1000));
-        deliveryStatus = daysLate >= DELIVERY_DELAY_TOLERANCE_DAYS ? 'LIVRAISON_DOUTEUSE' : 'LIVREE';
+        // CORRIGÉ le 19/10/2026 (bug signalé avec capture : article marqué "Livré" sur sa fiche
+        // détail, alors que le dernier arrivage RPOS réel est ANTÉRIEUR au début de cette rupture et
+        // qu'aucun nouvel arrivage n'a eu lieu depuis — "il ya pas de nouvelle arrivage mais il me
+        // dis livré"). Avant ce correctif, un délai de grâce de DELIVERY_DELAY_TOLERANCE_DAYS (2
+        // jours) après la date de réception estimée affichait quand même "Livrée" (badge vert) tant
+        // que ce délai n'était pas écoulé — or cette fonction ne liste QUE des épisodes encore
+        // EN_COURS : si l'article était vraiment revenu en stock, le job de détection l'aurait déjà
+        // résolu, donc l'estimation est déjà prise en défaut dès le jour même, pas seulement 2 jours
+        // plus tard. Le délai de grâce n'a de sens que pour juger un retard de livraison (EN_RETARD
+        // ci-dessous, commande pas encore déclarée reçue), jamais pour une commande déjà déclarée
+        // "reçue (estimée)" dont la rupture n'a pourtant pas pris fin.
+        deliveryStatus = 'LIVRAISON_DOUTEUSE';
       } else {
         // EN_RETARD ajouté le 18/10/2026 (demande explicite : "3j il faut avoir des explication
         // donc on doit nous dire que la livrasion est en retart") — calcul LÉGER en mémoire
@@ -1076,15 +1079,24 @@ async function getEpisodeDetail(episodeId) {
     // prochoine soit lundi, mardi"). order.actualReceptionDate vient du délai fixe
     // ReassortConfig.receptionLeadTimeDays (receptionSyncJob.js), qui ignore le week-end et la
     // coupure 14h — comparer directement à cette date déclenchait le doute un jour en avance sur la
-    // vraie échéance. On exige maintenant aussi que deliveryDelay soit non-null : cette valeur est
-    // calculée via computeExpectedReceptionDate (règle réelle du cycle entrepôt) + une marge de
-    // tolérance de 2 jours avant de juger quoi que ce soit (cf. diagnoseDeliveryDelay ci-dessus).
+    // vraie échéance. Déjà corrigé : receptionSyncJob.js ne fixe plus actualReceptionDate qu'APRÈS
+    // avoir dépassé expectedReceptionDate (lui-même basé sur computeExpectedReceptionDate, la vraie
+    // règle du cycle entrepôt) — order.actualReceptionDate < now est donc déjà fiable sans retest.
+    //
+    // RE-CORRIGÉ le 19/10/2026 (bug signalé avec capture : article marqué "Estimée reçue" sur sa
+    // fiche détail malgré aucun nouvel arrivage RPOS depuis le début de la rupture — "il ya pas de
+    // nouvelle arrivage mais il me dis livré"). Exiger EN PLUS que `deliveryDelay` soit non-null
+    // ajoutait silencieusement le délai de grâce DELIVERY_DELAY_TOLERANCE_DAYS (2 jours) de
+    // diagnoseDeliveryDelay — pensé pour juger un RETARD (commande pas encore déclarée reçue),
+    // jamais pour une commande déjà déclarée "reçue (estimée)" dont la rupture n'a pourtant pas pris
+    // fin. Résultat : pendant ces 2 jours, le badge restait "Estimée reçue" (vert) au lieu de
+    // "douteuse". Supprimé cette condition : l'épisode toujours EN_COURS après la date de réception
+    // estimée est déjà, à lui seul, la preuve que l'estimation est en défaut — dès le jour même.
     deliveryLooksDoubtful: !!(
       episode.status === 'EN_COURS' &&
       order?.receptionStatus === 'RECUE_ESTIMEE' &&
       order.actualReceptionDate &&
-      order.actualReceptionDate < now &&
-      deliveryDelay
+      order.actualReceptionDate < now
     ),
     // Retard de livraison (commande passée, jamais reçue du tout — distinct de
     // deliveryLooksDoubtful qui couvre le cas "marquée reçue mais rien ne le confirme"). null si
