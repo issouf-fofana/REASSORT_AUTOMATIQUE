@@ -32,16 +32,24 @@ const CAUSE_EXPLANATIONS: Record<string, string> = {
   INDETERMINEE: "Impossible de déterminer la cause avec les informations disponibles — aucune commande récente trouvée pour cet article.",
 };
 
+// Groupe "avec commande" vs "sans commande" (demande explicite du 19/10/2026 : "ou c'est rupture
+// des article commmander et non commadé ?") — le donut affiche désormais ce ratio à 2 parts, plus
+// lisible d'un coup d'œil que 5 causes détaillées dans un même camembert ; le détail des 5 causes
+// reste disponible dans la légende textuelle en dessous.
+const NO_ORDER_CAUSES = new Set(['MAGASIN_REASSORT', 'INDETERMINEE']);
+
 export function StockoutCauseChart({ causeCounts }: { causeCounts: Record<string, number> }) {
   const chartRef = useRef<HTMLDivElement>(null);
 
   const entries = Object.entries(causeCounts || {}).filter(([, count]) => count > 0);
+  const withoutOrder = entries.filter(([cause]) => NO_ORDER_CAUSES.has(cause)).reduce((s, [, c]) => s + c, 0);
+  const withOrder = entries.filter(([cause]) => !NO_ORDER_CAUSES.has(cause)).reduce((s, [, c]) => s + c, 0);
 
   useEffect(() => {
     if (!entries.length || !chartRef.current || !window.ApexCharts) return;
-    const labels = entries.map(([cause]) => CAUSE_LABELS[cause] || cause);
-    const values = entries.map(([, count]) => count);
-    const colors = entries.map(([cause]) => CAUSE_COLORS[cause] || '#A0A8B8');
+    const labels = ['Sans commande', 'Avec commande'];
+    const values = [withoutOrder, withOrder];
+    const colors = ['#E0574C', '#4A90D9'];
 
     const chart = new window.ApexCharts(chartRef.current, {
       chart: { type: 'donut', height: 280 },
@@ -56,19 +64,20 @@ export function StockoutCauseChart({ causeCounts }: { causeCounts: Record<string
     chart.render();
     return () => { chart.destroy(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(causeCounts)]);
+  }, [withoutOrder, withOrder]);
 
   return (
     <div className="card h-100">
       <div className="card-body">
         <h5 className="mb-3" style={{ color: '#1B2A4A', fontWeight: 600, fontSize: '.95rem' }}>
-          Répartition par cause probable
+          Ruptures avec ou sans commande en cours
         </h5>
         {entries.length === 0 ? (
           <div className="text-muted small">Aucune rupture en cours.</div>
         ) : (
           <>
             <div ref={chartRef}></div>
+            <div className="text-muted" style={{ fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', marginTop: 4 }}>Détail par cause</div>
             <div className="mt-2" style={{ fontSize: '.74rem', color: '#5B6B85', lineHeight: 1.55 }}>
               {entries
                 .sort(([, a], [, b]) => b - a)
