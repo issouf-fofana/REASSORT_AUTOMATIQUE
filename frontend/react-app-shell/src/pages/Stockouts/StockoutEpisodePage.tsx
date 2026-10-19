@@ -192,30 +192,43 @@ export function FormulaInfoButton({ title, formula, why }: { title: string; form
         i
       </button>
       {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1040 }}></div>
-          {/* CORRIGÉ le 19/10/2026 (signalé avec capture : le popover débordait hors de la carte,
-              texte tronqué illisible) — `left: 0` ancrait le popover sur le bouton, qui se trouve
-              souvent tout à droite d'une carte étroite (bloc "Avant/Après commande" sur 2 colonnes) ;
-              un popover de 320px fixe débordait alors largement hors de l'écran à droite, sans
-              limite de hauteur ni défilement si le contenu dépassait la fenêtre visible. Ancré en
-              `right: 0` (le bouton est toujours plus proche du bord droit du bloc que du gauche sur
-              cette page), largeur responsive (`min(320px, 90vw)`), et `max-height` + `overflow-y`
-              pour ne jamais déborder verticalement de l'écran. */}
+        // RE-CORRIGÉ le 19/10/2026 (signalé une seconde fois avec capture : même en `right: 0` avec
+        // max-height/overflow-y, le popover ancré au bouton (`position: absolute`) débordait encore
+        // sur d'autres blocs de la page — un positionnement relatif au bouton reste fragile selon
+        // l'endroit où ce bouton se trouve dans une mise en page en grille à plusieurs colonnes).
+        // Remplacé par une vraie modale centrée à l'écran (`position: fixed`, centrée), complètement
+        // indépendante de la position du bouton qui l'a ouverte — ne peut plus déborder nulle part.
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1040, background: 'rgba(27,42,74,.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
           <div
+            onClick={(e) => e.stopPropagation()}
             style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 1041,
-              background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 8,
-              boxShadow: '0 6px 20px rgba(27,42,74,.15)', padding: '12px 14px',
-              width: 'min(320px, 90vw)', maxHeight: '70vh', overflowY: 'auto',
-              fontSize: '.78rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.5,
+              background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 10,
+              boxShadow: '0 10px 30px rgba(27,42,74,.25)', padding: '16px 18px',
+              width: 'min(380px, 100%)', maxHeight: '80vh', overflowY: 'auto',
+              fontSize: '.82rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.55,
             }}
           >
-            <div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>{title}</div>
-            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '6px 8px', marginBottom: 8, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formula}</div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{title}</div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Fermer"
+                style={{ border: 'none', background: 'transparent', color: '#8591A0', fontSize: '1.1rem', lineHeight: 1, padding: 0, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '8px 10px', marginBottom: 10, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formula}</div>
             <div style={{ color: '#5B6B85' }}>{why}</div>
           </div>
-        </>
+        </div>
       )}
     </span>
   );
