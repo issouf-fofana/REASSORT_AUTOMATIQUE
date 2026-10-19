@@ -349,8 +349,6 @@ async function getOpenEpisodes(rposShopId) {
 
   const { reactionDeadlineHours, deliveryDeadlineHours } = await getReactionDeadlines();
   const now = new Date();
-  const reassortConfig = await prisma.reassortConfig.findUnique({ where: { rposShopId }, select: { weekendDeliveryDay: true } });
-  const weekendDeliveryDay = reassortConfig?.weekendDeliveryDay || 'LUNDI';
   const eans = [...new Set(episodes.map((e) => e.ean))];
   const earliestStart = episodes.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), episodes[0].startedAt);
 
@@ -415,6 +413,24 @@ async function getOpenEpisodes(rposShopId) {
   }
   for (const list of linesByEan.values()) list.sort((a, b) => a.proposal.generatedAt.getTime() - b.proposal.generatedAt.getTime());
 
+  // Dernier mouvement "Arrivage" réel par EAN depuis le début de rupture le plus ancien du lot
+  // (demande explicite du 19/10/2026 : "pour qu'une commande ait le statut livré... il ya arrivage
+  // et le stock est mis a jour" — un vrai mouvement StockMove de type Arrivage, jamais seulement
+  // ProposalOrder.receptionStatus=RECUE_ESTIMEE, une estimation de délai). Une seule requête groupée
+  // pour tout le magasin (jamais un aller-retour DB par article, même principe de performance que le
+  // reste de cette fonction) ; le filtrage par rapport à la date de CHAQUE commande se fait ensuite
+  // en mémoire, EAN par EAN.
+  const arrivalMoves = await prisma.stockMove.findMany({
+    where: { rposShopId, ean: { in: eans }, date: { gte: earliestStart }, typeLabel: { in: ['Arrivage', 'Arrivage manuel'] } },
+    select: { ean: true, date: true },
+    orderBy: { date: 'asc' },
+  });
+  const arrivalDatesByEan = new Map();
+  for (const m of arrivalMoves) {
+    if (!arrivalDatesByEan.has(m.ean)) arrivalDatesByEan.set(m.ean, []);
+    arrivalDatesByEan.get(m.ean).push(m.date);
+  }
+
   return episodes.map((e) => {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
@@ -441,48 +457,34 @@ async function getOpenEpisodes(rposShopId) {
     else if (durationHours > reactionDeadlineHours) reactionStatus = 'RETARD';
     else reactionStatus = 'EN_ATTENTE';
 
-    // Statut de livraison, distinct de reactionStatus (demande explicite du 17/10/2026 : "l'autre ou
-    // ya commande mais pas encore livré ou il ya pas encore arrivage sur rpos pour metre a jour le
-    // stock") — SANS_COMMANDE / EN_ATTENTE_LIVRAISON (commande passée, receptionStatus pas encore
-    // RECUE_ESTIMEE) / LIVREE (receptionStatus RECUE_ESTIMEE, cf. le commentaire sur ce champ dans
-    // schema.prisma : c'est une ESTIMATION basée sur le délai configuré, jamais une confirmation
-    // RPOS certaine) / LIVRAISON_DOUTEUSE.
-    //
-    // LIVRAISON_DOUTEUSE ajoutée le 18/10/2026 (bug signalé avec capture : badge "Livrée" affiché
-    // alors que la fiche détail montre "compteur toujours actif", stock RPOS toujours négatif, et
-    // AUCUN mouvement de réception en base — "il me dis les quantité livré or si je vais dessu le
-    // temps de rupture continue de compté"). RECUE_ESTIMEE est une estimation de délai, jamais une
-    // preuve ; la preuve la plus fiable qu'on a réellement ICI est l'épisode LUI-MÊME : il reste
-    // EN_COURS (cette fonction ne liste QUE les épisodes EN_COURS) alors que la réception estimée
-    // est déjà passée — si l'article était vraiment revenu en stock, le job de détection l'aurait
-    // déjà résolu. Ne jamais affirmer "Livrée" dans ce cas, mais signaler l'écart au lieu de le
-    // masquer derrière un badge vert rassurant.
+    // Statut de livraison, distinct de reactionStatus — RÉÉCRIT le 19/10/2026 (règle explicite
+    // donnée par le magasin) : "pour qu'une commande ait le statut livré : 1) cas normal, il y a
+    // arrivage et le stock est mis à jour ; 2) si 48h après la commande y'a pas de stock à jour, on
+    // dit 'estimé livré' ; ... donc on a : sans commande / avec commande / livré estimé / livré. —
+    // livré estimé = plus de 48h mais sur l'article on a pas d'arrivage ; livré = il y a arrivage et
+    // le stock est mis à jour." Remplace l'ancienne logique basée sur
+    // ProposalOrder.receptionStatus=RECUE_ESTIMEE (une pure estimation de délai fixe, cf. schema.prisma
+    // — jamais une preuve) par la recherche d'un VRAI mouvement StockMove "Arrivage"/"Arrivage
+    // manuel" postérieur à la commande (arrivalDatesByEan, requête groupée ci-dessus) :
+    //   - SANS_COMMANDE : aucune commande créée depuis le début de la rupture.
+    //   - EN_ATTENTE_LIVRAISON : commande passée depuis moins de deliveryDeadlineHours (48h par
+    //     défaut) — délai normal, rien à signaler.
+    //   - LIVREE : un arrivage réel a été détecté après la commande — logiquement, cet épisode
+    //     devrait déjà être résolu par le job de détection ; si on le voit encore ici EN_COURS malgré
+    //     un arrivage, c'est un signe de désynchronisation stock/rayon (ECART_STOCK_RAYON côté cause).
+    //   - LIVRAISON_DOUTEUSE (ex-"livré estimé") : plus de deliveryDeadlineHours se sont écoulées
+    //     depuis la commande, sans qu'aucun arrivage réel n'ait été détecté — l'estimation RPOS
+    //     (RECUE_ESTIMEE) ne doit jamais être prise pour une confirmation.
     let deliveryStatus = 'SANS_COMMANDE';
     if (hasOrder) {
-      if (matchedOrder.receptionStatus === 'RECUE_ESTIMEE') {
-        // CORRIGÉ le 19/10/2026 (bug signalé avec capture : article marqué "Livré" sur sa fiche
-        // détail, alors que le dernier arrivage RPOS réel est ANTÉRIEUR au début de cette rupture et
-        // qu'aucun nouvel arrivage n'a eu lieu depuis — "il ya pas de nouvelle arrivage mais il me
-        // dis livré"). Avant ce correctif, un délai de grâce de DELIVERY_DELAY_TOLERANCE_DAYS (2
-        // jours) après la date de réception estimée affichait quand même "Livrée" (badge vert) tant
-        // que ce délai n'était pas écoulé — or cette fonction ne liste QUE des épisodes encore
-        // EN_COURS : si l'article était vraiment revenu en stock, le job de détection l'aurait déjà
-        // résolu, donc l'estimation est déjà prise en défaut dès le jour même, pas seulement 2 jours
-        // plus tard. Le délai de grâce n'a de sens que pour juger un retard de livraison (EN_RETARD
-        // ci-dessous, commande pas encore déclarée reçue), jamais pour une commande déjà déclarée
-        // "reçue (estimée)" dont la rupture n'a pourtant pas pris fin.
-        deliveryStatus = 'LIVRAISON_DOUTEUSE';
+      const hoursSinceOrder = (now.getTime() - orderCreatedAt.getTime()) / (60 * 60 * 1000);
+      const hasRealArrival = (arrivalDatesByEan.get(e.ean) || []).some((d) => d >= orderCreatedAt);
+      if (hasRealArrival) {
+        deliveryStatus = 'LIVREE';
+      } else if (hoursSinceOrder < deliveryDeadlineHours) {
+        deliveryStatus = 'EN_ATTENTE_LIVRAISON';
       } else {
-        // EN_RETARD ajouté le 18/10/2026 (demande explicite : "3j il faut avoir des explication
-        // donc on doit nous dire que la livrasion est en retart") — calcul LÉGER en mémoire
-        // (computeExpectedReceptionDate, pas de requête StockMove par article ici, volontairement :
-        // cette fonction liste TOUS les épisodes d'un magasin en masse, un aller-retour DB par
-        // article romprait le correctif de performance déjà appliqué une fois sur ce module). La
-        // preuve StockMove plus coûteuse (diagnoseDeliveryDelay) reste réservée à la fiche détail
-        // d'UN seul article (getEpisodeDetail), où son coût est négligeable.
-        const expected = computeExpectedReceptionDate(matchedOrder.createdAt, weekendDeliveryDay);
-        const daysLate = Math.floor((now.getTime() - expected.getTime()) / (24 * 60 * 60 * 1000));
-        deliveryStatus = daysLate >= DELIVERY_DELAY_TOLERANCE_DAYS ? 'EN_RETARD' : 'EN_ATTENTE_LIVRAISON';
+        deliveryStatus = 'LIVRAISON_DOUTEUSE';
       }
     }
 
