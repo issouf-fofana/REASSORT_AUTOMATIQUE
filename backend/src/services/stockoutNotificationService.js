@@ -11,7 +11,7 @@
 const prisma = require('../utils/prisma');
 const outlookMailService = require('./outlookMailService');
 const { renderMailTemplate } = require('./mailTemplateService');
-const { getShopRecipientUsers } = require('./proposalNotificationService');
+const { getShopRecipientUsers, getAdminUsers, sendMailToEachRecipient } = require('./proposalNotificationService');
 
 function stockoutsLink(shop) {
   const origins = (process.env.FRONTEND_URL || 'https://reassort.local').split(',').map((o) => o.trim()).filter(Boolean);
@@ -71,11 +71,18 @@ function buildEpisodeTableHtml(episodes) {
 /** Envoie, pour UN magasin, un récap des ruptures EN_COURS à ses destinataires habituels
  * (getShopRecipientUsers — mêmes comptes que les alertes de proposition). N'envoie rien si le
  * magasin n'a aucune rupture ouverte. `episodes` : résultat déjà chargé par l'appelant (job), jamais
- * recalculé ici — cette fonction ne fait qu'émettre l'email. */
+ * recalculé ici — cette fonction ne fait qu'émettre l'email.
+ *
+ * includeAdmins: false (demande explicite du 19/10/2026 : "pour chaque mail de rupture l'admin
+ * recoit un par mag donc corrige il doit recevoir un seul pour synthese comme pour les commande...
+ * c'est le mag qui recoit un mail pour lui et l'admin un mail global pour tout") — même principe déjà
+ * appliqué à notifyShopUsersOfNewProposal (proposalNotificationService.js) : l'admin ne doit plus
+ * recevoir une copie de CHAQUE email magasin (jusqu'à 50+ sur un réseau), mais un seul récap global
+ * en fin de job (cf. notifyAdminsOfStockoutSummary ci-dessous). */
 async function notifyShopOfOpenStockouts(shop, episodes) {
   if (!episodes.length) return { sent: false, recipientCount: 0 };
 
-  const users = await getShopRecipientUsers(shop.rposShopId);
+  const users = await getShopRecipientUsers(shop.rposShopId, { includeAdmins: false });
   if (!users.length) return { sent: false, recipientCount: 0 };
 
   const withoutOrder = episodes.filter((e) => !e.hasOrder).length;
@@ -109,4 +116,59 @@ async function notifyShopOfOpenStockouts(shop, episodes) {
   return { sent: true, recipientCount: users.length };
 }
 
-module.exports = { notifyShopOfOpenStockouts };
+/** Récap unique envoyé aux ADMIN à la fin du job d'alerte ruptures (demande explicite du
+ * 19/10/2026) — remplace la copie individuelle de chaque email magasin, même principe que
+ * notifyAdminsOfNightlySummary (proposalNotificationService.js). `summaries` : tableau construit par
+ * le job au fil du traitement de chaque magasin, `{ shop: {reference, name}, episodeCount,
+ * withoutOrderCount }`. N'envoie rien si aucun magasin n'a de rupture en cours (tableau vide) — un
+ * récap vide n'a aucune valeur. */
+async function notifyAdminsOfStockoutSummary(summaries) {
+  const nonEmpty = summaries.filter((s) => s.episodeCount > 0);
+  if (!nonEmpty.length) return;
+
+  const admins = await getAdminUsers();
+  if (!admins.length) return;
+
+  const totalEpisodes = nonEmpty.reduce((sum, s) => sum + s.episodeCount, 0);
+  const totalWithoutOrder = nonEmpty.reduce((sum, s) => sum + s.withoutOrderCount, 0);
+
+  const rows = nonEmpty
+    .sort((a, b) => b.episodeCount - a.episodeCount)
+    .map((s) => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${s.shop.reference} — ${s.shop.name}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${s.episodeCount}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${s.withoutOrderCount ? `⚠️ ${s.withoutOrderCount}` : '—'}</td>
+      </tr>
+    `)
+    .join('');
+
+  const tableHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:12px;font-family:Arial,sans-serif;font-size:13px;">
+      <thead>
+        <tr style="background:#f4f6f9;">
+          <th style="padding:6px 8px;text-align:left;">Magasin</th>
+          <th style="padding:6px 8px;text-align:right;">Ruptures en cours</th>
+          <th style="padding:6px 8px;text-align:right;">Sans commande</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  await sendMailToEachRecipient(admins, async (user) => ({
+    subject: `Réassort Automatique — récap ruptures (${nonEmpty.length} magasin(s), ${totalEpisodes} rupture(s) au total)`,
+    htmlBody: renderMailTemplate(
+      'Récap des ruptures de stock en cours',
+      `
+        <p>Bonjour ${user.name},</p>
+        <p><strong>${nonEmpty.length}</strong> magasin(s) ont des ruptures de stock en cours, pour un
+        total de <strong>${totalEpisodes}</strong> article(s)${totalWithoutOrder ? `, dont <strong>${totalWithoutOrder}</strong> sans commande passée sur l'ensemble des magasins` : ''}.</p>
+        ${tableHtml}
+      `,
+      { severity: totalWithoutOrder > 0 ? 'warning' : 'info' },
+    ),
+  }));
+}
+
+module.exports = { notifyShopOfOpenStockouts, notifyAdminsOfStockoutSummary };

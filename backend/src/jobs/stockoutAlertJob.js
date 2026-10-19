@@ -13,7 +13,7 @@
 const prisma = require('../utils/prisma');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { getOpenEpisodes } = require('../services/stockoutEpisodeService');
-const { notifyShopOfOpenStockouts } = require('../services/stockoutNotificationService');
+const { notifyShopOfOpenStockouts, notifyAdminsOfStockoutSummary } = require('../services/stockoutNotificationService');
 
 const SHOP_CONCURRENCY = 5; // pas d'appel RPOS ici (getOpenEpisodes lit uniquement la DB locale), concurrence large
 
@@ -24,13 +24,29 @@ async function runStockoutAlertJob() {
 
   let alerted = 0;
   let skipped = 0;
+  // Résumé par magasin accumulé au fil du job (demande explicite du 19/10/2026 : "il doit recevoir
+  // un seul [mail] pour synthese comme pour les commande... c'est le mag qui recoit un mail pour
+  // lui et l'admin un mail global pour tout") — un seul récap admin en fin de job plutôt qu'une
+  // copie de chaque email magasin (même principe que nightlyProposalJob.js).
+  const summaries = [];
 
   await mapWithConcurrency(shops, SHOP_CONCURRENCY, async (shop) => {
     const episodes = await getOpenEpisodes(shop.rposShopId);
     if (!episodes.length) { skipped += 1; return; }
     const { sent } = await notifyShopOfOpenStockouts(shop, episodes);
     if (sent) alerted += 1; else skipped += 1;
+    summaries.push({
+      shop: { reference: shop.reference, name: shop.name },
+      episodeCount: episodes.length,
+      withoutOrderCount: episodes.filter((e) => !e.hasOrder).length,
+    });
   });
+
+  try {
+    await notifyAdminsOfStockoutSummary(summaries);
+  } catch (err) {
+    console.error('[stockoutAlertJob] Échec de l\'envoi du récap admin :', err.message);
+  }
 
   console.log(`[stockoutAlertJob] Terminé : ${alerted} magasin(s) alerté(s), ${skipped} sans rupture ou sans destinataire.`);
   return { alerted, skipped };

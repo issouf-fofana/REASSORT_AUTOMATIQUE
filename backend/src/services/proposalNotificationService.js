@@ -536,6 +536,7 @@ module.exports = {
   getShopRecipients,
   getShopRecipientUsers,
   getAdminUsers,
+  sendMailToEachRecipient,
   purchaseOrderLink,
   buildSupplierWarningHtml,
   notifyShopUsersOfNewProposal,
