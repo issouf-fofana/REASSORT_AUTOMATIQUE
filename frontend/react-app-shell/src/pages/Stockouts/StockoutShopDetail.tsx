@@ -251,10 +251,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .stockout-toggle-charts:hover { color: #1B2A4A; }
         .stockout-section-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #8591A0; margin: 20px 0 10px; padding-top: 10px; border-top: 1px solid rgba(27,42,74,.08); }
         .stockout-section-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
-        .stockout-period-filter-card { background: linear-gradient(135deg, #FFF8ED 0%, #FDF1DD 100%); border: 1px solid rgba(245,166,35,.25); border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
-        .stockout-period-filter-icon { width: 38px; height: 38px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 19px; color: #F5A623; flex-shrink: 0; box-shadow: 0 2px 6px rgba(245,166,35,.18); }
-        .stockout-period-preset { border: 1px solid rgba(245,166,35,.35); background: #fff; color: #8a5a10; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 999px; transition: background .15s, color .15s; }
-        .stockout-period-preset:hover { background: #F5A623; color: #fff; border-color: #F5A623; }
+        .stockout-period-filter-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+        .stockout-period-filter-icon { width: 30px; height: 30px; border-radius: 7px; background: rgba(27,42,74,.05); display: flex; align-items: center; justify-content: center; font-size: 15px; color: #5B6B85; flex-shrink: 0; }
+        .stockout-period-preset { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 6px; transition: background .15s, color .15s, border-color .15s; }
+        .stockout-period-preset:hover { background: #F6F8FB; color: #1B2A4A; border-color: rgba(27,42,74,.2); }
       `}</style>
 
       {/* Organisation de la page revue le 18/10/2026 (demande explicite : "il faut mettre en haut
