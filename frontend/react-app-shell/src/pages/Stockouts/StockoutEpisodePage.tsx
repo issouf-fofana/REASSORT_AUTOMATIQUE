@@ -170,12 +170,52 @@ function formatMoney(value: number | null): string {
   return `${Math.round(value).toLocaleString('fr-FR')} CFA`;
 }
 
-// Ajouté le 19/10/2026 (demande explicite : "affiche la formule de calcule pour la perte") — "—"
-// signifie historique de vente insuffisant pour estimer une demande fiable (pas d'erreur) ; un
-// montant à 0 CFA est un résultat réel du calcul (demande attendue très faible sur cette fenêtre),
-// pas une absence de donnée.
-const LOSS_FORMULA_EXPLANATION =
-  "Perte estimée = (vente moyenne du même jour de semaine sur les semaines précédentes comparables × durée de la période) − ventes réellement réalisées pendant cette période. « — » = historique de vente insuffisant pour estimer une demande fiable ; 0 CFA = demande attendue très faible sur cette fenêtre (résultat réel, pas une donnée manquante).";
+// Ajouté le 19/10/2026 (demande explicite : "affiche la formule de calcule pour la perte" puis
+// "pour affiche la formule de calcule il faut ajouter un bouton a coté pour voir la formule utilisé
+// et l'explication de pourquoi cette formmule") — un simple `title` HTML (tooltip au survol) était
+// peu visible/peu pratique sur mobile ; remplacé par un vrai bouton ⓘ cliquable qui ouvre une
+// explication en dur dans la page (formule + pourquoi ce choix de méthode).
+export function FormulaInfoButton({ title, formula, why }: { title: string; formula: string; why: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Voir la formule de calcul"
+        style={{
+          border: 'none', background: 'rgba(27,42,74,.08)', color: '#5B6B85', borderRadius: '50%',
+          width: 16, height: 16, fontSize: '.68rem', lineHeight: '16px', padding: 0, marginLeft: 4,
+          cursor: 'pointer', verticalAlign: 'middle',
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>
+          <div
+            style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 41,
+              background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 8,
+              boxShadow: '0 6px 20px rgba(27,42,74,.15)', padding: '12px 14px', width: 320,
+              fontSize: '.78rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.5,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>{title}</div>
+            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '6px 8px', marginBottom: 8 }}>{formula}</div>
+            <div style={{ color: '#5B6B85' }}>{why}</div>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
+const LOSS_FORMULA_TITLE = 'Perte estimée';
+const LOSS_FORMULA = '(vente moyenne du même jour de semaine sur les semaines comparables × durée de la période) − ventes réellement réalisées pendant cette période';
+const LOSS_FORMULA_WHY =
+  "On compare aux ventes du MÊME jour de semaine (et non à une moyenne générale) car la demande varie fortement selon le jour (ex: samedi très différent d'un mardi). « — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.";
 
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
 // (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
@@ -536,7 +576,7 @@ export function StockoutEpisodePage() {
                         <div className="ep2-metric-val accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</div>
                       </div>
                       <div>
-                        <div className="ep2-metric-lbl" title={LOSS_FORMULA_EXPLANATION}>Perte estimée ⓘ</div>
+                        <div className="ep2-metric-lbl">Perte estimée<FormulaInfoButton title={LOSS_FORMULA_TITLE} formula={LOSS_FORMULA} why={LOSS_FORMULA_WHY} /></div>
                         <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
                       </div>
                     </div>
@@ -566,7 +606,7 @@ export function StockoutEpisodePage() {
                             <div className={`ep2-metric-val ${detail.deliveryDelay || detail.deliveryLooksDoubtful ? 'money' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
                           </div>
                           <div>
-                            <div className="ep2-metric-lbl" title={LOSS_FORMULA_EXPLANATION}>Perte estimée ⓘ</div>
+                            <div className="ep2-metric-lbl">Perte estimée<FormulaInfoButton title={LOSS_FORMULA_TITLE} formula={LOSS_FORMULA} why={LOSS_FORMULA_WHY} /></div>
                             <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
                           </div>
                         </div>

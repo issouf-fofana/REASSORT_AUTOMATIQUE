@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
+import { FormulaInfoButton } from './StockoutEpisodePage';
 
 // Analyse des pertes de rupture sur une période personnalisée, comparée au CA réellement réalisé
 // par le magasin (demande explicite du 18/10/2026 : "il faut me donne la possiblité de faire les
@@ -138,7 +139,14 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
           <>
             <div className="row g-3 mb-3">
               <div className="col-6 col-md-3">
-                <div className="text-muted small">CA perdu (rupture)</div>
+                <div className="text-muted small">
+                  CA perdu (rupture)
+                  <FormulaInfoButton
+                    title="CA perdu sur la période"
+                    formula="Somme, pour chaque rupture chevauchant la période, de : (vente moyenne du même jour de semaine sur les semaines comparables × durée dans la période) − ventes réellement réalisées pendant cette même fenêtre"
+                    why="Seule la portion de chaque rupture qui tombe DANS la période choisie est comptée (une rupture ouverte depuis des mois n'est comptée que pour les jours qui chevauchent le filtre) — recalculé précisément par période, pas une approximation figée."
+                  />
+                </div>
                 <div className="fs-5 fw-semibold">{summary.totalCaPerdu.toLocaleString('fr-FR')} CFA</div>
               </div>
               <div className="col-6 col-md-3">

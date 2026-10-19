@@ -9,6 +9,7 @@ const { getMovesFromLocal } = require('./stockMoveAnalysisService');
 const rpos = require('./rposClient');
 const systemConfig = require('./systemConfigService');
 const { streamWithFallback } = require('./aiForecastService');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
 // Seuil de retard de livraison : au-delà de ce nombre de jours après la date de livraison ATTENDUE
 // (computeExpectedReceptionDate ci-dessous), l'écart n'est plus "explicable" par un aléa logistique
@@ -1192,27 +1193,26 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     }),
   ]);
 
-  // Part de la perte d'un épisode encore ouvert qui tombe DANS la période demandée (prorata temps)
-  // — lue depuis caPerdueEstime/qtyPerdueEstimee déjà PRÉCALCULÉS par stockoutLossRecalcJob (perte
-  // totale depuis le début de la rupture), jamais recalculée en direct via estimateLoss() ici : avec
-  // plusieurs centaines d'épisodes ouverts, un appel estimateLoss() par épisode (même avec
-  // concurrence) fait exploser le temps de réponse de cette page (même bug de performance déjà
-  // corrigé ailleurs le 17/10/2026, cf. stockoutLossRecalcJob.js). Approximation : la perte totale
-  // de l'épisode est répartie linéairement sur sa durée, on ne garde que la part qui tombe dans la
-  // période demandée.
+  // RÉÉCRIT le 19/10/2026 (bug signalé : "le filtre ne modifie pas les valeur actuelle... il
+  // affiche les CA sur 1an") — l'ancienne version prorata la perte TOTALE DE L'ÉPISODE (depuis son
+  // tout premier début, parfois des mois plus tôt) par le ratio temps-dans-la-fenêtre /
+  // temps-total-de-l'épisode. Résultat : un épisode ouvert depuis longtemps dominait le total peu
+  // importe la période choisie, et resserrer/élargir le filtre ne changeait presque rien au chiffre
+  // affiché. Corrigé en appliquant estimateLoss() directement sur la fenêtre [overlapStart,
+  // overlapEnd] de CHAQUE épisode qui chevauche la période — même méthode que la fiche détail
+  // (lossBeforeOrder/lossAfterOrder) : vente moyenne du même jour de semaine sur l'historique
+  // comparable × durée de la fenêtre, moins les ventes réellement réalisées PENDANT cette fenêtre
+  // précise. Plus de prorata approximatif : la perte affichée correspond exactement à la période
+  // demandée, à durée d'exécution raisonnable (concurrence, cf. mapWithConcurrency — le nombre
+  // d'épisodes EN_COURS sur un magasin reste de l'ordre de quelques centaines au plus, jamais des
+  // milliers comme getDashboardSummaryAllShops qui agrège tout le réseau).
   const now = new Date();
-  const openLosses = openOverlapping.map((e) => {
+  const openLosses = await mapWithConcurrency(openOverlapping, 8, async (e) => {
     const overlapStart = e.startedAt > start ? e.startedAt : start;
     const overlapEnd = end < now ? end : now;
     if (overlapEnd <= overlapStart) return { episode: e, qtyPerdue: 0, caPerdue: 0 };
-    const totalDurationMs = now.getTime() - e.startedAt.getTime();
-    const overlapMs = overlapEnd.getTime() - overlapStart.getTime();
-    const ratio = totalDurationMs > 0 ? Math.min(1, overlapMs / totalDurationMs) : 0;
-    return {
-      episode: e,
-      qtyPerdue: (e.qtyPerdueEstimee || 0) * ratio,
-      caPerdue: (e.caPerdueEstime || 0) * ratio,
-    };
+    const { qtyPerdue, caPerdue } = await estimateLoss(rposShopId, e.ean, overlapStart, overlapEnd);
+    return { episode: e, qtyPerdue: qtyPerdue || 0, caPerdue: caPerdue || 0 };
   });
 
   const byDepartment = new Map();
