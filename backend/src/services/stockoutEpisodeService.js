@@ -295,6 +295,15 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
  * depuis le début de la rupture, stock résultant = previousQuantity + quantity). Volontairement
  * planifié peu fréquemment (cf. stockoutCatchUpResolveJob.js) : couvre le rattrapage initial après
  * un déploiement, puis sert de filet de sécurité continu pour tout cas résiduel.
+ *
+ * ÉTENDU le 19/10/2026 (demande explicite : "le stckok afficher doit etre le stok tu pos... vu que
+ * tout les stok ne son pas correct") — un déficit historique accumulé dans StockMove (ventes mal
+ * enregistrées au fil du temps) peut rester fortement négatif même après un vrai arrivage (ex: -57
+ * avant, +24 d'arrivage, résultat encore -33) : le calcul reconstitué depuis les mouvements hérite
+ * alors de la même désynchronisation que RPOS lui-même. ProductCache.stock (resynchronisé
+ * régulièrement pour ces articles par stockoutProductCacheRefreshJob.js) est le stock RPOS
+ * "officiel" directement lu depuis /api/product/, pas un recalcul — considéré prioritaire : si LUI
+ * est positif, la rupture est résolue même si le calcul StockMove reste négatif.
  */
 async function catchUpResolveStockoutEpisodes() {
   const openEpisodes = await prisma.stockoutEpisode.findMany({
@@ -304,22 +313,38 @@ async function catchUpResolveStockoutEpisodes() {
 
   let resolved = 0;
   for (const episode of openEpisodes) {
-    const latestMove = await prisma.stockMove.findFirst({
-      where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt } },
-      orderBy: { date: 'desc' },
-      select: { date: true, quantity: true, previousQuantity: true },
-    });
-    if (!latestMove) continue;
+    const [latestMove, productCache] = await Promise.all([
+      prisma.stockMove.findFirst({
+        where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt } },
+        orderBy: { date: 'desc' },
+        select: { date: true, quantity: true, previousQuantity: true },
+      }),
+      prisma.productCache.findUnique({
+        where: { rposShopId_ean: { rposShopId: episode.rposShopId, ean: episode.ean } },
+        select: { stock: true, syncedAt: true },
+      }),
+    ]);
 
-    const resultingStock = (latestMove.previousQuantity ?? 0) + latestMove.quantity;
-    if (resultingStock <= 0) continue;
+    const moveResultingStock = latestMove ? (latestMove.previousQuantity ?? 0) + latestMove.quantity : null;
+    // Le stock RPOS officiel (ProductCache) n'est pertinent ici que s'il a été resynchronisé
+    // DEPUIS le début de la rupture — une valeur plus ancienne que startedAt ne prouve rien sur
+    // l'état actuel de l'article (cf. le cas déjà rencontré : syncedAt du 18/09, un mois périmé).
+    const productCacheIsFresh = productCache && productCache.syncedAt >= episode.startedAt;
+    const resolvedByMove = moveResultingStock !== null && moveResultingStock > 0;
+    const resolvedByRpos = productCacheIsFresh && productCache.stock > 0;
+    if (!resolvedByMove && !resolvedByRpos) continue;
 
-    const estimation = await estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, new Date(latestMove.date));
+    // Date de fin retenue : celle du dernier mouvement si c'est lui qui a résolu la rupture (preuve
+    // d'un événement précis), sinon "maintenant" (la resynchro RPOS ne donne qu'un instantané, pas
+    // un moment précis de retour en stock).
+    const endedAt = resolvedByMove ? new Date(latestMove.date) : new Date();
+
+    const estimation = await estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, endedAt);
     await prisma.stockoutEpisode.update({
       where: { id: episode.id },
       data: {
         status: 'RESOLUE',
-        endedAt: new Date(latestMove.date),
+        endedAt,
         qtyPerdueEstimee: estimation.qtyPerdue,
         caPerdueEstime: estimation.caPerdue,
       },
