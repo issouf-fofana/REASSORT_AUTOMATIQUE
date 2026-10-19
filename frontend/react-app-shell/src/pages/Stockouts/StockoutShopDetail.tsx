@@ -494,7 +494,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       <th>Durée</th>
                       <th>Réaction</th>
                       <th>Livraison</th>
-                      <th>Livré le</th>
+                      <th>Reçue (estimée) le</th>
                       <th>Prix</th>
                       <th>Qté perdue</th>
                       <th>Valorisation (CA perdu)</th>
@@ -523,7 +523,16 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                             <td>
                               <span className={`badge ${delivery.badge} py-1 px-2`}>{delivery.label}</span>
                             </td>
-                            <td>{e.actualReceptionDate ? new Date(e.actualReceptionDate).toLocaleString('fr-FR') : '—'}</td>
+                            {/* CORRIGÉ le 19/10/2026 (signalé avec capture : colonne "Livré le" avec
+                                une date remplie alors que le badge Livraison affiche "Livraison
+                                douteuse" — "il na pas mis ajour l capture", confusion entre la DATE
+                                ESTIMÉE RPOS (actualReceptionDate, jamais une preuve, cf.
+                                deliveryStatus réécrit dans stockoutEpisodeService.js) et une vraie
+                                réception confirmée). N'affiche cette date QUE si le statut est
+                                réellement LIVREE (un vrai mouvement Arrivage a été détecté) —
+                                EN_ATTENTE_LIVRAISON et LIVRAISON_DOUTEUSE affichent "—", même si
+                                actualReceptionDate est techniquement renseigné côté RPOS. */}
+                            <td>{e.deliveryStatus === 'LIVREE' && e.actualReceptionDate ? new Date(e.actualReceptionDate).toLocaleString('fr-FR') : '—'}</td>
                             <td>{e.sellingPrice !== null ? `${Math.round(e.sellingPrice).toLocaleString('fr-FR')} CFA` : '—'}</td>
                             <td>{e.qtyPerdueEstimee !== null ? Math.round(e.qtyPerdueEstimee) : '—'}</td>
                             <td>{e.caPerdueEstime !== null ? `${Math.round(e.caPerdueEstime).toLocaleString('fr-FR')} CFA` : '—'}</td>
