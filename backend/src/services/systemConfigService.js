@@ -42,6 +42,11 @@ const KEYS = {
   // demande explicite du 18/10/2026 : "fais en sorte quil s'applique a tout ancien comme nouveau"
   // (filet de sécurité, en plus de la résolution déjà faite à la création d'un épisode).
   STOCKOUT_SECTOR_BACKFILL_CRON: 'STOCKOUT_SECTOR_BACKFILL_CRON',
+  // Précalcul nocturne de "Analyse des pertes sur une période" (demande explicite du 19/10/2026 :
+  // "l'analyse ne doit pas ce fait a achaque actualisation de la page il doit etre fait pas defaut
+  // et stocke en base") — une fois par nuit suffit, cette analyse (période par défaut 30j) n'a pas
+  // besoin d'être aussi fraîche que qtyPerdueEstimee/caPerdueEstime (recalculés toutes les heures).
+  STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON',
   // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
   // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
   // modifiable sur les parametre") — en dur à 24h/48h jusqu'ici (stockoutEpisodeService.js,
@@ -151,6 +156,7 @@ const KEYS = {
   STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
+  STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED',
   ORDER_IDENTITY_SYNC_ENABLED: 'ORDER_IDENTITY_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
@@ -268,6 +274,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
+  [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
@@ -380,6 +387,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
+  [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.ORDER_IDENTITY_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',

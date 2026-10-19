@@ -2125,3 +2125,31 @@ model StockoutEpisode {
   @@index([rposShopId, ean, status])
   @@map("stockout_episodes")
 }
+
+// Précalcul de "Analyse des pertes sur une période" (demande explicite du 19/10/2026 : "l'analyse ne
+// doit pas ce fait a achaque actualisation de la page il doit etre fait pas defaut et stocke en
+// base") — recalculer getPeriodLossSummary() en direct à chaque chargement de page devient lent dès
+// que le magasin a plusieurs centaines d'épisodes EN_COURS (un estimateLoss() par épisode, même avec
+// concurrence). Un seul snapshot par magasin, pour la période par défaut (30 derniers jours
+// glissants), rafraîchi chaque nuit par un job planifié — la page l'affiche instantanément à
+// l'ouverture. Toute AUTRE période choisie par l'utilisateur (demande explicite confirmée : "si je
+// met 1an il doit me donner si je met 1 jour il dois affiché aussi") continue d'être calculée à la
+// demande, en direct, jamais stockée (combinatoire de dates infinie).
+model StockoutPeriodSummarySnapshot {
+  id String @id @default(cuid())
+
+  rposShopId String @unique @map("rpos_shop_id")
+
+  periodDays Int      @map("period_days") // 30 aujourd'hui, gardé explicite si la période par défaut change un jour
+  periodEnd  DateTime @map("period_end") // borne de fin utilisée au moment du calcul (= date du job)
+
+  totalCaPerdu          Float @map("total_ca_perdu")
+  totalQtyPerdue        Float @map("total_qty_perdue")
+  episodeCount          Int   @map("episode_count")
+  shopRevenueExclTax    Float @map("shop_revenue_excl_tax")
+  departmentBreakdownJson String @map("department_breakdown_json") // JSON.stringify(PeriodSummary.departmentBreakdown), évite une table de détail séparée pour un résumé rafraîchi en bloc chaque nuit
+
+  computedAt DateTime @updatedAt @map("computed_at")
+
+  @@map("stockout_period_summary_snapshots")
+}

@@ -10,6 +10,7 @@ const { runStockSnapshotJob } = require('./stockSnapshotJob');
 const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutAlertJob } = require('./stockoutAlertJob');
+const { runStockoutPeriodSummarySnapshotJob } = require('./stockoutPeriodSummarySnapshotJob');
 const { runOrderIdentitySync } = require('./orderIdentitySyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
@@ -31,6 +32,7 @@ let currentStockSnapshotTask = null;
 let currentStockoutLossRecalcTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutAlertTask = null;
+let currentStockoutPeriodSummarySnapshotTask = null;
 let currentOrderIdentitySyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
@@ -53,6 +55,7 @@ const stockSnapshotLock = createJobLock('Capture des snapshots de stock (rupture
 const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
+const stockoutPeriodSummarySnapshotLock = createJobLock('Précalcul de l\'analyse des pertes par période (ruptures)');
 const orderIdentitySyncLock = createJobLock('Synchronisation identité RPOS des commandes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
@@ -329,6 +332,35 @@ async function startOrRestartStockoutSectorBackfillJob() {
   });
 
   console.log(`⏰ Résolution du secteur/rayon des ruptures planifiée: ${cronSchedule}`);
+}
+
+/** (Re)programme le précalcul nocturne de "Analyse des pertes sur une période" (stockoutPeriodSummarySnapshotJob.js). */
+async function startOrRestartStockoutPeriodSummarySnapshotJob() {
+  if (currentStockoutPeriodSummarySnapshotTask) {
+    currentStockoutPeriodSummarySnapshotTask.stop();
+    currentStockoutPeriodSummarySnapshotTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED))) {
+    console.log('⏸️  Précalcul de l\'analyse des pertes par période désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), précalcul de l'analyse des pertes par période non planifié`);
+    return;
+  }
+
+  currentStockoutPeriodSummarySnapshotTask = cron.schedule(cronSchedule, () => {
+    stockoutPeriodSummarySnapshotLock(async () => {
+      console.log('[cron] Démarrage du précalcul de l\'analyse des pertes par période...');
+      await trackJobRun('stockoutPeriodSummarySnapshot', runStockoutPeriodSummarySnapshotJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Précalcul de l'analyse des pertes par période planifié: ${cronSchedule}`);
 }
 
 /** (Re)programme l'alerte email récapitulative des ruptures EN_COURS par magasin (stockoutAlertJob.js). */
@@ -609,6 +641,7 @@ module.exports = {
   startOrRestartStockoutLossRecalcJob,
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutAlertJob,
+  startOrRestartStockoutPeriodSummarySnapshotJob,
   startOrRestartOrderIdentitySyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,

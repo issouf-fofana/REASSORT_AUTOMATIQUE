@@ -24,6 +24,7 @@ const productAnalyticsService = require('../../services/productAnalyticsService'
 const { getParetoArticles } = require('../../services/chatbotToolsService');
 const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
+const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -401,6 +402,45 @@ router.get('/stockout-episodes/period-summary', async (req, res) => {
     if (!start || !end) {
       return res.status(400).json({ success: false, message: 'Paramètres start et end (dates) requis.' });
     }
+
+    // Précalcul nocturne (demande explicite du 19/10/2026 : "l'analyse ne doit pas ce fait a
+    // achaque actualisation de la page il doit etre fait pas defaut et stocke en base") — la période
+    // PAR DÉFAUT (30 derniers jours glissants) est servie instantanément depuis
+    // StockoutPeriodSummarySnapshot plutôt que recalculée à chaque chargement. Toute autre période
+    // choisie par l'utilisateur (confirmé explicitement : "si je met 1an il doit me donner si je
+    // met 1 jour il dois affiché aussi") continue d'être calculée en direct ci-dessous — on ne
+    // sert le snapshot QUE si la fenêtre demandée correspond bien aux 30 derniers jours (± 1 jour de
+    // tolérance sur la durée, et "end" doit tomber dans les dernières 24h, sinon ce n'est pas une
+    // vraie fenêtre "glissante jusqu'à maintenant" mais une période choisie délibérément dans le passé).
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const requestedDays = (endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000);
+    const endIsRecent = Date.now() - endDate.getTime() < 24 * 60 * 60 * 1000;
+    const matchesDefaultPeriod = Math.abs(requestedDays - STOCKOUT_PERIOD_SNAPSHOT_DAYS) <= 1 && endIsRecent;
+
+    if (matchesDefaultPeriod) {
+      const snapshot = await prisma.stockoutPeriodSummarySnapshot.findUnique({ where: { rposShopId: shopId } });
+      if (snapshot) {
+        const lossRatioPct = snapshot.shopRevenueExclTax > 0 ? Math.round((snapshot.totalCaPerdu / snapshot.shopRevenueExclTax) * 1000) / 10 : null;
+        return res.json({
+          success: true,
+          data: {
+            found: true,
+            period: { startDate: start, endDate: end },
+            totalCaPerdu: Math.round(snapshot.totalCaPerdu),
+            totalQtyPerdue: Math.round(snapshot.totalQtyPerdue),
+            episodeCount: snapshot.episodeCount,
+            shopRevenueExclTax: Math.round(snapshot.shopRevenueExclTax),
+            lossRatioPct,
+            departmentBreakdown: JSON.parse(snapshot.departmentBreakdownJson),
+            precomputedAt: snapshot.computedAt,
+          },
+        });
+      }
+      // Pas encore de snapshot pour ce magasin (premier passage du job pas encore effectué) —
+      // repli sur le calcul en direct, jamais une erreur bloquante.
+    }
+
     const result = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
     res.json({ success: true, data: result });
   } catch (error) {
