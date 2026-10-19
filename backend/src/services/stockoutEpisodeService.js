@@ -1120,7 +1120,7 @@ async function getEpisodeDetail(episodeId) {
   }
 
   const contextStart = new Date(episode.startedAt.getTime() - PRE_EPISODE_CONTEXT_DAYS * 24 * 60 * 60 * 1000);
-  const [stockMoves, salesBefore, salesDuring, stockAtStart, stockLatestSnapshot, productCache, stockAtEnd, stockAfterDelivery] = await Promise.all([
+  const [stockMoves, salesBefore, salesDuring, stockAtStart, latestStockMove, productCache, stockAtEnd, latestArrivalMove] = await Promise.all([
     getMovesFromLocal(episode.rposShopId, episode.ean, contextStart, endedAt),
     prisma.salesLine.aggregate({
       where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: contextStart, lt: episode.startedAt } },
@@ -1140,12 +1140,18 @@ async function getEpisodeDetail(episodeId) {
       orderBy: { capturedAt: 'asc' },
       select: { stock: true, capturedAt: true },
     }),
-    // Dernier snapshot connu (pendant la rupture si toujours EN_COURS, ou proche de la fin si
-    // résolue) — complète productCache (RPOS en temps réel) par la trace historique la plus récente.
-    prisma.stockSnapshot.findFirst({
-      where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { lte: endedAt } },
-      orderBy: { capturedAt: 'desc' },
-      select: { stock: true, capturedAt: true },
+    // "Actuellement" — RÉÉCRIT le 19/10/2026 (bug signalé avec capture : stock affiché figé à -6/-57
+    // malgré un arrivage bien visible dans l'historique des mouvements, "le stock a bougé mais je
+    // comprend pas les calcul") — StockSnapshot n'est capturé que toutes les 6h
+    // (STOCK_SNAPSHOT_CRON), donc après un arrivage réel le "dernier snapshot connu" reste périmé
+    // pendant des heures. StockMove (synchronisé toutes les 20 min, cf. stockMoveSyncJob.js) donne
+    // une valeur bien plus fraîche : son dernier mouvement connu, via previousQuantity + quantity,
+    // EST le stock résultant réel (même calcul que resolveEpisodesFromArrivalMoves). Repli sur
+    // StockSnapshot uniquement si aucun StockMove n'existe pour cet article (jamais une erreur).
+    prisma.stockMove.findFirst({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { lte: endedAt } },
+      orderBy: { date: 'desc' },
+      select: { date: true, quantity: true, previousQuantity: true },
     }),
     // Stock RPOS "maintenant" (ProductCache, synchronisé périodiquement en tâche de fond, pas un
     // appel RPOS direct ici) — pour un épisode EN_COURS, c'est la valeur la plus à jour disponible
@@ -1154,8 +1160,8 @@ async function getEpisodeDetail(episodeId) {
       where: { rposShopId_ean: { rposShopId: episode.rposShopId, ean: episode.ean } },
       select: { stock: true, syncedAt: true, sellingPrice: true, buyingPrice: true },
     }),
-    // Stock au moment de la résolution (si l'épisode est déjà clos) — distinct de stockLatestSnapshot
-    // qui peut être un peu avant endedAt selon la fréquence de capture.
+    // Stock au moment de la résolution (si l'épisode est déjà clos) — distinct de latestStockMove
+    // (qui reflète le stock à l'instant de la LECTURE de la page, pas forcément celui de endedAt).
     episode.endedAt
       ? prisma.stockSnapshot.findFirst({
           where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: episode.endedAt } },
@@ -1163,16 +1169,16 @@ async function getEpisodeDetail(episodeId) {
           select: { stock: true, capturedAt: true },
         })
       : null,
-    // Stock après arrivage (demande explicite du 17/10/2026 : "si arrivage aussi tu doit metre
-    // aussi le stock apres arrivage") — distinct de stockAtEnd (qui se base sur la fin de l'épisode,
-    // potentiellement due à une vente redevenue positive sans commande) : ici ancré sur la date de
-    // réception RÉELLE de la commande, pour vérifier concrètement que l'arrivage a bien fait monter
-    // le stock côté RPOS.
-    order?.actualReceptionDate
-      ? prisma.stockSnapshot.findFirst({
-          where: { rposShopId: episode.rposShopId, ean: episode.ean, capturedAt: { gte: order.actualReceptionDate } },
-          orderBy: { capturedAt: 'asc' },
-          select: { stock: true, capturedAt: true },
+    // Stock après arrivage — RÉÉCRIT le 19/10/2026 (même bug que "Actuellement" ci-dessus : basé
+    // sur StockSnapshot après order.actualReceptionDate, qui est l'ESTIMATION RPOS, pas la vraie
+    // date d'arrivage, et de toute façon capturé au mieux 6h plus tard). Cherche désormais le
+    // dernier VRAI mouvement Arrivage depuis la commande, puis calcule son stock résultant via
+    // previousQuantity + quantity — reflète ce qui s'est réellement passé, pas une estimation.
+    order
+      ? prisma.stockMove.findFirst({
+          where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: order.createdAt }, typeLabel: { in: ['Arrivage', 'Arrivage manuel'] } },
+          orderBy: { date: 'desc' },
+          select: { date: true, quantity: true, previousQuantity: true },
         })
       : null,
   ]);
@@ -1334,12 +1340,12 @@ async function getEpisodeDetail(episodeId) {
     reactionDeadlineHours,
     deliveryDeadlineHours,
     stockAtStart: stockAtStart ? { value: stockAtStart.stock, capturedAt: stockAtStart.capturedAt } : null,
-    stockCurrent: stockLatestSnapshot ? { value: stockLatestSnapshot.stock, capturedAt: stockLatestSnapshot.capturedAt } : null,
+    stockCurrent: latestStockMove ? { value: (latestStockMove.previousQuantity ?? 0) + latestStockMove.quantity, capturedAt: latestStockMove.date } : null,
     stockRpos: productCache ? { value: productCache.stock, syncedAt: productCache.syncedAt } : null,
     sellingPrice: productCache?.sellingPrice ?? null,
     buyingPrice: productCache?.buyingPrice ?? null,
     stockAtEnd: stockAtEnd ? { value: stockAtEnd.stock, capturedAt: stockAtEnd.capturedAt } : null,
-    stockAfterDelivery: stockAfterDelivery ? { value: stockAfterDelivery.stock, capturedAt: stockAfterDelivery.capturedAt } : null,
+    stockAfterDelivery: latestArrivalMove ? { value: (latestArrivalMove.previousQuantity ?? 0) + latestArrivalMove.quantity, capturedAt: latestArrivalMove.date } : null,
     // Signale une incohérence RÉELLE plutôt que de la masquer derrière "Reçue" (bug signalé le
     // 18/10/2026 avec capture : badge "Livrée" affiché alors que l'épisode reste EN_COURS, le stock
     // RPOS temps réel reste négatif, et aucun mouvement de réception n'apparaît — "il me dis les
