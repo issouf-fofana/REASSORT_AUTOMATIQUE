@@ -59,6 +59,17 @@ const KEYS = {
   // de semaines comparables requises pour afficher une estimation plutôt que "indisponible".
   STOCKOUT_LOSS_LOOKBACK_WEEKS: 'STOCKOUT_LOSS_LOOKBACK_WEEKS',
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS: 'STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS',
+  // Méthode de calcul de la demande attendue (demande explicite du 19/10/2026 : "l'analyse peux ce
+  // faire sur les meme jour, la la possiblité de configuré sur la validité des donner en fonction de
+  // la moyenne global sur une periode") — 'SAME_WEEKDAY' (même jour de semaine, plus précis mais
+  // exige plus d'historique) avec repli automatique sur 'ALL_DAYS' (moyenne tous jours confondus,
+  // moins précis mais disponible avec moins de données) si STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS=true
+  // et que le nombre de semaines comparables du même jour est insuffisant.
+  STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS: 'STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS',
+  // Nombre minimum de JOURS (pas semaines) de ventes disponibles dans la fenêtre de lookback pour
+  // accepter la moyenne "tous jours confondus" en repli — distinct de
+  // STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS qui ne s'applique qu'au mode "même jour de semaine".
+  STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL: 'STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL',
   // Alerte email récapitulative des ruptures EN_COURS, par magasin (demande explicite du
   // 18/10/2026 : "je veux quil ai une partie la possibilité de faire un mail auto au magasin...
   // meme si ya une propostion de commande") — 1x/jour par défaut, pas trop fréquent pour ne pas
@@ -279,6 +290,8 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
   [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8',
+  [KEYS.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS]: () => process.env.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS || 'true',
+  [KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL]: () => process.env.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL || '14',
   // 8h du matin, avant l'ouverture — le magasin démarre sa journée avec la situation de rupture à
   // jour plutôt qu'en pleine journée de vente.
   [KEYS.STOCKOUT_ALERT_CRON]: () => process.env.STOCKOUT_ALERT_CRON || '0 8 * * *',

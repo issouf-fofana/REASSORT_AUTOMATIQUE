@@ -255,6 +255,8 @@ interface SystemConfigData {
   STOCKOUT_DELIVERY_DEADLINE_HOURS?: string;
   STOCKOUT_LOSS_LOOKBACK_WEEKS?: string;
   STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS?: string;
+  STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS?: string;
+  STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL?: string;
   STOCKOUT_ALERT_CRON?: string;
   STOCKOUT_SECTOR_BACKFILL_CRON?: string;
   STOCKOUT_SECTOR_BACKFILL_ENABLED?: string;
@@ -277,6 +279,11 @@ export function SchedulingSection() {
   const [stockoutDeadlinesSaved, setStockoutDeadlinesSaved] = useState(false);
   const [stockoutLossLookbackWeeks, setStockoutLossLookbackWeeks] = useState('52');
   const [stockoutLossMinComparableWeeks, setStockoutLossMinComparableWeeks] = useState('8');
+  // Méthode de calcul configurable (demande explicite du 19/10/2026 : "l'analyse peux ce faire sur
+  // les meme jour, la la possiblité de configuré sur la validité des donner en fonction de la
+  // moyenne global sur une periode").
+  const [stockoutLossFallbackToAllDays, setStockoutLossFallbackToAllDays] = useState(true);
+  const [stockoutLossMinComparableDaysAll, setStockoutLossMinComparableDaysAll] = useState('14');
   const [stockoutAlertCron, setStockoutAlertCron] = useState('0 8 * * *');
   const [stockoutSectorBackfillCron, setStockoutSectorBackfillCron] = useState('30 */6 * * *');
 
@@ -296,6 +303,8 @@ export function SchedulingSection() {
         setStockoutDeliveryDeadline(d.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48');
         setStockoutLossLookbackWeeks(d.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52');
         setStockoutLossMinComparableWeeks(d.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS || '8');
+        setStockoutLossFallbackToAllDays(d.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS !== 'false');
+        setStockoutLossMinComparableDaysAll(d.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL || '14');
         setStockoutAlertCron(d.STOCKOUT_ALERT_CRON || '0 8 * * *');
         setStockoutSectorBackfillCron(d.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *');
       })
@@ -653,6 +662,50 @@ export function SchedulingSection() {
               </div>
             </div>
 
+            <hr className="my-4" />
+
+            <div
+              className="alert alert-light border small mb-3"
+              dangerouslySetInnerHTML={{
+                __html:
+                  "<strong>Repli sur la moyenne globale :</strong> un article à faible rotation peut avoir trop peu de semaines du même jour pour une estimation fiable, même avec assez de jours de vente au total. Si activé, le calcul utilise alors la vente moyenne « tous jours confondus » plutôt que d'afficher « indisponible » — moins précis (ignore les écarts entre jours de semaine) mais couvre plus de cas.",
+              }}
+            />
+            <div className="row g-3 align-items-end">
+              <div className="col-md-6">
+                <div className="form-check form-switch">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    role="switch"
+                    id="stockoutLossFallbackToAllDays"
+                    checked={stockoutLossFallbackToAllDays}
+                    onChange={(e) => setStockoutLossFallbackToAllDays(e.target.checked)}
+                  />
+                  <label className="form-check-label fw-semibold" htmlFor="stockoutLossFallbackToAllDays">
+                    Autoriser le repli sur la moyenne tous jours confondus
+                  </label>
+                </div>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Minimum de jours comparables (repli)</label>
+                <div className="input-group" style={{ maxWidth: 200 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={1}
+                    disabled={!stockoutLossFallbackToAllDays}
+                    value={stockoutLossMinComparableDaysAll}
+                    onChange={(e) => setStockoutLossMinComparableDaysAll(e.target.value)}
+                  />
+                  <span className="input-group-text">j.</span>
+                </div>
+                <div className="form-text">
+                  Nombre minimum de jours de vente constatés (tous jours confondus) requis pour accepter ce repli.
+                </div>
+              </div>
+            </div>
+
             <button
               type="button"
               className="btn btn-primary mt-3"
@@ -665,6 +718,8 @@ export function SchedulingSection() {
                   await saveSystemConfigKey('STOCKOUT_DELIVERY_DEADLINE_HOURS', stockoutDeliveryDeadline);
                   await saveSystemConfigKey('STOCKOUT_LOSS_LOOKBACK_WEEKS', stockoutLossLookbackWeeks);
                   await saveSystemConfigKey('STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS', stockoutLossMinComparableWeeks);
+                  await saveSystemConfigKey('STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS', stockoutLossFallbackToAllDays ? 'true' : 'false');
+                  await saveSystemConfigKey('STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL', stockoutLossMinComparableDaysAll);
                   setStockoutDeadlinesSaved(true);
                 } finally {
                   setStockoutDeadlinesSaving(false);

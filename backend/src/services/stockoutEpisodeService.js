@@ -131,13 +131,17 @@ async function getReactionDeadlines() {
  * seulement les 8 dernières semaines).
  */
 async function getLossLookbackConfig() {
-  const [lookback, minComparable] = await Promise.all([
+  const [lookback, minComparable, fallbackToAllDays, minComparableDaysAll] = await Promise.all([
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS),
     systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_WEEKS),
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS),
+    systemConfig.getValue(systemConfig.KEYS.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL),
   ]);
   return {
     lookbackWeeks: parseInt(lookback, 10) || 52,
     minComparableWeeks: parseInt(minComparable, 10) || 8,
+    fallbackToAllDays: fallbackToAllDays !== 'false',
+    minComparableDaysAll: parseInt(minComparableDaysAll, 10) || 14,
   };
 }
 
@@ -271,7 +275,7 @@ async function diagnoseCause(rposShopId, ean, rposPosId) {
  * null si l'historique comparable est trop court (MIN_COMPARABLE_WEEKS) pour être fiable.
  */
 async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
-  const { lookbackWeeks, minComparableWeeks } = await getLossLookbackConfig();
+  const { lookbackWeeks, minComparableWeeks, fallbackToAllDays, minComparableDaysAll } = await getLossLookbackConfig();
   const lookbackStart = new Date(referenceDate.getTime() - lookbackWeeks * 7 * 24 * 60 * 60 * 1000);
   const comparableSales = await prisma.salesLine.findMany({
     where: { rposShopId, ean, date: { gte: lookbackStart, lt: referenceDate } },
@@ -282,11 +286,32 @@ async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
   const sameDowSales = comparableSales.filter((s) => s.date.getDay() === targetDow);
   const comparableWeeksCount = new Set(sameDowSales.map((s) => s.date.toISOString().slice(0, 10))).size;
 
-  if (comparableWeeksCount < minComparableWeeks) return null;
+  if (comparableWeeksCount >= minComparableWeeks) {
+    return {
+      avgDailyQty: sameDowSales.reduce((sum, s) => sum + s.quantity, 0) / comparableWeeksCount,
+      avgDailyRevenue: sameDowSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableWeeksCount,
+      method: 'SAME_WEEKDAY',
+    };
+  }
+
+  // Repli "tous les jours confondus" (demande explicite du 19/10/2026 : "l'analyse peux ce faire sur
+  // les meme jour, la la possiblité de configuré sur la validité des donner en fonction de la
+  // moyenne global sur une periode") — activé par défaut (STOCKOUT_LOSS_FALLBACK_TO_ALL_DAYS),
+  // désactivable dans Paramètres. Un article à faible rotation peut avoir assez de JOURS de vente
+  // dans la fenêtre de lookback sans avoir assez de SEMAINES du même jour précis — plutôt que
+  // d'afficher "—" (non calculable), on utilise la moyenne quotidienne tous jours confondus dès que
+  // STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL jours de vente sont disponibles. Moins précis (ignore les
+  // effets de jour de semaine) mais couvre des cas aujourd'hui non calculables — le champ `method`
+  // renvoyé permet à l'UI de distinguer clairement les deux méthodes utilisées.
+  if (!fallbackToAllDays) return null;
+
+  const comparableDaysCount = new Set(comparableSales.map((s) => s.date.toISOString().slice(0, 10))).size;
+  if (comparableDaysCount < minComparableDaysAll) return null;
 
   return {
-    avgDailyQty: sameDowSales.reduce((sum, s) => sum + s.quantity, 0) / comparableWeeksCount,
-    avgDailyRevenue: sameDowSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableWeeksCount,
+    avgDailyQty: comparableSales.reduce((sum, s) => sum + s.quantity, 0) / comparableDaysCount,
+    avgDailyRevenue: comparableSales.reduce((sum, s) => sum + s.revenueExclTax, 0) / comparableDaysCount,
+    method: 'ALL_DAYS',
   };
 }
 
@@ -300,7 +325,7 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
   const durationDays = Math.max(1, Math.ceil(durationMs / (24 * 60 * 60 * 1000)));
 
   const demand = await getAvgDailyDemand(rposShopId, ean, startedAt);
-  if (!demand) return { qtyPerdue: null, caPerdue: null };
+  if (!demand) return { qtyPerdue: null, caPerdue: null, method: null };
 
   const expectedQty = demand.avgDailyQty * durationDays;
   const expectedRevenue = demand.avgDailyRevenue * durationDays;
@@ -315,7 +340,10 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
   const qtyPerdue = Math.max(0, expectedQty - actualQty);
   const caPerdue = Math.max(0, expectedRevenue - actualRevenue);
 
-  return { qtyPerdue, caPerdue };
+  // method renvoyé (demande explicite du 19/10/2026) pour que l'UI affiche clairement quelle
+  // méthode a produit ce chiffre — 'SAME_WEEKDAY' (par défaut) ou 'ALL_DAYS' (repli, cf.
+  // getAvgDailyDemand ci-dessus).
+  return { qtyPerdue, caPerdue, method: demand.method };
 }
 
 /**

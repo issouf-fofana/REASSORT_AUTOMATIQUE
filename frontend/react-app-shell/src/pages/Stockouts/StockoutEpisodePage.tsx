@@ -47,7 +47,7 @@ type ReactionStatus = 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI' | 'REAGI'
 
 type OrderQuantitySufficiency = { quantityOrdered: number; expectedDemand: number; sufficient: boolean };
 
-type Loss = { qtyPerdue: number | null; caPerdue: number | null };
+type Loss = { qtyPerdue: number | null; caPerdue: number | null; method: 'SAME_WEEKDAY' | 'ALL_DAYS' | null };
 
 type EpisodeDetail = {
   id: string;
@@ -193,17 +193,26 @@ export function FormulaInfoButton({ title, formula, why }: { title: string; form
       </button>
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1040 }}></div>
+          {/* CORRIGÉ le 19/10/2026 (signalé avec capture : le popover débordait hors de la carte,
+              texte tronqué illisible) — `left: 0` ancrait le popover sur le bouton, qui se trouve
+              souvent tout à droite d'une carte étroite (bloc "Avant/Après commande" sur 2 colonnes) ;
+              un popover de 320px fixe débordait alors largement hors de l'écran à droite, sans
+              limite de hauteur ni défilement si le contenu dépassait la fenêtre visible. Ancré en
+              `right: 0` (le bouton est toujours plus proche du bord droit du bloc que du gauche sur
+              cette page), largeur responsive (`min(320px, 90vw)`), et `max-height` + `overflow-y`
+              pour ne jamais déborder verticalement de l'écran. */}
           <div
             style={{
-              position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 41,
+              position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 1041,
               background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 8,
-              boxShadow: '0 6px 20px rgba(27,42,74,.15)', padding: '12px 14px', width: 320,
+              boxShadow: '0 6px 20px rgba(27,42,74,.15)', padding: '12px 14px',
+              width: 'min(320px, 90vw)', maxHeight: '70vh', overflowY: 'auto',
               fontSize: '.78rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.5,
             }}
           >
             <div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>{title}</div>
-            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '6px 8px', marginBottom: 8 }}>{formula}</div>
+            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '6px 8px', marginBottom: 8, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formula}</div>
             <div style={{ color: '#5B6B85' }}>{why}</div>
           </div>
         </>
@@ -213,9 +222,22 @@ export function FormulaInfoButton({ title, formula, why }: { title: string; form
 }
 
 const LOSS_FORMULA_TITLE = 'Perte estimée';
-const LOSS_FORMULA = '(vente moyenne du même jour de semaine sur les semaines comparables × durée de la période) − ventes réellement réalisées pendant cette période';
-const LOSS_FORMULA_WHY =
-  "On compare aux ventes du MÊME jour de semaine (et non à une moyenne générale) car la demande varie fortement selon le jour (ex: samedi très différent d'un mardi). « — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.";
+// Deux méthodes possibles, configurables dans Paramètres (demande explicite du 19/10/2026 :
+// "l'analyse peux ce faire sur les meme jour, la la possiblité de configuré sur la validité des
+// donner en fonction de la moyenne global sur une periode") — SAME_WEEKDAY par défaut, repli
+// automatique sur ALL_DAYS si l'historique du même jour est insuffisant (cf. getAvgDailyDemand,
+// stockoutEpisodeService.js). `method` vient du backend, reflète la méthode RÉELLEMENT utilisée pour
+// CE calcul précis, pas un texte générique figé.
+const LOSS_FORMULA_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
+  SAME_WEEKDAY: '(vente moyenne du même jour de semaine sur les semaines comparables × durée de la période) − ventes réellement réalisées pendant cette période',
+  ALL_DAYS: '(vente moyenne par jour, tous jours de la semaine confondus, sur la fenêtre de recul × durée de la période) − ventes réellement réalisées pendant cette période',
+};
+const LOSS_FORMULA_WHY_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
+  SAME_WEEKDAY:
+    "On compare aux ventes du MÊME jour de semaine (et non à une moyenne générale) car la demande varie fortement selon le jour (ex: samedi très différent d'un mardi). « — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.",
+  ALL_DAYS:
+    "Historique insuffisant du MÊME jour de semaine pour cet article (faible rotation) : repli automatique sur la moyenne tous jours confondus, moins précise (ignore les écarts entre jours) mais disponible avec moins de données. Ce repli est configurable (activable/désactivable, seuil de jours requis) dans Paramètres. « — » = même avec ce repli, historique encore insuffisant.",
+};
 
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
 // (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
@@ -576,7 +598,14 @@ export function StockoutEpisodePage() {
                         <div className="ep2-metric-val accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</div>
                       </div>
                       <div>
-                        <div className="ep2-metric-lbl">Perte estimée<FormulaInfoButton title={LOSS_FORMULA_TITLE} formula={LOSS_FORMULA} why={LOSS_FORMULA_WHY} /></div>
+                        <div className="ep2-metric-lbl">
+                          Perte estimée
+                          <FormulaInfoButton
+                            title={LOSS_FORMULA_TITLE}
+                            formula={LOSS_FORMULA_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                            why={LOSS_FORMULA_WHY_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                          />
+                        </div>
                         <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
                       </div>
                     </div>
@@ -606,7 +635,14 @@ export function StockoutEpisodePage() {
                             <div className={`ep2-metric-val ${detail.deliveryDelay || detail.deliveryLooksDoubtful ? 'money' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
                           </div>
                           <div>
-                            <div className="ep2-metric-lbl">Perte estimée<FormulaInfoButton title={LOSS_FORMULA_TITLE} formula={LOSS_FORMULA} why={LOSS_FORMULA_WHY} /></div>
+                            <div className="ep2-metric-lbl">
+                              Perte estimée
+                              <FormulaInfoButton
+                                title={LOSS_FORMULA_TITLE}
+                                formula={LOSS_FORMULA_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                                why={LOSS_FORMULA_WHY_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                              />
+                            </div>
                             <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
                           </div>
                         </div>
