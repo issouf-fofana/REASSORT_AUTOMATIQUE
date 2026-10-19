@@ -488,7 +488,7 @@ async function getOpenEpisodes(rposShopId) {
  * cumulé sur les épisodes résolus récemment, répartition des causes.
  */
 async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {}) {
-  const [openEpisodes, resolvedEpisodes] = await Promise.all([
+  const [openEpisodes, resolvedEpisodes, totalOrderableArticles] = await Promise.all([
     getOpenEpisodes(rposShopId),
     prisma.stockoutEpisode.findMany({
       where: {
@@ -497,6 +497,12 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
         endedAt: { gte: new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
       },
     }),
+    // Dénominateur pour le % d'articles en rupture (demande explicite du 19/10/2026 : "le graph la
+    // rupture par rapport quoi la rupture est trop 90%") — un nombre brut d'épisodes ("238 en
+    // rupture") ne dit rien de l'ampleur réelle sans un total de référence ; ProductCache.orderable
+    // reflète le catalogue d'articles réellement commandables du magasin, déjà synchronisé par
+    // ailleurs (pas de nouvel appel RPOS ici).
+    prisma.productCache.count({ where: { rposShopId, orderable: true } }),
   ]);
 
   const avgDurationHours = openEpisodes.length
@@ -523,6 +529,8 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
     totalCaPerduEstime: Math.round(totalCaPerdu),
     causeCounts,
     openEpisodes,
+    totalOrderableArticles,
+    ruptureRatioPct: totalOrderableArticles > 0 ? Math.round((openEpisodes.length / totalOrderableArticles) * 1000) / 10 : null,
   };
 }
 

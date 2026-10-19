@@ -19,6 +19,19 @@ const CAUSE_COLORS: Record<string, string> = {
   INDETERMINEE: '#A0A8B8',
 };
 
+// Légende explicative ajoutée le 19/10/2026 (demande explicite : "il faut affiche plus explicatif
+// si on doit affiché quelque chose de pertinant") — "Répartition par cause probable" affiche parfois
+// 100% sur une seule cause (ex: beaucoup de ruptures très récentes, aucune n'a encore de commande
+// passée dessus) sans que le libellé seul explique pourquoi c'est normal ni ce que chaque cause
+// signifie concrètement.
+const CAUSE_EXPLANATIONS: Record<string, string> = {
+  MAGASIN_REASSORT: "Aucune commande n'a encore été passée sur l'article depuis le début de la rupture — cause la plus fréquente sur des ruptures récentes, avant que le magasin ait eu le temps de réagir.",
+  MAGASIN_COMMANDE_NON_VALIDEE: 'Une commande existe mais ne porte pas encore cette référence — proposition générée mais pas encore validée.',
+  AMONT_A_PRECISER: "Une commande a été passée et transmise à l'entrepôt, mais sa réception n'est pas encore confirmée — le blocage se situe en amont du magasin (entrepôt/fournisseur), pas une absence de réaction locale.",
+  ECART_STOCK_RAYON: 'Une commande est déclarée reçue par le système, mais le stock reste en rupture — signe probable de désynchronisation entre le stock informatique et la réalité du rayon.',
+  INDETERMINEE: "Impossible de déterminer la cause avec les informations disponibles — aucune commande récente trouvée pour cet article.",
+};
+
 export function StockoutCauseChart({ causeCounts }: { causeCounts: Record<string, number> }) {
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +67,19 @@ export function StockoutCauseChart({ causeCounts }: { causeCounts: Record<string
         {entries.length === 0 ? (
           <div className="text-muted small">Aucune rupture en cours.</div>
         ) : (
-          <div ref={chartRef}></div>
+          <>
+            <div ref={chartRef}></div>
+            <div className="mt-2" style={{ fontSize: '.74rem', color: '#5B6B85', lineHeight: 1.55 }}>
+              {entries
+                .sort(([, a], [, b]) => b - a)
+                .map(([cause, count]) => (
+                  <div key={cause} className="d-flex gap-2 mb-1">
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: CAUSE_COLORS[cause] || '#A0A8B8', flexShrink: 0, marginTop: 4 }}></span>
+                    <span><strong style={{ color: '#1B2A4A' }}>{CAUSE_LABELS[cause] || cause}</strong> ({count}) — {CAUSE_EXPLANATIONS[cause] || 'Cause non documentée.'}</span>
+                  </div>
+                ))}
+            </div>
+          </>
         )}
       </div>
     </div>

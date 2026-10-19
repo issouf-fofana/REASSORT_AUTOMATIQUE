@@ -40,6 +40,8 @@ type StockoutSummary = {
   totalCaPerduEstime: number;
   causeCounts: Record<string, number>;
   openEpisodes: StockoutEpisode[];
+  totalOrderableArticles: number;
+  ruptureRatioPct: number | null;
 };
 
 type GroupSummary = { group: string; openCount: number; totalEpisodesCount: number };
@@ -247,6 +249,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .stockout-mini-kpi .icon { width: 30px; height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; }
         .stockout-mini-kpi .label { font-size: .68rem; color: #8591A0; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; line-height: 1.2; }
         .stockout-mini-kpi .value { font-size: 1.15rem; font-weight: 700; color: #1B2A4A; line-height: 1.1; }
+        .stockout-mini-kpi .sub { font-size: .7rem; color: #8591A0; margin-top: 2px; }
         .stockout-toggle-charts { font-size: .76rem; color: #5B6B85; background: none; border: none; display: inline-flex; align-items: center; gap: 4px; padding: 0; }
         .stockout-toggle-charts:hover { color: #1B2A4A; }
         .stockout-section-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #8591A0; margin: 20px 0 10px; padding-top: 10px; border-top: 1px solid rgba(27,42,74,.08); }
@@ -334,6 +337,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <div>
                   <div className="label">En cours</div>
                   <div className="value">{summary.openCount ?? 0}</div>
+                  {/* Ratio ajouté le 19/10/2026 (demande explicite : "la rupture par rapport quoi
+                      la rupture est trop 90% ?") — un nombre brut d'articles en rupture ne dit rien
+                      de l'ampleur réelle sans le comparer au catalogue total du magasin. */}
+                  {summary.ruptureRatioPct !== null && (
+                    <div className="sub">{summary.ruptureRatioPct} % du catalogue ({summary.totalOrderableArticles} articles)</div>
+                  )}
                 </div>
               </div>
             </div>
