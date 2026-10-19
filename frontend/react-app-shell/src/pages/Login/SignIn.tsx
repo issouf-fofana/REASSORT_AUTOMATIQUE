@@ -57,12 +57,19 @@ export function SignIn() {
   }
 
   return (
+    // CORRIGÉ le 19/10/2026 (signalé avec capture sur un écran très large : "il doit etre un petit
+    // une taille max") — `h-full` sur la carte, combiné à `h-screen` sans limite sur le conteneur,
+    // forçait la carte à s'étirer sur toute la hauteur de l'écran en plus de sa largeur max de
+    // 1600px : sur un grand moniteur, les deux panneaux devenaient démesurément hauts avec
+    // énormément de vide autour du contenu réel (logo, formulaire). Plafonné aussi en hauteur
+    // (max-h-[800px]) pour que la carte garde une taille raisonnable et reste centrée, peu importe
+    // la taille de l'écran.
     <div className="h-screen w-screen flex items-center justify-center bg-zinc-100 p-4 md:p-8">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="w-full h-full max-w-[1600px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
+        className="w-full h-full max-w-[1600px] max-h-[800px] overflow-hidden rounded-2xl flex flex-col md:flex-row bg-white shadow-xl"
       >
       {/* Panneau gauche : animation canvas interactive (points connectés, réagissent au survol
           du curseur par répulsion magnétique) à la place de l'image statique (demande du
