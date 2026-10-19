@@ -827,7 +827,7 @@ export function PurchaseOrder() {
             </div>
           )}
 
-          <DepartmentListView proposal={proposal} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
+          <DepartmentListView proposal={proposal} loading={refreshing} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
         </div>
       ) : (
         <div className="row reassort-view-transition" key={`detail-${selectedSector || ''}-${selectedDepartment || ''}`}>

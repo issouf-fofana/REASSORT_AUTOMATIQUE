@@ -253,18 +253,37 @@ function DeptListContext({ proposal }: { proposal: Proposal }) {
 
 export function DepartmentListView({
   proposal,
+  loading,
   selectedSector,
   buildNavUrl,
   onNavigate,
   onOpenExcluded,
 }: {
   proposal: Proposal | null;
+  // Distingue "en cours de chargement" de "vraiment aucune proposition" — demande explicite du
+  // 19/10/2026 : "quand je suis sur la vue de propostion de commande il ne dois pas affiché vide
+  // pour dire aucun propostion il doit chargé tu vois ?". Avant ce correctif, proposal === null
+  // (encore en train de charger, cf. loadPendingProposal) et proposal.lines.length === 0 (chargé,
+  // vraiment vide) affichaient exactement le même message "Aucune proposition en attente" — sur une
+  // page lente (5+ Mo de JSON non compressé, cf. correctif gzip précédent), l'utilisateur voyait ce
+  // message pendant plusieurs secondes avant que les vraies données n'apparaissent, laissant croire
+  // à tort que le chargement était terminé.
+  loading?: boolean;
   selectedSector: string | null;
   buildNavUrl: (sector: string | null, dept: string | null) => string;
   onNavigate: (href: string) => void;
   onOpenExcluded: (proposalId: string, reason: string, label: string) => void;
 }) {
   const lines = proposal ? proposal.lines : [];
+
+  if (loading && !lines.length) {
+    return (
+      <div className="d-flex align-items-center gap-2 text-muted py-4">
+        <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+        Chargement de la proposition en cours…
+      </div>
+    );
+  }
 
   if (!lines.length) {
     return (
