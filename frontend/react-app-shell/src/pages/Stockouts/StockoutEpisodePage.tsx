@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
@@ -216,19 +217,20 @@ export function FormulaInfoButton({
       >
         i
       </button>
-      {open && (
-        // Modale centrée (position: fixed), indépendante de la position du bouton qui l'ouvre — ne
-        // déborde jamais de l'écran, contrairement à un popover ancré (corrigé le 19/10/2026).
+      {open && createPortal(
+        // RE-CORRIGÉ le 19/10/2026 (signalé une 3e fois avec capture : la modale restait collée en
+        // haut à gauche, visiblement coincée dans une boîte au lieu de couvrir tout l'écran) — un
+        // `position: fixed` est positionné relativement à l'ancêtre le plus proche qui a un
+        // `transform` (ou filter/perspective) appliqué, PAS forcément à la fenêtre : `.ep2-card:hover
+        // { transform: translateY(-2px); }` (StockoutEpisodePage.tsx) crée justement ce piège pour
+        // tout bouton ⓘ rendu à l'intérieur d'une `.ep2-card`. Rendu maintenant via un PORTAL React
+        // directement sous `document.body`, en dehors de toute hiérarchie DOM affectée par un
+        // `transform` d'ancêtre — la modale n'est plus jamais piégée dans la boîte d'une carte.
         //
-        // CORRIGÉ le 19/10/2026 (signalé avec capture : tout le texte apparaissait sélectionné en
-        // bleu à l'ouverture, et la modale "bouge quand le curseur est dans le vide") — fermer sur
-        // `onClick` de l'overlay se déclenchait aussi après un clic-glisser de sélection de texte qui
-        // débordait légèrement sur la zone semi-transparente autour de la boîte (un `click` est émis
-        // au relâchement même après une sélection), rouvrant/refermant la modale et causant le
-        // sursaut visuel. Fermeture désormais basée sur `onMouseDown` ET seulement si le clic a
-        // commencé ET fini sur l'overlay lui-même (pas pendant un drag de sélection qui se termine
-        // dessus) ; `userSelect: 'none'` sur l'overlay empêche toute sélection accidentelle de
-        // démarrer en dehors de la boîte de texte.
+        // Fermer sur `onMouseDown` (et seulement si le clic démarre ET finit sur l'overlay lui-même)
+        // plutôt que `onClick`, pour ne pas se déclencher après un clic-glisser de sélection de texte
+        // qui déborderait sur la zone semi-transparente ; `userSelect: 'none'` sur l'overlay empêche
+        // toute sélection accidentelle de démarrer en dehors de la boîte de texte.
         <div
           onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           style={{
@@ -297,7 +299,8 @@ export function FormulaInfoButton({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   );
