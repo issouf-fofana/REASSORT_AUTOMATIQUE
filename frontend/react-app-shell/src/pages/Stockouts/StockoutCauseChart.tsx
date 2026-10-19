@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { FormulaInfoButton } from './StockoutEpisodePage';
 
 // Répartition des ruptures par cause probable (demande du 16/10/2026) — reçoit causeCounts déjà
 // calculé côté backend (cf. stockoutEpisodeService.js), pas de second appel API, juste la
@@ -77,14 +78,33 @@ export function StockoutCauseChart({ causeCounts }: { causeCounts: Record<string
         ) : (
           <>
             <div ref={chartRef}></div>
-            <div className="text-muted" style={{ fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', marginTop: 4 }}>Détail par cause</div>
-            <div className="mt-2" style={{ fontSize: '.74rem', color: '#5B6B85', lineHeight: 1.55 }}>
+            {/* RÉÉCRIT le 19/10/2026 (demande explicite : "la legend sous le graphique le texte est
+                trop diminu ou fait comme pour les formule la un petit truc pop up pour affiché") —
+                remplace le bloc de texte dense (une phrase d'explication par cause, en tout petit)
+                par une liste compacte de puces (couleur + libellé + compte, lisible d'un coup
+                d'œil), chaque explication détaillée n'étant plus affichée qu'à la demande via le
+                même bouton ⓘ que les formules de calcul (FormulaInfoButton, StockoutEpisodePage.tsx). */}
+            <div className="d-flex align-items-center gap-1 mt-3 mb-1">
+              <div className="text-muted" style={{ fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                Détail par cause
+              </div>
+              <FormulaInfoButton
+                title="Détail par cause de rupture"
+                steps={entries
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([cause, count]) => ({
+                    label: `${CAUSE_LABELS[cause] || cause} (${count})`,
+                    detail: CAUSE_EXPLANATIONS[cause] || 'Cause non documentée.',
+                  }))}
+              />
+            </div>
+            <div className="d-flex flex-wrap gap-2">
               {entries
                 .sort(([, a], [, b]) => b - a)
                 .map(([cause, count]) => (
-                  <div key={cause} className="d-flex gap-2 mb-1">
-                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: CAUSE_COLORS[cause] || '#A0A8B8', flexShrink: 0, marginTop: 4 }}></span>
-                    <span><strong style={{ color: '#1B2A4A' }}>{CAUSE_LABELS[cause] || cause}</strong> ({count}) — {CAUSE_EXPLANATIONS[cause] || 'Cause non documentée.'}</span>
+                  <div key={cause} className="d-flex align-items-center gap-1" style={{ fontSize: '.78rem', color: '#2A2F45' }}>
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: CAUSE_COLORS[cause] || '#A0A8B8', flexShrink: 0 }}></span>
+                    <span>{CAUSE_LABELS[cause] || cause} ({count})</span>
                   </div>
                 ))}
             </div>
