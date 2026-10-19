@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
@@ -24,6 +25,14 @@ const app = express();
 // MIDDLEWARE
 // =============================================
 app.use(helmet());
+// Compression gzip des réponses (demande explicite du 19/10/2026 : "pourquoi ca prend temps pour
+// etre affiché souvent ?" — diagnostiqué via l'onglet Network : la route /proposal/pending
+// transférait jusqu'à 5.5 Mo de JSON non compressé pour une proposition de 619 articles, ~30
+// champs chacun avec des textes de raisonnement IA assez longs. Aucune compression n'était activée
+// sur le serveur Express — gzip réduit typiquement ce type de JSON répétitif à 10-20% de sa taille
+// d'origine, sans aucun changement côté frontend (le navigateur décompresse automatiquement via
+// l'en-tête Accept-Encoding déjà envoyé par défaut).
+app.use(compression());
 // localhost et 127.0.0.1 sont deux origines distinctes pour le navigateur (CORS les compare
 // strictement) même si elles pointent sur la même machine : on autorise les deux variantes du
 // port configuré pour ne pas dépendre de la façon dont l'utilisateur tape l'URL dans son navigateur.
