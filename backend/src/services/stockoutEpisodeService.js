@@ -920,6 +920,12 @@ async function getEpisodeDetail(episodeId) {
   const endedAt = episode.endedAt || now;
   const durationHours = Math.round(((endedAt.getTime() - episode.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
+  // Réglages ACTIFS du calcul de perte (demande explicite du 19/10/2026 : "le message de la formule
+  // doit etre en fonction de la config des parametre") — renvoyés pour que le frontend construise un
+  // texte reflétant les VRAIS réglages courants (fenêtre de recul, seuils, repli) au lieu d'un texte
+  // générique figé, qui pourrait décrire un comportement différent de la config réellement active.
+  const lossConfig = await getLossLookbackConfig();
+
   // Commande associée à CET épisode précis : contrairement à diagnoseCause (qui prend la dernière
   // proposition connue, utile pour un diagnostic rapide à la détection), on ne retient ici qu'une
   // commande créée À PARTIR du début de la rupture — une commande plus ancienne n'est pas une
@@ -1150,6 +1156,7 @@ async function getEpisodeDetail(episodeId) {
     durationHours,
     causeProposee: episode.causeProposee,
     niveauConfiance: episode.niveauConfiance,
+    lossConfig,
     reactionStatus,
     qtyPerdueEstimee: episode.qtyPerdueEstimee,
     caPerdueEstime: episode.caPerdueEstime,

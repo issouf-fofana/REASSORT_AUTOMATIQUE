@@ -92,6 +92,16 @@ type EpisodeDetail = {
     invoiceSlotsPassedWithoutArrival: number;
     likelyInvoiceIntegrationIssue: boolean;
   } | null;
+  // Réglages ACTIFS du calcul de perte (demande explicite du 19/10/2026 : "le message de la formule
+  // doit etre en fonction de la config des parametre") — permet de construire un texte reflétant les
+  // VRAIS réglages courants (Paramètres > Planification), jamais un texte générique figé.
+  lossConfig: {
+    method: 'SAME_WEEKDAY' | 'ALL_DAYS';
+    lookbackWeeks: number;
+    minComparableWeeks: number;
+    fallbackToAllDays: boolean;
+    minComparableDaysAll: number;
+  };
 };
 
 const CAUSE_LABELS: Record<string, string> = {
@@ -209,20 +219,32 @@ export function FormulaInfoButton({
       {open && (
         // Modale centrée (position: fixed), indépendante de la position du bouton qui l'ouvre — ne
         // déborde jamais de l'écran, contrairement à un popover ancré (corrigé le 19/10/2026).
+        //
+        // CORRIGÉ le 19/10/2026 (signalé avec capture : tout le texte apparaissait sélectionné en
+        // bleu à l'ouverture, et la modale "bouge quand le curseur est dans le vide") — fermer sur
+        // `onClick` de l'overlay se déclenchait aussi après un clic-glisser de sélection de texte qui
+        // débordait légèrement sur la zone semi-transparente autour de la boîte (un `click` est émis
+        // au relâchement même après une sélection), rouvrant/refermant la modale et causant le
+        // sursaut visuel. Fermeture désormais basée sur `onMouseDown` ET seulement si le clic a
+        // commencé ET fini sur l'overlay lui-même (pas pendant un drag de sélection qui se termine
+        // dessus) ; `userSelect: 'none'` sur l'overlay empêche toute sélection accidentelle de
+        // démarrer en dehors de la boîte de texte.
         <div
-          onClick={() => setOpen(false)}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           style={{
             position: 'fixed', inset: 0, zIndex: 1040, background: 'rgba(27,42,74,.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+            userSelect: 'none',
           }}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{
               background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 12,
               boxShadow: '0 12px 32px rgba(27,42,74,.3)', padding: '18px 20px',
               width: 'min(420px, 100%)', maxHeight: '82vh', overflowY: 'auto',
               fontSize: '.82rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.5,
+              userSelect: 'text',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
@@ -282,62 +304,70 @@ export function FormulaInfoButton({
 }
 
 const LOSS_FORMULA_TITLE = 'Comment la perte estimée est calculée';
-// Deux méthodes possibles, configurables dans Paramètres (demande explicite du 19/10/2026 :
-// "l'analyse peux ce faire sur les meme jour, la la possiblité de configuré sur la validité des
-// donner en fonction de la moyenne global sur une periode") — SAME_WEEKDAY par défaut, repli
-// automatique sur ALL_DAYS si l'historique du même jour est insuffisant (cf. getAvgDailyDemand,
-// stockoutEpisodeService.js). `method` vient du backend, reflète la méthode RÉELLEMENT utilisée pour
-// CE calcul précis, pas un texte générique figé.
-//
-// Mis à jour le 19/10/2026 pour refléter la décomposition JOUR PAR JOUR corrigée dans estimateLoss
-// (bug trouvé par l'utilisateur en vérifiant la méthode : "image le lundi en moyenne j'ai 400 vente
-// et le mardie la moyyenne est 50 vente je vais toujour prendre la vente moyenne de lundi or c'est
-// pas confome") — chaque jour de la période est désormais comparé à SON propre jour de semaine, puis
-// les demandes journalières sont ADDITIONNÉES (jamais moyennées) pour obtenir la demande totale
-// attendue sur toute la période.
-const LOSS_FORMULA_STEPS_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', FormulaStep[]> = {
-  SAME_WEEKDAY: [
+
+// RÉÉCRIT le 19/10/2026 (demande explicite : "le message de la formule doit etre en fonction de la
+// config des parametre") — avant, le texte dépendait uniquement de `method` (la méthode utilisée
+// pour CE calcul précis), avec des nombres en dur (52 semaines, etc.) qui pouvaient décrire un
+// réglage différent de la config RÉELLEMENT active si l'utilisateur avait changé les paramètres.
+// Construit maintenant le texte à partir de `lossConfig` (renvoyé par getEpisodeDetail,
+// stockoutEpisodeService.js), qui reflète les valeurs EXACTES actuellement configurées dans
+// Paramètres > Planification (fenêtre de recul, seuils, repli).
+type LossConfig = EpisodeDetail['lossConfig'];
+
+function buildLossFormulaSteps(config: LossConfig): FormulaStep[] {
+  if (config.method === 'ALL_DAYS') {
+    return [
+      {
+        label: 'Demande attendue (moyenne tous jours confondus)',
+        detail: `Vente moyenne par jour, TOUS jours de semaine confondus, calculée sur les ${config.lookbackWeeks} dernières semaines (réglage actif) — ne distingue pas lundi de samedi. Cette moyenne journalière est multipliée par le nombre de jours de la période.`,
+      },
+      {
+        label: 'Perte = demande attendue − ventes réelles',
+        detail: 'On soustrait les ventes RÉELLEMENT réalisées pendant la période. Le résultat est plafonné à 0 : jamais de perte négative.',
+      },
+    ];
+  }
+  return [
     {
       label: 'Demande attendue, jour par jour',
-      detail: "Pour CHAQUE jour calendaire de la période (lundi, mardi, ...), on calcule la vente moyenne de CE jour de semaine précis sur les semaines comparables de l'historique (lundi → moyenne des lundis précédents, mardi → moyenne des mardis précédents, etc.), puis on additionne ces moyennes journalières.",
+      detail: `Pour CHAQUE jour calendaire de la période (lundi, mardi, ...), on calcule la vente moyenne de CE jour de semaine précis sur les ${config.lookbackWeeks} dernières semaines (lundi → moyenne des lundis précédents, mardi → moyenne des mardis précédents, etc.), puis on additionne ces moyennes journalières.`,
     },
     {
       label: 'Perte = demande attendue − ventes réelles',
       detail: "On soustrait les ventes RÉELLEMENT réalisées pendant la période (un article en rupture n'est pas toujours à 0 vente strict — stock résiduel, ventes partielles). Le résultat est plafonné à 0 : jamais de perte négative.",
     },
-  ],
-  ALL_DAYS: [
-    {
-      label: 'Demande attendue (moyenne tous jours confondus)',
-      detail: "Vente moyenne par jour, TOUS jours de semaine confondus, calculée sur la fenêtre de recul (52 semaines par défaut) — ne distingue pas lundi de samedi. Cette moyenne journalière est multipliée par le nombre de jours de la période.",
-    },
-    {
-      label: 'Perte = demande attendue − ventes réelles',
-      detail: 'On soustrait les ventes RÉELLEMENT réalisées pendant la période. Le résultat est plafonné à 0 : jamais de perte négative.',
-    },
-  ],
-};
-const LOSS_FORMULA_EXAMPLE_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
-  SAME_WEEKDAY:
+  ];
+}
+
+function buildLossFormulaExample(config: LossConfig): string {
+  if (config.method === 'ALL_DAYS') {
+    return (
+      'Rupture de 3 jours, moyenne tous jours confondus = 220/jour :\n' +
+      '  220 × 3 jours = 660 unités attendues\n' +
+      '− ventes réelles sur ces 3 jours (ex: 30)\n' +
+      '= perte estimée = 630 unités'
+    );
+  }
+  return (
     'Rupture du lundi au mercredi (3 jours) :\n' +
     '  moyenne des lundis    =  400\n' +
     '+ moyenne des mardis    =   50\n' +
     '+ moyenne des mercredis =  200\n' +
     '= demande attendue      =  650 unités\n' +
     '− ventes réelles sur ces 3 jours (ex: 30)\n' +
-    '= perte estimée = 620 unités',
-  ALL_DAYS:
-    'Rupture de 3 jours, moyenne tous jours confondus = 220/jour :\n' +
-    '  220 × 3 jours = 660 unités attendues\n' +
-    '− ventes réelles sur ces 3 jours (ex: 30)\n' +
-    '= perte estimée = 630 unités',
-};
-const LOSS_FORMULA_NOTE_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
-  SAME_WEEKDAY:
-    "« — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.",
-  ALL_DAYS:
-    "Historique insuffisant du MÊME jour de semaine pour cet article (faible rotation) : repli automatique sur la moyenne tous jours confondus, moins précise (ignore les écarts entre jours) mais disponible avec moins de données. Ce repli est configurable (activable/désactivable, seuil de jours requis, ou choix de méthode permanent) dans Paramètres > Planification. « — » = même avec ce repli, historique encore insuffisant.",
-};
+    '= perte estimée = 620 unités'
+  );
+}
+
+function buildLossFormulaNote(config: LossConfig): string {
+  if (config.method === 'ALL_DAYS') {
+    return `Méthode active : « Tous les jours confondus » (choisie dans Paramètres > Planification). « — » = historique de vente insuffisant pour estimer une demande fiable (moins de ${config.minComparableDaysAll} jours de vente constatés sur la fenêtre de recul) — donnée manquante, pas une erreur.`;
+  }
+  const fallbackText = config.fallbackToAllDays
+    ? `Si un article a moins de ${config.minComparableWeeks} semaines comparables du même jour, repli automatique sur la moyenne tous jours confondus (activé, seuil : ${config.minComparableDaysAll} jours de vente minimum) — réglable dans Paramètres > Planification.`
+    : 'Le repli sur la moyenne tous jours confondus est actuellement DÉSACTIVÉ (réglable dans Paramètres > Planification) : en dessous du seuil de semaines comparables, « — » est affiché plutôt qu\'un chiffre peu fiable.';
+  return `Méthode active : « Même jour de semaine », historique sur ${config.lookbackWeeks} semaines, minimum ${config.minComparableWeeks} semaines comparables (Paramètres > Planification). ${fallbackText} 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : un résultat réel du calcul, pas une absence de donnée.`;
+}
 
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
 // (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
@@ -702,9 +732,9 @@ export function StockoutEpisodePage() {
                           Perte estimée
                           <FormulaInfoButton
                             title={LOSS_FORMULA_TITLE}
-                            steps={LOSS_FORMULA_STEPS_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
-                            example={LOSS_FORMULA_EXAMPLE_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
-                            note={LOSS_FORMULA_NOTE_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                            steps={buildLossFormulaSteps(detail.lossConfig)}
+                            example={buildLossFormulaExample(detail.lossConfig)}
+                            note={buildLossFormulaNote(detail.lossConfig)}
                           />
                         </div>
                         <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
@@ -740,9 +770,9 @@ export function StockoutEpisodePage() {
                               Perte estimée
                               <FormulaInfoButton
                                 title={LOSS_FORMULA_TITLE}
-                                steps={LOSS_FORMULA_STEPS_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
-                                example={LOSS_FORMULA_EXAMPLE_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
-                                note={LOSS_FORMULA_NOTE_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                                steps={buildLossFormulaSteps(detail.lossConfig)}
+                                example={buildLossFormulaExample(detail.lossConfig)}
+                                note={buildLossFormulaNote(detail.lossConfig)}
                               />
                             </div>
                             <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
