@@ -206,8 +206,8 @@ async function detectStockoutEpisodes(rposShopId) {
 
 /**
  * Résout immédiatement les épisodes EN_COURS pour lesquels un VRAI mouvement Arrivage vient d'être
- * synchronisé localement avec un stock résultant positif — sans attendre le prochain StockSnapshot
- * (capturé seulement toutes les 6h par défaut, cf. STOCK_SNAPSHOT_CRON).
+ * synchronisé localement et dont le stock résultant est redevenu positif — sans attendre le
+ * prochain StockSnapshot (capturé seulement toutes les 6h par défaut, cf. STOCK_SNAPSHOT_CRON).
  *
  * Bug signalé avec capture le 19/10/2026 : "il me dis arrivage ok mais il continue de compté
  * pourquoi ?" — un arrivage de +36 unités avait bien eu lieu (visible dans l'historique des
@@ -217,9 +217,21 @@ async function detectStockoutEpisodes(rposShopId) {
  * après la synchronisation de nouveaux mouvements — ne traite QUE les EANs ayant un épisode
  * EN_COURS ET un nouveau mouvement Arrivage, jamais un balayage complet du magasin (coût minimal).
  *
- * `quantity` sur StockMove est le stock RÉSULTANT après le mouvement (confirmé par test direct,
- * cf. toStockMoveRows dans stockMoveSyncJob.js) — pas une quantité livrée brute, donc directement
- * comparable à 0 comme StockSnapshot.stock.
+ * BUG CORRIGÉ dans la même journée (confirmé par l'utilisateur en vérifiant l'arithmétique :
+ * "si le stock etait a -6 et que ya eu arrivage de 34 il doit faire 34-6=28... pourquoi 0 ?") :
+ * `StockMove.quantity` n'est PAS le stock résultant après le mouvement, contrairement à ce que le
+ * premier commentaire ci-dessus affirmait à tort — c'est la quantité DU MOUVEMENT lui-même (le
+ * delta, ex: +36 pour un arrivage de 36 unités). Vérifié sur de vraies données : un Arrivage avec
+ * `quantity: 36, previousQuantity: -6` donne un stock résultant de -6+36=30, jamais 36 tout seul.
+ * Comparer `move.quantity <= 0` (toujours faux pour un VRAI arrivage, le champ est toujours positif
+ * par construction) faisait donc résoudre l'épisode sur la seule présence d'un arrivage, SANS
+ * jamais vérifier que le stock résultant était vraiment redevenu positif — corrigé en utilisant
+ * (previousQuantity ?? 0) + quantity comme stock résultant réel.
+ *
+ * Prend aussi en compte le DERNIER mouvement toutes natures confondues (pas seulement Arrivage)
+ * après le dernier arrivage détecté, pour tenir compte d'éventuelles ventes survenues juste après
+ * (ex: une vente -1 juste après l'arrivage) — le stock résultant à retenir est celui du tout dernier
+ * mouvement connu, pas seulement celui de l'arrivage lui-même.
  */
 async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
   if (!arrivalMoves.length) return 0;
@@ -232,8 +244,7 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
 
   const openByEan = new Map(openEpisodes.map((e) => [e.ean, e]));
   // Dernier mouvement Arrivage (le plus récent) par EAN parmi ceux qu'on vient de synchroniser —
-  // c'est son `quantity` (stock résultant) qui compte pour juger si l'article est vraiment revenu
-  // en stock.
+  // sert de point de départ pour chercher le tout dernier mouvement connu depuis cette date.
   const latestArrivalByEan = new Map();
   for (const m of arrivalMoves) {
     const current = latestArrivalByEan.get(m.ean);
@@ -241,9 +252,21 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
   }
 
   let resolved = 0;
-  for (const [ean, move] of latestArrivalByEan) {
+  for (const [ean, arrival] of latestArrivalByEan) {
     const open = openByEan.get(ean);
-    if (!open || move.quantity <= 0) continue;
+    if (!open) continue;
+
+    // Dernier mouvement connu pour cet article depuis l'arrivage (peut être une vente survenue
+    // juste après) — son stock résultant (previousQuantity + quantity) est la valeur la plus fiable
+    // disponible localement, plus fiable que l'arrivage seul si des ventes ont suivi.
+    const latestMove = await prisma.stockMove.findFirst({
+      where: { rposShopId, ean, date: { gte: new Date(arrival.date) } },
+      orderBy: { date: 'desc' },
+      select: { date: true, quantity: true, previousQuantity: true },
+    });
+    const move = latestMove || arrival;
+    const resultingStock = (move.previousQuantity ?? 0) + move.quantity;
+    if (resultingStock <= 0) continue;
 
     const estimation = await estimateLoss(rposShopId, ean, open.startedAt, new Date(move.date));
     await prisma.stockoutEpisode.update({
