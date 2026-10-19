@@ -336,20 +336,25 @@ async function getAvgDailyDemand(rposShopId, ean, referenceDate) {
 }
 
 /**
- * Quantité/CA perdus estimés = ventes attendues (moyenne du même jour de semaine sur les
- * LOOKBACK_WEEKS précédentes, hors période de rupture) moins ventes réellement réalisées pendant la
+ * Quantité/CA perdus estimés = ventes attendues moins ventes réellement réalisées pendant la
  * rupture. Cf. rupture.md §2.4.
+ *
+ * CORRIGÉ le 19/10/2026 (bug signalé par l'utilisateur en vérifiant le calcul en détail : "image le
+ * lundi en moyenne j'ai 400 vente et le mardie la moyyenne est 50 vente je vais toujour prendre la
+ * vente moyenne de lundi or c'est pas confome") — AVANT ce correctif, un seul jour de référence
+ * (startedAt, le jour où la rupture a démarré) servait à calculer UNE SEULE moyenne journalière,
+ * ensuite multipliée par le nombre total de jours de la rupture : une rupture démarrée un lundi mais
+ * durant 3 jours (lundi+mardi+mercredi) appliquait la moyenne DU LUNDI aux 3 jours, y compris mardi
+ * et mercredi dont la demande réelle peut être très différente (ex: lundi à 400 ventes/jour, mardi à
+ * seulement 50). Corrigé en décomposant la rupture JOUR PAR JOUR CALENDAIRE : pour chaque jour
+ * couvert par la période, on calcule sa propre demande attendue (comparée aux mêmes jours de semaine
+ * dans l'historique, cf. getAvgDailyDemand) et on additionne — chaque jour de la rupture est donc
+ * comparé à SON propre jour de semaine, jamais celui du premier jour appliqué à tout le reste.
+ * Uniquement pour method='SAME_WEEKDAY' : en 'ALL_DAYS', la moyenne est déjà uniforme (ne dépend pas
+ * du jour de semaine), la décomposition jour par jour ne changerait rien au résultat pour un coût de
+ * calcul inutile — un seul appel à getAvgDailyDemand suffit dans ce cas.
  */
 async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
-  const durationMs = endedAt.getTime() - startedAt.getTime();
-  const durationDays = Math.max(1, Math.ceil(durationMs / (24 * 60 * 60 * 1000)));
-
-  const demand = await getAvgDailyDemand(rposShopId, ean, startedAt);
-  if (!demand) return { qtyPerdue: null, caPerdue: null, method: null };
-
-  const expectedQty = demand.avgDailyQty * durationDays;
-  const expectedRevenue = demand.avgDailyRevenue * durationDays;
-
   const actualSales = await prisma.salesLine.aggregate({
     where: { rposShopId, ean, date: { gte: startedAt, lte: endedAt } },
     _sum: { quantity: true, revenueExclTax: true },
@@ -357,13 +362,53 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
   const actualQty = actualSales._sum.quantity || 0;
   const actualRevenue = actualSales._sum.revenueExclTax || 0;
 
+  const { method } = await getLossLookbackConfig();
+
+  if (method === 'ALL_DAYS') {
+    const durationMs = endedAt.getTime() - startedAt.getTime();
+    const durationDays = Math.max(1, Math.ceil(durationMs / (24 * 60 * 60 * 1000)));
+    const demand = await getAvgDailyDemand(rposShopId, ean, startedAt);
+    if (!demand) return { qtyPerdue: null, caPerdue: null, method: null };
+    const qtyPerdue = Math.max(0, demand.avgDailyQty * durationDays - actualQty);
+    const caPerdue = Math.max(0, demand.avgDailyRevenue * durationDays - actualRevenue);
+    return { qtyPerdue, caPerdue, method: demand.method };
+  }
+
+  // Décomposition jour par jour calendaire — un appel getAvgDailyDemand PAR JOUR distinct de la
+  // rupture (chacun avec son propre getDay()), jamais un seul calcul étendu sur toute la durée.
+  const dayStarts = [];
+  const cursor = new Date(startedAt);
+  cursor.setHours(0, 0, 0, 0);
+  while (cursor.getTime() < endedAt.getTime()) {
+    dayStarts.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (!dayStarts.length) dayStarts.push(new Date(startedAt));
+
+  let expectedQty = 0;
+  let expectedRevenue = 0;
+  let anyDemandFound = false;
+  let methodUsed = null;
+  for (const dayStart of dayStarts) {
+    const demand = await getAvgDailyDemand(rposShopId, ean, dayStart > startedAt ? dayStart : startedAt);
+    if (!demand) continue;
+    anyDemandFound = true;
+    methodUsed = methodUsed || demand.method;
+    expectedQty += demand.avgDailyQty;
+    expectedRevenue += demand.avgDailyRevenue;
+  }
+
+  if (!anyDemandFound) return { qtyPerdue: null, caPerdue: null, method: null };
+
   const qtyPerdue = Math.max(0, expectedQty - actualQty);
   const caPerdue = Math.max(0, expectedRevenue - actualRevenue);
 
   // method renvoyé (demande explicite du 19/10/2026) pour que l'UI affiche clairement quelle
-  // méthode a produit ce chiffre — 'SAME_WEEKDAY' (par défaut) ou 'ALL_DAYS' (repli, cf.
-  // getAvgDailyDemand ci-dessus).
-  return { qtyPerdue, caPerdue, method: demand.method };
+  // méthode a produit ce chiffre — 'SAME_WEEKDAY' ou 'ALL_DAYS' (repli ponctuel sur un jour précis
+  // sans assez d'historique, cf. getAvgDailyDemand). Si des jours différents de la rupture ont
+  // utilisé des méthodes différentes (ex: lundi avec assez d'historique, mardi en repli), le premier
+  // rencontré est affiché — un détail de calcul interne, pas une donnée visible séparément par jour.
+  return { qtyPerdue, caPerdue, method: methodUsed };
 }
 
 /**
@@ -371,11 +416,31 @@ async function estimateLoss(rposShopId, ean, startedAt, endedAt) {
  * juger si une quantité commandée était suffisante pour couvrir le magasin jusqu'à la livraison
  * (demande explicite : "déterminer si la quantité commandée était suffisante pour couvrir les
  * besoins du magasin jusqu'à la livraison"). null si l'historique comparable est insuffisant.
+ *
+ * CORRIGÉ le 19/10/2026 (même bug que estimateLoss ci-dessus, trouvé en vérifiant la méthode avec
+ * l'utilisateur) : appliquait la demande d'UN SEUL jour (fromDate) à toute la couverture, même sur
+ * plusieurs jours de semaine différents. Décompose maintenant jour par jour calendaire, comme
+ * estimateLoss — en ALL_DAYS la moyenne est déjà uniforme, un seul appel suffit.
  */
 async function estimateDemand(rposShopId, ean, fromDate, coverageDays) {
-  const demand = await getAvgDailyDemand(rposShopId, ean, fromDate);
-  if (!demand) return null;
-  return demand.avgDailyQty * coverageDays;
+  const { method } = await getLossLookbackConfig();
+
+  if (method === 'ALL_DAYS') {
+    const demand = await getAvgDailyDemand(rposShopId, ean, fromDate);
+    if (!demand) return null;
+    return demand.avgDailyQty * coverageDays;
+  }
+
+  let total = 0;
+  let anyDemandFound = false;
+  for (let i = 0; i < coverageDays; i++) {
+    const dayStart = new Date(fromDate.getTime() + i * 24 * 60 * 60 * 1000);
+    const demand = await getAvgDailyDemand(rposShopId, ean, dayStart);
+    if (!demand) continue;
+    anyDemandFound = true;
+    total += demand.avgDailyQty;
+  }
+  return anyDemandFound ? total : null;
 }
 
 /**
