@@ -21,6 +21,12 @@ type DepartmentRow = {
   longEpisodesCount: number;
   noOrderCount: number;
   totalCaPerduEstime: number;
+  // Ventilation du CA perdu ajoutée le 19/10/2026 (demande explicite : "dans 'Analyse par rayon' je
+  // dois voir CA perdu sans commande et avec commande pas encore livré") — sans commande = perte sur
+  // des épisodes où rien n'a encore été fait côté magasin ; avec commande non livrée = perte malgré
+  // une réaction déjà en cours, à ne pas confondre dans le même total.
+  caPerduSansCommande: number;
+  caPerduAvecCommandeNonLivree: number;
 };
 
 type ByFieldSummary = { found: boolean; groupCount: number; groups: DepartmentRow[]; message?: string };
@@ -136,7 +142,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam }: { shopQueryParam:
                     <th>En cours</th>
                     <th>Durée moy.</th>
                     <th>Sans commande</th>
-                    <th>CA perdu</th>
+                    <th>CA perdu sans commande</th>
+                    <th>CA perdu, commandé non livré</th>
                     <th>Priorité</th>
                   </tr>
                 </thead>
@@ -149,7 +156,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam }: { shopQueryParam:
                         <td>{r.openCount}</td>
                         <td>{formatDuration(r.avgDurationHours)}</td>
                         <td>{r.noOrderCount}</td>
-                        <td>{r.totalCaPerduEstime.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduAvecCommandeNonLivree.toLocaleString('fr-FR')} CFA</td>
                         <td><span className={`badge ${priority.badge} py-1 px-2`}>{priority.label}</span></td>
                       </tr>
                     );

@@ -712,6 +712,10 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
     bucket.openEpisodes.push(e);
     bucket.totalCaPerdu += e.caPerdueEstime || 0;
   }
+  // CA perdu ventilé sans commande / avec commande pas encore livrée (demande explicite du
+  // 19/10/2026 : "dans 'Analyse par rayon' je dois voir CA perdu sans commande et avec commande pas
+  // encore livré") — basé sur hasOrder (dynamique, cf. getOpenEpisodes), calculé juste après la
+  // boucle ci-dessus pour ne pas la dupliquer.
   for (const e of resolvedEpisodes) {
     const bucket = getBucket(e[field]);
     bucket.resolvedCount += 1;
@@ -732,6 +736,20 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
       causeCounts[cause] = (causeCounts[cause] || 0) + 1;
     }
 
+    // Ventilation du CA perdu sans commande / avec commande pas encore livrée (demande explicite du
+    // 19/10/2026) — uniquement sur les épisodes EN_COURS (les épisodes résolus n'ont plus de
+    // hasOrder dynamique disponible ici, cf. select plus haut qui ne charge que caPerdueEstime pour
+    // eux, volontairement léger). caPerdueEstime (stocké, maintenu par stockoutLossRecalcJob) comme
+    // seule source de CA perdu, cohérent avec totalCaPerduEstime ci-dessous.
+    const caPerduSansCommande = Math.round(
+      bucket.openEpisodes.filter((e) => !e.hasOrder).reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+    const caPerduAvecCommandeNonLivree = Math.round(
+      bucket.openEpisodes
+        .filter((e) => e.hasOrder && e.deliveryStatus !== 'LIVREE')
+        .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+
     return {
       group: bucket.group,
       openCount: bucket.openEpisodes.length,
@@ -741,6 +759,8 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
       noOrderCount,
       causeCounts,
       totalCaPerduEstime: Math.round(bucket.totalCaPerdu),
+      caPerduSansCommande,
+      caPerduAvecCommandeNonLivree,
     };
   });
 

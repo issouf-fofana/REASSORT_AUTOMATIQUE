@@ -170,6 +170,13 @@ function formatMoney(value: number | null): string {
   return `${Math.round(value).toLocaleString('fr-FR')} CFA`;
 }
 
+// Ajouté le 19/10/2026 (demande explicite : "affiche la formule de calcule pour la perte") — "—"
+// signifie historique de vente insuffisant pour estimer une demande fiable (pas d'erreur) ; un
+// montant à 0 CFA est un résultat réel du calcul (demande attendue très faible sur cette fenêtre),
+// pas une absence de donnée.
+const LOSS_FORMULA_EXPLANATION =
+  "Perte estimée = (vente moyenne du même jour de semaine sur les semaines précédentes comparables × durée de la période) − ventes réellement réalisées pendant cette période. « — » = historique de vente insuffisant pour estimer une demande fiable ; 0 CFA = demande attendue très faible sur cette fenêtre (résultat réel, pas une donnée manquante).";
+
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
 // (désynchro RPOS probable) en rouge, 0 (rupture propre) en ambre neutre, positif en vert — avec
 // l'horodatage du relevé pour qu'on sache à quel moment précis cette valeur a été constatée.
@@ -529,7 +536,7 @@ export function StockoutEpisodePage() {
                         <div className="ep2-metric-val accent" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.beforeOrderHours ?? null)}</div>
                       </div>
                       <div>
-                        <div className="ep2-metric-lbl">Perte estimée</div>
+                        <div className="ep2-metric-lbl" title={LOSS_FORMULA_EXPLANATION}>Perte estimée ⓘ</div>
                         <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
                       </div>
                     </div>
@@ -559,7 +566,7 @@ export function StockoutEpisodePage() {
                             <div className={`ep2-metric-val ${detail.deliveryDelay || detail.deliveryLooksDoubtful ? 'money' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterOrderHours ?? null)}</div>
                           </div>
                           <div>
-                            <div className="ep2-metric-lbl">Perte estimée</div>
+                            <div className="ep2-metric-lbl" title={LOSS_FORMULA_EXPLANATION}>Perte estimée ⓘ</div>
                             <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>
                           </div>
                         </div>
