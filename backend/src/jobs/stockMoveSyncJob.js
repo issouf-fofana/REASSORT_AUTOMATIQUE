@@ -22,6 +22,7 @@ const rpos = require('../services/rposClient');
 const rposServers = require('../services/rposServersService');
 const systemConfig = require('../services/systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { resolveEpisodesFromArrivalMoves } = require('../services/stockoutEpisodeService');
 
 // Marge de recouvrement : comme salesSyncJob, pour couvrir les mouvements arrivés en retard côté
 // RPOS (synchro différée d'une caisse hors-ligne) qu'une synchro strictement incrémentale manquerait.
@@ -70,7 +71,10 @@ async function fetchAndSaveWindow(posId, shopId, start, now) {
     await prisma.stockMove.createMany({ data: rows, skipDuplicates: true });
   }
 
-  return rows.length;
+  // `rows` retourné en plus du count (demande explicite du 19/10/2026 : "il me dis arrivage ok mais
+  // il continue de compté pourquoi ?") — permet à syncShop() de résoudre immédiatement les
+  // épisodes de rupture concernés par un nouvel Arrivage, sans attendre le prochain StockSnapshot.
+  return rows;
 }
 
 // Fenêtre de réconciliation : même raisonnement que salesSyncJob (RPOS peut répondre incomplet sans
@@ -99,7 +103,7 @@ async function syncShop(posId, shop) {
     // corrigé/annulé côté RPOS entre deux synchros ne doit pas laisser de doublon obsolète).
     await prisma.stockMove.deleteMany({ where: { rposShopId: shopId, date: { gte: start, lte: now } } });
 
-    const totalMoves = await fetchAndSaveWindow(posId, shopId, start, now);
+    const rows = await fetchAndSaveWindow(posId, shopId, start, now);
 
     const reconcileStart = new Date(now.getTime() - RECONCILE_HOURS * 60 * 60 * 1000);
     if (reconcileStart < start) {
@@ -107,8 +111,20 @@ async function syncShop(posId, shop) {
       if (needsReconcile) {
         console.warn(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : écart détecté sur ${reconcileStart.toISOString()} -> ${start.toISOString()}, réimport...`);
         await prisma.stockMove.deleteMany({ where: { rposShopId: shopId, date: { gte: reconcileStart, lte: start } } });
-        const reconciledMoves = await fetchAndSaveWindow(posId, shopId, reconcileStart, start);
-        console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : réconciliation terminée, ${reconciledMoves} mouvement(s) réimporté(s).`);
+        const reconciledRows = await fetchAndSaveWindow(posId, shopId, reconcileStart, start);
+        rows.push(...reconciledRows);
+        console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : réconciliation terminée, ${reconciledRows.length} mouvement(s) réimporté(s).`);
+      }
+    }
+
+    // Résout immédiatement les ruptures EN_COURS dont un nouvel Arrivage vient d'être synchronisé
+    // (demande explicite du 19/10/2026 : "il me dis arrivage ok mais il continue de compté
+    // pourquoi ?") — sans attendre le prochain StockSnapshot (toutes les 6h par défaut).
+    const arrivalMoves = rows.filter((r) => ['Arrivage', 'Arrivage manuel'].includes(r.typeLabel));
+    if (arrivalMoves.length) {
+      const resolved = await resolveEpisodesFromArrivalMoves(shopId, arrivalMoves);
+      if (resolved > 0) {
+        console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : ${resolved} rupture(s) résolue(s) immédiatement grâce à un arrivage détecté.`);
       }
     }
 
@@ -118,7 +134,7 @@ async function syncShop(posId, shop) {
       create: { rposPosId: posId, rposShopId: shopId, lastSyncedUntil: now, lastSyncStatus: 'ok' },
     });
 
-    console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : ${totalMoves} mouvement(s) synchronisé(s) (${start.toISOString()} -> ${now.toISOString()})`);
+    console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : ${rows.length} mouvement(s) synchronisé(s) (${start.toISOString()} -> ${now.toISOString()})`);
   } catch (err) {
     console.error(`[stockMoveSyncJob] Échec pour ${shop.reference || shopId} (${posId}):`, err.message);
     await prisma.stockMoveSyncState.upsert({

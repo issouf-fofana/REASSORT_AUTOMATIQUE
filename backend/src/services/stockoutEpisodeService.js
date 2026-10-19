@@ -205,6 +205,62 @@ async function detectStockoutEpisodes(rposShopId) {
 }
 
 /**
+ * Résout immédiatement les épisodes EN_COURS pour lesquels un VRAI mouvement Arrivage vient d'être
+ * synchronisé localement avec un stock résultant positif — sans attendre le prochain StockSnapshot
+ * (capturé seulement toutes les 6h par défaut, cf. STOCK_SNAPSHOT_CRON).
+ *
+ * Bug signalé avec capture le 19/10/2026 : "il me dis arrivage ok mais il continue de compté
+ * pourquoi ?" — un arrivage de +36 unités avait bien eu lieu (visible dans l'historique des
+ * mouvements), mais le compteur de la rupture continuait car detectStockoutEpisodes() ne résout
+ * QUE sur la base de StockSnapshot.stock > 0, et le prochain snapshot n'était pas encore capturé.
+ * Appelée par stockMoveSyncJob.js (toutes les 20 min, bien plus fréquent que le snapshot) juste
+ * après la synchronisation de nouveaux mouvements — ne traite QUE les EANs ayant un épisode
+ * EN_COURS ET un nouveau mouvement Arrivage, jamais un balayage complet du magasin (coût minimal).
+ *
+ * `quantity` sur StockMove est le stock RÉSULTANT après le mouvement (confirmé par test direct,
+ * cf. toStockMoveRows dans stockMoveSyncJob.js) — pas une quantité livrée brute, donc directement
+ * comparable à 0 comme StockSnapshot.stock.
+ */
+async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
+  if (!arrivalMoves.length) return 0;
+
+  const eans = [...new Set(arrivalMoves.map((m) => m.ean))];
+  const openEpisodes = await prisma.stockoutEpisode.findMany({
+    where: { rposShopId, status: 'EN_COURS', ean: { in: eans } },
+  });
+  if (!openEpisodes.length) return 0;
+
+  const openByEan = new Map(openEpisodes.map((e) => [e.ean, e]));
+  // Dernier mouvement Arrivage (le plus récent) par EAN parmi ceux qu'on vient de synchroniser —
+  // c'est son `quantity` (stock résultant) qui compte pour juger si l'article est vraiment revenu
+  // en stock.
+  const latestArrivalByEan = new Map();
+  for (const m of arrivalMoves) {
+    const current = latestArrivalByEan.get(m.ean);
+    if (!current || new Date(m.date) > new Date(current.date)) latestArrivalByEan.set(m.ean, m);
+  }
+
+  let resolved = 0;
+  for (const [ean, move] of latestArrivalByEan) {
+    const open = openByEan.get(ean);
+    if (!open || move.quantity <= 0) continue;
+
+    const estimation = await estimateLoss(rposShopId, ean, open.startedAt, new Date(move.date));
+    await prisma.stockoutEpisode.update({
+      where: { id: open.id },
+      data: {
+        status: 'RESOLUE',
+        endedAt: new Date(move.date),
+        qtyPerdueEstimee: estimation.qtyPerdue,
+        caPerdueEstime: estimation.caPerdue,
+      },
+    });
+    resolved += 1;
+  }
+  return resolved;
+}
+
+/**
  * Diagnostic simplifié (sans Cyrus) : on regarde uniquement si une commande récente couvrant cet
  * article existe, et à quel stade de receptionStatus elle est. Prend la ProposalLine la plus récente
  * pour (shop, ean) comme point d'entrée, puis cherche le ProposalOrder correspondant (même
@@ -1522,4 +1578,4 @@ N'invente aucun fait, aucune date, aucun montant qui ne figure pas ci-dessus.`;
   };
 }
 
-module.exports = { detectStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };
+module.exports = { detectStockoutEpisodes, resolveEpisodesFromArrivalMoves, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };
