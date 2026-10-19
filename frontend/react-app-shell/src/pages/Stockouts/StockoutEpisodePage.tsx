@@ -175,7 +175,22 @@ function formatMoney(value: number | null): string {
 // et l'explication de pourquoi cette formmule") — un simple `title` HTML (tooltip au survol) était
 // peu visible/peu pratique sur mobile ; remplacé par un vrai bouton ⓘ cliquable qui ouvre une
 // explication en dur dans la page (formule + pourquoi ce choix de méthode).
-export function FormulaInfoButton({ title, formula, why }: { title: string; formula: string; why: string }) {
+// Modale d'explication de formule — demande explicite du 19/10/2026 ("met a jour les note sur les
+// formule sur le U et donne une style bien defini") : présentée en ÉTAPES numérotées plutôt qu'une
+// seule phrase dense, avec un exemple chiffré concret, pour que le calcul (en particulier la
+// décomposition jour par jour, cf. estimateLoss corrigé le même jour) soit lisible d'un coup d'œil.
+type FormulaStep = { label: string; detail: string };
+export function FormulaInfoButton({
+  title,
+  steps,
+  example,
+  note,
+}: {
+  title: string;
+  steps: FormulaStep[];
+  example?: string;
+  note?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -192,41 +207,73 @@ export function FormulaInfoButton({ title, formula, why }: { title: string; form
         i
       </button>
       {open && (
-        // RE-CORRIGÉ le 19/10/2026 (signalé une seconde fois avec capture : même en `right: 0` avec
-        // max-height/overflow-y, le popover ancré au bouton (`position: absolute`) débordait encore
-        // sur d'autres blocs de la page — un positionnement relatif au bouton reste fragile selon
-        // l'endroit où ce bouton se trouve dans une mise en page en grille à plusieurs colonnes).
-        // Remplacé par une vraie modale centrée à l'écran (`position: fixed`, centrée), complètement
-        // indépendante de la position du bouton qui l'a ouverte — ne peut plus déborder nulle part.
+        // Modale centrée (position: fixed), indépendante de la position du bouton qui l'ouvre — ne
+        // déborde jamais de l'écran, contrairement à un popover ancré (corrigé le 19/10/2026).
         <div
           onClick={() => setOpen(false)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1040, background: 'rgba(27,42,74,.35)',
+            position: 'fixed', inset: 0, zIndex: 1040, background: 'rgba(27,42,74,.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 10,
-              boxShadow: '0 10px 30px rgba(27,42,74,.25)', padding: '16px 18px',
-              width: 'min(380px, 100%)', maxHeight: '80vh', overflowY: 'auto',
-              fontSize: '.82rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.55,
+              background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 12,
+              boxShadow: '0 12px 32px rgba(27,42,74,.3)', padding: '18px 20px',
+              width: 'min(420px, 100%)', maxHeight: '82vh', overflowY: 'auto',
+              fontSize: '.82rem', color: '#2A2F45', fontWeight: 400, lineHeight: 1.5,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-              <div style={{ fontWeight: 700, color: '#1B2A4A' }}>{title}</div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, color: '#1B2A4A', fontSize: '.95rem' }}>{title}</div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Fermer"
-                style={{ border: 'none', background: 'transparent', color: '#8591A0', fontSize: '1.1rem', lineHeight: 1, padding: 0, cursor: 'pointer' }}
+                style={{ border: 'none', background: 'transparent', color: '#8591A0', fontSize: '1.2rem', lineHeight: 1, padding: 0, cursor: 'pointer' }}
               >
                 ×
               </button>
             </div>
-            <div style={{ fontFamily: 'monospace', background: '#F6F8FB', borderRadius: 6, padding: '8px 10px', marginBottom: 10, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formula}</div>
-            <div style={{ color: '#5B6B85' }}>{why}</div>
+
+            {steps.map((step, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < steps.length - 1 ? 10 : 0 }}>
+                <div
+                  style={{
+                    flexShrink: 0, width: 20, height: 20, borderRadius: '50%', background: '#1B2A4A',
+                    color: '#fff', fontSize: '.7rem', fontWeight: 700, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', marginTop: 1,
+                  }}
+                >
+                  {i + 1}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: '#1B2A4A', marginBottom: 2 }}>{step.label}</div>
+                  <div style={{ color: '#5B6B85', fontSize: '.78rem' }}>{step.detail}</div>
+                </div>
+              </div>
+            ))}
+
+            {example && (
+              <div
+                style={{
+                  marginTop: 14, background: '#F6F8FB', border: '1px solid rgba(27,42,74,.08)',
+                  borderRadius: 8, padding: '10px 12px',
+                }}
+              >
+                <div style={{ fontSize: '.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8591A0', marginBottom: 4 }}>
+                  Exemple
+                </div>
+                <div style={{ fontFamily: 'monospace', fontSize: '.78rem', color: '#2A2F45', whiteSpace: 'pre-line' }}>{example}</div>
+              </div>
+            )}
+
+            {note && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed rgba(27,42,74,.12)', color: '#5B6B85', fontSize: '.76rem' }}>
+                {note}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -234,22 +281,62 @@ export function FormulaInfoButton({ title, formula, why }: { title: string; form
   );
 }
 
-const LOSS_FORMULA_TITLE = 'Perte estimée';
+const LOSS_FORMULA_TITLE = 'Comment la perte estimée est calculée';
 // Deux méthodes possibles, configurables dans Paramètres (demande explicite du 19/10/2026 :
 // "l'analyse peux ce faire sur les meme jour, la la possiblité de configuré sur la validité des
 // donner en fonction de la moyenne global sur une periode") — SAME_WEEKDAY par défaut, repli
 // automatique sur ALL_DAYS si l'historique du même jour est insuffisant (cf. getAvgDailyDemand,
 // stockoutEpisodeService.js). `method` vient du backend, reflète la méthode RÉELLEMENT utilisée pour
 // CE calcul précis, pas un texte générique figé.
-const LOSS_FORMULA_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
-  SAME_WEEKDAY: '(vente moyenne du même jour de semaine sur les semaines comparables × durée de la période) − ventes réellement réalisées pendant cette période',
-  ALL_DAYS: '(vente moyenne par jour, tous jours de la semaine confondus, sur la fenêtre de recul × durée de la période) − ventes réellement réalisées pendant cette période',
+//
+// Mis à jour le 19/10/2026 pour refléter la décomposition JOUR PAR JOUR corrigée dans estimateLoss
+// (bug trouvé par l'utilisateur en vérifiant la méthode : "image le lundi en moyenne j'ai 400 vente
+// et le mardie la moyyenne est 50 vente je vais toujour prendre la vente moyenne de lundi or c'est
+// pas confome") — chaque jour de la période est désormais comparé à SON propre jour de semaine, puis
+// les demandes journalières sont ADDITIONNÉES (jamais moyennées) pour obtenir la demande totale
+// attendue sur toute la période.
+const LOSS_FORMULA_STEPS_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', FormulaStep[]> = {
+  SAME_WEEKDAY: [
+    {
+      label: 'Demande attendue, jour par jour',
+      detail: "Pour CHAQUE jour calendaire de la période (lundi, mardi, ...), on calcule la vente moyenne de CE jour de semaine précis sur les semaines comparables de l'historique (lundi → moyenne des lundis précédents, mardi → moyenne des mardis précédents, etc.), puis on additionne ces moyennes journalières.",
+    },
+    {
+      label: 'Perte = demande attendue − ventes réelles',
+      detail: "On soustrait les ventes RÉELLEMENT réalisées pendant la période (un article en rupture n'est pas toujours à 0 vente strict — stock résiduel, ventes partielles). Le résultat est plafonné à 0 : jamais de perte négative.",
+    },
+  ],
+  ALL_DAYS: [
+    {
+      label: 'Demande attendue (moyenne tous jours confondus)',
+      detail: "Vente moyenne par jour, TOUS jours de semaine confondus, calculée sur la fenêtre de recul (52 semaines par défaut) — ne distingue pas lundi de samedi. Cette moyenne journalière est multipliée par le nombre de jours de la période.",
+    },
+    {
+      label: 'Perte = demande attendue − ventes réelles',
+      detail: 'On soustrait les ventes RÉELLEMENT réalisées pendant la période. Le résultat est plafonné à 0 : jamais de perte négative.',
+    },
+  ],
 };
-const LOSS_FORMULA_WHY_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
+const LOSS_FORMULA_EXAMPLE_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
   SAME_WEEKDAY:
-    "On compare aux ventes du MÊME jour de semaine (et non à une moyenne générale) car la demande varie fortement selon le jour (ex: samedi très différent d'un mardi). « — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.",
+    'Rupture du lundi au mercredi (3 jours) :\n' +
+    '  moyenne des lundis    =  400\n' +
+    '+ moyenne des mardis    =   50\n' +
+    '+ moyenne des mercredis =  200\n' +
+    '= demande attendue      =  650 unités\n' +
+    '− ventes réelles sur ces 3 jours (ex: 30)\n' +
+    '= perte estimée = 620 unités',
   ALL_DAYS:
-    "Historique insuffisant du MÊME jour de semaine pour cet article (faible rotation) : repli automatique sur la moyenne tous jours confondus, moins précise (ignore les écarts entre jours) mais disponible avec moins de données. Ce repli est configurable (activable/désactivable, seuil de jours requis) dans Paramètres. « — » = même avec ce repli, historique encore insuffisant.",
+    'Rupture de 3 jours, moyenne tous jours confondus = 220/jour :\n' +
+    '  220 × 3 jours = 660 unités attendues\n' +
+    '− ventes réelles sur ces 3 jours (ex: 30)\n' +
+    '= perte estimée = 630 unités',
+};
+const LOSS_FORMULA_NOTE_BY_METHOD: Record<'SAME_WEEKDAY' | 'ALL_DAYS', string> = {
+  SAME_WEEKDAY:
+    "« — » = historique de vente insuffisant pour estimer une demande fiable (donnée manquante, pas une erreur). 0 CFA = la demande attendue était déjà très faible sur cette fenêtre précise : c'est un résultat réel du calcul, pas une absence de donnée.",
+  ALL_DAYS:
+    "Historique insuffisant du MÊME jour de semaine pour cet article (faible rotation) : repli automatique sur la moyenne tous jours confondus, moins précise (ignore les écarts entre jours) mais disponible avec moins de données. Ce repli est configurable (activable/désactivable, seuil de jours requis, ou choix de méthode permanent) dans Paramètres > Planification. « — » = même avec ce repli, historique encore insuffisant.",
 };
 
 // Affiche une valeur de stock avec le code couleur demandé explicitement le 17/10/2026 : négatif
@@ -615,8 +702,9 @@ export function StockoutEpisodePage() {
                           Perte estimée
                           <FormulaInfoButton
                             title={LOSS_FORMULA_TITLE}
-                            formula={LOSS_FORMULA_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
-                            why={LOSS_FORMULA_WHY_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                            steps={LOSS_FORMULA_STEPS_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                            example={LOSS_FORMULA_EXAMPLE_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
+                            note={LOSS_FORMULA_NOTE_BY_METHOD[detail.lossBeforeOrder?.method || 'SAME_WEEKDAY']}
                           />
                         </div>
                         <div className="ep2-metric-val">{formatMoney(detail.lossBeforeOrder?.caPerdue ?? null)}</div>
@@ -652,8 +740,9 @@ export function StockoutEpisodePage() {
                               Perte estimée
                               <FormulaInfoButton
                                 title={LOSS_FORMULA_TITLE}
-                                formula={LOSS_FORMULA_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
-                                why={LOSS_FORMULA_WHY_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                                steps={LOSS_FORMULA_STEPS_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                                example={LOSS_FORMULA_EXAMPLE_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
+                                note={LOSS_FORMULA_NOTE_BY_METHOD[detail.lossAfterOrder?.method || 'SAME_WEEKDAY']}
                               />
                             </div>
                             <div className="ep2-metric-val">{formatMoney(detail.lossAfterOrder?.caPerdue ?? null)}</div>

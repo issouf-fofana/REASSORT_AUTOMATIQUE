@@ -142,9 +142,22 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
                 <div className="text-muted small">
                   CA perdu (rupture)
                   <FormulaInfoButton
-                    title="CA perdu sur la période"
-                    formula="Somme, pour chaque rupture chevauchant la période, de : (vente moyenne du même jour de semaine sur les semaines comparables × durée dans la période) − ventes réellement réalisées pendant cette même fenêtre"
-                    why="Seule la portion de chaque rupture qui tombe DANS la période choisie est comptée (une rupture ouverte depuis des mois n'est comptée que pour les jours qui chevauchent le filtre) — recalculé précisément par période, pas une approximation figée."
+                    title="Comment le CA perdu sur la période est calculé"
+                    steps={[
+                      {
+                        label: 'Pour chaque rupture qui chevauche la période',
+                        detail: "Seule la portion de la rupture qui tombe DANS la période choisie est comptée — une rupture ouverte depuis des mois n'est comptée que pour les jours qui chevauchent le filtre, jamais pour sa durée totale.",
+                      },
+                      {
+                        label: 'Demande attendue, jour par jour',
+                        detail: "Pour chaque jour de cette portion, on calcule la vente moyenne de CE jour de semaine précis sur l'historique comparable, puis on additionne ces moyennes journalières (jamais une seule moyenne étendue à toute la durée).",
+                      },
+                      {
+                        label: 'Perte de la rupture = demande attendue − ventes réelles',
+                        detail: 'On soustrait les ventes réellement réalisées sur cette même portion de période. Le total affiché est la somme des pertes de toutes les ruptures chevauchant la période.',
+                      },
+                    ]}
+                    note="Recalculé précisément pour la période choisie à chaque changement de filtre — jamais une approximation figée sur la durée totale des ruptures."
                   />
                 </div>
                 <div className="fs-5 fw-semibold">{summary.totalCaPerdu.toLocaleString('fr-FR')} CFA</div>
