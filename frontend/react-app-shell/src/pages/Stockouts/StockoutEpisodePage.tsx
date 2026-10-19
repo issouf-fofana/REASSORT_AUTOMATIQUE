@@ -831,20 +831,22 @@ export function StockoutEpisodePage() {
                           <div className="ep2-metric-val money" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDurationLive(liveDurations?.afterArrivalHours ?? null)}</div>
                         </div>
                         <div>
-                          <div className="ep2-metric-lbl">
-                            Perte estimée
-                            <FormulaInfoButton
-                              title={LOSS_FORMULA_TITLE}
-                              steps={buildLossFormulaSteps(detail.lossConfig)}
-                              example={buildLossFormulaExample(detail.lossConfig)}
-                              note={buildLossFormulaNote(detail.lossConfig)}
-                            />
-                          </div>
-                          <div className="ep2-metric-val">{formatMoney(detail.lossAfterArrival?.caPerdue ?? null)}</div>
+                          <div className="ep2-metric-lbl">Perte estimée</div>
+                          {/* SUPPRIMÉ le 19/10/2026 (demande explicite : "quand apres arrivage il ne
+                              dois petre compté la perte encore il peux arrivé que le stock du mag
+                              n'et pas ajour donc il sera pas a jour taemps que a pas inventaire sur
+                              l'articcle pour avoir un bon stok") — une fois qu'un vrai arrivage
+                              prouve que le déficit vient d'une désynchronisation RPOS (pas d'une
+                              vraie absence physique de stock), continuer à chiffrer une "perte"
+                              ici est trompeur : ce n'est plus une vente manquée, c'est un problème
+                              de données qui ne se résout que par un inventaire physique. Remplacé
+                              par un message explicite au lieu d'un chiffre qui laisserait croire à
+                              une perte réelle continue. */}
+                          <div className="ep2-metric-val" style={{ fontSize: '.78rem', fontWeight: 600, color: '#b8302c' }}>Stock non à jour</div>
                         </div>
                       </div>
                       <div className="ep2-metric-empty" style={{ color: '#b8302c', marginTop: 8 }}>
-                        Un arrivage a bien été détecté, mais le stock est resté en-dessous de 0 depuis — probable désynchronisation RPOS plutôt qu'un simple retard de livraison.
+                        Un arrivage a bien été détecté, mais le stock RPOS est resté en-dessous de 0 depuis — probable désynchronisation plutôt qu'une vraie rupture physique. Le stock ne redeviendra fiable qu'après un inventaire physique de cet article en magasin ; la perte n'est plus comptabilisée au-delà de l'arrivage pour éviter de surestimer l'impact réel.
                       </div>
                     </div>
                   )}
