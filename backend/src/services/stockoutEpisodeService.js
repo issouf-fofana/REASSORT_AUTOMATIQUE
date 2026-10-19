@@ -354,11 +354,20 @@ async function getOpenEpisodes(rposShopId) {
   const eans = [...new Set(episodes.map((e) => e.ean))];
   const earliestStart = episodes.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), episodes[0].startedAt);
 
-  // Toutes les lignes de proposition + commandes potentiellement pertinentes pour CES articles
-  // depuis le début de rupture le plus ancien du lot — un seul aller-retour DB, le matching précis
-  // par épisode (seuil de date propre à chaque startedAt) se fait ensuite en mémoire.
+  // Toutes les lignes de proposition + commandes potentiellement pertinentes pour CES articles —
+  // un seul aller-retour DB, le matching précis par épisode (seuil de date propre à chaque
+  // startedAt) se fait ensuite en mémoire.
+  //
+  // BUG CORRIGÉ le 19/10/2026 (signalé avec capture : mail d'alerte "sans commande" pour des
+  // articles ayant pourtant une vraie commande passée) : cette requête filtrait AUSSI
+  // `proposal.generatedAt >= earliestStart`, excluant dès la base toute ligne dont la PROPOSITION
+  // parente est antérieure au début de rupture le plus ancien du lot — même si la COMMANDE associée
+  // à cette ligne a été créée bien après (un article proposé il y a longtemps peut très bien n'être
+  // commandé/validé que plus tard, en réaction à la rupture actuelle). Seule la date de la commande
+  // compte pour juger d'une réaction, jamais celle de la proposition qui l'a précédée — retiré ce
+  // filtre ici, qui ne sert plus qu'à borner par magasin/EAN.
   const lines = await prisma.proposalLine.findMany({
-    where: { ean: { in: eans }, proposal: { rposShopId, generatedAt: { gte: earliestStart } } },
+    where: { ean: { in: eans }, proposal: { rposShopId } },
     select: { ean: true, department: true, proposalId: true, proposal: { select: { generatedAt: true } } },
   });
   const proposalIds = [...new Set(lines.map((l) => l.proposalId))];
@@ -409,10 +418,18 @@ async function getOpenEpisodes(rposShopId) {
   return episodes.map((e) => {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
+    // BUG CORRIGÉ le 19/10/2026 (signalé avec capture : mail d'alerte annonçant "sans commande"
+    // pour des articles ayant pourtant une vraie commande passée visible dans l'UI) : ce filtre
+    // exigeait AUSSI que la PROPOSITION parente soit générée après le début de la rupture
+    // (`line.proposal.generatedAt < e.startedAt` -> skip), avant même de regarder si une commande
+    // existait. Or un article peut être présent dans une proposition ANCIENNE (générée avant la
+    // rupture) dont la commande n'a été créée/validée que PLUS TARD, après le début de la rupture —
+    // cette commande, pourtant bien une vraie réaction à la rupture, était ignorée car sa ligne
+    // d'origine ratait ce premier filtre. Seule la date de la COMMANDE elle-même compte pour juger
+    // si le magasin a réagi, jamais la date de la proposition qui l'a précédée.
     let orderCreatedAt = null;
     let matchedOrder = null;
     for (const line of linesByEan.get(e.ean) || []) {
-      if (line.proposal.generatedAt < e.startedAt) continue;
       const candidate = (ordersByKey.get(line.proposalId) || []).find((o) => o.createdAt >= e.startedAt);
       if (candidate) { orderCreatedAt = candidate.createdAt; matchedOrder = candidate; break; }
     }
