@@ -284,6 +284,52 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
 }
 
 /**
+ * Filet de rattrapage pour TOUS les épisodes EN_COURS du réseau, pas seulement ceux touchés par un
+ * mouvement fraîchement synchronisé (resolveEpisodesFromArrivalMoves ci-dessus) — demande implicite
+ * du 19/10/2026 (confirmé lors du test : "j'ai fait le commit il est toujour en pareil") : un
+ * arrivage déjà synchronisé AVANT le déploiement du correctif n'est plus jamais revu par
+ * resolveEpisodesFromArrivalMoves (qui ne traite que les lignes NOUVELLEMENT insérées à chaque
+ * passage de stockMoveSyncJob) — un épisode resté ouvert à tort à cause de ce bug ne se corrige
+ * donc jamais tout seul sans ce filet. Relit directement StockMove (déjà en base localement, aucun
+ * appel RPOS) pour chaque épisode EN_COURS et applique la même règle (dernier mouvement connu
+ * depuis le début de la rupture, stock résultant = previousQuantity + quantity). Volontairement
+ * planifié peu fréquemment (cf. stockoutCatchUpResolveJob.js) : couvre le rattrapage initial après
+ * un déploiement, puis sert de filet de sécurité continu pour tout cas résiduel.
+ */
+async function catchUpResolveStockoutEpisodes() {
+  const openEpisodes = await prisma.stockoutEpisode.findMany({
+    where: { status: 'EN_COURS' },
+    select: { id: true, rposShopId: true, ean: true, startedAt: true },
+  });
+
+  let resolved = 0;
+  for (const episode of openEpisodes) {
+    const latestMove = await prisma.stockMove.findFirst({
+      where: { rposShopId: episode.rposShopId, ean: episode.ean, date: { gte: episode.startedAt } },
+      orderBy: { date: 'desc' },
+      select: { date: true, quantity: true, previousQuantity: true },
+    });
+    if (!latestMove) continue;
+
+    const resultingStock = (latestMove.previousQuantity ?? 0) + latestMove.quantity;
+    if (resultingStock <= 0) continue;
+
+    const estimation = await estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, new Date(latestMove.date));
+    await prisma.stockoutEpisode.update({
+      where: { id: episode.id },
+      data: {
+        status: 'RESOLUE',
+        endedAt: new Date(latestMove.date),
+        qtyPerdueEstimee: estimation.qtyPerdue,
+        caPerdueEstime: estimation.caPerdue,
+      },
+    });
+    resolved += 1;
+  }
+  return { checked: openEpisodes.length, resolved };
+}
+
+/**
  * Diagnostic simplifié (sans Cyrus) : on regarde uniquement si une commande récente couvrant cet
  * article existe, et à quel stade de receptionStatus elle est. Prend la ProposalLine la plus récente
  * pour (shop, ean) comme point d'entrée, puis cherche le ProposalOrder correspondant (même
@@ -1601,4 +1647,4 @@ N'invente aucun fait, aucune date, aucun montant qui ne figure pas ci-dessus.`;
   };
 }
 
-module.exports = { detectStockoutEpisodes, resolveEpisodesFromArrivalMoves, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };
+module.exports = { detectStockoutEpisodes, resolveEpisodesFromArrivalMoves, catchUpResolveStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };

@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -235,6 +235,11 @@ async function start() {
     // ouverts avant le correctif RPOS, ou tout cas résiduel) — filet de sécurité en continu, pas
     // seulement à la création d'un épisode (horaire configurable, toutes les 6h par défaut).
     await startOrRestartStockoutSectorBackfillJob();
+    // Filet de rattrapage des ruptures résolvables par un arrivage déjà présent en base locale mais
+    // raté par resolveEpisodesFromArrivalMoves (qui ne traite que les mouvements fraîchement
+    // synchronisés, pas l'historique) — couvre notamment les arrivages synchronisés AVANT le
+    // déploiement de ce correctif (horaire configurable, toutes les heures par défaut).
+    await startOrRestartStockoutCatchUpResolveJob();
     await startOrRestartStockoutAlertJob();
     // Précalcule chaque nuit "Analyse des pertes sur une période" (30 derniers jours) pour que la
     // page l'affiche instantanément au lieu de recalculer à chaque chargement (horaire configurable).
@@ -267,6 +272,12 @@ async function start() {
     runStockoutSectorBackfillJob().catch((err) => console.error('[startup] Résolution secteur/rayon en arrière-plan : échec non bloquant —', err.message));
     const { runWeekendReceptionDatesFix } = require('../scripts/fixWeekendReceptionDates');
     runWeekendReceptionDatesFix().catch((err) => console.error('[startup] Correction des dates de livraison en arrière-plan : échec non bloquant —', err.message));
+    // Rattrapage immédiat des ruptures résolvables par un arrivage déjà en base (demande implicite
+    // du 19/10/2026 : "j'ai fait le commit il est toujour en pareil") — purement local (aucun appel
+    // RPOS), donc sûr à lancer dès le démarrage sans attendre le premier passage planifié (jusqu'à
+    // 1h par défaut, cf. STOCKOUT_CATCH_UP_RESOLVE_CRON).
+    const { runStockoutCatchUpResolveJob } = require('./jobs/stockoutCatchUpResolveJob');
+    runStockoutCatchUpResolveJob().catch((err) => console.error('[startup] Rattrapage de résolution des ruptures en arrière-plan : échec non bloquant —', err.message));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
