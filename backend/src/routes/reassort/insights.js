@@ -705,6 +705,27 @@ router.get('/product/:productId/proposal-history', async (req, res) => {
   }
 });
 
+// Cache court en mémoire process pour getPendingPlatformOrderedEans (demande du 20/10/2026 :
+// "j'ai deja ses donner en local qui son synchroniser non ?"). Dans proposalService.js cet appel
+// RPOS est déjà partagé entre des centaines d'articles au sein d'une même génération de
+// proposition (coût acceptable car amorti) — mais ici, ouvrir ce panneau pour voir UN SEUL article
+// répétait tout le coût (parcourt toutes les commandes plateforme en cours + un appel RPOS par
+// commande pour ses lignes) à chaque clic, pour un résultat qui ne change qu'au rythme des
+// commandes passées sur la plateforme, pas à chaque seconde.
+const PENDING_PLATFORM_ORDERS_CACHE_TTL_MS = 5 * 60 * 1000;
+const pendingPlatformOrdersCache = new Map(); // `${posId}:${shopId}` -> { data, cachedAt }
+
+async function getPendingPlatformOrderedEansCached(posId, shopId) {
+  const key = `${posId}:${shopId}`;
+  const cached = pendingPlatformOrdersCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < PENDING_PLATFORM_ORDERS_CACHE_TTL_MS) {
+    return cached.data;
+  }
+  const data = await rpos.getPendingPlatformOrderedEans(posId, shopId);
+  pendingPlatformOrdersCache.set(key, { data, cachedAt: Date.now() });
+  return data;
+}
+
 // GET /api/reassort/product/:productId/analytics?ean=&dateStart=&dateEnd= - évolution d'un article
 // sur une période choisie : courbe de ventes (granularité adaptée à la durée), historique de
 // commandes, indicateurs de comportement (tendance, fréquence de commande), et prédiction de la
@@ -728,7 +749,12 @@ router.get('/product/:productId/analytics', async (req, res) => {
     let currentStock;
     let currentOrderedQuantity;
     try {
-      const product = await rpos.getProductByEan(posId, shopId, ean);
+      // Lu depuis ProductCache (resynchronisé régulièrement par stockoutProductCacheRefreshJob.js
+      // et à chaque génération de proposition) plutôt qu'un appel RPOS /api/product/ en direct à
+      // chaque ouverture de ce panneau (demande du 20/10/2026 : "j'ai deja ses donner en local qui
+      // son synchroniser non ?") — même source que le tableau de la proposition, donc jamais en
+      // désaccord avec lui, et nettement plus rapide à afficher.
+      const product = await prisma.productCache.findUnique({ where: { rposShopId_ean: { rposShopId: shopId, ean } } });
       if (product) {
         currentStock = Number(product.stock || 0);
         // On n'utilise PAS le compteur RPOS brut product.current_ordered_quantity : comme dans
@@ -740,43 +766,44 @@ router.get('/product/:productId/analytics', async (req, res) => {
         // raconte jamais une autre histoire que le tableau principal.
         const ignoreRposStock = !!config.ignoreRposStockInCalculation;
         let rposOrderedQty = 0;
-        if (!ignoreRposStock) {
-          const recentRposOrder = await getRecentUndeliveredOrderedQuantityCached(
-            posId, shopId, product.id, config.recentOrderMaxAgeDays, ignoreRposStock
-          );
-          rposOrderedQty = recentRposOrder.quantity;
-        }
         let quantityInTransit = 0;
         if (!ignoreRposStock) {
-          const { quantityByEan: inTransitByEan } = await rpos.getPendingPlatformOrderedEans(posId, shopId);
-          quantityInTransit = inTransitByEan.get(ean) || 0;
+          // Les deux appels sont indépendants (l'un lit un cache DB par produit, l'autre un cache
+          // mémoire process par magasin) : lancés en parallèle plutôt qu'en série, ce qui domine
+          // encore le temps de réponse une fois le stock lu localement ci-dessus.
+          const [recentRposOrder, pendingPlatformOrders] = await Promise.all([
+            getRecentUndeliveredOrderedQuantityCached(posId, shopId, product.productId, config.recentOrderMaxAgeDays, ignoreRposStock),
+            getPendingPlatformOrderedEansCached(posId, shopId),
+          ]);
+          rposOrderedQty = recentRposOrder.quantity;
+          quantityInTransit = pendingPlatformOrders.quantityByEan.get(ean) || 0;
         }
         currentOrderedQuantity = Math.max(rposOrderedQty, quantityInTransit);
       }
     } catch (err) {
-      console.error('[product analytics] Échec de lecture du produit RPOS:', err.message);
+      console.error('[product analytics] Échec de lecture du produit:', err.message);
     }
 
-    const data = await productAnalyticsService.analyzeProduct(posId, shopId, {
-      ean,
-      productId: req.params.productId,
-      dateStart,
-      dateEnd,
-      safetyStockRatio: config.safetyStockRatio,
-      currentStock,
-      currentOrderedQuantity,
-    });
-
-    // Mouvements de stock (casse, cession entre rayons, retour fournisseur...) sur la même période :
-    // best-effort, ne doit jamais faire échouer l'analyse principale si RPOS est indisponible ou si
-    // l'article n'a aucun mouvement hors vente/réception (demande du 16/09/2026, à partir de l'écran
-    // admin RPOS "Mouvements de stock").
-    let stockMoves = null;
-    try {
-      stockMoves = await stockMoveAnalysis.getStockMoveSummary(posId, shopId, ean, dateStart, dateEnd);
-    } catch (err) {
-      console.error('[product analytics] Échec de lecture des mouvements de stock RPOS:', err.message);
-    }
+    // Analyse principale et mouvements de stock (casse, cession entre rayons, retour fournisseur...)
+    // sont indépendants l'un de l'autre : lancés en parallèle. Le second reste best-effort et ne
+    // doit jamais faire échouer le premier si RPOS est indisponible ou si l'article n'a aucun
+    // mouvement hors vente/réception (demande du 16/09/2026, à partir de l'écran admin RPOS
+    // "Mouvements de stock").
+    const [data, stockMoves] = await Promise.all([
+      productAnalyticsService.analyzeProduct(posId, shopId, {
+        ean,
+        productId: req.params.productId,
+        dateStart,
+        dateEnd,
+        safetyStockRatio: config.safetyStockRatio,
+        currentStock,
+        currentOrderedQuantity,
+      }),
+      stockMoveAnalysis.getStockMoveSummary(posId, shopId, ean, dateStart, dateEnd).catch((err) => {
+        console.error('[product analytics] Échec de lecture des mouvements de stock RPOS:', err.message);
+        return null;
+      }),
+    ]);
 
     res.json({ success: true, data: { ...data, stockMoves } });
   } catch (error) {
