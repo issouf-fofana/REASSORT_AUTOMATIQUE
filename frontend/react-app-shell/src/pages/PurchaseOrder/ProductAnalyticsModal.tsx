@@ -232,6 +232,19 @@ function AnalyticsOverview({ data }: { data: AnalyticsData }) {
         Stock estimé : reconstitué à partir du stock actuel et de l'historique ventes/commandes (RPOS ne conserve pas l'historique de stock
         réel) — à lire comme une tendance, pas une valeur exacte.
       </p>
+      {/* Ajouté le 20/10/2026 (demande explicite : "dans prpopostion si le stok est negtive a ce
+          niveau il faut mettre a et tu dis que le stock est negative tu vois sinon il fait un
+          surtock") — un stock actuel négatif (désynchronisation RPOS probable) faisait descendre
+          le résultat de la formule sous 0, silencieusement ramené à 0 unité(s) commandée. Sans
+          signal explicite ici, "0 unité(s)" se lit comme "besoin couvert, rien à commander" alors
+          que c'est en réalité une donnée de stock suspecte qui masque peut-être un vrai besoin —
+          risque de sous-commander puis de se retrouver en surstock une fois le stock resynchronisé. */}
+      {p.currentStock < 0 && (
+        <div className="alert alert-warning mb-2">
+          <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon>{' '}
+          <strong>Stock actuel négatif ({p.currentStock})</strong> — probable désynchronisation RPOS, pas une vraie absence de stock. La quantité proposée ci-dessous peut être sous-estimée ; vérifiez le stock réel en rayon avant de valider, pour éviter un surstock une fois le stock RPOS corrigé.
+        </div>
+      )}
       <div className="alert alert-info mb-0">
         <strong>Prochaine commande estimée :</strong> {p.predictedQuantity} unité(s)
         {p.nextOrderInDays !== null &&
