@@ -35,14 +35,33 @@ async function getSalesHistoryLocalFirst(posId, shopId, ean, dateStart, dateEnd)
 
 // L'historique de commandes n'a pas d'équivalent en base locale (contrairement aux ventes) : la
 // fenêtre d'analyse pouvant être rouverte plusieurs fois de suite sur le même article (changement
-// de préréglage de période, etc.), un cache court en mémoire process évite de rappeler RPOS à
-// chaque fois pour la même requête pendant que l'utilisateur explore le graphique.
-const PURCHASE_HISTORY_CACHE_TTL_MS = 5 * 60 * 1000;
-const purchaseHistoryCache = new Map(); // `${posId}:${shopId}:${productId}:${dateStart}:${dateEnd}` -> { data, cachedAt }
+// de préréglage de période, etc.), un cache en mémoire process évite de rappeler RPOS à chaque
+// fois pour la même requête pendant que l'utilisateur explore le graphique.
+//
+// Durée allongée le 20/10/2026 (demande explicite : "il ya toujour un temps de latence" après le
+// premier passage de parallélisation/ProductCache — ce dernier appel RPOS, lui, n'a pas
+// d'équivalent local possible sans un nouveau job de synchro complet, jugé trop lourd pour
+// l'instant face à un simple ralentissement perçu) : 30 minutes au lieu de 5, pour que seule la
+// toute première ouverture d'un article paie le coût réseau RPOS, les suivantes dans la même
+// session restant quasi instantanées.
+const PURCHASE_HISTORY_CACHE_TTL_MS = 30 * 60 * 1000;
+const purchaseHistoryCache = new Map(); // `${posId}:${shopId}:${productId}:${dateStart}:${bucketedDateEnd}` -> { data, cachedAt }
+
+// dateEnd vient quasi toujours de `new Date()` côté frontend (préréglages "30 derniers jours" etc.)
+// — à la seconde près, donc quasiment jamais identique d'une ouverture à l'autre du même article,
+// ce qui ratait systématiquement le cache ci-dessus malgré son TTL. Arrondi à la tranche de 10 min
+// la plus proche pour la clé de cache uniquement (la requête RPOS elle-même, si besoin, utilise
+// toujours le dateEnd exact reçu) : deux ouvertures du même article à quelques minutes d'intervalle
+// retombent sur la même entrée de cache.
+function bucketDateEndForCacheKey(dateEnd) {
+  const ms = new Date(dateEnd).getTime();
+  const bucketMs = 10 * 60 * 1000;
+  return Math.floor(ms / bucketMs) * bucketMs;
+}
 
 async function getPurchaseHistoryCached(posId, shopId, productId, dateStart, dateEnd) {
   if (!productId) return [];
-  const key = `${posId}:${shopId}:${productId}:${dateStart}:${dateEnd}`;
+  const key = `${posId}:${shopId}:${productId}:${dateStart}:${bucketDateEndForCacheKey(dateEnd)}`;
   const cached = purchaseHistoryCache.get(key);
   if (cached && Date.now() - cached.cachedAt < PURCHASE_HISTORY_CACHE_TTL_MS) {
     return cached.data;
