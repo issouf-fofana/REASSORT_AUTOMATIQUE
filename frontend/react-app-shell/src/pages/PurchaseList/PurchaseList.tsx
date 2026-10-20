@@ -594,8 +594,22 @@ export function PurchaseList() {
                 </div>
               </div>
             )}
-            <div className="card-body p-0">
-              <div ref={gridDivRef} id="orders-grid" className="m-3"></div>
+            <div className="card-body p-0" style={{ position: 'relative' }}>
+              {/* Overlay de chargement ajouté le 20/10/2026 (demande explicite : "histoique des
+                  commande il donne tableau vide et apres les donner aparaisse donc il faut mettre
+                  un system de chargement") — avant ce correctif, seul un petit texte "Chargement..."
+                  discret en haut à droite (setStatus) signalait le chargement ; la grille centrale,
+                  elle, restait visuellement vide (div AG Grid non montée) sans aucun indicateur dans
+                  l'espace que l'utilisateur regarde réellement, laissant penser à tort qu'il n'y a
+                  aucune commande. Même principe que le correctif appliqué hier sur Proposition de
+                  commande (DepartmentListView "Chargement de la proposition en cours…"). */}
+              {refreshing && orders.length === 0 && (
+                <div className="d-flex align-items-center justify-content-center gap-2 text-muted py-5">
+                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                  Chargement des commandes…
+                </div>
+              )}
+              <div ref={gridDivRef} id="orders-grid" className="m-3" style={{ display: refreshing && orders.length === 0 ? 'none' : undefined }}></div>
             </div>
 
             {detailOpen && (
