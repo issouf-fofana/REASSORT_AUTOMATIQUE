@@ -53,7 +53,10 @@ function priorityLevel(row: DepartmentRow): { label: string; badge: string } {
   return { label: 'Normal', badge: 'reassort-badge-neutral' };
 }
 
-export function StockoutDepartmentAnalysis({ shopQueryParam }: { shopQueryParam: string }) {
+// startDate/endDate ajoutés le 20/10/2026 (demande explicite : "quand je fait un filtre il doit
+// etre appliqué sur tout") — "Analyse par rayon" restait figée sur l'état courant peu importe la
+// période choisie en haut de page ; suit désormais le même sélecteur unique que le reste de la page.
+export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
   const [data, setData] = useState<ByFieldSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('openCount');
@@ -65,11 +68,12 @@ export function StockoutDepartmentAnalysis({ shopQueryParam }: { shopQueryParam:
     setData(null);
     setError(null);
     setShowAll(false);
-    apiFetch<ByFieldSummary>(`/reassort/stockout-episodes/by-department?${shopQueryParam}`)
+    const periodParams = `start=${encodeURIComponent(new Date(startDate).toISOString())}&end=${encodeURIComponent(new Date(endDate + 'T23:59:59').toISOString())}`;
+    apiFetch<ByFieldSummary>(`/reassort/stockout-episodes/by-department?${periodParams}&${shopQueryParam}`)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [shopQueryParam]);
+  }, [shopQueryParam, startDate, endDate]);
 
   const rows = useMemo(() => {
     const list = data?.groups || [];

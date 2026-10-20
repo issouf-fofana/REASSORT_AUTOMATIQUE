@@ -844,16 +844,36 @@ async function getOpenEpisodes(rposShopId) {
  * Vue d'ensemble pour les KPI du dashboard : nombre de ruptures en cours, durée moyenne, CA perdu
  * cumulé sur les épisodes résolus récemment, répartition des causes.
  */
-async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {}) {
+async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, start, end } = {}) {
+  // Filtre de période optionnel (demande explicite du 20/10/2026 : "le filtre ne fonctionne sur
+  // tout la vue... quand je fait un filtre il doit etre appliqué sur tout") — AVANT ce correctif,
+  // le filtre de dates choisi en haut de page (qui pilote déjà le graphe de tendance et l'analyse
+  // des pertes) n'avait aucun effet sur les KPI "En cours"/le donut causes/"Analyse par rayon", qui
+  // restaient figés sur l'état COURANT (status EN_COURS) peu importe la période affichée ailleurs
+  // sur la même page — incohérent visuellement. Si start/end sont fournis, bascule vers "ruptures
+  // actives à un moment de la période" (startedAt <= end ET (toujours ouvert OU résolu après start))
+  // au lieu de "ruptures encore ouvertes maintenant" — même logique que getTrend(), qui applique
+  // déjà ce filtre au graphe. Sans start/end (comportement par défaut, ex: appels existants non
+  // migrés), le comportement d'origine (état courant) est inchangé.
+  const periodMode = !!(start && end);
+  const periodStart = periodMode ? new Date(start) : null;
+  const periodEnd = periodMode ? new Date(end) : null;
+
   const [openEpisodes, resolvedEpisodes, totalOrderableArticles] = await Promise.all([
-    getOpenEpisodes(rposShopId),
-    prisma.stockoutEpisode.findMany({
-      where: {
-        rposShopId,
-        status: 'RESOLUE',
-        endedAt: { gte: new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
-      },
-    }),
+    periodMode
+      ? prisma.stockoutEpisode.findMany({
+          where: { rposShopId, startedAt: { lte: periodEnd }, OR: [{ endedAt: null }, { endedAt: { gte: periodStart } }] },
+        })
+      : getOpenEpisodes(rposShopId),
+    periodMode
+      ? [] // en mode période, resolvedEpisodes ci-dessus n'existe pas séparément : l'ensemble "actif pendant la période" couvre déjà résolus ET ouverts dans la même requête ci-dessus
+      : prisma.stockoutEpisode.findMany({
+          where: {
+            rposShopId,
+            status: 'RESOLUE',
+            endedAt: { gte: new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
+          },
+        }),
     // Dénominateur pour le % d'articles en rupture (demande explicite du 19/10/2026 : "le graph la
     // rupture par rapport quoi la rupture est trop 90%") — un nombre brut d'épisodes ("238 en
     // rupture") ne dit rien de l'ampleur réelle sans un total de référence ; ProductCache.orderable
@@ -862,8 +882,23 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
     prisma.productCache.count({ where: { rposShopId, orderable: true } }),
   ]);
 
-  const avgDurationHours = openEpisodes.length
-    ? openEpisodes.reduce((sum, e) => sum + e.durationHours, 0) / openEpisodes.length
+  // En mode période, openEpisodes contient un mélange status EN_COURS/RESOLUE (la requête ci-dessus
+  // ne filtre plus sur status) — durationHours/hasOrder/deliveryStatus ne sont PAS recalculés ici
+  // (coûteux, cf. le précalcul déjà en place) : pour les épisodes RESOLUE dans ce lot, ces champs
+  // dynamiques restent ceux stockés au moment de leur dernière mise à jour (moins critique, un
+  // épisode résolu ne change plus) ; pour les EN_COURS, hasOrder/deliveryStatus viennent déjà de
+  // computeAndPersistOpenEpisodeStatuses (colonnes stockées), durationHours est calculé à la volée
+  // ci-dessous comme pour getOpenEpisodes.
+  const now = new Date();
+  const episodesForStats = periodMode
+    ? openEpisodes.map((e) => ({
+        ...e,
+        durationHours: Math.round((((e.endedAt || now).getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10,
+      }))
+    : openEpisodes;
+
+  const avgDurationHours = episodesForStats.length
+    ? episodesForStats.reduce((sum, e) => sum + e.durationHours, 0) / episodesForStats.length
     : 0;
 
   // caPerdueEstime est désormais TOUJOURS lu depuis la valeur stockée, jamais recalculé ici (bug de
@@ -873,7 +908,7 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
   // de commande"). Un job dédié (stockoutLossRecalcJob.js, toutes les heures) maintient ce champ à
   // jour pour les épisodes EN_COURS — avant son premier passage sur un épisode tout juste détecté,
   // la valeur reste simplement null (page "estimation indisponible", pas une erreur).
-  const totalCaPerdu = [...openEpisodes, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  const totalCaPerdu = [...episodesForStats, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
   // CORRIGÉ le 19/10/2026 (bug signalé avec capture : donut "99% sans commande" au global, alors
   // que le détail par rayon montrait clairement de nombreux articles "Avec commande") — causeProposee
@@ -886,22 +921,27 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30 } = {
   // seuls les épisodes RÉSOLUS (où plus rien ne peut changer) gardent causeProposee tel quel, un
   // instantané historique cohérent avec le principe du reste du module (jamais réévalué après coup).
   const causeCounts = {};
-  for (const e of openEpisodes) {
-    const cause = DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE';
-    causeCounts[cause] = (causeCounts[cause] || 0) + 1;
+  for (const e of episodesForStats) {
+    if (periodMode && e.status === 'RESOLUE') {
+      causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
+    } else {
+      const cause = DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE';
+      causeCounts[cause] = (causeCounts[cause] || 0) + 1;
+    }
   }
   for (const e of resolvedEpisodes) {
     causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
   }
 
   return {
-    openCount: openEpisodes.length,
+    openCount: episodesForStats.length,
     avgDurationHours: Math.round(avgDurationHours * 10) / 10,
     totalCaPerduEstime: Math.round(totalCaPerdu),
     causeCounts,
-    openEpisodes,
+    openEpisodes: episodesForStats,
     totalOrderableArticles,
-    ruptureRatioPct: totalOrderableArticles > 0 ? Math.round((openEpisodes.length / totalOrderableArticles) * 1000) / 10 : null,
+    ruptureRatioPct: totalOrderableArticles > 0 ? Math.round((episodesForStats.length / totalOrderableArticles) * 1000) / 10 : null,
+    periodMode,
   };
 }
 
@@ -1003,9 +1043,17 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
  * indicateurs que la vue réseau (§2), appliqués au niveau du champ choisi. `extraWhere` permet de
  * restreindre à un secteur précis pour lister seulement SES rayons (étape intermédiaire Rayon).
  */
-async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackDays = 30, extraWhere = {}, noDataLabel } = {}) {
+async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackDays = 30, extraWhere = {}, noDataLabel, start, end } = {}) {
   const now = new Date();
   const resolvedSince = new Date(now.getTime() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
+
+  // Filtre de période optionnel — même principe que getDashboardSummary ci-dessus (demande
+  // explicite du 20/10/2026 : "quand je fait un filtre il doit etre appliqué sur tout"). En mode
+  // période, openEpisodes couvre tout épisode actif à un moment de [start, end] (EN_COURS ou
+  // RESOLUE), au lieu de seulement "encore ouvert maintenant".
+  const periodMode = !!(start && end);
+  const periodStart = periodMode ? new Date(start) : null;
+  const periodEnd = periodMode ? new Date(end) : null;
 
   // openEpisodes vient de getOpenEpisodes (et non d'une requête Prisma brute) depuis le 19/10/2026
   // (bug signalé avec capture : "Priorisation par rayon" affichait quasi 100% "Sans commande" sur
@@ -1016,14 +1064,23 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
   // coup en mémoire, cette fonction opérant toujours sur UN SEUL magasin (coût raisonnable,
   // contrairement à getDashboardSummaryAllShops qui reste sur l'ancienne requête brute pour cette
   // raison).
-  const allOpenEpisodes = await getOpenEpisodes(rposShopId);
+  const allOpenEpisodes = periodMode
+    ? (await prisma.stockoutEpisode.findMany({
+        where: { rposShopId, startedAt: { lte: periodEnd }, OR: [{ endedAt: null }, { endedAt: { gte: periodStart } }] },
+      })).map((e) => ({ ...e, durationHours: Math.round((((e.endedAt || now).getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10 }))
+    : await getOpenEpisodes(rposShopId);
   const openEpisodes = extraWhere.sector !== undefined
     ? allOpenEpisodes.filter((e) => (e.sector || null) === extraWhere.sector)
     : allOpenEpisodes;
-  const resolvedEpisodes = await prisma.stockoutEpisode.findMany({
-    where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince }, ...extraWhere },
-    select: { [field]: true, caPerdueEstime: true },
-  });
+  // En mode période, resolvedEpisodes n'est plus une requête séparée (tout est déjà dans
+  // openEpisodes ci-dessus, ouverts ET résolus confondus sur la fenêtre) — vide pour ne pas compter
+  // deux fois les mêmes épisodes résolus.
+  const resolvedEpisodes = periodMode
+    ? []
+    : await prisma.stockoutEpisode.findMany({
+        where: { rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince }, ...extraWhere },
+        select: { [field]: true, caPerdueEstime: true },
+      });
 
   if (!openEpisodes.length && !resolvedEpisodes.length) {
     return { found: true, groupCount: 0, groups: [], message: noDataLabel || 'Aucune rupture détectée pour ce magasin sur la période.' };
@@ -1067,7 +1124,10 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
 
     const causeCounts = {};
     for (const e of bucket.openEpisodes) {
-      const cause = DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE';
+      // En mode période, bucket.openEpisodes peut contenir des épisodes RESOLUE (cf. le mode
+      // mélangé ci-dessus) — on garde alors leur causeProposee figé (instantané historique
+      // acceptable, rien ne peut plus changer sur un épisode déjà résolu), comme getDashboardSummary.
+      const cause = e.status === 'RESOLUE' ? e.causeProposee : (DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE');
       causeCounts[cause] = (causeCounts[cause] || 0) + 1;
     }
 

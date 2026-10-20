@@ -300,13 +300,18 @@ router.get('/stockout-rate', async (req, res) => {
 
 // GET /api/reassort/stockout-episodes - module Ruptures (cf. rupture.md) : épisodes en cours,
 // durée, cause diagnostiquée (sans données Cyrus, cf. stockoutEpisodeService.js) et pertes estimées.
+// start/end optionnels (demande explicite du 20/10/2026 : "quand je fait un filtre il doit etre
+// appliqué sur tout") — passés tels quels à getDashboardSummary, qui bascule alors en mode période
+// (ruptures actives pendant [start, end] au lieu de "encore ouvertes maintenant"). Sans ces deux
+// paramètres, comportement inchangé (état courant).
 router.get('/stockout-episodes', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getDashboardSummary(shopId);
+    const { start, end } = req.query;
+    const result = await getDashboardSummary(shopId, { start, end });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -335,7 +340,8 @@ router.get('/stockout-episodes/by-sector', async (req, res) => {
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getDashboardSummaryBySector(shopId);
+    const { start, end } = req.query;
+    const result = await getDashboardSummaryBySector(shopId, { start, end });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -352,7 +358,8 @@ router.get('/stockout-episodes/by-department', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const sector = typeof req.query.sector === 'string' ? req.query.sector : undefined;
-    const result = await getDashboardSummaryByDepartment(shopId, { sector });
+    const { start, end } = req.query;
+    const result = await getDashboardSummaryByDepartment(shopId, { sector, start, end });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
