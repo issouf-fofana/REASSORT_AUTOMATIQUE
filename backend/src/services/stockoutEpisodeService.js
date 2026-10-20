@@ -973,7 +973,7 @@ const DELIVERY_STATUS_TO_CAUSE = {
  * de sa situation de ruptures. Même principe que getStockoutRisksAllShops (chatbotToolsService.js) :
  * itère les magasins du périmètre, agrège, trie par magasin le plus touché en premier.
  */
-async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDays = 30 } = {}) {
+async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDays = 30, start, end } = {}) {
   // allowedShopIds === null signifie "pas de restriction" (ADMIN, cf. getAccessibleShopIds dans
   // middleware/auth.js) — distinct d'un tableau vide, qui signifierait "aucun magasin accessible"
   // pour un SUPERVISOR sans périmètre configuré. Même convention que getWeeklyConformityRate.
@@ -984,6 +984,14 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
     select: { rposShopId: true, reference: true, name: true },
   });
 
+  // Filtre de période optionnel (demande explicite du 20/10/2026 : "ajoute tout les filtre
+  // possible" sur la vue réseau) — même principe que getDashboardSummary/getDashboardSummaryByField
+  // : si start/end sont fournis, bascule vers "ruptures actives à un moment de la période" au lieu
+  // de "ruptures encore ouvertes maintenant".
+  const periodMode = !!(start && end);
+  const periodStart = periodMode ? new Date(start) : null;
+  const periodEnd = periodMode ? new Date(end) : null;
+
   // Un magasin à la fois en série ici bloquait toute la vue réseau sur N × (2-3 requêtes)
   // séquentielles (53 magasins mesurés en production = plus de 100 aller-retours DB l'un après
   // l'autre) — demande explicite du 20/10/2026 ("la vue pour tout les magasin aussi il faut
@@ -991,24 +999,29 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
   // parallèle (concurrence 10, même ordre de grandeur que les autres usages de mapWithConcurrency
   // dans ce fichier) au lieu d'un for...of séquentiel.
   const now = Date.now();
+  const resolvedSince = new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000);
   const perShopResults = await mapWithConcurrency(shops, 10, async (shop) => {
     const [openEpisodes, resolvedCount, resolvedWithLoss] = await Promise.all([
-      prisma.stockoutEpisode.findMany({ where: { rposShopId: shop.rposShopId, status: 'EN_COURS' } }),
-      prisma.stockoutEpisode.count({
-        where: {
-          rposShopId: shop.rposShopId,
-          status: 'RESOLUE',
-          endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
-        },
-      }),
-      prisma.stockoutEpisode.findMany({
-        where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
-        select: { caPerdueEstime: true },
-      }),
+      periodMode
+        ? prisma.stockoutEpisode.findMany({
+            where: { rposShopId: shop.rposShopId, startedAt: { lte: periodEnd }, OR: [{ endedAt: null }, { endedAt: { gte: periodStart } }] },
+          })
+        : prisma.stockoutEpisode.findMany({ where: { rposShopId: shop.rposShopId, status: 'EN_COURS' } }),
+      periodMode
+        ? 0 // en mode période, openEpisodes ci-dessus couvre déjà résolus ET ouverts, même convention que getDashboardSummary
+        : prisma.stockoutEpisode.count({
+            where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince } },
+          }),
+      periodMode
+        ? []
+        : prisma.stockoutEpisode.findMany({
+            where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: resolvedSince } },
+            select: { caPerdueEstime: true },
+          }),
     ]);
     if (!openEpisodes.length && !resolvedCount) return null;
 
-    const durations = openEpisodes.map((e) => (now - e.startedAt.getTime()) / (60 * 60 * 1000));
+    const durations = openEpisodes.map((e) => (((periodMode ? e.endedAt : null) || new Date(now)).getTime() - e.startedAt.getTime()) / (60 * 60 * 1000));
     const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
     const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
     const noOrderCount = openEpisodes.filter((e) => NO_ORDER_CAUSES.has(e.causeProposee)).length;

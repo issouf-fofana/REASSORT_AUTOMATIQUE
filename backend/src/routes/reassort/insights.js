@@ -324,7 +324,8 @@ router.get('/stockout-episodes', async (req, res) => {
 router.get('/stockout-episodes/all-shops', requireAdminOrSupervisor, async (req, res) => {
   try {
     const shopIdFilter = await getAccessibleShopIds(req);
-    const result = await getDashboardSummaryAllShops(shopIdFilter);
+    const { start, end } = req.query;
+    const result = await getDashboardSummaryAllShops(shopIdFilter, { start, end });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
