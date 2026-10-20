@@ -1941,6 +1941,19 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     });
   }
 
+  // Recalcule immédiatement le statut précalculé des ruptures (hasOrder/reactionStatus/
+  // deliveryStatus) de ce magasin — demande explicite du 20/10/2026 : la commande qu'on vient de
+  // valider peut changer le statut de ruptures EN_COURS sur cet article, mais le job planifié
+  // (stockoutStatusRecalcJob.js) ne tourne que toutes les 5 min. En arrière-plan (jamais attendu) :
+  // ne doit jamais retarder la réponse HTTP de validation, qui a déjà ses propres utilisateurs en
+  // attente. Échec non bloquant, le prochain passage du job planifié reste le filet de sécurité.
+  if (createdOrders.length) {
+    const { computeAndPersistOpenEpisodeStatuses } = require('./stockoutEpisodeService');
+    computeAndPersistOpenEpisodeStatuses(shopId).catch((err) =>
+      console.error('[validateProposalDepartment] Recalcul du statut des ruptures en arrière-plan : échec non bloquant —', err.message)
+    );
+  }
+
   // skippedIneligible : articles sans aucun fournisseur valide (origin NONE, connus dès la
   // génération), distincts de allFailedLines (rejetés par RPOS, ou détectés par la re-vérification
   // fraîche juste avant l'envoi dans createOrderForLines pour un groupe donné) — les deux ensemble

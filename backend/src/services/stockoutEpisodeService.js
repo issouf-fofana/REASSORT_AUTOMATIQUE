@@ -187,6 +187,14 @@ async function detectStockoutEpisodes(rposShopId) {
           causeProposee: diagnosis.cause,
           niveauConfiance: diagnosis.confiance,
           commandeRefUtile: diagnosis.commandeRef || null,
+          // Pré-rempli dès la création (demande du 20/10/2026 : précalcul du statut, jamais de
+          // recalcul à la lecture) — état correct par construction : un épisode qui vient d'être
+          // détecté n'a par définition encore AUCUNE commande, inutile d'attendre le prochain
+          // passage de stockoutStatusRecalcJob.js pour afficher le bon statut initial.
+          hasOrder: false,
+          reactionStatus: 'EN_ATTENTE',
+          deliveryStatus: 'SANS_COMMANDE',
+          statusComputedAt: snap.capturedAt,
         },
       });
     } else if (snap.stock > 0 && open) {
@@ -594,17 +602,19 @@ async function estimateDemand(rposShopId, ean, fromDate, coverageDays) {
 }
 
 /**
- * Liste les épisodes en cours d'un magasin, pour le dashboard. durationHours calculé à la volée
- * (pas stocké, puisque l'épisode est toujours ouvert).
+ * Calcule hasOrder/reactionStatus/deliveryStatus/orderCreatedAt pour tous les épisodes EN_COURS
+ * d'un magasin ET LES ÉCRIT EN BASE (StockoutEpisode.hasOrder/reactionStatus/deliveryStatus/
+ * orderCreatedAt/actualReceptionDateStatus/statusComputedAt) — précalcul demandé explicitement le
+ * 20/10/2026 : "il ne calcule ps a meme temps et il doit avoir un syste de calcul deja fais en
+ * base... le but est d'optimisé", sur le modèle déjà en place pour qtyPerdueEstimee/caPerdueEstime
+ * (stockoutLossRecalcJob.js). Appelée par stockoutStatusRecalcJob.js (toutes les 5-10 min) pour TOUT
+ * le réseau, et par les hooks ciblés sur événements connus (validation de commande, détection
+ * d'arrivage) pour un recalcul immédiat sans attendre le prochain passage du job.
  *
- * Enrichi le 17/10/2026 (demande explicite : "on doit voir... qui son en rupture et qui on une
- * commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de commande dessu") avec
- * hasOrder + reactionStatus (version LÉGÈRE, sans appel RPOS ni recalcul de perte — juste "une
- * commande a-t-elle été créée depuis le début de CET épisode ?", en masse pour tout le magasin en 2
- * requêtes plutôt qu'une par article comme getEpisodeDetail, potentiellement des centaines
- * d'articles en rupture sur un même rayon).
+ * Toute la logique de calcul reste ici (une seule source de vérité) — getOpenEpisodes() ci-dessous
+ * ne fait plus que LIRE ces colonnes déjà calculées, zéro recalcul à la lecture.
  */
-async function getOpenEpisodes(rposShopId) {
+async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   const episodes = await prisma.stockoutEpisode.findMany({
     where: { rposShopId, status: 'EN_COURS' },
     orderBy: { startedAt: 'asc' },
@@ -695,7 +705,7 @@ async function getOpenEpisodes(rposShopId) {
     arrivalDatesByEan.get(m.ean).push(m.date);
   }
 
-  return episodes.map((e) => {
+  const computed = episodes.map((e) => {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
     // BUG CORRIGÉ le 19/10/2026 (signalé avec capture : mail d'alerte annonçant "sans commande"
@@ -755,7 +765,10 @@ async function getOpenEpisodes(rposShopId) {
     // startedAt/orderCreatedAt renvoyés en plus de durationHours (déjà calculé côté serveur) pour
     // que le frontend puisse faire tourner un vrai chronomètre live (demande explicite du
     // 17/10/2026 : "le user doit voir compté... le compteur de rupture avant commande continue
-    // toujour de compté") plutôt qu'une valeur figée au chargement de la page.
+    // toujour de compté") plutôt qu'une valeur figée au chargement de la page. durationHours n'est
+    // PAS persisté (dépend de "maintenant", recalculé à chaque lecture côté getOpenEpisodes à
+    // partir de startedAt, coût négligeable — un simple Date.now() - startedAt, rien à voir avec le
+    // recalcul coûteux de hasOrder/deliveryStatus qui, lui, est maintenant précalculé).
     return {
       ...e,
       durationHours,
@@ -767,6 +780,64 @@ async function getOpenEpisodes(rposShopId) {
       sellingPrice: priceByEan.get(e.ean) ?? null,
     };
   });
+
+  await mapWithConcurrency(computed, 20, async (e) => {
+    await prisma.stockoutEpisode.update({
+      where: { id: e.id },
+      data: {
+        hasOrder: e.hasOrder,
+        reactionStatus: e.reactionStatus,
+        deliveryStatus: e.deliveryStatus,
+        orderCreatedAt: e.orderCreatedAt,
+        actualReceptionDateStatus: e.actualReceptionDate,
+        statusComputedAt: now,
+      },
+    });
+  });
+
+  return computed;
+}
+
+/**
+ * Liste les épisodes en cours d'un magasin, pour le dashboard — RÉÉCRIT le 20/10/2026 (demande
+ * explicite : "il ne calcule ps a meme temps et il doit avoir un syste de calcul deja fais en
+ * base... quand un user viens il clique juste pour voir sans charger"). Ne fait plus QUE lire
+ * hasOrder/reactionStatus/deliveryStatus/orderCreatedAt déjà calculés et stockés par
+ * computeAndPersistOpenEpisodeStatuses() ci-dessus (job planifié + hooks sur événements connus) —
+ * zéro recalcul de matching commande/arrivage à la lecture, juste une requête SQL simple + un prix
+ * en masse (ProductCache) et durationHours (Date.now() - startedAt, coût négligeable).
+ *
+ * Si statusComputedAt est encore null (épisode tout juste détecté, pas encore passé par le job),
+ * les colonnes précalculées restent null elles aussi — reflété fidèlement ici (hasOrder: null, etc.)
+ * plutôt que de recalculer en direct, pour ne jamais réintroduire la lenteur corrigée. Le job
+ * tournant toutes les 5-10 min, cette fenêtre reste courte en pratique.
+ */
+async function getOpenEpisodes(rposShopId) {
+  const episodes = await prisma.stockoutEpisode.findMany({
+    where: { rposShopId, status: 'EN_COURS' },
+    orderBy: { startedAt: 'asc' },
+  });
+  if (!episodes.length) return [];
+
+  const now = new Date();
+  const eans = [...new Set(episodes.map((e) => e.ean))];
+  const priceByEan = new Map(
+    (await prisma.productCache.findMany({
+      where: { rposShopId, ean: { in: eans } },
+      select: { ean: true, sellingPrice: true },
+    })).map((p) => [p.ean, p.sellingPrice])
+  );
+
+  return episodes.map((e) => ({
+    ...e,
+    durationHours: Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10,
+    hasOrder: e.hasOrder,
+    reactionStatus: e.reactionStatus,
+    deliveryStatus: e.deliveryStatus,
+    orderCreatedAt: e.orderCreatedAt,
+    actualReceptionDate: e.actualReceptionDateStatus,
+    sellingPrice: priceByEan.get(e.ean) ?? null,
+  }));
 }
 
 /**
@@ -1705,4 +1776,4 @@ N'invente aucun fait, aucune date, aucun montant qui ne figure pas ci-dessus.`;
   };
 }
 
-module.exports = { detectStockoutEpisodes, resolveEpisodesFromArrivalMoves, catchUpResolveStockoutEpisodes, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };
+module.exports = { detectStockoutEpisodes, resolveEpisodesFromArrivalMoves, catchUpResolveStockoutEpisodes, computeAndPersistOpenEpisodeStatuses, getOpenEpisodes, getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend, diagnoseCause, estimateLoss, getPeriodLossSummary, analyzePeriodLoss, computeExpectedReceptionDate, diagnoseDeliveryDelay, analyzeEpisode };

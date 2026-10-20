@@ -11,6 +11,7 @@ const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutCatchUpResolveJob } = require('./stockoutCatchUpResolveJob');
 const { runStockoutProductCacheRefreshJob } = require('./stockoutProductCacheRefreshJob');
+const { runStockoutStatusRecalcJob } = require('./stockoutStatusRecalcJob');
 const { runStockoutAlertJob } = require('./stockoutAlertJob');
 const { runStockoutPeriodSummarySnapshotJob } = require('./stockoutPeriodSummarySnapshotJob');
 const { runOrderIdentitySync } = require('./orderIdentitySyncJob');
@@ -35,6 +36,7 @@ let currentStockoutLossRecalcTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutCatchUpResolveTask = null;
 let currentStockoutProductCacheRefreshTask = null;
+let currentStockoutStatusRecalcTask = null;
 let currentStockoutAlertTask = null;
 let currentStockoutPeriodSummarySnapshotTask = null;
 let currentOrderIdentitySyncTask = null;
@@ -60,6 +62,7 @@ const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures 
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutCatchUpResolveLock = createJobLock('Rattrapage de résolution des ruptures (arrivage déjà en base)');
 const stockoutProductCacheRefreshLock = createJobLock('Resynchronisation du stock RPOS des ruptures en cours');
+const stockoutStatusRecalcLock = createJobLock('Précalcul du statut des ruptures en cours');
 const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
 const stockoutPeriodSummarySnapshotLock = createJobLock('Précalcul de l\'analyse des pertes par période (ruptures)');
 const orderIdentitySyncLock = createJobLock('Synchronisation identité RPOS des commandes');
@@ -398,6 +401,35 @@ async function startOrRestartStockoutProductCacheRefreshJob() {
   console.log(`⏰ Resynchronisation du stock RPOS des ruptures planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme le précalcul du statut dynamique des ruptures EN_COURS (stockoutStatusRecalcJob.js). */
+async function startOrRestartStockoutStatusRecalcJob() {
+  if (currentStockoutStatusRecalcTask) {
+    currentStockoutStatusRecalcTask.stop();
+    currentStockoutStatusRecalcTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCKOUT_STATUS_RECALC_ENABLED))) {
+    console.log('⏸️  Précalcul du statut des ruptures désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCKOUT_STATUS_RECALC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), précalcul du statut des ruptures non planifié`);
+    return;
+  }
+
+  currentStockoutStatusRecalcTask = cron.schedule(cronSchedule, () => {
+    stockoutStatusRecalcLock(async () => {
+      console.log('[cron] Démarrage du précalcul du statut des ruptures...');
+      await trackJobRun('stockoutStatusRecalc', runStockoutStatusRecalcJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Précalcul du statut des ruptures planifié: ${cronSchedule}`);
+}
+
 /** (Re)programme le précalcul nocturne de "Analyse des pertes sur une période" (stockoutPeriodSummarySnapshotJob.js). */
 async function startOrRestartStockoutPeriodSummarySnapshotJob() {
   if (currentStockoutPeriodSummarySnapshotTask) {
@@ -706,6 +738,7 @@ module.exports = {
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutCatchUpResolveJob,
   startOrRestartStockoutProductCacheRefreshJob,
+  startOrRestartStockoutStatusRecalcJob,
   startOrRestartStockoutAlertJob,
   startOrRestartStockoutPeriodSummarySnapshotJob,
   startOrRestartOrderIdentitySyncJob,

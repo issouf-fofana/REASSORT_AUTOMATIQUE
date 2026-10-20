@@ -2122,6 +2122,23 @@ model StockoutEpisode {
   qtyPerdueEstimee Float? @map("qty_perdue_estimee")
   caPerdueEstime   Float? @map("ca_perdue_estime")
 
+  // Statut dynamique PRÉCALCULÉ (demande explicite du 20/10/2026 : "il ne calcule ps a meme temps
+  // et il doit avoir un syste de calcul deja fais en base... le but est d'optimisé") — avant ces
+  // colonnes, getOpenEpisodes() recalculait hasOrder/reactionStatus/deliveryStatus EN DIRECT à
+  // chaque chargement de la page Ruptures (matching commande + mouvement d'arrivage par article),
+  // contrairement à qtyPerdueEstimee/caPerdueEstime déjà précalculés par stockoutLossRecalcJob.js.
+  // Même principe désormais appliqué ici : stockoutStatusRecalcJob.js (toutes les 5-10 min) ET des
+  // hooks déclenchés par les événements connus (commande validée, arrivage détecté) maintiennent
+  // ces colonnes à jour — la page lit ces valeurs stockées, zéro recalcul à l'affichage.
+  // null tant que le premier passage du job n'a pas encore eu lieu sur un épisode tout juste
+  // détecté (jamais une erreur, juste "pas encore calculé").
+  hasOrder                  Boolean?  @map("has_order")
+  reactionStatus            String?   @map("reaction_status") // 'REAGI' | 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI'
+  deliveryStatus            String?   @map("delivery_status") // 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE' | 'LIVRAISON_DOUTEUSE'
+  orderCreatedAt            DateTime? @map("order_created_at")
+  actualReceptionDateStatus DateTime? @map("actual_reception_date_status") // copie de ProposalOrder.actualReceptionDate au moment du calcul — jamais une preuve de réception réelle (cf. commentaire sur ce champ ailleurs dans ce fichier)
+  statusComputedAt          DateTime? @map("status_computed_at") // horodatage du dernier recalcul de ces colonnes — permet de savoir si une valeur est périmée
+
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Vue "ruptures en cours d'un magasin" (dashboard) et recherche d'un épisode ouvert pour un

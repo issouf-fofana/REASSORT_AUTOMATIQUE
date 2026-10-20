@@ -52,6 +52,9 @@ const KEYS = {
   // doit etre le stok tu pos" après qu'un déficit historique dans StockMove (ventes mal enregistrées
   // accumulées) ait pu faire paraître un article toujours en rupture malgré un vrai arrivage.
   STOCKOUT_PRODUCT_CACHE_REFRESH_CRON: 'STOCKOUT_PRODUCT_CACHE_REFRESH_CRON',
+  // Précalcul du statut dynamique des ruptures (hasOrder/reactionStatus/deliveryStatus) —
+  // demande explicite du 20/10/2026 : "il ne calcule ps a meme temps... le but est d'optimisé".
+  STOCKOUT_STATUS_RECALC_CRON: 'STOCKOUT_STATUS_RECALC_CRON',
   // Précalcul nocturne de "Analyse des pertes sur une période" (demande explicite du 19/10/2026 :
   // "l'analyse ne doit pas ce fait a achaque actualisation de la page il doit etre fait pas defaut
   // et stocke en base") — une fois par nuit suffit, cette analyse (période par défaut 30j) n'a pas
@@ -182,6 +185,7 @@ const KEYS = {
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   STOCKOUT_CATCH_UP_RESOLVE_ENABLED: 'STOCKOUT_CATCH_UP_RESOLVE_ENABLED',
   STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED: 'STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED',
+  STOCKOUT_STATUS_RECALC_ENABLED: 'STOCKOUT_STATUS_RECALC_ENABLED',
   STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
   STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED',
   ORDER_IDENTITY_SYNC_ENABLED: 'ORDER_IDENTITY_SYNC_ENABLED',
@@ -303,6 +307,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_CRON]: () => process.env.STOCKOUT_CATCH_UP_RESOLVE_CRON || '20 * * * *',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '*/15 * * * *',
+  [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
@@ -420,6 +425,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED]: () => 'true',
+  [KEYS.STOCKOUT_STATUS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.ORDER_IDENTITY_SYNC_ENABLED]: () => 'true',

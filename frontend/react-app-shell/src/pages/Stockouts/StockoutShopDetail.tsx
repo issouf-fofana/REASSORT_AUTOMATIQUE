@@ -510,8 +510,13 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       </tr>
                     ) : (
                       articlesInDepartment.map((e) => {
-                        const reaction = REACTION_LIGHT_META[e.reactionStatus];
-                        const delivery = DELIVERY_STATUS_META[e.deliveryStatus];
+                        // Repli "Calcul en cours" (demande du 20/10/2026, statut désormais
+                        // précalculé en base par stockoutStatusRecalcJob.js) — un épisode tout juste
+                        // détecté peut, en théorie, être lu avant le premier passage du job (fenêtre
+                        // de quelques minutes au pire) ; ce repli évite un crash sur une clé absente
+                        // plutôt que de supposer que la colonne est toujours renseignée.
+                        const reaction = REACTION_LIGHT_META[e.reactionStatus] || { label: 'Calcul en cours…', badge: 'reassort-badge-neutral' };
+                        const delivery = DELIVERY_STATUS_META[e.deliveryStatus] || { label: 'Calcul en cours…', badge: 'reassort-badge-neutral' };
                         return (
                           <tr key={e.id} role="button" style={{ cursor: 'pointer' }} onClick={() => navigate(`/stockouts/episode/${e.id}?from=${encodeURIComponent(`/stockouts?${searchParams.toString()}`)}`)}>
                             <td>{e.label || e.ean}</td>

@@ -6,7 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -254,6 +254,10 @@ async function start() {
     // le stock recalculé depuis l'historique StockMove restait fortement négatif malgré un vrai
     // arrivage (horaire configurable, toutes les 15 min par défaut).
     await startOrRestartStockoutProductCacheRefreshJob();
+    // Précalcule hasOrder/reactionStatus/deliveryStatus pour chaque rupture EN_COURS — demande
+    // explicite : "il ne calcule ps a meme temps... le but est d'optimisé", même principe que le
+    // recalcul de perte ci-dessus (horaire configurable, toutes les 5 min par défaut).
+    await startOrRestartStockoutStatusRecalcJob();
     await startOrRestartStockoutAlertJob();
     // Précalcule chaque nuit "Analyse des pertes sur une période" (30 derniers jours) pour que la
     // page l'affiche instantanément au lieu de recalculer à chaque chargement (horaire configurable).
@@ -297,6 +301,12 @@ async function start() {
     // arrière-plan sans bloquer le démarrage, comme les autres rattrapages ici.
     const { runStockoutProductCacheRefreshJob } = require('./jobs/stockoutProductCacheRefreshJob');
     runStockoutProductCacheRefreshJob().catch((err) => console.error('[startup] Resynchronisation du stock RPOS en arrière-plan : échec non bloquant —', err.message));
+    // Précalcul immédiat du statut des ruptures déjà ouvertes AVANT ce déploiement (demande
+    // explicite du 20/10/2026 : "il ne calcule ps a meme temps... le but est d'optimisé") — sans ce
+    // passage immédiat, les épisodes déjà ouverts resteraient avec hasOrder/deliveryStatus à null
+    // jusqu'au premier déclenchement planifié (jusqu'à 5 min, cf. STOCKOUT_STATUS_RECALC_CRON).
+    const { runStockoutStatusRecalcJob } = require('./jobs/stockoutStatusRecalcJob');
+    runStockoutStatusRecalcJob().catch((err) => console.error('[startup] Précalcul du statut des ruptures en arrière-plan : échec non bloquant —', err.message));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
