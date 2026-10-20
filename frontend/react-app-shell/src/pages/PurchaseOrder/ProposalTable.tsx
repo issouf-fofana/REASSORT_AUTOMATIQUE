@@ -278,13 +278,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const gridApiRef = useRef<any>(null);
   const lineStateRef = useRef<Map<string, LineState>>(new Map());
   const pendingFilterModelRef = useRef<Record<string, unknown> | null>(null);
-  // Scrollbar horizontale dupliquée en haut du tableau (demande du 30/09/2026) : avec beaucoup de
-  // colonnes, la scrollbar native ag-grid en bas du tableau est trop fine/difficile à attraper sans
-  // faire défiler toute la page pour la voir. syncingScrollRef évite une boucle infinie entre les
-  // deux barres (chacune déclenche un scroll sur l'autre).
-  const topScrollRef = useRef<HTMLDivElement>(null);
-  const topScrollInnerRef = useRef<HTMLDivElement>(null);
-  const syncingScrollRef = useRef(false);
   const lastPurchaseScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function getLineState(l: ProposalLine): LineState {
@@ -755,39 +748,8 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         requestAnimationFrame(() => {
           setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
         });
-        // Synchronise la largeur du faux contenu de la barre du haut sur la largeur scrollable
-        // réelle du tableau (le viewport horizontal natif ag-grid, .ag-body-horizontal-scroll-*).
-        // Recalculée à chaque resize/changement de colonnes visibles, pas seulement au montage.
-        const syncTopScrollWidth = () => {
-          const nativeContainer = gridDivRef.current?.querySelector('.ag-body-horizontal-scroll-container') as HTMLElement | null;
-          if (nativeContainer && topScrollInnerRef.current) {
-            topScrollInnerRef.current.style.width = nativeContainer.style.width || `${nativeContainer.scrollWidth}px`;
-          }
-        };
-        requestAnimationFrame(syncTopScrollWidth);
-        window.addEventListener('resize', syncTopScrollWidth);
-        gridApiRef.current?.addEventListener('columnVisible', syncTopScrollWidth);
-        gridApiRef.current?.addEventListener('gridSizeChanged', syncTopScrollWidth);
-
-        // Répercute le scroll de la barre du haut sur le viewport natif ag-grid (pas d'API publique
-        // pour positionner le scroll horizontal en pixels — on manipule directement le DOM natif,
-        // comme onBodyScroll ci-dessous le fait dans l'autre sens).
-        const nativeViewport = gridDivRef.current?.querySelector('.ag-body-horizontal-scroll-viewport') as HTMLElement | null;
-        topScrollRef.current?.addEventListener('scroll', () => {
-          if (syncingScrollRef.current || !nativeViewport || !topScrollRef.current) return;
-          syncingScrollRef.current = true;
-          nativeViewport.scrollLeft = topScrollRef.current.scrollLeft;
-          syncingScrollRef.current = false;
-        });
       },
-      onBodyScroll: (e: any) => {
-        // Répercute le scroll natif ag-grid (souris/trackpad/scrollbar du bas) sur la barre du haut,
-        // sans déclencher en retour son propre handler 'scroll' (cf. syncingScrollRef ci-dessous).
-        if (syncingScrollRef.current || !topScrollRef.current) return;
-        syncingScrollRef.current = true;
-        topScrollRef.current.scrollLeft = e.left;
-        syncingScrollRef.current = false;
-
+      onBodyScroll: () => {
         // Bug trouvé le 08/10/2026 : "Dernier achat"/"Dernière vente" restaient bloqués sur
         // "Chargement..." quand ces colonnes sont hors du viewport horizontal initial (hide:true par
         // défaut, affichées ensuite via le bouton "Colonnes") — AG Grid virtualise aussi les COLONNES
@@ -940,9 +902,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   return (
     <div>
       <div ref={toolbarRef} className="d-flex gap-2 mb-2"></div>
-      <div ref={topScrollRef} className="reassort-grid-top-scroll">
-        <div ref={topScrollInnerRef}></div>
-      </div>
       <div ref={gridDivRef} id="reassort-grid"></div>
     </div>
   );
