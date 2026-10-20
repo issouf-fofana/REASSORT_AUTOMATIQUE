@@ -984,35 +984,40 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
     select: { rposShopId: true, reference: true, name: true },
   });
 
-  const results = [];
-  for (const shop of shops) {
-    const [openEpisodes, resolvedCount] = await Promise.all([
+  // Un magasin à la fois en série ici bloquait toute la vue réseau sur N × (2-3 requêtes)
+  // séquentielles (53 magasins mesurés en production = plus de 100 aller-retours DB l'un après
+  // l'autre) — demande explicite du 20/10/2026 ("la vue pour tout les magasin aussi il faut
+  // corrige ca aussi ca dure"). Les magasins sont indépendants les uns des autres : traités en
+  // parallèle (concurrence 10, même ordre de grandeur que les autres usages de mapWithConcurrency
+  // dans ce fichier) au lieu d'un for...of séquentiel.
+  const now = Date.now();
+  const perShopResults = await mapWithConcurrency(shops, 10, async (shop) => {
+    const [openEpisodes, resolvedCount, resolvedWithLoss] = await Promise.all([
       prisma.stockoutEpisode.findMany({ where: { rposShopId: shop.rposShopId, status: 'EN_COURS' } }),
       prisma.stockoutEpisode.count({
         where: {
           rposShopId: shop.rposShopId,
           status: 'RESOLUE',
-          endedAt: { gte: new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
+          endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) },
         },
       }),
+      prisma.stockoutEpisode.findMany({
+        where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
+        select: { caPerdueEstime: true },
+      }),
     ]);
-    if (!openEpisodes.length && !resolvedCount) continue;
+    if (!openEpisodes.length && !resolvedCount) return null;
 
-    const now = Date.now();
     const durations = openEpisodes.map((e) => (now - e.startedAt.getTime()) / (60 * 60 * 1000));
     const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
     const longEpisodesCount = durations.filter((d) => d >= LONG_EPISODE_HOURS).length;
     const noOrderCount = openEpisodes.filter((e) => NO_ORDER_CAUSES.has(e.causeProposee)).length;
 
-    const resolvedWithLoss = await prisma.stockoutEpisode.findMany({
-      where: { rposShopId: shop.rposShopId, status: 'RESOLUE', endedAt: { gte: new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000) } },
-      select: { caPerdueEstime: true },
-    });
     // caPerdueEstime lu depuis la valeur stockée pour tous les épisodes (EN_COURS inclus, maintenue
     // à jour par stockoutLossRecalcJob.js) — plus de recalcul temps réel ici, cf. getDashboardSummary.
     const totalCaPerdu = resolvedWithLoss.reduce((s, e) => s + (e.caPerdueEstime || 0), 0) + openEpisodes.reduce((s, e) => s + (e.caPerdueEstime || 0), 0);
 
-    results.push({
+    return {
       rposShopId: shop.rposShopId,
       shopReference: shop.reference,
       shopName: shop.name,
@@ -1022,9 +1027,10 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
       longEpisodesCount,
       noOrderCount,
       totalCaPerduEstime: Math.round(totalCaPerdu),
-    });
-  }
+    };
+  });
 
+  const results = perShopResults.filter(Boolean);
   results.sort((a, b) => b.openCount - a.openCount);
 
   if (!results.length) return { found: true, shopCount: 0, shops: [], message: 'Aucun magasin avec une rupture détectée sur la période.' };
