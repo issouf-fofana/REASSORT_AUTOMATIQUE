@@ -8,6 +8,12 @@ interface Decision {
   quantity: number;
   excluded: boolean;
   price: number;
+  // ean ajouté le 20/10/2026 (demande explicite : "donne moi la possibilité de choisir les commande
+  // a cree tu vois ? actu tout es coché je peux pas chosir le LC seul sil le LD... donne la
+  // possiblité de faire un ou plusieur choix") — permet de faire correspondre chaque décision à son
+  // groupe fournisseur dans groupingPreview (qui, lui, liste les articles par EAN) pour pouvoir
+  // exclure en bloc les lignes d'un fournisseur DÉCOCHÉ avant l'envoi, sans jamais toucher au reste.
+  ean?: string;
 }
 
 interface IneligibleLine {
@@ -135,6 +141,13 @@ export function ValidationFlow({
   const [ineligibleLines, setIneligibleLines] = useState<IneligibleLine[] | null>(null);
   const [groupingPreview, setGroupingPreview] = useState<SupplierGroupingPreview | null>(null);
   const [loadingGroupingPreview, setLoadingGroupingPreview] = useState(false);
+  // Groupes fournisseur DÉCOCHÉS par l'utilisateur (demande explicite du 20/10/2026 : "donne moi la
+  // possibilité de choisir les commande a cree... actu tout es coché je peux pas chosir le LC seul
+  // sil le LD... donne la possiblité de faire un ou plusieur choix") — clé = `${deliveryType}::
+  // ${supplierId}`, vide par défaut (tous les groupes cochés/inclus, comportement d'origine inchangé
+  // si l'utilisateur ne touche à rien). Réinitialisé à chaque nouvel aperçu (nouvelle ouverture de
+  // la modale), jamais conservé d'une validation à l'autre.
+  const [excludedSupplierGroups, setExcludedSupplierGroups] = useState<Set<string>>(new Set());
   const [mailRecipients, setMailRecipients] = useState<{ email: string; name: string | null; role: string }[]>([]);
 
   // Suivi détaillé étape par étape de l'envoi (demande explicite du 08/10/2026 : "fait un style pour
@@ -191,6 +204,7 @@ export function ValidationFlow({
     // n'a pas encore cet aperçu dédié.
     if (departmentValidation) {
       setGroupingPreview(null);
+      setExcludedSupplierGroups(new Set());
       setLoadingGroupingPreview(true);
       try {
         const preview = await apiFetch<SupplierGroupingPreview>(`/reassort/proposal/${proposalId}/preview-department-grouping?${shopQueryParam}`, {
@@ -348,7 +362,24 @@ export function ValidationFlow({
 
   async function submitValidation(validateAfterCreate: boolean) {
     if (!confirmData) return;
-    const { decisions, reference: ref, comment: cmt } = confirmData;
+    // Applique les groupes fournisseur décochés (demande explicite du 20/10/2026) — construit
+    // l'ensemble des EAN appartenant aux groupes exclus depuis groupingPreview, puis marque
+    // excluded=true sur les decisions correspondantes AVANT l'envoi, sans jamais modifier
+    // l'état réel de la proposition (la case à cocher de l'article dans le tableau principal reste
+    // intacte) : un groupe décoché ici n'est exclu que de CETTE validation précise.
+    const excludedEans = new Set<string>();
+    if (groupingPreview && excludedSupplierGroups.size > 0) {
+      for (const o of groupingPreview.orders) {
+        const groupKey = `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
+        if (excludedSupplierGroups.has(groupKey)) {
+          for (const a of o.articles) excludedEans.add(a.ean);
+        }
+      }
+    }
+    const decisions = excludedEans.size
+      ? confirmData.decisions.map((d) => (d.ean && excludedEans.has(d.ean) ? { ...d, excluded: true } : d))
+      : confirmData.decisions;
+    const { reference: ref, comment: cmt } = confirmData;
     setConfirmData(null);
     setSending(true);
     resetSteps(validateAfterCreate);
@@ -620,16 +651,49 @@ export function ValidationFlow({
                       <div className={`alert ${groupingPreview.orderCount > 1 ? 'alert-warning' : 'alert-info'} small mt-2 mb-0`}>
                         <iconify-icon icon="solar:bill-list-bold-duotone"></iconify-icon>{' '}
                         <strong>
-                          Ceci va créer {groupingPreview.orderCount} commande{groupingPreview.orderCount > 1 ? 's' : ''} distincte
-                          {groupingPreview.orderCount > 1 ? 's' : ''} sur RPOS :
+                          Ceci va créer {groupingPreview.orderCount - excludedSupplierGroups.size} commande
+                          {groupingPreview.orderCount - excludedSupplierGroups.size > 1 ? 's' : ''} distincte
+                          {groupingPreview.orderCount - excludedSupplierGroups.size > 1 ? 's' : ''} sur RPOS :
                         </strong>
-                        <ul className="mb-0 mt-1">
-                          {groupingPreview.orders.map((o) => (
-                            <li key={o.supplierId || 'none'}>
-                              <strong>{o.deliveryType}</strong> — {o.supplierName} : {o.articleCount} article(s)
-                            </li>
-                          ))}
-                        </ul>
+                        {/* Choix par groupe fournisseur ajouté le 20/10/2026 (demande explicite :
+                            "je peux pas chosir le LC seul sil le LD... donne la possiblité de faire
+                            un ou plusieur choix") — chaque groupe (LC central ou LD par fournisseur
+                            de repli) a désormais sa propre case à cocher, plutôt qu'un bloc tout ou
+                            rien. Décocher un groupe exclut SES articles de la commande ENVOYÉE (pas
+                            de la proposition elle-même, qui reste inchangée pour une validation
+                            ultérieure) — les autres groupes restent inclus normalement. */}
+                        <div className="mt-2 d-flex flex-column gap-1">
+                          {groupingPreview.orders.map((o) => {
+                            const groupKey = `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
+                            const isExcluded = excludedSupplierGroups.has(groupKey);
+                            return (
+                              <label key={groupKey} className="d-flex align-items-center gap-2 mb-0" style={{ cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input mt-0"
+                                  checked={!isExcluded}
+                                  onChange={(e) => {
+                                    setExcludedSupplierGroups((prev) => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.delete(groupKey); else next.add(groupKey);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span className={isExcluded ? 'text-muted text-decoration-line-through' : ''}>
+                                  <strong>{o.deliveryType}</strong> — {o.supplierName} : {o.articleCount} article(s)
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {excludedSupplierGroups.size > 0 && (
+                          <div className="mt-2 text-muted">
+                            <iconify-icon icon="solar:info-circle-bold-duotone"></iconify-icon> {excludedSupplierGroups.size} groupe(s)
+                            décoché(s) — ses/leurs articles ne seront PAS envoyés cette fois-ci, la proposition reste inchangée pour eux
+                            et pourra être validée séparément plus tard.
+                          </div>
+                        )}
                         {groupingPreview.unresolvedCount > 0 && (
                           <div className="mt-2">
                             <iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> {groupingPreview.unresolvedCount} article(s)
@@ -675,10 +739,22 @@ export function ValidationFlow({
                   <button type="button" className="btn btn-outline-secondary" onClick={() => setConfirmData(null)}>
                     Annuler
                   </button>
-                  <button type="button" className="btn btn-outline-primary" onClick={() => submitValidation(false)}>
+                  {/* Désactivés si TOUS les groupes fournisseur ont été décochés (demande explicite
+                      du 20/10/2026) — rien à envoyer dans ce cas, plutôt qu'un appel RPOS vide. */}
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary"
+                    disabled={!!groupingPreview && excludedSupplierGroups.size >= groupingPreview.orderCount}
+                    onClick={() => submitValidation(false)}
+                  >
                     Créer sur RPOS
                   </button>
-                  <button type="button" className="btn btn-success" onClick={() => submitValidation(true)}>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    disabled={!!groupingPreview && excludedSupplierGroups.size >= groupingPreview.orderCount}
+                    onClick={() => submitValidation(true)}
+                  >
                     Créer et valider sur RPOS
                   </button>
                 </div>

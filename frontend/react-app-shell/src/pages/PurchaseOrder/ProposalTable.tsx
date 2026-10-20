@@ -4,7 +4,7 @@ import type { LineState, Proposal, ProposalLine } from './types';
 
 export interface ProposalTableHandle {
   getDecisions: () => { lineId: string; quantity: number; excluded: boolean; price: number }[];
-  getDecisionsForDepartment: (department: string) => { lineId: string; quantity: number; excluded: boolean; price: number }[];
+  getDecisionsForDepartment: (department: string) => { lineId: string; quantity: number; excluded: boolean; price: number; ean: string }[];
   selectAllToggle: () => void;
   exportCsv: (shopReference: string) => void;
   unblockLine: (l: ProposalLine, quantity: number) => void;
@@ -884,7 +884,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         .filter((l) => (l.department || 'Sans rayon') === department)
         .map((l) => {
           const st = getLineState(l);
-          return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0 };
+          return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0, ean: l.ean };
         });
     },
     selectAllToggle() {
