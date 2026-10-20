@@ -124,51 +124,83 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
     );
   }
 
+  // Préréglage de période actuellement actif (surbrillance du bouton correspondant) — comparaison
+  // sur le jour plutôt que l'horodatage exact, periodEnd/periodStart étant des dates (pas des
+  // datetimes) ici.
+  const activePresetDays = (() => {
+    const start = new Date(periodStart).getTime();
+    const end = new Date(periodEnd).getTime();
+    const diffDays = Math.round((end - start) / (24 * 60 * 60 * 1000));
+    const today = new Date().toISOString().slice(0, 10);
+    if (periodEnd !== today) return null;
+    return [7, 30, 90].includes(diffDays) ? diffDays : null;
+  })();
+
   return (
     <div className="card">
+      <style>{`
+        .aso-filter-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .aso-filter-icon { width: 30px; height: 30px; border-radius: 7px; background: rgba(27,42,74,.05); display: flex; align-items: center; justify-content: center; font-size: 15px; color: #5B6B85; flex-shrink: 0; }
+        .aso-preset { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 6px; transition: background .15s, color .15s, border-color .15s; }
+        .aso-preset:hover { background: #F6F8FB; color: #1B2A4A; border-color: rgba(27,42,74,.2); }
+        .aso-preset.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
+        .aso-input { border: 1px solid rgba(27,42,74,.12); border-radius: 6px; font-size: .8rem; padding: 5px 10px; color: #1B2A4A; background: #fff; }
+        .aso-input:focus { outline: none; border-color: rgba(27,42,74,.3); box-shadow: 0 0 0 3px rgba(27,42,74,.06); }
+        .aso-toggle { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; transition: background .15s, color .15s, border-color .15s; }
+        .aso-toggle:hover { background: #F6F8FB; }
+        .aso-toggle.active { background: rgba(214,69,65,.08); color: #B8302C; border-color: rgba(214,69,65,.3); }
+        .aso-toggle input { accent-color: #B8302C; margin: 0; }
+      `}</style>
       <div className="card-body">
-        {/* Filtre de période (même composant visuel que StockoutShopDetail.tsx, cf. commentaire ci-dessus). */}
-        <div className="d-flex align-items-center gap-2 flex-wrap mb-3 pb-3" style={{ borderBottom: '1px solid rgba(27,42,74,.08)' }}>
-          {[
-            { label: '7 j', days: 7 },
-            { label: '30 j', days: 30 },
-            { label: '90 j', days: 90 },
-          ].map((preset) => (
-            <button
-              key={preset.days}
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              onClick={() => {
-                const end = new Date();
-                const start = new Date(end.getTime() - preset.days * 24 * 60 * 60 * 1000);
-                setPeriodEnd(end.toISOString().slice(0, 10));
-                setPeriodStart(start.toISOString().slice(0, 10));
-              }}
-            >
-              {preset.label}
-            </button>
-          ))}
-          <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
-          <span className="text-muted small">au</span>
-          <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+        {/* Filtre de période : même style de carte douce (icône + fond clair + boutons arrondis) que
+            l'onglet "Ce magasin" (StockoutShopDetail.tsx), demande explicite du 20/10/2026 : "fair un
+            stle bien soft" — étendu ici avec recherche/filtres avancés/surbrillance d'état actif. */}
+        <div className="aso-filter-card mb-3">
+          <span className="aso-filter-icon">
+            <iconify-icon icon="solar:filter-bold-duotone"></iconify-icon>
+          </span>
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            {[
+              { label: '7 j', days: 7 },
+              { label: '30 j', days: 30 },
+              { label: '90 j', days: 90 },
+            ].map((preset) => (
+              <button
+                key={preset.days}
+                type="button"
+                className={`aso-preset${activePresetDays === preset.days ? ' active' : ''}`}
+                onClick={() => {
+                  const end = new Date();
+                  const start = new Date(end.getTime() - preset.days * 24 * 60 * 60 * 1000);
+                  setPeriodEnd(end.toISOString().slice(0, 10));
+                  setPeriodStart(start.toISOString().slice(0, 10));
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+            <input type="date" className="aso-input" style={{ width: 142 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
+            <span className="text-muted small">au</span>
+            <input type="date" className="aso-input" style={{ width: 142 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+          </div>
 
           <div className="ms-auto d-flex align-items-center gap-2 flex-wrap">
             <input
               type="search"
-              className="form-control form-control-sm"
+              className="aso-input"
               style={{ width: 200 }}
               placeholder="Rechercher un magasin..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <div className="form-check form-check-inline mb-0">
-              <input type="checkbox" className="form-check-input" id="aso-long-only" checked={longOnly} onChange={(e) => setLongOnly(e.target.checked)} />
-              <label className="form-check-label small" htmlFor="aso-long-only">Ruptures longues uniquement</label>
-            </div>
-            <div className="form-check form-check-inline mb-0">
-              <input type="checkbox" className="form-check-input" id="aso-no-order-only" checked={noOrderOnly} onChange={(e) => setNoOrderOnly(e.target.checked)} />
-              <label className="form-check-label small" htmlFor="aso-no-order-only">Sans commande uniquement</label>
-            </div>
+            <label className={`aso-toggle${longOnly ? ' active' : ''}`}>
+              <input type="checkbox" checked={longOnly} onChange={(e) => setLongOnly(e.target.checked)} />
+              Ruptures longues
+            </label>
+            <label className={`aso-toggle${noOrderOnly ? ' active' : ''}`}>
+              <input type="checkbox" checked={noOrderOnly} onChange={(e) => setNoOrderOnly(e.target.checked)} />
+              Sans commande
+            </label>
           </div>
         </div>
 
