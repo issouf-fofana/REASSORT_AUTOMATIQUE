@@ -328,6 +328,9 @@ function AnalyticsOverview({ data }: { data: AnalyticsData }) {
 
 function statusBadgeClass(status: string): string {
   if (status === 'VALIDATED') return 'success';
+  // Ajouté le 20/10/2026 — même raisonnement que ProposalHeader.tsx : une proposition
+  // PARTIALLY_VALIDATED a de vraies commandes dessus, à distinguer visuellement d'un simple rejet.
+  if (status === 'PARTIALLY_VALIDATED') return 'info';
   if (status === 'REJECTED') return 'secondary';
   return 'warning';
 }

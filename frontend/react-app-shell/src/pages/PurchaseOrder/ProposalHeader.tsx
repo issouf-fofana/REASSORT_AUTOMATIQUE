@@ -16,6 +16,11 @@ const STATUS_LABEL: Record<string, string> = {
   VALIDATED: 'Validée',
   VALIDATION_FAILED: 'Échec de validation',
   REJECTED: 'Remplacée par une génération plus récente',
+  // Ajouté le 20/10/2026 (bug corrigé : des commandes réelles passées sur certains rayons se
+  // retrouvaient rattachées à une proposition REJECTED dès qu'une nouvelle génération écrasait
+  // l'ancienne avant que tous ses rayons soient traités) — distingue ce cas du rejet "propre"
+  // (aucune commande dessus, REJECTED reste correct dans ce cas).
+  PARTIALLY_VALIDATED: 'Partiellement validée (remplacée avant la fin)',
 };
 
 const PERIOD_MODE_LABEL: Record<string, string> = {
@@ -142,7 +147,7 @@ export function ProposalHeader({ proposal }: { proposal: Proposal }) {
             {proposal.rposShopName ? ` — ${proposal.rposShopName}` : ''}
           </div>
         </div>
-        <span className={`ph-status${proposal.status === 'VALIDATED' ? ' validated' : ''}`}>
+        <span className={`ph-status${proposal.status === 'VALIDATED' || proposal.status === 'PARTIALLY_VALIDATED' ? ' validated' : ''}`}>
           {STATUS_LABEL[proposal.status] || proposal.status}
         </span>
       </div>

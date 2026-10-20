@@ -41,6 +41,7 @@ interface PredictionOutcome {
 
 function statusBadgeClass(status: string): string {
   if (status === 'VALIDATED') return 'success';
+  if (status === 'PARTIALLY_VALIDATED') return 'info';
   if (status === 'REJECTED') return 'secondary';
   return 'warning';
 }

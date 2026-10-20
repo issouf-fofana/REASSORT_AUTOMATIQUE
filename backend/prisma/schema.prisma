@@ -486,8 +486,13 @@ model Proposal {
   rposPosId         String? @map("rpos_pos_id")
 
   // Statut du cycle de vie : GENERATED (calculée, en attente) -> VALIDATING (envoi en cours vers
-  // RPOS, en tâche de fond) -> VALIDATED (terminé) ou VALIDATION_FAILED -> REJECTED (écrasée par
-  // une nouvelle génération sans avoir été traitée)
+  // RPOS, en tâche de fond) -> VALIDATED (tous les rayons traités) ou VALIDATION_FAILED ->
+  // REJECTED (écrasée par une nouvelle génération sans AUCUNE commande créée dessus) ou
+  // PARTIALLY_VALIDATED (écrasée par une nouvelle génération après que SEULEMENT CERTAINS rayons
+  // aient été traités — au moins un ProposalOrder existe, les rayons restants sont considérés
+  // définitivement abandonnés. Ajouté le 20/10/2026, cf. proposalService.js : avant ce statut, ce
+  // cas tombait aussi dans REJECTED, faisant disparaître de vraies commandes déjà passées des KPI
+  // filtrés sur status='VALIDATED' uniquement).
   status String @default("GENERATED")
 
   generatedAt DateTime  @default(now()) @map("generated_at")

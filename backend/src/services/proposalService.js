@@ -1352,12 +1352,54 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
     }
   }
 
-  // Une seule proposition GENERATED active à la fois par magasin : on rejette l'ancienne
-  // seulement maintenant que la nouvelle génération a réussi, pour ne jamais en accumuler plusieurs.
-  await prisma.proposal.updateMany({
+  // Une seule proposition GENERATED active à la fois par magasin : on remplace l'ancienne seulement
+  // maintenant que la nouvelle génération a réussi, pour ne jamais en accumuler plusieurs.
+  //
+  // CORRIGÉ le 20/10/2026 (bug signalé : "le dash est toujour vide" alors que 4 commandes réelles
+  // avaient bien été validées) — AVANT ce correctif, TOUTE proposition encore GENERATED était
+  // rejetée en bloc, SANS jamais vérifier si des commandes réelles existaient déjà dessus. Un
+  // utilisateur qui valide quelques rayons un jour, puis se fait rattraper par la génération
+  // automatique du lendemain avant d'avoir traité les rayons restants, voyait ses VRAIES commandes
+  // (déjà transmises à RPOS) rattachées à une proposition passée REJECTED — jamais VALIDATED,
+  // puisque ce statut n'est atteint que lorsque TOUS les rayons de la proposition sont traités (cf.
+  // plus bas dans ce fichier, validateProposalDepartment). Résultat : tous les KPI du tableau de
+  // bord filtrés sur status='VALIDATED' (taux de conformité, taux de rupture, taux de surstock,
+  // précision des prévisions) restaient N/A malgré de vraies commandes passées et livrées.
+  //
+  // Une proposition qui a AU MOINS une commande réelle (ProposalOrder) créée dessus passe désormais
+  // à PARTIALLY_VALIDATED au lieu de REJECTED — ses rayons traités restent comptabilisés dans les
+  // KPI (cf. getConformityRate etc., élargis pour inclure ce statut), ses rayons non traités sont
+  // considérés définitivement abandonnés (repris par la proposition suivante, qui les recalcule).
+  // Seules les propositions SANS AUCUNE commande (jamais touchées par l'utilisateur) restent
+  // REJECTED, comme avant.
+  const staleProposals = await prisma.proposal.findMany({
     where: { rposShopId: shopId, status: 'GENERATED' },
-    data: { status: 'REJECTED' },
+    select: { id: true },
   });
+  if (staleProposals.length) {
+    const staleIds = staleProposals.map((p) => p.id);
+    const ordersByProposal = await prisma.proposalOrder.groupBy({
+      by: ['proposalId'],
+      where: { proposalId: { in: staleIds } },
+      _count: { _all: true },
+    });
+    const proposalIdsWithOrders = new Set(ordersByProposal.map((o) => o.proposalId));
+    const idsToPartiallyValidate = staleIds.filter((id) => proposalIdsWithOrders.has(id));
+    const idsToReject = staleIds.filter((id) => !proposalIdsWithOrders.has(id));
+
+    if (idsToPartiallyValidate.length) {
+      await prisma.proposal.updateMany({
+        where: { id: { in: idsToPartiallyValidate } },
+        data: { status: 'PARTIALLY_VALIDATED' },
+      });
+    }
+    if (idsToReject.length) {
+      await prisma.proposal.updateMany({
+        where: { id: { in: idsToReject } },
+        data: { status: 'REJECTED' },
+      });
+    }
+  }
 
   const proposal = await prisma.proposal.create({
     data: {
@@ -2458,11 +2500,17 @@ async function getProposalStatus(proposalId) {
  * Taux de conformité : proportion des lignes validées sans aucune modification humaine
  * (quantité identique à la suggestion, non exclue), sur l'ensemble des propositions validées.
  * Sert à décider quand basculer un magasin/article en validation automatique (readme section 17).
+ *
+ * Inclut PARTIALLY_VALIDATED depuis le 20/10/2026 (bug signalé : "le dash est toujour vide" malgré
+ * de vraies commandes validées) — une proposition remplacée par la génération suivante AVANT que
+ * tous ses rayons soient traités passe désormais à ce statut (au lieu de REJECTED en bloc, qui
+ * faisait disparaître des rayons réellement validés des KPI). Même raisonnement sur toutes les
+ * autres lectures de ce fichier filtrées sur Proposal.status ci-dessous.
  */
 async function getConformityRate(shopId) {
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
     },
   });
 
@@ -2516,7 +2564,7 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
 
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: 'VALIDATED', validatedAt: { gte: windowStart } },
+      proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, validatedAt: { gte: windowStart } },
     },
     select: {
       excludedOutOfScope: true,
@@ -2610,7 +2658,7 @@ async function getTodayProposalShops(shopIdFilter = null) {
 async function getStockoutRate(shopId) {
   const lines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
       wasExcluded: false,
       daysUntilStockout: { not: null },
     },
@@ -2638,7 +2686,7 @@ async function getOverstockRate(shopId) {
   const config = await getConfig(shopId);
   const lines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
       wasExcluded: false,
       quantityValidated: { not: null },
       avgWeeklySales: { not: null },
@@ -2709,7 +2757,7 @@ async function getAdminDashboard(shopIdFilter = null) {
       _count: true,
     }),
     prisma.proposal.findMany({
-      where: { rposShopId: { in: shopIds }, status: 'VALIDATED', validatedAt: { gte: dashboardWindowStart } },
+      where: { rposShopId: { in: shopIds }, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, validatedAt: { gte: dashboardWindowStart } },
       select: { rposShopId: true, validatedAt: true, rposOrderReference: true },
       orderBy: { validatedAt: 'desc' },
     }),
@@ -2950,7 +2998,7 @@ async function getForecastAccuracy(shopId) {
 
   const lines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
       wasExcluded: false,
       avgWeeklySales: { not: null, gt: 0 },
     },
@@ -3017,7 +3065,7 @@ async function getForecastAccuracy(shopId) {
 async function getShadowAiReport(shopId, { limit = 200 } = {}) {
   const lines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: 'VALIDATED' },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
       wasExcluded: false,
       quantityAiOriginal: { not: null },
       quantityValidated: { not: null },
