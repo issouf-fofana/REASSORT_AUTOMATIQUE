@@ -967,28 +967,13 @@ function ByShopGrid({ rows, periodMode, threshold, onOpenDetail }: { rows: ShopA
         flex: 2,
         minWidth: 220,
         filter: 'agTextColumnFilter',
-        cellRenderer: (p: any) => {
-          const wrap = document.createElement('div');
-          wrap.className = 'd-flex align-items-center gap-2';
-          const avatar = document.createElement('span');
-          avatar.className = 'osr-row-avatar';
-          avatar.textContent = articleInitials(p.data.label);
-          const textWrap = document.createElement('div');
-          const title = document.createElement('div');
-          title.className = 'fw-semibold';
-          title.style.fontSize = '.84rem';
-          title.style.color = '#1B2A4A';
-          title.textContent = p.data.label;
-          const ean = document.createElement('div');
-          ean.className = 'text-muted';
-          ean.style.fontSize = '.72rem';
-          ean.textContent = p.data.ean;
-          textWrap.appendChild(title);
-          textWrap.appendChild(ean);
-          wrap.appendChild(avatar);
-          wrap.appendChild(textWrap);
-          return wrap;
-        },
+        // Texte simple sur une ligne, sans avatar/sous-titre empilé (demande explicite du
+        // 21/10/2026 : "c'est pa bien affiché") — l'avatar (initiales dans un badge) rendu par un
+        // cellRenderer DOM brut se décalait sous le texte au lieu de rester à côté, probablement
+        // une interaction entre le display:flex de .osr-row-avatar et la hauteur de cellule fixée
+        // par ag-Grid. Un texte simple évite ce risque d'affichage, cohérent avec les autres
+        // colonnes du tableau (pas d'avatar ailleurs dans cette grille).
+        valueGetter: (p: any) => `${p.data.label} (${p.data.ean})`,
       },
       {
         field: 'shopLabel',
