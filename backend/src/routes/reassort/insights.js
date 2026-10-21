@@ -26,7 +26,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockDataAvailability } = require('../../services/overstockReportService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
 // son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
@@ -319,16 +319,36 @@ router.get('/stockout-episodes', async (req, res) => {
   }
 });
 
-// GET /api/reassort/overstock-report?minWeeksOfCoverage= - page Surstock (demande explicite du
-// 21/10/2026 : "sortir pour les magasins chaque magasin les articles en surstock", "identifier les
-// articles que les magasins ont en commun en surstock", "sortir la casse de ces articles sur les 3
-// dernières mois"). minWeeksOfCoverage réglable depuis la page (défaut 2 semaines, cf.
-// overstockReportService.js — le seuil chatbot de 6 semaines a été jugé trop élevé le 21/10/2026).
+// GET /api/reassort/overstock-report?minWeeksOfCoverage=&start=&end= - page Surstock (demande
+// explicite du 21/10/2026 : "sortir pour les magasins chaque magasin les articles en surstock",
+// "identifier les articles que les magasins ont en commun en surstock", "sortir la casse de ces
+// articles sur les 3 dernières mois"). minWeeksOfCoverage réglable depuis la page (défaut 2
+// semaines, cf. overstockReportService.js — le seuil chatbot de 6 semaines a été jugé trop élevé).
+// start/end optionnels (demande explicite : "si moi meme je veux le surstok sur une periode
+// comment je peux faire le filtre") : sans eux, snapshot de la dernière proposition par magasin ;
+// avec eux, analyse sur la période choisie (ajoute aussi persistentArticles, "toujours en
+// surstock").
 router.get('/overstock-report', requireAdminOrSupervisor, async (req, res) => {
   try {
     const shopIdFilter = await getAccessibleShopIds(req);
     const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
-    const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage });
+    const { start, end } = req.query;
+    const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage, start, end });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report/availability - étendue réelle de l'historique de propositions
+// disponible (demande explicite du 21/10/2026 : "on doit me dire j'ai des donner de quel periode...
+// si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre grisé") — pour que
+// le sélecteur de période de la page Surstock désactive les dates antérieures aux données réelles
+// plutôt que de laisser l'utilisateur choisir une fenêtre vide.
+router.get('/overstock-report/availability', requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const result = await getOverstockDataAvailability(shopIdFilter);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

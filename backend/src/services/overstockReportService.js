@@ -15,6 +15,32 @@ const prisma = require('../utils/prisma');
 
 const DEFAULT_MIN_WEEKS_OF_COVERAGE = 2;
 const SCRAP_LOOKBACK_DAYS = 90; // "3 dernières mois", demande explicite
+// Seuil de persistance pour "toujours en surstock" sur une période (demande explicite du
+// 21/10/2026 : "je dois avoir les article on son toujour en surstok" + confirmé "seuil souple
+// ≥90%" plutôt que 100% strict — tolère une génération manquée/en panne un jour sans faire sortir
+// l'article de la liste.
+const ALWAYS_OVERSTOCK_THRESHOLD_RATIO = 0.9;
+
+/**
+ * Étendue réelle de l'historique de propositions disponible (demande explicite du 21/10/2026 :
+ * "quand je veux faire le filtre on doit me dire j'ai des donner de quel periode... si je clique de
+ * 10/10/2026 alors que les donner commence de 12 le 10 doit etre grisé") — une proposition est
+ * générée chaque nuit par magasin et jamais supprimée (NIGHTLY_PROPOSAL_CRON, cf.
+ * cronManager.js/systemConfigService.js), donc cette date correspond à la plus ancienne génération
+ * encore en base pour les magasins accessibles à ce compte, pas une fenêtre fixe arbitraire.
+ */
+async function getOverstockDataAvailability(allowedShopIds) {
+  if (Array.isArray(allowedShopIds) && !allowedShopIds.length) {
+    return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+  }
+  const where = allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {};
+  const [oldest, newest] = await Promise.all([
+    prisma.proposal.findFirst({ where, orderBy: { generatedAt: 'asc' }, select: { generatedAt: true } }),
+    prisma.proposal.findFirst({ where, orderBy: { generatedAt: 'desc' }, select: { generatedAt: true } }),
+  ]);
+  if (!oldest || !newest) return { found: false, message: 'Aucune proposition générée pour les magasins accessibles.' };
+  return { found: true, oldestDate: oldest.generatedAt.toISOString(), newestDate: newest.generatedAt.toISOString() };
+}
 
 async function getLatestProposalIdsByShop(shopIds) {
   // Un seul aller-retour DB pour tous les magasins plutôt qu'une requête par magasin (findFirst en
@@ -109,6 +135,112 @@ async function getOverstockByShop(allowedShopIds, { minWeeksOfCoverage = DEFAULT
 }
 
 /**
+ * Articles en surstock sur une PÉRIODE choisie (demande explicite du 21/10/2026 : "si moi meme je
+ * veux le surstok sur une periode comment je peux faire le filtre", confirmé "historique : quels
+ * articles étaient en surstock à un moment donné") — contrairement à getOverstockByShop (snapshot
+ * de la toute dernière proposition), parcourt TOUTES les propositions générées dans [start, end]
+ * pour chaque magasin et calcule, par article, combien de fois il était en surstock sur combien de
+ * propositions générées — base du calcul "toujours en surstock" ci-dessous.
+ */
+async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE, start, end } = {}) {
+  if (Array.isArray(allowedShopIds) && !allowedShopIds.length) {
+    return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+  }
+  if (!start || !end) {
+    return { found: false, message: 'Paramètres start et end (dates) requis pour une analyse sur période.' };
+  }
+
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true, reference: true, name: true },
+  });
+  if (!shops.length) return { found: true, minWeeksOfCoverage, shopCount: 0, articleCount: 0, articles: [], persistentArticles: [] };
+
+  const shopIds = shops.map((s) => s.rposShopId);
+  const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
+
+  const proposals = await prisma.proposal.findMany({
+    where: { rposShopId: { in: shopIds }, generatedAt: { gte: new Date(start), lte: new Date(end) } },
+    select: { id: true, rposShopId: true },
+  });
+  if (!proposals.length) {
+    return { found: true, minWeeksOfCoverage, shopCount: 0, articleCount: 0, articles: [], persistentArticles: [], message: 'Aucune proposition générée sur cette période pour les magasins accessibles.' };
+  }
+
+  const shopIdByProposalId = new Map(proposals.map((p) => [p.id, p.rposShopId]));
+  // Nombre de propositions générées par magasin sur la période : dénominateur du ratio de
+  // persistance ci-dessous (un magasin ouvert depuis peu ou avec des générations manquées a moins
+  // de propositions que la pleine fenêtre, le ratio reste correct relativement à SES propositions).
+  const proposalCountByShop = new Map();
+  for (const p of proposals) proposalCountByShop.set(p.rposShopId, (proposalCountByShop.get(p.rposShopId) || 0) + 1);
+
+  const lines = await prisma.proposalLine.findMany({
+    where: { proposalId: { in: proposals.map((p) => p.id) } },
+    select: { proposalId: true, ean: true, label: true, department: true, stockAtGeneration: true, avgWeeklySales: true, sellingPrice: true },
+  });
+
+  // Agrégation par (magasin, ean) : combien de propositions sur la période avaient cet article EN
+  // SURSTOCK, et les dernières valeurs connues (stock/vente/prix) pour l'affichage.
+  const byShopEan = new Map(); // `${rposShopId}:${ean}` -> { overstockCount, latest: {...} }
+  for (const l of lines) {
+    const rposShopId = shopIdByProposalId.get(l.proposalId);
+    const isOverstocked = (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage;
+    if (!isOverstocked) continue;
+    const key = `${rposShopId}:${l.ean}`;
+    if (!byShopEan.has(key)) byShopEan.set(key, { rposShopId, ean: l.ean, overstockCount: 0, latest: null });
+    const entry = byShopEan.get(key);
+    entry.overstockCount += 1;
+    // "latest" : la dernière ligne rencontrée l'emporte (lines n'est pas garanti trié par date, mais
+    // peu importe ici — juste besoin d'UN jeu de valeurs représentatif pour l'affichage, le ratio de
+    // persistance est le chiffre qui compte réellement, pas la valeur exacte affichée à côté).
+    entry.latest = l;
+  }
+
+  const shopProposalDenominator = (rposShopId) => proposalCountByShop.get(rposShopId) || 1;
+
+  const articles = [...byShopEan.values()].map((e) => {
+    const shop = shopById.get(e.rposShopId);
+    const l = e.latest;
+    const avgWeeklySales = Math.round((l.avgWeeklySales || 0) * 10) / 10;
+    const denom = shopProposalDenominator(e.rposShopId);
+    return {
+      rposShopId: e.rposShopId,
+      shopReference: shop?.reference || null,
+      shopName: shop?.name || null,
+      ean: e.ean,
+      label: l.label,
+      department: l.department,
+      stock: l.stockAtGeneration || 0,
+      sellingPrice: l.sellingPrice || null,
+      avgDailySales: Math.round((avgWeeklySales / 7) * 100) / 100,
+      avgWeeklySales,
+      avgMonthlySales: Math.round(avgWeeklySales * (365 / 12 / 7) * 10) / 10,
+      weeksOfCoverage: avgWeeklySales > 0 ? Math.round(((l.stockAtGeneration || 0) / avgWeeklySales) * 10) / 10 : null,
+      overstockCount: e.overstockCount,
+      proposalCount: denom,
+      overstockRatio: Math.round((e.overstockCount / denom) * 100) / 100,
+    };
+  }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+
+  const persistentArticles = articles
+    .filter((a) => a.overstockRatio >= ALWAYS_OVERSTOCK_THRESHOLD_RATIO)
+    .sort((a, b) => b.overstockRatio - a.overstockRatio);
+
+  return {
+    found: true,
+    minWeeksOfCoverage,
+    alwaysOverstockThresholdRatio: ALWAYS_OVERSTOCK_THRESHOLD_RATIO,
+    periodStart: start,
+    periodEnd: end,
+    shopCount: new Set(articles.map((a) => a.rposShopId)).size,
+    articleCount: articles.length,
+    articles,
+    persistentArticleCount: persistentArticles.length,
+    persistentArticles,
+  };
+}
+
+/**
  * Articles en surstock dans PLUSIEURS magasins à la fois (demande explicite : "identifier les
  * articles que les magasins ont en commun en surstock") — regroupe la sortie de getOverstockByShop
  * par EAN, ne garde que les EAN présents dans >= 2 magasins distincts.
@@ -176,42 +308,110 @@ async function getScrapSummaryForEans(shopEanPairs) {
 }
 
 /**
- * Rapport complet prêt pour affichage/export (demande explicite du 21/10/2026) : combine
- * getOverstockByShop + groupCommonOverstock + la casse 3 mois des seuls articles communs (pas tous,
- * pour ne pas payer le coût d'agrégation sur des articles non pertinents pour cette question).
+ * Regroupe les articles "toujours en surstock" (sortie de getOverstockOverPeriod.persistentArticles)
+ * par EAN pour un affichage par article façon groupCommonOverstock — DISTINCT de
+ * groupCommonOverstock lui-même : celui-ci exige >= 2 magasins (la question "en commun entre
+ * magasins") alors qu'un article persistant dans un seul magasin reste pertinent ici (la question
+ * "toujours en surstock" ne porte pas sur le nombre de magasins), et doit conserver
+ * overstockCount/proposalCount/overstockRatio que groupCommonOverstock ignore.
  */
-async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE } = {}) {
-  const byShop = await getOverstockByShop(allowedShopIds, { minWeeksOfCoverage });
+function groupPersistentOverstock(persistentArticles) {
+  const byEan = new Map();
+  for (const a of persistentArticles) {
+    if (!byEan.has(a.ean)) byEan.set(a.ean, { ean: a.ean, label: a.label, department: a.department, sellingPrice: a.sellingPrice, shops: [] });
+    byEan.get(a.ean).shops.push({
+      rposShopId: a.rposShopId,
+      shopReference: a.shopReference,
+      shopName: a.shopName,
+      stock: a.stock,
+      sellingPrice: a.sellingPrice,
+      avgDailySales: a.avgDailySales,
+      avgWeeklySales: a.avgWeeklySales,
+      avgMonthlySales: a.avgMonthlySales,
+      weeksOfCoverage: a.weeksOfCoverage,
+      overstockCount: a.overstockCount,
+      proposalCount: a.proposalCount,
+      overstockRatio: a.overstockRatio,
+    });
+  }
+  return [...byEan.values()].sort((a, b) => b.shops.length - a.shops.length);
+}
+
+function attachScrap(shopEntries, scrapByKey, ean) {
+  return shopEntries.map((s) => {
+    const scrap = scrapByKey.get(`${s.rposShopId}:${ean}`) || { scrapQuantity: 0, scrapCount: 0, lastScrapDate: null };
+    return {
+      ...s,
+      scrapQuantity90d: scrap.scrapQuantity,
+      scrapMoveCount90d: scrap.scrapCount,
+      lastScrapDate: scrap.lastScrapDate ? scrap.lastScrapDate.toISOString() : null,
+    };
+  });
+}
+
+/**
+ * Rapport complet prêt pour affichage/export (demande explicite du 21/10/2026) : combine
+ * getOverstockByShop/getOverstockOverPeriod + groupCommonOverstock + la casse 3 mois des seuls
+ * articles communs/persistants (pas tous, pour ne pas payer le coût d'agrégation sur des articles
+ * non pertinents pour cette question).
+ *
+ * Sans start/end : comportement d'origine (snapshot de la toute dernière proposition par magasin).
+ * Avec start/end : analyse sur la période choisie (demande explicite "si moi meme je veux le
+ * surstok sur une periode comment je peux faire le filtre"), articles communs calculés sur les
+ * mêmes articles mais ajoute en plus persistentArticles ("toujours en surstock" sur la période,
+ * ratio ≥ ALWAYS_OVERSTOCK_THRESHOLD_RATIO).
+ */
+async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE, start, end } = {}) {
+  const periodMode = !!(start && end);
+  const byShop = periodMode
+    ? await getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage, start, end })
+    : await getOverstockByShop(allowedShopIds, { minWeeksOfCoverage });
   if (!byShop.found) return byShop;
 
   const common = groupCommonOverstock(byShop.articles);
 
-  const pairs = common.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean })));
-  const scrapByKey = await getScrapSummaryForEans(pairs);
+  const persistent = periodMode ? groupPersistentOverstock(byShop.persistentArticles) : [];
 
-  const commonWithScrap = common.map((e) => ({
-    ...e,
-    shops: e.shops.map((s) => {
-      const scrap = scrapByKey.get(`${s.rposShopId}:${e.ean}`) || { scrapQuantity: 0, scrapCount: 0, lastScrapDate: null };
-      return {
-        ...s,
-        scrapQuantity90d: scrap.scrapQuantity,
-        scrapMoveCount90d: scrap.scrapCount,
-        lastScrapDate: scrap.lastScrapDate ? scrap.lastScrapDate.toISOString() : null,
-      };
-    }),
-  }));
+  const allPairs = [
+    ...common.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
+    ...persistent.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
+  ];
+  const scrapByKey = await getScrapSummaryForEans(allPairs);
+
+  const commonWithScrap = common.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
+  const persistentWithScrap = persistent.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
 
   return {
     found: true,
+    periodMode,
+    periodStart: periodMode ? byShop.periodStart : null,
+    periodEnd: periodMode ? byShop.periodEnd : null,
     minWeeksOfCoverage,
+    alwaysOverstockThresholdRatio: periodMode ? byShop.alwaysOverstockThresholdRatio : null,
     scrapLookbackDays: SCRAP_LOOKBACK_DAYS,
     shopCount: byShop.shopCount,
     articleCount: byShop.articleCount,
     articlesByShop: byShop.articles,
     commonArticleCount: commonWithScrap.length,
     commonArticles: commonWithScrap,
+    // "Articles communs à plusieurs magasins" ET "toujours en surstock" sont deux tris orthogonaux
+    // de la même liste d'articles — un article peut être dans l'un, l'autre, les deux, ou aucun
+    // (ex: en surstock dans un seul magasin mais en permanence). persistentArticles n'existe qu'en
+    // mode période (la notion de persistance n'a pas de sens sur un simple snapshot).
+    persistentArticleCount: periodMode ? persistentWithScrap.length : null,
+    persistentArticles: periodMode ? persistentWithScrap : null,
   };
 }
 
-module.exports = { getOverstockByShop, groupCommonOverstock, getScrapSummaryForEans, getOverstockReport, DEFAULT_MIN_WEEKS_OF_COVERAGE, SCRAP_LOOKBACK_DAYS };
+module.exports = {
+  getOverstockByShop,
+  getOverstockOverPeriod,
+  getOverstockDataAvailability,
+  groupCommonOverstock,
+  groupPersistentOverstock,
+  getScrapSummaryForEans,
+  getOverstockReport,
+  DEFAULT_MIN_WEEKS_OF_COVERAGE,
+  SCRAP_LOOKBACK_DAYS,
+  ALWAYS_OVERSTOCK_THRESHOLD_RATIO,
+};
