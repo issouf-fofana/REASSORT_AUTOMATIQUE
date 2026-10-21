@@ -136,6 +136,74 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
   URL.revokeObjectURL(url);
 }
 
+// Menu déroulant personnalisé pour le filtre magasin (demande explicite du 21/10/2026 : "donne moi
+// un bon style pour le menu deroulent") — un <select> natif ne peut pas être stylisé en profondeur
+// une fois ouvert (c'est le navigateur, pas la page, qui dessine sa liste), d'où ce composant
+// maison avec recherche intégrée (28+ magasins, plus rapide à trouver qu'en faisant défiler) et le
+// même style doux (coins arrondis, surlignage au survol) que le reste de la page.
+function ShopDropdown({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [open]);
+
+  useEffect(() => { if (!open) setQuery(''); }, [open]);
+
+  const selectedLabel = value ? options.find(([id]) => id === value)?.[1] || value : 'Tous les magasins';
+  const filteredOptions = query.trim()
+    ? options.filter(([, label]) => label.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  function select(id: string) {
+    onChange(id);
+    setOpen(false);
+  }
+
+  return (
+    <div className="osr-shop-dropdown" ref={rootRef}>
+      <button type="button" className="osr-shop-dropdown-btn" onClick={() => setOpen((v) => !v)}>
+        <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
+        <span className="osr-shop-dropdown-label">{selectedLabel}</span>
+        <iconify-icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ marginLeft: 'auto', fontSize: '13px', opacity: 0.6 }}></iconify-icon>
+      </button>
+      {open && (
+        <div className="osr-shop-dropdown-panel">
+          <input
+            type="search"
+            autoFocus
+            className="osr-shop-dropdown-search"
+            placeholder="Rechercher un magasin..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="osr-shop-dropdown-list">
+            <div className={`osr-shop-dropdown-item${value === '' ? ' active' : ''}`} onClick={() => select('')}>
+              Tous les magasins
+            </div>
+            {filteredOptions.length === 0 ? (
+              <div className="osr-shop-dropdown-empty">Aucun magasin trouvé.</div>
+            ) : (
+              filteredOptions.map(([id, label]) => (
+                <div key={id} className={`osr-shop-dropdown-item${value === id ? ' active' : ''}`} onClick={() => select(id)}>
+                  {label}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Bandeau "hero" en dégradé bleu avec courbe de tendance (demande explicite du 21/10/2026, capture
 // d'un tableau de bord type "Today $764.39" avec graphique + cartes arrondies + badges de tendance :
 // "je veux le style sur cette vue... il faut me faire un truc bien fait"). Le graphique montre le
@@ -475,6 +543,17 @@ export function OverstockReport() {
         .osr-settings-summary:hover { color: #1B2A4A; }
         .osr-settings-details[open] .osr-settings-summary { color: #1B2A4A; }
         .osr-settings-details .osr-settings-card { margin-top: 10px; }
+        .osr-shop-dropdown { position: relative; width: 240px; }
+        .osr-shop-dropdown-btn { width: 100%; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(27,42,74,.12); border-radius: 6px; background: #fff; padding: 6px 10px; font-size: .8rem; color: #1B2A4A; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+        .osr-shop-dropdown-btn:hover { border-color: rgba(27,42,74,.25); }
+        .osr-shop-dropdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; flex: 1; }
+        .osr-shop-dropdown-panel { position: absolute; top: calc(100% + 6px); left: 0; width: 280px; background: #fff; border: 1px solid rgba(27,42,74,.1); border-radius: 10px; box-shadow: 0 12px 32px rgba(27,42,74,.14); z-index: 20; overflow: hidden; }
+        .osr-shop-dropdown-search { width: 100%; border: none; border-bottom: 1px solid rgba(27,42,74,.08); padding: 10px 14px; font-size: .82rem; color: #1B2A4A; outline: none; background: #F9FAFC; }
+        .osr-shop-dropdown-list { max-height: 280px; overflow-y: auto; padding: 6px; }
+        .osr-shop-dropdown-item { padding: 8px 12px; border-radius: 7px; font-size: .82rem; color: #44516B; cursor: pointer; transition: background .12s, color .12s; }
+        .osr-shop-dropdown-item:hover { background: #F6F8FB; color: #1B2A4A; }
+        .osr-shop-dropdown-item.active { background: rgba(36,86,166,.1); color: #2456A6; font-weight: 600; }
+        .osr-shop-dropdown-empty { padding: 14px; text-align: center; font-size: .78rem; color: #8591A0; }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -633,12 +712,7 @@ export function OverstockReport() {
       ) : data ? (
         <>
           <div className="osr-filter-bar">
-            <select className="osr-input" style={{ width: 220 }} value={shopFilter} onChange={(e) => setShopFilter(e.target.value)}>
-              <option value="">Tous les magasins</option>
-              {shopOptions.map(([id, label]) => (
-                <option key={id} value={id}>{label}</option>
-              ))}
-            </select>
+            <ShopDropdown value={shopFilter} options={shopOptions} onChange={setShopFilter} />
             <input
               type="search"
               className="osr-input"
