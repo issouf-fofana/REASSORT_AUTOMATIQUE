@@ -24,6 +24,7 @@ import {
   Wand2,
   PackageX,
   PackageSearch,
+  Trash2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -50,33 +51,49 @@ export interface NavGroup {
 // routes"). Utilisé en commun par <Sidebar/> ET <NotchNav/> (cf. plan de migration, section
 // "Deux modes de navigation à maintenir") pour ne jamais faire diverger la liste des pages entre
 // les deux composants.
+// Réorganisée par thème le 21/10/2026 (demande explicite : "il faut organise la sidebare tout ce
+// qui est qui dans onglé IA, tout ce qui est stock dans l'onglet stok... tu vois il fait bien
+// organisé") — l'ancien découpage Pilotage/Réassort mélangeait pages de navigation générale, pages
+// de stock et pages IA dans les deux mêmes groupes (ex: "Assistant IA" dans Pilotage, "IA &
+// Prédictions" dans Réassort). Désormais : Pilotage = tableau de bord + guides uniquement, Stock =
+// toutes les pages dont le sujet est le stock/les commandes (même si l'IA intervient dans leur
+// calcul, ex: Anomalies de commande, Résultat de l'analyse — confirmé explicitement), IA = pages
+// dont le cœur est l'assistant/les modèles eux-mêmes, Administration et Paramètres inchangés.
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Pilotage',
     entries: [
       { id: 'dashboard', label: 'Tableau de bord', href: '/', icon: LayoutDashboard },
-      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
-      // Pas adminOnly : le backend autorise ADMIN ET SUPERVISOR (requireAdminOrSupervisor,
-      // overstockReportService.js) — adminOnly masquerait la page aux SUPERVISOR alors qu'ils y ont
-      // accès, même raisonnement que la vue "Tous les magasins" de 'stockouts' ci-dessus.
-      { id: 'overstock-report', label: 'Surstock', href: '/overstock-report', icon: PackageSearch },
-      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-guide', label: 'Mon accès', href: '/ai-guide', icon: Info },
       { id: 'project-guide', label: 'Guide du projet', href: '/project-guide', icon: BookOpen },
       { id: 'user-guide', label: "Guide d'utilisation", href: '/user-guide', icon: BookMarked },
     ],
   },
   {
-    label: 'Réassort',
+    label: 'Stock',
     entries: [
+      { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
+      // Pas adminOnly : le backend autorise ADMIN ET SUPERVISOR (requireAdminOrSupervisor,
+      // overstockReportService.js) — adminOnly masquerait la page aux SUPERVISOR alors qu'ils y ont
+      // accès, même raisonnement que la vue "Tous les magasins" de 'stockouts' ci-dessus.
+      { id: 'overstock-report', label: 'Surstock', href: '/overstock-report', icon: PackageSearch },
+      // Même raisonnement que 'overstock-report' ci-dessus (accessible ADMIN/SUPERVISOR/mono-magasin,
+      // jamais adminOnly).
+      { id: 'scrap-report', label: 'Casse', href: '/scrap-report', icon: Trash2 },
       { id: 'purchase-order', label: 'Proposition de commande', href: '/purchase-order', icon: ShoppingCart },
       { id: 'purchase-list', label: 'Historique', href: '/purchase-list', icon: History },
       { id: 'sales-analysis', label: "Résultat de l'analyse", href: '/sales-analysis', icon: LineChart },
       { id: 'sales-history', label: 'Ventes synchronisées', href: '/sales-history', icon: BarChart3 },
+      { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
+    ],
+  },
+  {
+    label: 'IA',
+    entries: [
+      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-predictions', label: 'IA & Prédictions', href: '/ai-predictions', icon: Sparkles },
       { id: 'ai-quality', label: 'Qualité & IA', href: '/ai-quality', icon: Zap, adminOnly: true },
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },
-      { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
       { id: 'feature-requests', label: "Demandes d'évolution", href: '/feature-requests', icon: Lightbulb, adminOnly: true },
     ],
   },

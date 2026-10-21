@@ -27,6 +27,7 @@ const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByD
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getScrapOverview } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('../../jobs/overstockReportSnapshotJob');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -410,6 +411,22 @@ router.get('/overstock-report/scrap-detail', async (req, res) => {
     }
     const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
     const result = await getScrapDetailForArticle(shopIdFilter, String(ean), { lookbackDays });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/scrap-report?lookbackDays= - page Casse (demande explicite du 21/10/2026 :
+// "les casse des article on doit voir un bouton sur la sidebare") — TOUS les articles ayant eu de
+// la casse sur la période, qu'ils soient en surstock ou non (contrairement à la casse déjà présente
+// dans Surstock, limitée aux articles déjà identifiés en surstock). Même périmètre magasins que
+// /overstock-report (ADMIN/SUPERVISOR/mono-magasin), même raisonnement de resolveOverstockShopFilter.
+router.get('/scrap-report', async (req, res) => {
+  try {
+    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
+    const result = await getScrapOverview(shopIdFilter, { lookbackDays });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
