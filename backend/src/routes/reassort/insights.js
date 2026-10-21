@@ -26,7 +26,8 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockDataAvailability } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('../../jobs/overstockReportSnapshotJob');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
 // son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
@@ -333,6 +334,23 @@ router.get('/overstock-report', requireAdminOrSupervisor, async (req, res) => {
     const shopIdFilter = await getAccessibleShopIds(req);
     const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
     const { start, end } = req.query;
+
+    // Vue par défaut (aucune période, seuil par défaut ou non précisé) : lit le snapshot précalculé
+    // par overstockReportSnapshotJob.js au lieu de recalculer en direct (demande explicite du
+    // 21/10/2026 : "il charge trop pourqhoi ? il fait les calcule quand j'actualise ?" — le calcul
+    // isolé est rapide, ~0.6s mesuré, mais ralentit fortement en concurrence avec les jobs de
+    // synchro RPOS qui saturent le pool de connexions DB au même moment). Tout seuil personnalisé ou
+    // toute période retombe sur le calcul en direct, inchangé.
+    const isDefaultView = !start && !end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE);
+    if (isDefaultView) {
+      const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_CACHE_KEY);
+      if (cached) {
+        return res.json({ success: true, data: cached });
+      }
+      // Pas encore de snapshot (job jamais exécuté, ex: tout juste déployé) : calcul en direct
+      // exceptionnel, le prochain passage du job remettra la vue par défaut sur le chemin rapide.
+    }
+
     const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage, start, end });
     res.json({ success: true, data: result });
   } catch (error) {

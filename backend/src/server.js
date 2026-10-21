@@ -6,7 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOverstockReportSnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -262,6 +262,9 @@ async function start() {
     // Précalcule chaque nuit "Analyse des pertes sur une période" (30 derniers jours) pour que la
     // page l'affiche instantanément au lieu de recalculer à chaque chargement (horaire configurable).
     await startOrRestartStockoutPeriodSummarySnapshotJob();
+    // Précalcule le rapport Surstock pour sa vue par défaut (horaire configurable) — demande
+    // explicite du 21/10/2026 : "il charge trop pourqhoi ? il fait les calcule quand j'actualise ?".
+    await startOrRestartOverstockReportSnapshotJob();
     await startOrRestartOrderIdentitySyncJob();
     // Synchronisation locale de la liste des magasins RPOS (horaire configurable).
     await startOrRestartShopsSyncJob();
@@ -307,6 +310,10 @@ async function start() {
     // jusqu'au premier déclenchement planifié (jusqu'à 5 min, cf. STOCKOUT_STATUS_RECALC_CRON).
     const { runStockoutStatusRecalcJob } = require('./jobs/stockoutStatusRecalcJob');
     runStockoutStatusRecalcJob().catch((err) => console.error('[startup] Précalcul du statut des ruptures en arrière-plan : échec non bloquant —', err.message));
+    // Précalcul immédiat du rapport Surstock (sans ce passage, la page resterait lente jusqu'au
+    // premier déclenchement planifié, jusqu'à 1h, cf. OVERSTOCK_REPORT_SNAPSHOT_CRON).
+    const { runOverstockReportSnapshotJob } = require('./jobs/overstockReportSnapshotJob');
+    runOverstockReportSnapshotJob().catch((err) => console.error('[startup] Précalcul du rapport Surstock en arrière-plan : échec non bloquant —', err.message));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

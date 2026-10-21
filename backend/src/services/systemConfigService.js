@@ -60,6 +60,11 @@ const KEYS = {
   // et stocke en base") — une fois par nuit suffit, cette analyse (période par défaut 30j) n'a pas
   // besoin d'être aussi fraîche que qtyPerdueEstimee/caPerdueEstime (recalculés toutes les heures).
   STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON',
+  // Précalcul du rapport Surstock (demande explicite du 21/10/2026 : "il charge trop... il fait les
+  // calcule quand j'actualise ?") — toutes les heures : la donnée source (dernière proposition par
+  // magasin) ne change qu'une fois par nuit, mais un intervalle plus court limite l'écart entre une
+  // proposition fraîchement régénérée manuellement et le snapshot affiché.
+  OVERSTOCK_REPORT_SNAPSHOT_CRON: 'OVERSTOCK_REPORT_SNAPSHOT_CRON',
   // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
   // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
   // modifiable sur les parametre") — en dur à 24h/48h jusqu'ici (stockoutEpisodeService.js,
@@ -188,6 +193,7 @@ const KEYS = {
   STOCKOUT_STATUS_RECALC_ENABLED: 'STOCKOUT_STATUS_RECALC_ENABLED',
   STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
   STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED',
+  OVERSTOCK_REPORT_SNAPSHOT_ENABLED: 'OVERSTOCK_REPORT_SNAPSHOT_ENABLED',
   ORDER_IDENTITY_SYNC_ENABLED: 'ORDER_IDENTITY_SYNC_ENABLED',
   DAILY_REVIEW_ENABLED: 'DAILY_REVIEW_ENABLED',
   PREDICTION_OUTCOME_ENABLED: 'PREDICTION_OUTCOME_ENABLED',
@@ -309,6 +315,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '*/15 * * * *',
   [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
+  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '0 * * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
@@ -428,6 +435,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCKOUT_STATUS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED]: () => 'true',
+  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.ORDER_IDENTITY_SYNC_ENABLED]: () => 'true',
   [KEYS.DAILY_REVIEW_ENABLED]: () => 'true',
   [KEYS.PREDICTION_OUTCOME_ENABLED]: () => 'true',

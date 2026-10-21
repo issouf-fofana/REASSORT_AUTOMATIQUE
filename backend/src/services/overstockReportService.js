@@ -403,10 +403,48 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
   };
 }
 
+/**
+ * Lit le snapshot précalculé par overstockReportSnapshotJob.js (vue par défaut uniquement — aucune
+ * période, seuil par défaut) et le filtre selon allowedShopIds pour ce compte, sans jamais recalculer
+ * (demande explicite du 21/10/2026 : "il charge trop pourqhoi ? il fait les calcule quand
+ * j'actualise ?"). Retourne null si aucun snapshot n'existe encore (job jamais exécuté) — l'appelant
+ * retombe alors sur getOverstockReport() en direct.
+ */
+async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
+  const snapshot = await prisma.overstockReportSnapshot.findUnique({ where: { cacheKey } });
+  if (!snapshot) return null;
+
+  const full = JSON.parse(snapshot.reportJson);
+  if (allowedShopIds === null) return full; // ADMIN : snapshot déjà calculé pour tous les magasins
+
+  const allowedSet = new Set(allowedShopIds);
+  const articlesByShop = full.articlesByShop.filter((a) => allowedSet.has(a.rposShopId));
+  // Un article "commun"/"persistant" dans le snapshot complet peut ne plus l'être une fois réduit au
+  // périmètre SUPERVISOR (ex: commun à 3 magasins dont 1 seul accessible) — on ne filtre donc jamais
+  // juste les lignes à l'intérieur de chaque article, on RECALCULE le regroupement sur les lignes
+  // déjà filtrées (coût négligeable, en mémoire, pas de nouvelle requête DB).
+  const filterShopsIn = (groups) =>
+    groups
+      .map((g) => ({ ...g, shops: g.shops.filter((s) => allowedSet.has(s.rposShopId)) }))
+      .filter((g) => g.shops.length >= 2);
+
+  return {
+    ...full,
+    shopCount: new Set(articlesByShop.map((a) => a.rposShopId)).size,
+    articleCount: articlesByShop.length,
+    articlesByShop,
+    commonArticles: filterShopsIn(full.commonArticles),
+    commonArticleCount: filterShopsIn(full.commonArticles).length,
+    persistentArticles: full.persistentArticles ? filterShopsIn(full.persistentArticles) : null,
+    persistentArticleCount: full.persistentArticles ? filterShopsIn(full.persistentArticles).length : null,
+  };
+}
+
 module.exports = {
   getOverstockByShop,
   getOverstockOverPeriod,
   getOverstockDataAvailability,
+  getCachedDefaultOverstockReport,
   groupCommonOverstock,
   groupPersistentOverstock,
   getScrapSummaryForEans,

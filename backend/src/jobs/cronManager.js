@@ -14,6 +14,7 @@ const { runStockoutProductCacheRefreshJob } = require('./stockoutProductCacheRef
 const { runStockoutStatusRecalcJob } = require('./stockoutStatusRecalcJob');
 const { runStockoutAlertJob } = require('./stockoutAlertJob');
 const { runStockoutPeriodSummarySnapshotJob } = require('./stockoutPeriodSummarySnapshotJob');
+const { runOverstockReportSnapshotJob } = require('./overstockReportSnapshotJob');
 const { runOrderIdentitySync } = require('./orderIdentitySyncJob');
 const { runShopsSync } = require('./shopsSyncJob');
 const { runDailyReplenishmentReview } = require('./dailyReplenishmentReviewJob');
@@ -39,6 +40,7 @@ let currentStockoutProductCacheRefreshTask = null;
 let currentStockoutStatusRecalcTask = null;
 let currentStockoutAlertTask = null;
 let currentStockoutPeriodSummarySnapshotTask = null;
+let currentOverstockReportSnapshotTask = null;
 let currentOrderIdentitySyncTask = null;
 let currentShopsSyncTask = null;
 let currentDailyReviewTask = null;
@@ -65,6 +67,7 @@ const stockoutProductCacheRefreshLock = createJobLock('Resynchronisation du stoc
 const stockoutStatusRecalcLock = createJobLock('Précalcul du statut des ruptures en cours');
 const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
 const stockoutPeriodSummarySnapshotLock = createJobLock('Précalcul de l\'analyse des pertes par période (ruptures)');
+const overstockReportSnapshotLock = createJobLock('Précalcul du rapport Surstock');
 const orderIdentitySyncLock = createJobLock('Synchronisation identité RPOS des commandes');
 const shopsSyncLock = createJobLock('Synchronisation des magasins');
 const dailyReviewLock = createJobLock('Réajustement quotidien du réassort');
@@ -459,6 +462,35 @@ async function startOrRestartStockoutPeriodSummarySnapshotJob() {
   console.log(`⏰ Précalcul de l'analyse des pertes par période planifié: ${cronSchedule}`);
 }
 
+/** (Re)programme le précalcul du rapport Surstock (overstockReportSnapshotJob.js). */
+async function startOrRestartOverstockReportSnapshotJob() {
+  if (currentOverstockReportSnapshotTask) {
+    currentOverstockReportSnapshotTask.stop();
+    currentOverstockReportSnapshotTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.OVERSTOCK_REPORT_SNAPSHOT_ENABLED))) {
+    console.log('⏸️  Précalcul du rapport Surstock désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), précalcul du rapport Surstock non planifié`);
+    return;
+  }
+
+  currentOverstockReportSnapshotTask = cron.schedule(cronSchedule, () => {
+    overstockReportSnapshotLock(async () => {
+      console.log('[cron] Démarrage du précalcul du rapport Surstock...');
+      await trackJobRun('overstockReportSnapshot', runOverstockReportSnapshotJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Précalcul du rapport Surstock planifié: ${cronSchedule}`);
+}
+
 /** (Re)programme l'alerte email récapitulative des ruptures EN_COURS par magasin (stockoutAlertJob.js). */
 async function startOrRestartStockoutAlertJob() {
   if (currentStockoutAlertTask) {
@@ -741,6 +773,7 @@ module.exports = {
   startOrRestartStockoutStatusRecalcJob,
   startOrRestartStockoutAlertJob,
   startOrRestartStockoutPeriodSummarySnapshotJob,
+  startOrRestartOverstockReportSnapshotJob,
   startOrRestartOrderIdentitySyncJob,
   startOrRestartShopsSyncJob,
   startOrRestartDailyReviewJob,
