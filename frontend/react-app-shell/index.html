@@ -2,11 +2,15 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <!-- CORRIGÉ le 19/10/2026 (signalé : "le favicon n'est pas affiché") — pointait vers
-         /assets/images/favicon-reassort.png, un fichier qui n'a jamais existé dans le repo (vérifié :
-         introuvable partout, ni ici ni côté backend). Pointé vers logo-reassort.png, déjà présent et
-         utilisé comme logo dans toute l'application (sidebar, page de connexion). -->
-    <link rel="icon" type="image/png" href="/assets/images/logo-reassort.png" />
+    <!-- CORRIGÉ le 21/10/2026 (signalé : "le favicon es pareil que le logo... quand je change le
+         favicon ca ne change pas") — le correctif du 19/10/2026 pointait ici directement vers
+         logo-reassort.png en contournant complètement la route /assets/images/favicon-reassort.png
+         (proxy nginx vers GET /api/site-favicon, SystemConfig SITE_FAVICON_BASE64) : le favicon
+         personnalisé uploadé dans Paramètres n'était donc jamais servi, quel que soit son contenu.
+         Un fichier par défaut RÉEL existe bien (assets/images/favicon.ico, jamais remarqué par le
+         correctif précédent qui ne cherchait que favicon-reassort.png) — repointé vers la route
+         proxy, dont le fallback sert maintenant ce fichier au lieu du logo (cf. nginx.conf). -->
+    <link rel="icon" type="image/png" href="/assets/images/favicon-reassort.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Réassort Automatique</title>
 
