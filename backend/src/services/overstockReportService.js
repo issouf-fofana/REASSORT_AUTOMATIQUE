@@ -62,10 +62,102 @@ async function getLatestProposalIdsByShop(shopIds) {
   return new Map(proposals.map((p) => [p.rposShopId, p.id]));
 }
 
+// Fenêtre de calcul de la vente moyenne directement depuis les ventes brutes (SalesLine), pour les
+// magasins SANS proposition générée (demande explicite du 21/10/2026 : "fait les calcule en
+// fonction des vente... il faut faire dans la base et il soit affiché faut pas au chargement il
+// fait les calcule" — l'utilisateur a confirmé avoir lui-même désactivé la génération nocturne sur
+// la plupart des magasins, ce n'est donc pas un bug à corriger côté génération, mais Surstock doit
+// quand même pouvoir les couvrir). Même fenêtre que le reste du calcul existant (dérivation
+// jour/semaine/mois depuis UNE SEULE moyenne de base, confirmé "il faut faire comme tu fait
+// actuellement") : 30 jours glissants.
+const SALES_FALLBACK_LOOKBACK_DAYS = 30;
+
+/**
+ * Articles en surstock calculés DIRECTEMENT depuis le stock (ProductCache) et les ventes
+ * (SalesLine) synchronisés — pour les magasins qui n'ont AUCUNE proposition générée (fallback de
+ * getOverstockByShop ci-dessous). Même règle de surstock et même forme de retour que la version
+ * basée sur les propositions, pour que l'appelant puisse fusionner les deux sans distinction.
+ * department toujours null ici (demande confirmée : "rayon vide... évite les appels RPOS en
+ * masse" — le nom de rayon n'existe en local que via ProposalLine, qui n'existe pas pour ces
+ * magasins par définition).
+ */
+async function computeOverstockFromSales(shopIds, shopById, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE, lookbackDays = SALES_FALLBACK_LOOKBACK_DAYS } = {}) {
+  if (!shopIds.length) return [];
+
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+  const [productRows, salesByEan] = await Promise.all([
+    prisma.productCache.findMany({
+      where: { rposShopId: { in: shopIds }, orderable: true },
+      select: { rposShopId: true, ean: true, stock: true, sellingPrice: true },
+    }),
+    prisma.salesLine.groupBy({
+      by: ['rposShopId', 'ean'],
+      where: { rposShopId: { in: shopIds }, date: { gte: since } },
+      _sum: { quantity: true },
+    }),
+  ]);
+
+  // Même seuil "article générique" que proposalService.js/chatbotToolsService.js
+  // (excludeGenericArticlesBelowPrice, défaut 2 CFA) : un prix très bas signale un agrégat de
+  // rayon (ex: "FRUITS & LEGUMES" vendu au poids), pas un article réel — sa "quantité vendue" en
+  // base est en réalité un poids ou une valeur monétaire, jamais un nombre d'unités exploitable.
+  const GENERIC_ARTICLE_PRICE_THRESHOLD = 2;
+
+  const salesByKey = new Map(salesByEan.map((s) => [`${s.rposShopId}:${s.ean}`, s._sum.quantity || 0]));
+
+  const articles = [];
+  for (const p of productRows) {
+    if ((p.sellingPrice || 0) < GENERIC_ARTICLE_PRICE_THRESHOLD) continue;
+    const totalQty = salesByKey.get(`${p.rposShopId}:${p.ean}`) || 0;
+    const avgWeeklySales = Math.round(((totalQty / lookbackDays) * 7) * 10) / 10;
+    if (avgWeeklySales <= 0) continue;
+    const weeksOfCoverage = (p.stock || 0) / avgWeeklySales;
+    if (weeksOfCoverage < minWeeksOfCoverage) continue;
+
+    const shop = shopById.get(p.rposShopId);
+    articles.push({
+      rposShopId: p.rposShopId,
+      shopReference: shop?.reference || null,
+      shopName: shop?.name || null,
+      ean: p.ean,
+      label: null, // résolu séparément via SalesLine.label (voir ci-dessous) ou laissé vide
+      department: null,
+      stock: p.stock || 0,
+      sellingPrice: p.sellingPrice || null,
+      avgDailySales: Math.round((avgWeeklySales / 7) * 100) / 100,
+      avgWeeklySales,
+      avgMonthlySales: Math.round(avgWeeklySales * (365 / 12 / 7) * 10) / 10,
+      weeksOfCoverage: Math.round(weeksOfCoverage * 10) / 10,
+    });
+  }
+
+  if (!articles.length) return articles;
+
+  // Nom de l'article : SalesLine.label (dernière vente connue pour cet EAN dans ce magasin) —
+  // ProductCache ne stocke pas de libellé, uniquement l'EAN. Un seul aller-retour groupé plutôt
+  // qu'une requête par article.
+  const eansNeedingLabel = articles.map((a) => ({ rposShopId: a.rposShopId, ean: a.ean }));
+  const labelRows = await prisma.salesLine.findMany({
+    where: { OR: eansNeedingLabel.map((e) => ({ rposShopId: e.rposShopId, ean: e.ean })) },
+    select: { rposShopId: true, ean: true, label: true },
+    distinct: ['rposShopId', 'ean'],
+  });
+  const labelByKey = new Map(labelRows.filter((r) => r.label).map((r) => [`${r.rposShopId}:${r.ean}`, r.label]));
+  for (const a of articles) {
+    a.label = labelByKey.get(`${a.rposShopId}:${a.ean}`) || a.ean;
+  }
+
+  return articles.sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage);
+}
+
 /**
  * Articles en surstock par magasin (périmètre accessible au compte), avec vente moyenne
  * jour/semaine/mois dérivée de la même valeur avgWeeklySales déjà stockée (aucune nouvelle mesure,
- * juste /7 et *(365/12/7) — demande explicite "vente moyen par jour semaine et mois").
+ * juste /7 et *(365/12/7) — demande explicite "vente moyen par jour semaine et mois"). Un magasin
+ * SANS proposition générée (génération nocturne désactivée, demande explicite du 21/10/2026) passe
+ * par computeOverstockFromSales ci-dessus à la place — jamais absent du rapport simplement parce
+ * qu'aucune proposition n'a jamais tourné pour lui.
  */
 async function getOverstockByShop(allowedShopIds, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE } = {}) {
   if (Array.isArray(allowedShopIds) && !allowedShopIds.length) {
@@ -82,27 +174,26 @@ async function getOverstockByShop(allowedShopIds, { minWeeksOfCoverage = DEFAULT
   const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
   const latestProposalIdByShop = await getLatestProposalIdsByShop(shopIds);
   const proposalIds = [...latestProposalIdByShop.values()];
-  if (!proposalIds.length) {
-    return { found: true, minWeeksOfCoverage, shopCount: 0, articleCount: 0, articles: [], message: 'Aucune proposition générée pour les magasins accessibles.' };
-  }
 
   // id -> rposShopId, pour ré-attribuer chaque ligne à son magasin après la requête groupée.
   const shopIdByProposalId = new Map([...latestProposalIdByShop.entries()].map(([shopId, proposalId]) => [proposalId, shopId]));
 
-  const lines = await prisma.proposalLine.findMany({
-    where: { proposalId: { in: proposalIds } },
-    select: {
-      proposalId: true,
-      ean: true,
-      label: true,
-      department: true,
-      stockAtGeneration: true,
-      avgWeeklySales: true,
-      sellingPrice: true,
-    },
-  });
+  const lines = proposalIds.length
+    ? await prisma.proposalLine.findMany({
+        where: { proposalId: { in: proposalIds } },
+        select: {
+          proposalId: true,
+          ean: true,
+          label: true,
+          department: true,
+          stockAtGeneration: true,
+          avgWeeklySales: true,
+          sellingPrice: true,
+        },
+      })
+    : [];
 
-  const articles = lines
+  const articlesFromProposals = lines
     .filter((l) => (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage)
     .map((l) => {
       const rposShopId = shopIdByProposalId.get(l.proposalId);
@@ -122,8 +213,14 @@ async function getOverstockByShop(allowedShopIds, { minWeeksOfCoverage = DEFAULT
         avgMonthlySales: Math.round(avgWeeklySales * (365 / 12 / 7) * 10) / 10,
         weeksOfCoverage: Math.round((l.stockAtGeneration / l.avgWeeklySales) * 10) / 10,
       };
-    })
-    .sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage);
+    });
+
+  // Magasins accessibles SANS aucune proposition (jamais générée, ou génération désactivée) :
+  // calculés depuis les ventes/stock directement plutôt qu'absents du rapport.
+  const shopIdsWithoutProposal = shopIds.filter((id) => !latestProposalIdByShop.has(id));
+  const articlesFromSales = await computeOverstockFromSales(shopIdsWithoutProposal, shopById, { minWeeksOfCoverage });
+
+  const articles = [...articlesFromProposals, ...articlesFromSales].sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage);
 
   return {
     found: true,
