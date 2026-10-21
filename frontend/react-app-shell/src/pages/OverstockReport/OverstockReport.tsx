@@ -368,6 +368,22 @@ export function OverstockReport() {
     return true;
   }
 
+  // Tri croissant/décroissant par colonne sur le tableau "Par magasin" (demande explicite du
+  // 21/10/2026 : "sur le tableau donne la possibilté de faire un fitre croissant et decroi") — un
+  // clic sur un en-tête trie par cette colonne, un second clic inverse le sens, un clic sur une
+  // autre colonne repart en décroissant (comportement standard d'un tri de tableau).
+  const [sortKey, setSortKey] = useState<keyof ShopArticleRow | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  function toggleSort(key: keyof ShopArticleRow) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  }
+
   // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
   // il faut ajouter un systeme de pagination") — 2107+ lignes dans un seul tableau HTML sans
   // virtualisation (contrairement à Proposition de commande, qui utilise ag-Grid) ralentissait le
@@ -467,13 +483,28 @@ export function OverstockReport() {
   // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
   // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
   // résultat n'a que 2 pages.
-  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data]);
+  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data, sortKey, sortDir]);
 
-  const activeRows = activeTab === 'byShop' ? filteredByShop : activeTab === 'common' ? filteredCommon : filteredPersistent;
+  const sortedByShop = useMemo(() => {
+    if (!sortKey) return filteredByShop;
+    const sorted = [...filteredByShop].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return String(av).localeCompare(String(bv), 'fr-FR');
+      }
+      return (av as number) - (bv as number);
+    });
+    return sortDir === 'asc' ? sorted : sorted.reverse();
+  }, [filteredByShop, sortKey, sortDir]);
+
+  const activeRows = activeTab === 'byShop' ? sortedByShop : activeTab === 'common' ? filteredCommon : filteredPersistent;
   const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedByShop = activeTab === 'byShop' ? filteredByShop.slice(pageStart, pageStart + PAGE_SIZE) : [];
+  const pagedByShop = activeTab === 'byShop' ? sortedByShop.slice(pageStart, pageStart + PAGE_SIZE) : [];
   const pagedCommon = activeTab === 'common' ? filteredCommon.slice(pageStart, pageStart + PAGE_SIZE) : [];
   const pagedPersistent = activeTab === 'persistent' ? filteredPersistent.slice(pageStart, pageStart + PAGE_SIZE) : [];
 
@@ -571,14 +602,19 @@ export function OverstockReport() {
         .osr-run-btn:hover { background: #142037; }
         .osr-availability { font-size: .74rem; color: #8591A0; }
         .osr-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; }
-        .osr-adv-filter-btn { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
-        .osr-adv-filter-btn:hover { background: #F6F8FB; color: #1B2A4A; }
-        .osr-adv-filter-btn.active { background: rgba(36,86,166,.1); color: #2456A6; border-color: rgba(36,86,166,.3); }
-        .osr-range-panel { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 14px 18px; display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
-        .osr-range-field { display: flex; flex-direction: column; gap: 5px; }
-        .osr-range-label { font-size: .74rem; font-weight: 600; color: #5B6B85; }
-        .osr-range-clear { border: none; background: none; color: #B8302C; font-size: .78rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 6px 0; margin-left: auto; }
-        .osr-range-clear:hover { text-decoration: underline; }
+        .osr-adv-filter-btn { border: 1px solid rgba(27,42,74,.1); background: #FAFBFD; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 13px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .osr-adv-filter-btn:hover { background: #F0F3F9; color: #1B2A4A; }
+        .osr-adv-filter-btn.active { background: rgba(36,86,166,.08); color: #2456A6; border-color: rgba(36,86,166,.25); }
+        .osr-range-panel { background: #FAFBFD; border: 1px solid rgba(27,42,74,.06); border-radius: 14px; padding: 18px 22px; display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+        .osr-range-field { display: flex; flex-direction: column; gap: 6px; }
+        .osr-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
+        .osr-range-field .osr-input { border-color: rgba(27,42,74,.08); background: #fff; border-radius: 8px; }
+        .osr-range-field .osr-input::placeholder { color: #B6BFCF; }
+        .osr-range-field span { color: #C3CBDA; }
+        .osr-range-clear { border: none; background: #fff; color: #B8302C; font-size: .76rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 7px 14px; border-radius: 20px; margin-left: auto; transition: background .15s; }
+        .osr-range-clear:hover { background: rgba(214,69,65,.08); }
+        .osr-sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .osr-sortable-th:hover { color: #1B2A4A; }
         .osr-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(27,42,74,.08); margin-bottom: 1rem; flex-wrap: wrap; }
         .osr-tab { border: none; background: none; padding: 10px 16px; font-size: .86rem; font-weight: 600; color: #8591A0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
         .osr-tab.active { color: #1B2A4A; border-bottom-color: #1B2A4A; }
@@ -920,17 +956,17 @@ export function OverstockReport() {
                   <table className="table align-middle table-hover mb-0">
                     <thead className="bg-light-subtle">
                       <tr>
-                        <th>Article</th>
+                        <SortableTh label="Article" field="label" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                         <th>Magasin</th>
                         <th>Rayon</th>
-                        <th>Stock</th>
-                        <th>Prix de vente</th>
-                        <th>Vente/jour</th>
-                        <th>Vente/semaine</th>
-                        <th>Vente/mois</th>
-                        <th>Couverture</th>
-                        {data.periodMode && <th>% du temps en surstock</th>}
-                        <th>Casse (90j)</th>
+                        <SortableTh label="Stock" field="stock" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        <SortableTh label="Prix de vente" field="sellingPrice" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        <SortableTh label="Vente/jour" field="avgDailySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        <SortableTh label="Vente/semaine" field="avgWeeklySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        <SortableTh label="Vente/mois" field="avgMonthlySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        <SortableTh label="Couverture" field="weeksOfCoverage" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                        {data.periodMode && <SortableTh label="% du temps en surstock" field="overstockRatio" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />}
+                        <SortableTh label="Casse (90j)" field="scrapQuantity90d" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                       </tr>
                     </thead>
                     <tbody>
@@ -990,6 +1026,22 @@ export function OverstockReport() {
 // Pagination (demande explicite du 21/10/2026) — numéros de page condensés (toujours la première,
 // la dernière, la page courante et ses voisines immédiates, "…" pour le reste) : afficher 40+ boutons
 // de page pour 2000 lignes serait aussi inutilisable que l'absence totale de pagination.
+// En-tête de colonne triable (demande explicite du 21/10/2026 : "sur le tableau donne la
+// possibilté de faire un fitre croissant et decroi") — un clic trie, un second clic inverse le
+// sens, une flèche indique la colonne et le sens actifs.
+function SortableTh({ label, field, sortKey, sortDir, onSort }: { label: string; field: keyof ShopArticleRow; sortKey: keyof ShopArticleRow | null; sortDir: 'asc' | 'desc'; onSort: (field: keyof ShopArticleRow) => void }) {
+  const active = sortKey === field;
+  return (
+    <th role="button" onClick={() => onSort(field)} className="osr-sortable-th">
+      {label}
+      <iconify-icon
+        icon={active ? (sortDir === 'asc' ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold') : 'solar:sort-vertical-linear'}
+        style={{ marginLeft: 5, fontSize: '12px', opacity: active ? 1 : .35, color: active ? '#2456A6' : undefined }}
+      ></iconify-icon>
+    </th>
+  );
+}
+
 function PaginationBar({ page, totalPages, totalItems, onChange }: { page: number; totalPages: number; totalItems: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null;
 
