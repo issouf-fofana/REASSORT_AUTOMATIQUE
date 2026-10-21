@@ -110,11 +110,6 @@ function CoveragePill({ weeks, threshold }: { weeks: number | null; threshold: n
   return <span className={`osr-pill ${variant}`}>{weeks} sem.</span>;
 }
 
-function articleInitials(label: string): string {
-  const words = label.trim().split(/\s+/).filter(Boolean);
-  return ((words[0]?.[0] || '') + (words[1]?.[0] || '')).toUpperCase() || '?';
-}
-
 // Génère un CSV et déclenche son téléchargement côté navigateur — même principe que l'export
 // ag-Grid déjà utilisé sur Proposition de commande (ProposalTable.tsx), mais construit à la main
 // ici : cette page n'utilise pas ag-Grid (juste des tableaux HTML), pas de raison d'ajouter cette
@@ -413,15 +408,6 @@ export function OverstockReport() {
     return true;
   }
 
-  // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
-  // il faut ajouter un systeme de pagination") — 2107+ lignes dans un seul tableau HTML sans
-  // virtualisation (contrairement à Proposition de commande, qui utilise ag-Grid) ralentissait le
-  // rendu et rendait la liste inutilisable. Un seul état de page par onglet : changer d'onglet ou de
-  // filtre revient toujours à la page 1 (cf. resets ci-dessous), jamais une page vide sur un onglet
-  // qui a moins de résultats que la page courante sur un autre.
-  const PAGE_SIZE = 50;
-  const [page, setPage] = useState(1);
-
   // Étendue réelle des données disponibles (demande explicite : "on doit me dire j'ai des donner de
   // quel periode... si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre
   // grisé") — chargé une fois au montage, sert de borne min au sélecteur de dates ci-dessous.
@@ -508,21 +494,6 @@ export function OverstockReport() {
       }))
       .filter((a) => a.shops.length > 0);
   }, [data, shopFilters, search, rangeFilters, scrapOnly]);
-
-  // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
-  // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
-  // résultat n'a que 2 pages.
-  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data]);
-
-  // "Par magasin" utilise désormais sa propre grille ag-Grid (ByShopGrid, tri/filtre/pagination
-  // intégrés à la librairie) — la pagination "page"/PAGE_SIZE ci-dessus ne sert plus qu'aux deux
-  // onglets en cartes (commun/persistant), qui n'ont pas de tableau plat à une ligne par article.
-  const activeRows = activeTab === 'common' ? filteredCommon : filteredPersistent;
-  const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedCommon = activeTab === 'common' ? filteredCommon.slice(pageStart, pageStart + PAGE_SIZE) : [];
-  const pagedPersistent = activeTab === 'persistent' ? filteredPersistent.slice(pageStart, pageStart + PAGE_SIZE) : [];
 
   // Versions "recherche seule, sans le filtre magasin" — utilisées quand l'utilisateur choisit
   // "tous les magasins" dans la confirmation d'export ci-dessous, même si un magasin précis est
@@ -634,8 +605,6 @@ export function OverstockReport() {
         .osr-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(27,42,74,.08); margin-bottom: 1rem; flex-wrap: wrap; }
         .osr-tab { border: none; background: none; padding: 10px 16px; font-size: .86rem; font-weight: 600; color: #8591A0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
         .osr-tab.active { color: #1B2A4A; border-bottom-color: #1B2A4A; }
-        .osr-common-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
-        .osr-common-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
         .osr-scrap-badge { background: rgba(214,69,65,.08); color: #B8302C; border-radius: 5px; padding: 1px 7px; font-size: .72rem; font-weight: 700; }
         .osr-persist-badge { background: rgba(27,42,74,.06); color: #1B2A4A; border-radius: 5px; padding: 1px 7px; font-size: .72rem; font-weight: 700; }
         .osr-period-banner { background: #F6F8FB; border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 9px 14px; font-size: .82rem; color: #44516B; }
@@ -675,7 +644,6 @@ export function OverstockReport() {
         .osr-pill-danger { background: rgba(214,69,65,.1); color: #B8302C; }
         .osr-pill-warning { background: rgba(214,158,46,.12); color: #8A5A00; }
         .osr-pill-neutral { background: rgba(27,42,74,.06); color: #5B6B85; }
-        .osr-row-avatar { width: 32px; height: 32px; border-radius: 9px; background: #EEF2FB; color: #2456A6; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .76rem; flex-shrink: 0; }
         .osr-settings-details summary { list-style: none; cursor: pointer; }
         .osr-settings-details summary::-webkit-details-marker { display: none; }
         .osr-settings-summary { display: inline-flex; align-items: center; gap: 7px; font-size: .82rem; font-weight: 600; color: #5B6B85; padding: 6px 2px; }
@@ -956,32 +924,34 @@ export function OverstockReport() {
           </div>
 
           {activeTab === 'common' && (
-            filteredCommon.length === 0 ? (
-              <div className="text-muted small py-4">Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil.</div>
-            ) : (
-              <>
-                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />)}
-                <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredCommon.length} onChange={setPage} />
-              </>
-            )
+            <CommonArticlesTable
+              rows={flattenCommonArticles(filteredCommon)}
+              showRatio={!!data.periodMode}
+              threshold={data.minWeeksOfCoverage}
+              onOpenDetail={openScrapDetail}
+              emptyMessage="Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil."
+            />
           )}
 
           {activeTab === 'persistent' && (
-            filteredPersistent.length === 0 ? (
-              <div className="text-muted small py-4">Aucun article en surstock de façon persistante sur cette période pour ce seuil.</div>
-            ) : (
-              <>
+            <>
+              {filteredPersistent.length > 0 && (
                 <p className="text-muted small">
                   Articles en surstock dans au moins {fmtPct(data.alwaysOverstockThresholdRatio ?? 0.9)} des propositions générées sur la période, magasin par magasin.
                 </p>
-                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />)}
-                <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredPersistent.length} onChange={setPage} />
-              </>
-            )
+              )}
+              <CommonArticlesTable
+                rows={flattenCommonArticles(filteredPersistent)}
+                showRatio
+                threshold={data.minWeeksOfCoverage}
+                onOpenDetail={openScrapDetail}
+                emptyMessage="Aucun article en surstock de façon persistante sur cette période pour ce seuil."
+              />
+            </>
           )}
 
           {activeTab === 'byShop' && (
-            <ByShopGrid rows={filteredByShop} periodMode={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />
+            <ByShopTable rows={filteredByShop} periodMode={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />
           )}
         </>
       ) : null}
@@ -989,133 +959,83 @@ export function OverstockReport() {
   );
 }
 
-// Tableau "Par magasin" sur ag-Grid (demande explicite du 21/10/2026 : "le tableau fais meme
-// model de tableau que pour les propostion de commande") — même thème partagé
-// (window.REASSORT_AG_GRID_THEME_SOFT) et même pattern que SalesHistory.tsx (grille simple,
-// colonnes sans cellule React, formatters DOM). Tri/filtre/pagination gérés nativement par
-// ag-Grid (filtre par colonne via l'icône d'entonnoir, tri par clic sur l'en-tête) — le panneau
-// "Filtres avancés" au-dessus continue de filtrer AVANT que les lignes n'arrivent dans la grille
-// (rowData), les deux systèmes de filtre se cumulent sans se gêner.
-function ByShopGrid({ rows, periodMode, threshold, onOpenDetail }: { rows: ShopArticleRow[]; periodMode: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
-  const gridDivRef = useRef<HTMLDivElement>(null);
-  const gridApiRef = useRef<any>(null);
+// Tableau "Par magasin" en HTML simple, même style que CommonArticlesTable (demande explicite du
+// 21/10/2026 : "les tableau ici il ne faut pas utilisé les carde de ng que tu prend fait des tab
+// avec un nouveau style" — remplace la grille ag-Grid précédente, dont la pagination à 50 par page
+// avait fini par échapper à l'écran avec des dizaines de milliers de lignes une fois le calcul
+// étendu aux ventes/stock pour les magasins sans proposition). Pagination maison (PaginationBar),
+// identique sur les 3 onglets de cette page désormais.
+function ByShopTable({ rows, periodMode, threshold, onOpenDetail }: { rows: ShopArticleRow[]; periodMode: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  useEffect(() => { setPage(1); }, [rows]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  useEffect(() => {
-    if (!gridDivRef.current || !window.agGrid || !window.REASSORT_AG_GRID_THEME_SOFT) return;
+  if (rows.length === 0) {
+    return <div className="text-muted small py-4">Aucun article en surstock pour ce seuil.</div>;
+  }
 
-    const numberFormatter = (p: any) => (p.value === null || p.value === undefined ? '—' : p.value.toLocaleString('fr-FR'));
-    const cfaFormatter = (p: any) => fmtCfa(p.value);
-
-    const columnDefs: any[] = [
-      {
-        field: 'label',
-        headerName: 'Article',
-        flex: 2,
-        minWidth: 220,
-        filter: 'agTextColumnFilter',
-        // Texte simple sur une ligne, sans avatar/sous-titre empilé (demande explicite du
-        // 21/10/2026 : "c'est pa bien affiché") — l'avatar (initiales dans un badge) rendu par un
-        // cellRenderer DOM brut se décalait sous le texte au lieu de rester à côté, probablement
-        // une interaction entre le display:flex de .osr-row-avatar et la hauteur de cellule fixée
-        // par ag-Grid. Un texte simple évite ce risque d'affichage, cohérent avec les autres
-        // colonnes du tableau (pas d'avatar ailleurs dans cette grille).
-        valueGetter: (p: any) => `${p.data.label} (${p.data.ean})`,
-      },
-      {
-        field: 'shopLabel',
-        headerName: 'Magasin',
-        filter: 'agTextColumnFilter',
-        minWidth: 180,
-        valueGetter: (p: any) => `${p.data.shopName} (${p.data.shopReference})`,
-      },
-      { field: 'department', headerName: 'Rayon', filter: 'agTextColumnFilter', minWidth: 140, valueFormatter: (p: any) => p.value || '—' },
-      { field: 'stock', headerName: 'Stock', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 110, valueFormatter: numberFormatter },
-      { field: 'sellingPrice', headerName: 'Prix de vente', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, valueFormatter: cfaFormatter },
-      { field: 'avgDailySales', headerName: 'Vente/jour', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 120, valueFormatter: numberFormatter },
-      { field: 'avgWeeklySales', headerName: 'Vente/semaine', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, valueFormatter: numberFormatter },
-      { field: 'avgMonthlySales', headerName: 'Vente/mois', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 120, valueFormatter: numberFormatter },
-      {
-        field: 'weeksOfCoverage',
-        headerName: 'Couverture',
-        type: 'numericColumn',
-        filter: 'agNumberColumnFilter',
-        width: 130,
-        cellRenderer: (p: any) => {
-          if (p.value === null || p.value === undefined) return '—';
-          const ratio = threshold > 0 ? p.value / threshold : 1;
-          const span = document.createElement('span');
-          span.className = `osr-pill ${ratio >= 4 ? 'osr-pill-danger' : ratio >= 2 ? 'osr-pill-warning' : 'osr-pill-neutral'}`;
-          span.textContent = `${p.value} sem.`;
-          return span;
-        },
-      },
-      ...(periodMode
-        ? [{ field: 'overstockRatio', headerName: '% du temps en surstock', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 160, valueFormatter: (p: any) => fmtPct(p.value) }]
-        : []),
-      {
-        field: 'scrapQuantity90d',
-        headerName: 'Casse (90j)',
-        type: 'numericColumn',
-        filter: 'agNumberColumnFilter',
-        width: 130,
-        cellRenderer: (p: any) => {
-          const l = p.data as ShopArticleRow;
-          if (!(l.scrapQuantity90d > 0)) {
-            const span = document.createElement('span');
-            span.className = 'text-muted small';
-            span.textContent = 'Aucune';
-            return span;
-          }
-          const span = document.createElement('span');
-          span.className = 'osr-scrap-badge';
-          span.textContent = `−${l.scrapQuantity90d} (${l.scrapMoveCount90d})`;
-          if (l.lastScrapDate) span.title = `Dernière casse : ${new Date(l.lastScrapDate).toLocaleDateString('fr-FR')}`;
-          return span;
-        },
-      },
-    ];
-
-    const tableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
-      rowHeight: 56,
-      headerHeight: 38,
-      headerFontSize: 11.5,
-      headerFontWeight: 700,
-      dataFontSize: 13,
-      cellHorizontalPadding: 10,
-      oddRowBackgroundColor: '#FAFAFA',
-      rowBorder: { color: '#D9DCE1' },
-    });
-
-    gridApiRef.current = window.agGrid.createGrid(gridDivRef.current, {
-      theme: tableTheme,
-      columnDefs,
-      localeText: window.AG_GRID_LOCALE_FR,
-      domLayout: 'autoHeight',
-      pagination: true,
-      paginationPageSize: 50,
-      paginationPageSizeSelector: [25, 50, 100, 200],
-      defaultColDef: { resizable: true, sortable: true },
-      rowData: rows,
-      getRowId: (p: any) => `${p.data.rposShopId}:${p.data.ean}`,
-      suppressCellFocus: true,
-      onRowClicked: (e: any) => onOpenDetail(e.data.ean, e.data.label),
-      rowStyle: { cursor: 'pointer' },
-    });
-
-    return () => {
-      if (gridApiRef.current) {
-        gridApiRef.current.destroy();
-        gridApiRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodMode, threshold]);
-
-  useEffect(() => {
-    if (gridApiRef.current) gridApiRef.current.setGridOption('rowData', rows);
-  }, [rows]);
-
-  return <div className="osr-table-card" style={{ padding: 4 }}><div ref={gridDivRef}></div></div>;
+  return (
+    <>
+      <div className="osr-table-card">
+        <div className="table-responsive">
+          <table className="table align-middle table-hover mb-0">
+            <thead className="bg-light-subtle">
+              <tr>
+                <th>Article</th>
+                <th>Magasin</th>
+                <th>Rayon</th>
+                <th>Stock</th>
+                <th>Prix de vente</th>
+                <th>Vente/jour</th>
+                <th>Vente/semaine</th>
+                <th>Vente/mois</th>
+                <th>Couverture</th>
+                {periodMode && <th>% du temps en surstock</th>}
+                <th>Casse (90j)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.map((r, i) => (
+                <tr
+                  key={`${r.rposShopId}:${r.ean}:${i}`}
+                  role="button"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onOpenDetail(r.ean, r.label)}
+                >
+                  <td>
+                    <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{r.label}</div>
+                    <div className="text-muted" style={{ fontSize: '.72rem' }}>{r.ean}</div>
+                  </td>
+                  <td>{r.shopName} ({r.shopReference})</td>
+                  <td>{r.department || '—'}</td>
+                  <td>{r.stock}</td>
+                  <td>{fmtCfa(r.sellingPrice)}</td>
+                  <td>{r.avgDailySales}</td>
+                  <td>{r.avgWeeklySales}</td>
+                  <td>{r.avgMonthlySales}</td>
+                  <td><CoveragePill weeks={r.weeksOfCoverage} threshold={threshold} /></td>
+                  {periodMode && <td>{fmtPct(r.overstockRatio)}</td>}
+                  <td>
+                    {r.scrapQuantity90d > 0 ? (
+                      <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
+                        −{r.scrapQuantity90d} ({r.scrapMoveCount90d})
+                      </span>
+                    ) : (
+                      <span className="text-muted small">Aucune</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <PaginationBar page={currentPage} totalPages={totalPages} totalItems={rows.length} onChange={setPage} />
+    </>
+  );
 }
 
 // Pagination (demande explicite du 21/10/2026) — numéros de page condensés (toujours la première,
@@ -1159,67 +1079,89 @@ function PaginationBar({ page, totalPages, totalItems, onChange }: { page: numbe
   );
 }
 
-function CommonArticleCard({ a, showRatio, threshold, onOpenDetail }: { a: CommonArticle; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
+// Tableau plat (une ligne par article × magasin) pour "Surstock commun"/"Toujours en surstock"
+// (demande explicite du 21/10/2026 : "les tableau ici il ne faut pas utilisé les carde de ng que tu
+// prend fait des tab avec un nouveau style" — remplace les cartes par article avec mini-tableau
+// imbriqué par un vrai tableau simple, même style que "Par magasin", avec pagination à 50.
+type FlatCommonRow = CommonShopEntry & { ean: string; label: string; department: string | null };
+
+function flattenCommonArticles(articles: CommonArticle[]): FlatCommonRow[] {
+  const rows: FlatCommonRow[] = [];
+  for (const a of articles) {
+    for (const s of a.shops) {
+      rows.push({ ...s, ean: a.ean, label: a.label, department: a.department });
+    }
+  }
+  return rows;
+}
+
+function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMessage }: { rows: FlatCommonRow[]; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void; emptyMessage: string }) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  useEffect(() => { setPage(1); }, [rows]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  if (rows.length === 0) {
+    return <div className="text-muted small py-4">{emptyMessage}</div>;
+  }
+
   return (
-    <div className="osr-common-card">
-      <div className="osr-common-head">
-        <div
-          className="d-flex align-items-center gap-2"
-          role="button"
-          style={{ cursor: 'pointer' }}
-          onClick={() => onOpenDetail(a.ean, a.label)}
-          title="Voir le détail de la casse"
-        >
-          <span className="osr-row-avatar">{articleInitials(a.label)}</span>
-          <div>
-            <div className="fw-semibold" style={{ fontSize: '.86rem', color: '#1B2A4A' }}>{a.label}</div>
-            <div className="text-muted" style={{ fontSize: '.72rem' }}>{a.ean}{a.department ? ` — ${a.department}` : ''}</div>
-          </div>
-        </div>
-        <div className="small text-muted">{a.shops.length} magasin(s) · {fmtCfa(a.sellingPrice)}</div>
-      </div>
-      <div className="table-responsive">
-        <table className="table table-sm align-middle mb-0">
-          <thead className="bg-light-subtle">
-            <tr>
-              <th>Magasin</th>
-              <th>Stock</th>
-              <th>Vente/jour</th>
-              <th>Vente/semaine</th>
-              <th>Vente/mois</th>
-              <th>Couverture</th>
-              {showRatio && <th>% du temps en surstock</th>}
-              <th>Casse (90j)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {a.shops.map((s) => (
-              <tr key={s.rposShopId}>
-                <td>{s.shopName} ({s.shopReference})</td>
-                <td>{s.stock}</td>
-                <td>{s.avgDailySales}</td>
-                <td>{s.avgWeeklySales}</td>
-                <td>{s.avgMonthlySales}</td>
-                <td><CoveragePill weeks={s.weeksOfCoverage} threshold={threshold} /></td>
-                {showRatio && (
-                  <td>
-                    <span className="osr-persist-badge">{fmtPct(s.overstockRatio)}</span>
-                  </td>
-                )}
-                <td>
-                  {s.scrapQuantity90d > 0 ? (
-                    <span className="osr-scrap-badge" title={s.lastScrapDate ? `Dernière casse : ${new Date(s.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
-                      −{s.scrapQuantity90d} ({s.scrapMoveCount90d})
-                    </span>
-                  ) : (
-                    <span className="text-muted small">Aucune</span>
-                  )}
-                </td>
+    <>
+      <div className="osr-table-card">
+        <div className="table-responsive">
+          <table className="table align-middle table-hover mb-0">
+            <thead className="bg-light-subtle">
+              <tr>
+                <th>Article</th>
+                <th>Magasin</th>
+                <th>Stock</th>
+                <th>Prix de vente</th>
+                <th>Vente/jour</th>
+                <th>Vente/semaine</th>
+                <th>Vente/mois</th>
+                <th>Couverture</th>
+                {showRatio && <th>% du temps en surstock</th>}
+                <th>Casse (90j)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paged.map((r, i) => (
+                <tr
+                  key={`${r.ean}:${r.rposShopId}:${i}`}
+                  role="button"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onOpenDetail(r.ean, r.label)}
+                >
+                  <td>
+                    <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{r.label}</div>
+                    <div className="text-muted" style={{ fontSize: '.72rem' }}>{r.ean}{r.department ? ` — ${r.department}` : ''}</div>
+                  </td>
+                  <td>{r.shopName} ({r.shopReference})</td>
+                  <td>{r.stock}</td>
+                  <td>{fmtCfa(r.sellingPrice)}</td>
+                  <td>{r.avgDailySales}</td>
+                  <td>{r.avgWeeklySales}</td>
+                  <td>{r.avgMonthlySales}</td>
+                  <td><CoveragePill weeks={r.weeksOfCoverage} threshold={threshold} /></td>
+                  {showRatio && <td><span className="osr-persist-badge">{fmtPct(r.overstockRatio)}</span></td>}
+                  <td>
+                    {r.scrapQuantity90d > 0 ? (
+                      <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
+                        −{r.scrapQuantity90d} ({r.scrapMoveCount90d})
+                      </span>
+                    ) : (
+                      <span className="text-muted small">Aucune</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+      <PaginationBar page={currentPage} totalPages={totalPages} totalItems={rows.length} onChange={setPage} />
+    </>
   );
 }
