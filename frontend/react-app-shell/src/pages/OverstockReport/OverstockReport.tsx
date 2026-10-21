@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 
 // Page Surstock (demande explicite du 21/10/2026) : "sortir pour les magasins chaque magasin les
@@ -79,6 +79,7 @@ type OverstockReportData = {
   commonArticles: CommonArticle[];
   persistentArticleCount?: number | null;
   persistentArticles?: CommonArticle[] | null;
+  trendPoints?: { date: string; count: number }[] | null;
   message?: string;
 };
 
@@ -92,6 +93,22 @@ function fmtCfa(n: number | null): string {
 function fmtPct(ratio: number | undefined): string {
   if (ratio === undefined) return '—';
   return `${Math.round(ratio * 100)}%`;
+}
+
+// Pastille de sévérité sur la couverture (demande explicite du 21/10/2026 : style avec badges
+// colorés, inspiré de la capture "Success/Blocked") — plus la couverture dépasse le seuil, plus la
+// pastille vire au rouge : un repère visuel immédiat pour repérer les pires excès sans lire chaque
+// chiffre.
+function CoveragePill({ weeks, threshold }: { weeks: number | null; threshold: number }) {
+  if (weeks === null) return <span className="text-muted small">—</span>;
+  const ratio = threshold > 0 ? weeks / threshold : 1;
+  const variant = ratio >= 4 ? 'osr-pill-danger' : ratio >= 2 ? 'osr-pill-warning' : 'osr-pill-neutral';
+  return <span className={`osr-pill ${variant}`}>{weeks} sem.</span>;
+}
+
+function articleInitials(label: string): string {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0] || '') + (words[1]?.[0] || '')).toUpperCase() || '?';
 }
 
 // Génère un CSV et déclenche son téléchargement côté navigateur — même principe que l'export
@@ -117,6 +134,78 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// Bandeau "hero" en dégradé bleu avec courbe de tendance (demande explicite du 21/10/2026, capture
+// d'un tableau de bord type "Today $764.39" avec graphique + cartes arrondies + badges de tendance :
+// "je veux le style sur cette vue... il faut me faire un truc bien fait"). Le graphique montre le
+// nombre d'articles distincts en surstock jour par jour sur la période choisie (trendPoints,
+// overstockReportService.js) — n'existe qu'en mode période, pas sur un simple snapshot instantané,
+// donc affiche un repère "situation actuelle" à la place quand aucune période n'est active.
+function OverstockHero({ data, filteredCount }: { data: OverstockReportData; filteredCount: number }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<any>(null);
+  const points = data.trendPoints || [];
+
+  useEffect(() => {
+    if (!points.length || !chartRef.current || !window.ApexCharts) return;
+    const categories = points.map((p) => new Date(p.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }));
+    const values = points.map((p) => p.count);
+
+    const chart = new window.ApexCharts(chartRef.current, {
+      chart: { type: 'area', height: 170, toolbar: { show: false }, sparkline: { enabled: false }, background: 'transparent' },
+      series: [{ name: 'Articles en surstock', data: values }],
+      xaxis: { categories, labels: { style: { colors: 'rgba(255,255,255,.75)', fontSize: '10px' } }, axisBorder: { show: false }, axisTicks: { show: false } },
+      yaxis: { labels: { style: { colors: 'rgba(255,255,255,.75)' }, formatter: (v: number) => String(Math.round(v)) } },
+      colors: ['#fff'],
+      stroke: { curve: 'smooth', width: 2.5 },
+      fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0.02, shadeIntensity: 1, colorStops: [{ offset: 0, color: '#fff', opacity: 0.35 }, { offset: 100, color: '#fff', opacity: 0 }] } },
+      markers: { size: 3, colors: ['#fff'], strokeColors: '#2456A6', strokeWidth: 2 },
+      dataLabels: { enabled: false },
+      tooltip: { theme: 'dark', y: { formatter: (v: number) => `${v} article(s) en surstock` } },
+      grid: { borderColor: 'rgba(255,255,255,.12)', strokeDashArray: 3 },
+    });
+
+    chart.render();
+    chartInstanceRef.current = chart;
+    return () => { chart.destroy(); };
+  }, [points]);
+
+  const latest = points[points.length - 1];
+  const previous = points[points.length - 2];
+  const trendDiff = latest && previous ? latest.count - previous.count : null;
+
+  return (
+    <div className="osr-hero mb-3">
+      <div className="osr-hero-top">
+        <div>
+          <div className="osr-hero-label">{data.periodMode ? 'Articles en surstock aujourd\'hui' : 'Situation actuelle'}</div>
+          <div className="osr-hero-value">
+            {data.periodMode ? (latest ? latest.count.toLocaleString('fr-FR') : filteredCount.toLocaleString('fr-FR')) : filteredCount.toLocaleString('fr-FR')}
+            {trendDiff !== null && (
+              <span className={`osr-hero-trend ${trendDiff <= 0 ? 'down' : 'up'}`}>
+                <iconify-icon icon={trendDiff <= 0 ? 'solar:alt-arrow-down-bold' : 'solar:alt-arrow-up-bold'}></iconify-icon>
+                {Math.abs(trendDiff)}
+              </span>
+            )}
+          </div>
+          {previous && <div className="osr-hero-sub">Hier : {previous.count.toLocaleString('fr-FR')}</div>}
+        </div>
+        <div className="osr-hero-period">
+          {data.periodMode
+            ? <>{new Date(data.periodStart!).toLocaleDateString('fr-FR')} → {new Date(data.periodEnd!).toLocaleDateString('fr-FR')}</>
+            : 'Dernière proposition par magasin'}
+        </div>
+      </div>
+      {data.periodMode && points.length > 1 ? (
+        <div ref={chartRef}></div>
+      ) : (
+        <div className="osr-hero-empty">
+          {data.periodMode ? 'Pas assez de points pour tracer une courbe sur cette période.' : 'Active "Analyser sur une période" pour voir la courbe d\'évolution dans le temps.'}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type TabKey = 'common' | 'byShop' | 'persistent';
@@ -358,16 +447,87 @@ export function OverstockReport() {
         .osr-page-btn:disabled { opacity: .4; cursor: not-allowed; }
         .osr-page-btn.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
         .osr-page-info { font-size: .76rem; color: #8591A0; margin: 0 6px; }
+        .osr-hero { background: linear-gradient(135deg, #1B2A4A 0%, #2456A6 100%); border-radius: 14px; padding: 22px 26px 10px; color: #fff; box-shadow: 0 10px 28px rgba(27,42,74,.22); }
+        .osr-hero-top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; }
+        .osr-hero-label { font-size: .8rem; opacity: .8; font-weight: 500; }
+        .osr-hero-value { font-size: 2rem; font-weight: 700; display: flex; align-items: center; gap: 10px; line-height: 1.2; }
+        .osr-hero-trend { font-size: .72rem; font-weight: 700; border-radius: 6px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 2px; }
+        .osr-hero-trend.down { background: rgba(94,214,145,.22); color: #B6F2CF; }
+        .osr-hero-trend.up { background: rgba(255,255,255,.18); color: #fff; }
+        .osr-hero-sub { font-size: .76rem; opacity: .7; margin-top: 2px; }
+        .osr-hero-period { background: rgba(255,255,255,.12); border-radius: 7px; padding: 6px 12px; font-size: .76rem; font-weight: 600; }
+        .osr-hero-empty { font-size: .8rem; opacity: .75; padding: 2rem 0; text-align: center; }
+        .osr-kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: -34px 0 1.25rem; position: relative; z-index: 1; padding: 0 2px; }
+        .osr-kpi-card { flex: 1 1 200px; background: #fff; border-radius: 12px; padding: 14px 18px; box-shadow: 0 4px 18px rgba(27,42,74,.08); border: 1px solid rgba(27,42,74,.05); }
+        .osr-kpi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+        .osr-kpi-label { font-size: .76rem; color: #8591A0; font-weight: 600; }
+        .osr-kpi-value { font-size: 1.5rem; font-weight: 700; color: #1B2A4A; }
+        .osr-kpi-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .osr-table-card { background: #fff; border-radius: 12px; border: 1px solid rgba(27,42,74,.06); overflow: hidden; }
+        .osr-pill { border-radius: 20px; padding: 3px 11px; font-size: .72rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+        .osr-pill-danger { background: rgba(214,69,65,.1); color: #B8302C; }
+        .osr-pill-warning { background: rgba(214,158,46,.12); color: #8A5A00; }
+        .osr-pill-neutral { background: rgba(27,42,74,.06); color: #5B6B85; }
+        .osr-row-avatar { width: 32px; height: 32px; border-radius: 9px; background: #EEF2FB; color: #2456A6; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .76rem; flex-shrink: 0; }
+        .osr-settings-details summary { list-style: none; cursor: pointer; }
+        .osr-settings-details summary::-webkit-details-marker { display: none; }
+        .osr-settings-summary { display: inline-flex; align-items: center; gap: 7px; font-size: .82rem; font-weight: 600; color: #5B6B85; padding: 6px 2px; }
+        .osr-settings-summary:hover { color: #1B2A4A; }
+        .osr-settings-details[open] .osr-settings-summary { color: #1B2A4A; }
+        .osr-settings-details .osr-settings-card { margin-top: 10px; }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <h4 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Surstock</h4>
       </div>
-      <p className="text-muted small mb-3">
-        Articles dont le stock couvre largement plus que la vente moyenne — même règle que l'assistant IA (stock ÷ vente moyenne/semaine).
-        Réglez les paramètres ci-dessous puis lancez l'analyse.
-      </p>
 
+      {data && data.found && <OverstockHero data={data} filteredCount={filteredByShop.length} />}
+
+      {data && data.found && (
+        <div className="osr-kpi-row">
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Magasins concernés</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(36,86,166,.1)', color: '#2456A6' }}>
+                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredShopCount}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Articles en surstock{shopFilter ? ' (ce magasin)' : ' (total)'}</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
+                <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredByShop.length}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Communs à plusieurs magasins</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(94,214,145,.14)', color: '#1C8A52' }}>
+                <iconify-icon icon="solar:layers-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredCommon.length}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(214,69,65,.1)', color: '#B8302C' }}>
+                <iconify-icon icon={data.periodMode ? 'solar:repeat-bold-duotone' : 'solar:trash-bin-trash-bold-duotone'}></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{data.periodMode ? filteredPersistent.length : `${data.scrapLookbackDays || 90} j`}</div>
+          </div>
+        </div>
+      )}
+
+      <details className="osr-settings-details mb-3">
+        <summary className="osr-settings-summary">
+          <iconify-icon icon="solar:settings-bold-duotone"></iconify-icon> Paramètres de l'analyse
+        </summary>
       <div className="osr-settings-card">
         <div className="osr-settings-row">
           <span className="osr-icon"><iconify-icon icon="solar:settings-bold-duotone"></iconify-icon></span>
@@ -450,6 +610,7 @@ export function OverstockReport() {
           </button>
         </div>
       </div>
+      </details>
 
       {/* Bandeau "période analysée" (demande explicite du 21/10/2026 : "l'analyse deja fait c'est
           sur quel periode il faut affiche ca aussi") — toujours visible au-dessus des résultats,
@@ -505,25 +666,6 @@ export function OverstockReport() {
             </div>
           </div>
 
-          <div className="row g-3 mb-3">
-            <div className="col-6 col-md-3">
-              <div className="text-muted small">Magasins concernés</div>
-              <div className="fs-4 fw-semibold">{filteredShopCount}</div>
-            </div>
-            <div className="col-6 col-md-3">
-              <div className="text-muted small">Articles en surstock{shopFilter ? ' (ce magasin)' : ' (total)'}</div>
-              <div className="fs-4 fw-semibold">{filteredByShop.length}</div>
-            </div>
-            <div className="col-6 col-md-3">
-              <div className="text-muted small">Communs à plusieurs magasins</div>
-              <div className="fs-4 fw-semibold">{filteredCommon.length}</div>
-            </div>
-            <div className="col-6 col-md-3">
-              <div className="text-muted small">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</div>
-              <div className="fs-4 fw-semibold">{data.periodMode ? filteredPersistent.length : `${data.scrapLookbackDays || 90} j`}</div>
-            </div>
-          </div>
-
           <div className="osr-tabs">
             <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>
               Surstock commun à plusieurs magasins ({filteredCommon.length})
@@ -543,7 +685,7 @@ export function OverstockReport() {
               <div className="text-muted small py-4">Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil.</div>
             ) : (
               <>
-                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} />)}
+                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} threshold={data.minWeeksOfCoverage} />)}
                 <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredCommon.length} onChange={setPage} />
               </>
             )
@@ -557,7 +699,7 @@ export function OverstockReport() {
                 <p className="text-muted small">
                   Articles en surstock dans au moins {fmtPct(data.alwaysOverstockThresholdRatio ?? 0.9)} des propositions générées sur la période, magasin par magasin.
                 </p>
-                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio />)}
+                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio threshold={data.minWeeksOfCoverage} />)}
                 <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredPersistent.length} onChange={setPage} />
               </>
             )
@@ -565,45 +707,53 @@ export function OverstockReport() {
 
           {activeTab === 'byShop' && (
             <>
-              <div className="table-responsive">
-                <table className="table align-middle table-hover mb-0">
-                  <thead className="bg-light-subtle">
-                    <tr>
-                      <th>Magasin</th>
-                      <th>EAN</th>
-                      <th>Article</th>
-                      <th>Rayon</th>
-                      <th>Stock</th>
-                      <th>Prix de vente</th>
-                      <th>Vente/jour</th>
-                      <th>Vente/semaine</th>
-                      <th>Vente/mois</th>
-                      <th>Couverture</th>
-                      {data.periodMode && <th>% du temps en surstock</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pagedByShop.length === 0 ? (
-                      <tr><td colSpan={data.periodMode ? 11 : 10} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
-                    ) : (
-                      pagedByShop.map((a, i) => (
-                        <tr key={`${a.rposShopId}:${a.ean}:${i}`}>
-                          <td>{a.shopName} ({a.shopReference})</td>
-                          <td>{a.ean}</td>
-                          <td>{a.label}</td>
-                          <td>{a.department || '—'}</td>
-                          <td>{a.stock}</td>
-                          <td>{fmtCfa(a.sellingPrice)}</td>
-                          <td>{a.avgDailySales}</td>
-                          <td>{a.avgWeeklySales}</td>
-                          <td>{a.avgMonthlySales}</td>
-                          <td>{a.weeksOfCoverage ?? '—'} sem.</td>
-                          {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+              <div className="osr-table-card">
+                <div className="table-responsive">
+                  <table className="table align-middle table-hover mb-0">
+                    <thead className="bg-light-subtle">
+                      <tr>
+                        <th>Article</th>
+                        <th>Magasin</th>
+                        <th>Rayon</th>
+                        <th>Stock</th>
+                        <th>Prix de vente</th>
+                        <th>Vente/jour</th>
+                        <th>Vente/semaine</th>
+                        <th>Vente/mois</th>
+                        <th>Couverture</th>
+                        {data.periodMode && <th>% du temps en surstock</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedByShop.length === 0 ? (
+                        <tr><td colSpan={data.periodMode ? 10 : 9} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
+                      ) : (
+                        pagedByShop.map((a, i) => (
+                          <tr key={`${a.rposShopId}:${a.ean}:${i}`}>
+                            <td>
+                              <div className="d-flex align-items-center gap-2">
+                                <span className="osr-row-avatar">{articleInitials(a.label)}</span>
+                                <div>
+                                  <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{a.label}</div>
+                                  <div className="text-muted" style={{ fontSize: '.72rem' }}>{a.ean}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>{a.shopName} ({a.shopReference})</td>
+                            <td>{a.department || '—'}</td>
+                            <td>{a.stock}</td>
+                            <td>{fmtCfa(a.sellingPrice)}</td>
+                            <td>{a.avgDailySales}</td>
+                            <td>{a.avgWeeklySales}</td>
+                            <td>{a.avgMonthlySales}</td>
+                            <td><CoveragePill weeks={a.weeksOfCoverage} threshold={data.minWeeksOfCoverage} /></td>
+                            {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredByShop.length} onChange={setPage} />
             </>
@@ -655,13 +805,16 @@ function PaginationBar({ page, totalPages, totalItems, onChange }: { page: numbe
   );
 }
 
-function CommonArticleCard({ a, showRatio }: { a: CommonArticle; showRatio: boolean }) {
+function CommonArticleCard({ a, showRatio, threshold }: { a: CommonArticle; showRatio: boolean; threshold: number }) {
   return (
     <div className="osr-common-card">
       <div className="osr-common-head">
-        <div>
-          <strong>{a.label}</strong> <span className="text-muted small">({a.ean})</span>
-          {a.department && <span className="text-muted small"> — {a.department}</span>}
+        <div className="d-flex align-items-center gap-2">
+          <span className="osr-row-avatar">{articleInitials(a.label)}</span>
+          <div>
+            <div className="fw-semibold" style={{ fontSize: '.86rem', color: '#1B2A4A' }}>{a.label}</div>
+            <div className="text-muted" style={{ fontSize: '.72rem' }}>{a.ean}{a.department ? ` — ${a.department}` : ''}</div>
+          </div>
         </div>
         <div className="small text-muted">{a.shops.length} magasin(s) · {fmtCfa(a.sellingPrice)}</div>
       </div>
@@ -687,7 +840,7 @@ function CommonArticleCard({ a, showRatio }: { a: CommonArticle; showRatio: bool
                 <td>{s.avgDailySales}</td>
                 <td>{s.avgWeeklySales}</td>
                 <td>{s.avgMonthlySales}</td>
-                <td>{s.weeksOfCoverage ?? '—'} sem.</td>
+                <td><CoveragePill weeks={s.weeksOfCoverage} threshold={threshold} /></td>
                 {showRatio && (
                   <td>
                     <span className="osr-persist-badge">{fmtPct(s.overstockRatio)}</span>

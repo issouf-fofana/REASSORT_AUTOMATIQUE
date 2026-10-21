@@ -161,13 +161,18 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
 
   const proposals = await prisma.proposal.findMany({
     where: { rposShopId: { in: shopIds }, generatedAt: { gte: new Date(start), lte: new Date(end) } },
-    select: { id: true, rposShopId: true },
+    select: { id: true, rposShopId: true, generatedAt: true },
   });
   if (!proposals.length) {
-    return { found: true, minWeeksOfCoverage, shopCount: 0, articleCount: 0, articles: [], persistentArticles: [], message: 'Aucune proposition générée sur cette période pour les magasins accessibles.' };
+    return { found: true, minWeeksOfCoverage, shopCount: 0, articleCount: 0, articles: [], persistentArticles: [], trendPoints: [], message: 'Aucune proposition générée sur cette période pour les magasins accessibles.' };
   }
 
   const shopIdByProposalId = new Map(proposals.map((p) => [p.id, p.rposShopId]));
+  // Jour (YYYY-MM-DD) de génération de chaque proposition — base du graphique d'évolution ci-dessous
+  // (demande explicite du 21/10/2026 : "je veux le style... graphique en haut" inspiré d'un tableau
+  // de bord avec courbe de tendance). Une proposition est générée une fois par nuit par magasin,
+  // donc ce jour identifie naturellement un point de la courbe.
+  const dayByProposalId = new Map(proposals.map((p) => [p.id, p.generatedAt.toISOString().slice(0, 10)]));
   // Nombre de propositions générées par magasin sur la période : dénominateur du ratio de
   // persistance ci-dessous (un magasin ouvert depuis peu ou avec des générations manquées a moins
   // de propositions que la pleine fenêtre, le ratio reste correct relativement à SES propositions).
@@ -180,8 +185,11 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   });
 
   // Agrégation par (magasin, ean) : combien de propositions sur la période avaient cet article EN
-  // SURSTOCK, et les dernières valeurs connues (stock/vente/prix) pour l'affichage.
+  // SURSTOCK, et les dernières valeurs connues (stock/vente/prix) pour l'affichage. En parallèle,
+  // agrégation par JOUR : nombre d'articles distincts (magasin+ean confondus) en surstock ce
+  // jour-là, pour la courbe de tendance.
   const byShopEan = new Map(); // `${rposShopId}:${ean}` -> { overstockCount, latest: {...} }
+  const overstockEansByDay = new Map(); // 'YYYY-MM-DD' -> Set<`${rposShopId}:${ean}`>
   for (const l of lines) {
     const rposShopId = shopIdByProposalId.get(l.proposalId);
     const isOverstocked = (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage;
@@ -194,7 +202,15 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     // peu importe ici — juste besoin d'UN jeu de valeurs représentatif pour l'affichage, le ratio de
     // persistance est le chiffre qui compte réellement, pas la valeur exacte affichée à côté).
     entry.latest = l;
+
+    const day = dayByProposalId.get(l.proposalId);
+    if (!overstockEansByDay.has(day)) overstockEansByDay.set(day, new Set());
+    overstockEansByDay.get(day).add(key);
   }
+
+  const trendPoints = [...overstockEansByDay.entries()]
+    .map(([date, set]) => ({ date, count: set.size }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   const shopProposalDenominator = (rposShopId) => proposalCountByShop.get(rposShopId) || 1;
 
@@ -237,6 +253,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     articles,
     persistentArticleCount: persistentArticles.length,
     persistentArticles,
+    trendPoints,
   };
 }
 
@@ -400,6 +417,11 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     // mode période (la notion de persistance n'a pas de sens sur un simple snapshot).
     persistentArticleCount: periodMode ? persistentWithScrap.length : null,
     persistentArticles: periodMode ? persistentWithScrap : null,
+    // Courbe "nombre d'articles distincts en surstock par jour" (demande explicite du 21/10/2026,
+    // style inspiré d'un tableau de bord avec graphique de tendance en haut de page) — n'existe
+    // qu'en mode période, dérivée des mêmes propositions déjà parcourues ci-dessus, aucun calcul
+    // supplémentaire ni job de synchro.
+    trendPoints: periodMode ? byShop.trendPoints : null,
   };
 }
 
