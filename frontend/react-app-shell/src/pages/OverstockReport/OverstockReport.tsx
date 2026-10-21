@@ -84,6 +84,7 @@ type OverstockReportData = {
   persistentArticleCount?: number | null;
   persistentArticles?: CommonArticle[] | null;
   trendPoints?: { date: string; count: number }[] | null;
+  trendPointsByShop?: { date: string; rposShopId: string; count: number }[] | null;
   message?: string;
 };
 
@@ -225,10 +226,24 @@ function ShopDropdown({ value, options, onChange }: { value: Set<string>; option
 // nombre d'articles distincts en surstock jour par jour sur la période choisie (trendPoints,
 // overstockReportService.js) — n'existe qu'en mode période, pas sur un simple snapshot instantané,
 // donc affiche un repère "situation actuelle" à la place quand aucune période n'est active.
-function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopArticleRow[] }) {
+function OverstockHero({ data, rows, shopFilters }: { data: OverstockReportData; rows: ShopArticleRow[]; shopFilters: Set<string> }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<any>(null);
-  const points = data.trendPoints || [];
+  // Courbe filtrée par magasin sélectionné (demande explicite du 21/10/2026 : "quand je fait le
+  // filtre sur un mag ou deux la coube doit mettre ajour comme les valeur") — recalculée côté
+  // client depuis trendPointsByShop (un point par jour×magasin), jamais de rappel serveur juste
+  // pour changer le filtre. Sans sélection, retombe sur l'agrégat global trendPoints (identique au
+  // comportement précédent).
+  const points = useMemo(() => {
+    if (shopFilters.size === 0) return data.trendPoints || [];
+    const byShop = data.trendPointsByShop || [];
+    const byDay = new Map<string, number>();
+    for (const p of byShop) {
+      if (!shopFilters.has(p.rposShopId)) continue;
+      byDay.set(p.date, (byDay.get(p.date) || 0) + p.count);
+    }
+    return [...byDay.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+  }, [data.trendPoints, data.trendPointsByShop, shopFilters]);
   const filteredCount = rows.length;
 
   // Répartition par sévérité (demande explicite du 21/10/2026 : "fait un joli style ic" — le
@@ -329,6 +344,85 @@ function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopAr
   );
 }
 
+// Tableau "magasins les plus en surstock" (demande explicite du 21/10/2026 : "je dois voir les mag
+// qui on plus de sur-stok il faut les classé", confirmé "un nouveau tableau et les surbriance
+// dessu" — classé du plus grand au plus petit avec une barre de surbrillance proportionnelle au
+// rang, comme la légende de sévérité du bandeau ci-dessus). Recalculé depuis les mêmes lignes déjà
+// filtrées (shopFilters/search/rangeFilters) affichées dans les autres tableaux de la page, jamais
+// un second appel serveur.
+const TOP_SHOPS_PAGE_SIZE = 5;
+
+function TopShopsByOverstockTable({ rows }: { rows: ShopArticleRow[] }) {
+  // Affichage limité à 5 magasins par défaut (demande explicite du 21/10/2026 : "affiche 5 par
+  // defaut tu vois ? pas tout a meme temps") — "Voir plus" pour dérouler le reste plutôt que tout
+  // afficher d'un coup, utile dès qu'il y a une trentaine de magasins.
+  const [showAll, setShowAll] = useState(false);
+
+  const byShop = useMemo(() => {
+    const map = new Map<string, { rposShopId: string; shopReference: string | null; shopName: string | null; articleCount: number }>();
+    for (const r of rows) {
+      if (!map.has(r.rposShopId)) map.set(r.rposShopId, { rposShopId: r.rposShopId, shopReference: r.shopReference, shopName: r.shopName, articleCount: 0 });
+      map.get(r.rposShopId)!.articleCount += 1;
+    }
+    return [...map.values()].sort((a, b) => b.articleCount - a.articleCount);
+  }, [rows]);
+
+  useEffect(() => { setShowAll(false); }, [rows]);
+
+  const maxCount = byShop[0]?.articleCount || 1;
+  const visible = showAll ? byShop : byShop.slice(0, TOP_SHOPS_PAGE_SIZE);
+
+  if (!byShop.length) return null;
+
+  return (
+    <div className="mb-3">
+      <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Magasins les plus en surstock</h6>
+      <div className="osr-table-card">
+        <div className="table-responsive">
+          <table className="table align-middle mb-0">
+            <thead className="bg-light-subtle">
+              <tr>
+                <th style={{ width: 40 }}>#</th>
+                <th>Magasin</th>
+                <th style={{ width: '45%' }}></th>
+                <th className="text-end">Articles en surstock</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((s, i) => (
+                <tr key={s.rposShopId}>
+                  <td className="text-muted">{i + 1}</td>
+                  <td>{s.shopName} ({s.shopReference})</td>
+                  <td>
+                    <div style={{ height: 8, borderRadius: 4, background: 'rgba(27,42,74,.06)', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${Math.max(4, Math.round((s.articleCount / maxCount) * 100))}%`,
+                          borderRadius: 4,
+                          background: i === 0 ? '#B8302C' : i < 3 ? '#D69E2E' : '#2456A6',
+                        }}
+                      ></div>
+                    </div>
+                  </td>
+                  <td className="text-end fw-semibold" style={{ color: '#1B2A4A' }}>{s.articleCount.toLocaleString('fr-FR')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {byShop.length > TOP_SHOPS_PAGE_SIZE && (
+          <div className="text-center py-2 border-top">
+            <button type="button" className="btn btn-sm btn-link text-decoration-none" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? 'Voir moins' : `Voir les ${byShop.length - TOP_SHOPS_PAGE_SIZE} autres magasins`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type TabKey = 'common' | 'byShop' | 'persistent';
 
 export function OverstockReport() {
@@ -351,8 +445,12 @@ export function OverstockReport() {
   // UI... le user puisse lancer lui meme") — valeurs en attente tant que l'utilisateur n'a pas
   // cliqué "Lancer l'analyse", pour ne jamais relancer un calcul coûteux à chaque frappe clavier.
   const [minWeeksOfCoverage, setMinWeeksOfCoverage] = useState(2);
-  const [periodEnabled, setPeriodEnabled] = useState(false);
-  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  // Mode période activé par défaut, fenêtre "3 mois" (demande explicite du 21/10/2026 : "il faut
+  // affiché la courbe apres une analyser qui fait par defaut sur 3mois") — sans ça la courbe
+  // d'évolution (qui n'existe qu'en mode période) restait invisible tant que l'utilisateur n'avait
+  // pas lui-même coché "Analyser sur une période" et cliqué "Lancer l'analyse".
+  const [periodEnabled, setPeriodEnabled] = useState(true);
+  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [activeTab, setActiveTab] = useState<TabKey>(isSingleShop ? 'byShop' : 'common');
@@ -417,17 +515,28 @@ export function OverstockReport() {
       .catch(() => setAvailability(null));
   }, []);
 
-  function runAnalysis() {
+  // Accepte des overrides explicites (demande explicite du 21/10/2026 : boutons de période remontés
+  // dans la barre de filtres qui relancent directement l'analyse) — sans ça, l'appel partirait avec
+  // l'état React d'AVANT le clic (setPeriodStart/setPeriodEnd/setPeriodEnabled n'ont pas encore été
+  // appliqués au moment où runAnalysis() lirait periodStart/periodEnd par closure).
+  function runAnalysisWith(overrides?: { periodEnabled?: boolean; periodStart?: string; periodEnd?: string }) {
     setData(null);
     setError(null);
+    const effectivePeriodEnabled = overrides?.periodEnabled ?? periodEnabled;
+    const effectivePeriodStart = overrides?.periodStart ?? periodStart;
+    const effectivePeriodEnd = overrides?.periodEnd ?? periodEnd;
     const params = new URLSearchParams({ minWeeksOfCoverage: String(minWeeksOfCoverage) });
-    if (periodEnabled) {
-      params.set('start', new Date(periodStart).toISOString());
-      params.set('end', new Date(periodEnd + 'T23:59:59').toISOString());
+    if (effectivePeriodEnabled) {
+      params.set('start', new Date(effectivePeriodStart).toISOString());
+      params.set('end', new Date(effectivePeriodEnd + 'T23:59:59').toISOString());
     }
     apiFetch<OverstockReportData>(`/reassort/overstock-report?${params.toString()}`)
       .then(setData)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }
+
+  function runAnalysis() {
+    runAnalysisWith();
   }
 
   // Premier chargement automatique (snapshot, paramètres par défaut) — les relances suivantes sont
@@ -592,6 +701,9 @@ export function OverstockReport() {
         .osr-adv-filter-btn { border: 1px solid rgba(27,42,74,.1); background: #FAFBFD; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 13px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
         .osr-adv-filter-btn:hover { background: #F0F3F9; color: #1B2A4A; }
         .osr-adv-filter-btn.active { background: rgba(36,86,166,.08); color: #2456A6; border-color: rgba(36,86,166,.25); }
+        .osr-preset-pill { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .78rem; font-weight: 600; padding: 6px 13px; border-radius: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .osr-preset-pill:hover { background: #F6F8FB; color: #1B2A4A; }
+        .osr-preset-pill.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
         .osr-range-panel { background: #FAFBFD; border: 1px solid rgba(27,42,74,.06); border-radius: 14px; padding: 18px 22px; display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
         .osr-range-field { display: flex; flex-direction: column; gap: 6px; }
         .osr-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
@@ -646,9 +758,11 @@ export function OverstockReport() {
         .osr-pill-neutral { background: rgba(27,42,74,.06); color: #5B6B85; }
         .osr-settings-details summary { list-style: none; cursor: pointer; }
         .osr-settings-details summary::-webkit-details-marker { display: none; }
-        .osr-settings-summary { display: inline-flex; align-items: center; gap: 7px; font-size: .82rem; font-weight: 600; color: #5B6B85; padding: 6px 2px; }
-        .osr-settings-summary:hover { color: #1B2A4A; }
-        .osr-settings-details[open] .osr-settings-summary { color: #1B2A4A; }
+        .osr-settings-summary { display: inline-flex; align-items: center; gap: 8px; font-size: .84rem; font-weight: 600; color: #1B2A4A; padding: 9px 16px; background: #fff; border: 1px solid rgba(27,42,74,.14); border-radius: 8px; box-shadow: 0 1px 3px rgba(27,42,74,.05); transition: background .15s, border-color .15s, box-shadow .15s; }
+        .osr-settings-summary:hover { background: #F6F8FB; border-color: rgba(27,42,74,.22); box-shadow: 0 2px 6px rgba(27,42,74,.08); }
+        .osr-settings-chevron { margin-left: 2px; font-size: 12px; opacity: .6; transition: transform .15s; }
+        .osr-settings-details[open] .osr-settings-summary { background: rgba(36,86,166,.08); border-color: rgba(36,86,166,.3); color: #2456A6; }
+        .osr-settings-details[open] .osr-settings-chevron { transform: rotate(180deg); }
         .osr-settings-details .osr-settings-card { margin-top: 10px; }
         .osr-shop-dropdown { position: relative; width: 240px; }
         .osr-shop-dropdown-btn { width: 100%; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(27,42,74,.12); border-radius: 6px; background: #fff; padding: 6px 10px; font-size: .8rem; color: #1B2A4A; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
@@ -670,52 +784,15 @@ export function OverstockReport() {
         <h4 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Surstock</h4>
       </div>
 
-      {data && data.found && <OverstockHero data={data} rows={filteredByShop} />}
-
-      {data && data.found && (
-        <div className="osr-kpi-row">
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Magasins concernés</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(36,86,166,.1)', color: '#2456A6' }}>
-                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{filteredShopCount}</div>
-          </div>
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Articles en surstock{shopFilters.size > 0 ? ' (sélection)' : ' (total)'}</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
-                <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{filteredByShop.length}</div>
-          </div>
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Communs à plusieurs magasins</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(94,214,145,.14)', color: '#1C8A52' }}>
-                <iconify-icon icon="solar:layers-bold-duotone"></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{filteredCommon.length}</div>
-          </div>
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(214,69,65,.1)', color: '#B8302C' }}>
-                <iconify-icon icon={data.periodMode ? 'solar:repeat-bold-duotone' : 'solar:trash-bin-trash-bold-duotone'}></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{data.periodMode ? filteredPersistent.length : `${data.scrapLookbackDays || 90} j`}</div>
-          </div>
-        </div>
-      )}
-
+      {/* Réglages + période analysée remontés en tout premier (demande explicite du 21/10/2026 :
+          "il faut metre ca en haut... fais un style bien organisé") — "Paramètres de l'analyse"
+          est maintenant un vrai bouton plein (pas un <summary> discret qu'on ne devinait pas
+          cliquable), et le bandeau "période analysée" reste juste en dessous, visible avant même
+          la courbe et les filtres. */}
       <details className="osr-settings-details mb-3">
         <summary className="osr-settings-summary">
           <iconify-icon icon="solar:settings-bold-duotone"></iconify-icon> Paramètres de l'analyse
+          <iconify-icon icon="solar:alt-arrow-down-linear" className="osr-settings-chevron"></iconify-icon>
         </summary>
       <div className="osr-settings-card">
         <div className="osr-settings-row">
@@ -801,9 +878,6 @@ export function OverstockReport() {
       </div>
       </details>
 
-      {/* Bandeau "période analysée" (demande explicite du 21/10/2026 : "l'analyse deja fait c'est
-          sur quel periode il faut affiche ca aussi") — toujours visible au-dessus des résultats,
-          pas seulement dans le panneau paramètres qu'on peut avoir déjà fermé/oublié des yeux. */}
       {data && data.found && (
         <div className="osr-period-banner mb-3">
           <iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon>{' '}
@@ -813,15 +887,81 @@ export function OverstockReport() {
         </div>
       )}
 
-      {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
-
-      {data === null && !error ? (
-        <div className="text-muted small">Chargement...</div>
-      ) : data && !data.found ? (
-        <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
-      ) : data ? (
+      {data && data.found && (
         <>
           <div className="osr-filter-bar">
+            {/* Presets de période remontés directement dans la barre de filtres (demande explicite
+                du 21/10/2026 : "filtre periode il faut affiché ca ici") — avant, il fallait ouvrir
+                "Paramètres de l'analyse" pour changer de fenêtre temporelle ; ces boutons relancent
+                directement l'analyse sur la période choisie, sans étape intermédiaire. */}
+            <div className="d-flex align-items-center gap-1">
+              {[
+                { label: '7 j', days: 7 },
+                { label: '30 j', days: 30 },
+                { label: '3 mois', days: 90 },
+                { label: '6 mois', days: 180 },
+              ].map((preset) => {
+                const isActive = periodEnabled && periodStart === (() => {
+                  const earliestMs = minAvailableDate ? new Date(minAvailableDate).getTime() : 0;
+                  return new Date(Math.max(earliestMs, Date.now() - preset.days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+                })();
+                return (
+                  <button
+                    key={preset.days}
+                    type="button"
+                    className={`osr-preset-pill${isActive ? ' active' : ''}`}
+                    onClick={() => {
+                      const end = new Date();
+                      const earliestMs = minAvailableDate ? new Date(minAvailableDate).getTime() : 0;
+                      const start = new Date(Math.max(earliestMs, end.getTime() - preset.days * 24 * 60 * 60 * 1000));
+                      const newStart = start.toISOString().slice(0, 10);
+                      const newEnd = end.toISOString().slice(0, 10);
+                      setPeriodEnabled(true);
+                      setPeriodStart(newStart);
+                      setPeriodEnd(newEnd);
+                      runAnalysisWith({ periodEnabled: true, periodStart: newStart, periodEnd: newEnd });
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Période personnalisée (demande explicite du 21/10/2026 : "personalisé la periode")
+                — champs "du ... au ..." à côté des presets, pour choisir une fenêtre exacte plutôt
+                que seulement 7j/30j/3mois/6mois. "Appliquer" relance directement l'analyse, pas
+                besoin de rouvrir "Paramètres de l'analyse". */}
+            <div className="d-flex align-items-center gap-1">
+              <input
+                type="date"
+                className="osr-input"
+                style={{ width: 140 }}
+                value={periodStart}
+                min={minAvailableDate}
+                max={periodEnd}
+                onChange={(e) => setPeriodStart(e.target.value)}
+              />
+              <span className="text-muted small">→</span>
+              <input
+                type="date"
+                className="osr-input"
+                style={{ width: 140 }}
+                value={periodEnd}
+                min={periodStart}
+                max={maxAvailableDate}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+              />
+              <button
+                type="button"
+                className="osr-preset-pill"
+                onClick={() => {
+                  setPeriodEnabled(true);
+                  runAnalysisWith({ periodEnabled: true, periodStart, periodEnd });
+                }}
+              >
+                Appliquer
+              </button>
+            </div>
             {!isSingleShop && <ShopDropdown value={shopFilters} options={shopOptions} onChange={setShopFilters} />}
             <input
               type="search"
@@ -906,7 +1046,62 @@ export function OverstockReport() {
               )}
             </div>
           )}
+        </>
+      )}
 
+      {data && data.found && <OverstockHero data={data} rows={filteredByShop} shopFilters={shopFilters} />}
+
+      {data && data.found && (
+        <div className="osr-kpi-row">
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Magasins concernés</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(36,86,166,.1)', color: '#2456A6' }}>
+                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredShopCount}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Articles en surstock{shopFilters.size > 0 ? ' (sélection)' : ' (total)'}</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
+                <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredByShop.length}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">Communs à plusieurs magasins</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(94,214,145,.14)', color: '#1C8A52' }}>
+                <iconify-icon icon="solar:layers-bold-duotone"></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{filteredCommon.length}</div>
+          </div>
+          <div className="osr-kpi-card">
+            <div className="osr-kpi-top">
+              <span className="osr-kpi-label">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</span>
+              <span className="osr-kpi-icon" style={{ background: 'rgba(214,69,65,.1)', color: '#B8302C' }}>
+                <iconify-icon icon={data.periodMode ? 'solar:repeat-bold-duotone' : 'solar:trash-bin-trash-bold-duotone'}></iconify-icon>
+              </span>
+            </div>
+            <div className="osr-kpi-value">{data.periodMode ? filteredPersistent.length : `${data.scrapLookbackDays || 90} j`}</div>
+          </div>
+        </div>
+      )}
+
+      {data && data.found && !isSingleShop && <TopShopsByOverstockTable rows={filteredByShop} />}
+
+      {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
+
+      {data === null && !error ? (
+        <div className="text-muted small">Chargement...</div>
+      ) : data && !data.found ? (
+        <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
+      ) : data ? (
+        <>
           <div className="osr-tabs">
             {!isSingleShop && (
               <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>

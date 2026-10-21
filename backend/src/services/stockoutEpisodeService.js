@@ -1,8 +1,12 @@
 /**
  * Détection et diagnostic des épisodes de rupture de stock, SANS les données Cyrus (entrepôt) —
  * cf. rupture.md. Le diagnostic est donc une version simplifiée de la grille §5 du document : on ne
- * peut pas distinguer "stock central indisponible" / "non préparé" / "retard transport", ces 3 cas
- * retombent tous sur AMONT_A_PRECISER.
+ * peut pas distinguer "stock central indisponible" / "non préparé" / "retard transport" au sein
+ * d'un même fournisseur, ces 3 cas retombent tous sur AMONT_FOURNISSEUR_CENTRAL ou
+ * AMONT_FOURNISSEUR_EXTERNE selon ProposalOrder.deliveryType ('LC'/'LD') — distinction ajoutée le
+ * 21/10/2026 (demande explicite : "Amont — ca viens de founisseur central ou du fournisseur
+ * externe"). AMONT_A_PRECISER reste le repli pour les commandes sans deliveryType connu (créées
+ * avant ce champ, ou valeur RPOS imprévue).
  */
 const prisma = require('../utils/prisma');
 const { getMovesFromLocal } = require('./stockMoveAnalysisService');
@@ -423,7 +427,14 @@ async function diagnoseCause(rposShopId, ean, rposPosId) {
   }
 
   if (order.receptionStatus === 'EN_ATTENTE_RECEPTION') {
-    return { cause: 'AMONT_A_PRECISER', confiance: 'PROBABLE', commandeRef: order.id, label, department, sector };
+    // Distinction LC/LD exploitée depuis le 21/10/2026 (demande explicite : "Amont — ca viens de
+    // founisseur central ou du fournisseur externe") — ProposalOrder.deliveryType ('LC' = Livraison
+    // Centrale, 'LD' = Livraison Directe/fournisseur externe) était déjà en base mais ignoré ici,
+    // la cause retombait toujours sur un "amont" générique. 'LD' et toute autre valeur imprévue (ou
+    // null, commandes créées avant ce champ) gardent AMONT_A_PRECISER par prudence — seul 'LC'
+    // confirmé vaut explicitement "fournisseur central".
+    const cause = order.deliveryType === 'LC' ? 'AMONT_FOURNISSEUR_CENTRAL' : order.deliveryType === 'LD' ? 'AMONT_FOURNISSEUR_EXTERNE' : 'AMONT_A_PRECISER';
+    return { cause, confiance: 'PROBABLE', commandeRef: order.id, label, department, sector };
   }
 
   if (order.receptionStatus === 'RECUE_ESTIMEE') {

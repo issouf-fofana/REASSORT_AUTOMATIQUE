@@ -47,9 +47,16 @@ type StockoutSummary = {
 type GroupSummary = { group: string; openCount: number; totalEpisodesCount: number };
 type ByFieldSummary = { found: boolean; groupCount: number; groups: GroupSummary[]; message?: string };
 
+// AMONT_FOURNISSEUR_CENTRAL / AMONT_FOURNISSEUR_EXTERNE ajoutés le 21/10/2026 (demande explicite :
+// "Amont — ca viens de founisseur central ou du fournisseur externe") — distinguent désormais la
+// commande en attente de réception selon ProposalOrder.deliveryType ('LC' = livraison centrale,
+// 'LD' = livraison directe/fournisseur externe). AMONT_A_PRECISER reste le repli pour les
+// commandes sans deliveryType connu (créées avant ce champ).
 const CAUSE_LABELS: Record<string, string> = {
   MAGASIN_REASSORT: 'Magasin / réassort',
   MAGASIN_COMMANDE_NON_VALIDEE: 'Commande non validée',
+  AMONT_FOURNISSEUR_CENTRAL: 'Amont — fournisseur central',
+  AMONT_FOURNISSEUR_EXTERNE: 'Amont — fournisseur externe',
   AMONT_A_PRECISER: 'Amont — à préciser',
   ECART_STOCK_RAYON: 'Écart stock / rayon',
   INDETERMINEE: 'Indéterminée',
@@ -93,6 +100,14 @@ const DELIVERY_STATUS_META: Record<DeliveryStatus, { label: string; badge: strin
 };
 
 type OrderFilter = 'all' | 'with-order' | 'without-order' | 'delivered';
+
+// Tous les filtres possibles sur la liste d'articles d'un rayon (demande explicite du 21/10/2026 :
+// "sur rupture il faut affiché tout les filtre possible... ajoute tout ce qui est filtrable") —
+// en plus du filtre commande déjà présent, ajoute recherche texte, cause, réaction, livraison, et
+// des plages min/max sur durée/prix/quantité perdue/CA perdu. Même pattern que OverstockReport.tsx
+// (rangeFilters + panneau "Filtres avancés" dépliable) pour rester cohérent avec le reste de l'app.
+// Tout filtré côté client sur articlesInDepartmentAll déjà chargé, pas de nouvel appel réseau.
+type RangeFilterKey = 'durationHours' | 'sellingPrice' | 'qtyPerdueEstimee' | 'caPerdueEstime';
 
 function formatDuration(hours: number): string {
   if (hours < 24) return `${Math.round(hours)} h`;
@@ -155,6 +170,35 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
+  const [articleSearch, setArticleSearch] = useState('');
+  const [causeFilter, setCauseFilter] = useState<string>('');
+  const [reactionFilter, setReactionFilter] = useState<string>('');
+  const [deliveryFilter, setDeliveryFilter] = useState<string>('');
+  const [rangeFiltersOpen, setRangeFiltersOpen] = useState(false);
+  const [rangeFilters, setRangeFilters] = useState<Record<RangeFilterKey, { min: string; max: string }>>({
+    durationHours: { min: '', max: '' },
+    sellingPrice: { min: '', max: '' },
+    qtyPerdueEstimee: { min: '', max: '' },
+    caPerdueEstime: { min: '', max: '' },
+  });
+  function setRangeFilter(key: RangeFilterKey, side: 'min' | 'max', value: string) {
+    setRangeFilters((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
+  }
+  function clearAllArticleFilters() {
+    setOrderFilter('all');
+    setArticleSearch('');
+    setCauseFilter('');
+    setReactionFilter('');
+    setDeliveryFilter('');
+    setRangeFilters({
+      durationHours: { min: '', max: '' },
+      sellingPrice: { min: '', max: '' },
+      qtyPerdueEstimee: { min: '', max: '' },
+      caPerdueEstime: { min: '', max: '' },
+    });
+  }
+  const activeRangeFilterCount = Object.values(rangeFilters).filter((r) => r.min !== '' || r.max !== '').length;
+  const activeExtraFilterCount = activeRangeFilterCount + (causeFilter ? 1 : 0) + (reactionFilter ? 1 : 0) + (deliveryFilter ? 1 : 0) + (articleSearch.trim() ? 1 : 0);
   // Rafraîchit la colonne Durée affichée en live (demande explicite du 17/10/2026 : "le user doit
   // voir compté") — toutes les minutes plutôt que chaque seconde comme sur la fiche détail : des
   // centaines de lignes potentielles ici, un tick seconde serait un gaspillage de rendu sans valeur
@@ -240,9 +284,24 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
       )
     : [];
   const articlesInDepartment = articlesInDepartmentAll.filter((e) => {
-    if (orderFilter === 'with-order') return e.hasOrder;
-    if (orderFilter === 'without-order') return !e.hasOrder;
-    if (orderFilter === 'delivered') return e.deliveryStatus === 'LIVREE';
+    if (orderFilter === 'with-order' && !e.hasOrder) return false;
+    if (orderFilter === 'without-order' && e.hasOrder) return false;
+    if (orderFilter === 'delivered' && e.deliveryStatus !== 'LIVREE') return false;
+    if (causeFilter && e.causeProposee !== causeFilter) return false;
+    if (reactionFilter && e.reactionStatus !== reactionFilter) return false;
+    if (deliveryFilter && e.deliveryStatus !== deliveryFilter) return false;
+    const q = articleSearch.trim().toLowerCase();
+    if (q && !(e.label || '').toLowerCase().includes(q) && !e.ean.includes(q)) return false;
+    const checks: [number | null, { min: string; max: string }][] = [
+      [liveDurationHours(e.startedAt), rangeFilters.durationHours],
+      [e.sellingPrice, rangeFilters.sellingPrice],
+      [e.qtyPerdueEstimee, rangeFilters.qtyPerdueEstimee],
+      [e.caPerdueEstime, rangeFilters.caPerdueEstime],
+    ];
+    for (const [value, range] of checks) {
+      if (range.min !== '' && (value === null || value < Number(range.min))) return false;
+      if (range.max !== '' && (value === null || value > Number(range.max))) return false;
+    }
     return true;
   });
   const withOrderCount = articlesInDepartmentAll.filter((e) => e.hasOrder).length;
@@ -267,6 +326,26 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .stockout-period-filter-icon { width: 30px; height: 30px; border-radius: 7px; background: rgba(27,42,74,.05); display: flex; align-items: center; justify-content: center; font-size: 15px; color: #5B6B85; flex-shrink: 0; }
         .stockout-period-preset { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 6px; transition: background .15s, color .15s, border-color .15s; }
         .stockout-period-preset:hover { background: #F6F8FB; color: #1B2A4A; border-color: rgba(27,42,74,.2); }
+        .sof-filter-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 12px; padding: 16px 18px; }
+        .sof-pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px dashed rgba(27,42,74,.08); }
+        .sof-pill { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 13px; border-radius: 20px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .sof-pill:hover { background: #F6F8FB; color: #1B2A4A; }
+        .sof-pill.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
+        .sof-pill-count { font-size: .72rem; font-weight: 700; opacity: .75; }
+        .sof-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .sof-input { border: 1px solid rgba(27,42,74,.12); border-radius: 6px; font-size: .8rem; padding: 6px 10px; color: #1B2A4A; background: #fff; }
+        .sof-input:focus { outline: none; border-color: rgba(27,42,74,.3); box-shadow: 0 0 0 3px rgba(27,42,74,.06); }
+        .sof-search-wrap { position: relative; }
+        .sof-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #B6BFCF; font-size: 14px; pointer-events: none; }
+        .sof-search-input { width: 240px; padding-left: 30px; }
+        .sof-adv-filter-btn { border: 1px solid rgba(27,42,74,.1); background: #FAFBFD; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 13px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .sof-adv-filter-btn:hover { background: #F0F3F9; color: #1B2A4A; }
+        .sof-adv-filter-btn.active { background: rgba(36,86,166,.08); color: #2456A6; border-color: rgba(36,86,166,.25); }
+        .sof-clear-btn { border: none; background: none; color: #B8302C; font-size: .78rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 6px 10px; border-radius: 20px; transition: background .15s; }
+        .sof-clear-btn:hover { background: rgba(214,69,65,.08); }
+        .sof-range-panel { margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(27,42,74,.08); display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+        .sof-range-field { display: flex; flex-direction: column; gap: 6px; }
+        .sof-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
       `}</style>
 
       {/* Organisation de la page revue le 18/10/2026 (demande explicite : "il faut mettre en haut
@@ -488,20 +567,106 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             // qui on une commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de
             // commande dessu").
             <>
-              <div className="d-flex gap-2 mb-3">
-                <button type="button" className={`btn btn-sm ${orderFilter === 'all' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('all')}>
-                  Toutes ({articlesInDepartmentAll.length})
-                </button>
-                <button type="button" className={`btn btn-sm ${orderFilter === 'with-order' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('with-order')}>
-                  Avec commande ({withOrderCount})
-                </button>
-                <button type="button" className={`btn btn-sm ${orderFilter === 'without-order' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('without-order')}>
-                  Sans commande ({withoutOrderCount})
-                </button>
-                <button type="button" className={`btn btn-sm ${orderFilter === 'delivered' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setOrderFilter('delivered')}>
-                  Livrées ({deliveredCount})
-                </button>
+              {/* Barre de filtres restylée (demande explicite du 21/10/2026 : "personalyse tout les
+                  filtre met un style plus joli tu vois") — mêmes codes visuels que la page Surstock
+                  (OverstockReport.tsx) : pills pour le statut commande, carte claire pour la barre
+                  de filtres, panneau "Filtres avancés" en grille plutôt qu'une ligne compressée. */}
+              <div className="sof-filter-card mb-3">
+                <div className="sof-pill-row">
+                  <button type="button" className={`sof-pill${orderFilter === 'all' ? ' active' : ''}`} onClick={() => setOrderFilter('all')}>
+                    Toutes <span className="sof-pill-count">{articlesInDepartmentAll.length}</span>
+                  </button>
+                  <button type="button" className={`sof-pill${orderFilter === 'with-order' ? ' active' : ''}`} onClick={() => setOrderFilter('with-order')}>
+                    Avec commande <span className="sof-pill-count">{withOrderCount}</span>
+                  </button>
+                  <button type="button" className={`sof-pill${orderFilter === 'without-order' ? ' active' : ''}`} onClick={() => setOrderFilter('without-order')}>
+                    Sans commande <span className="sof-pill-count">{withoutOrderCount}</span>
+                  </button>
+                  <button type="button" className={`sof-pill${orderFilter === 'delivered' ? ' active' : ''}`} onClick={() => setOrderFilter('delivered')}>
+                    Livrées <span className="sof-pill-count">{deliveredCount}</span>
+                  </button>
+                </div>
+
+                <div className="sof-filter-row">
+                  <div className="sof-search-wrap">
+                    <iconify-icon icon="solar:magnifer-linear" className="sof-search-icon"></iconify-icon>
+                    <input
+                      type="search"
+                      className="sof-input sof-search-input"
+                      placeholder="Rechercher un article (EAN ou libellé)..."
+                      value={articleSearch}
+                      onChange={(e) => setArticleSearch(e.target.value)}
+                    />
+                  </div>
+                  <select className="sof-input" value={causeFilter} onChange={(e) => setCauseFilter(e.target.value)}>
+                    <option value="">Toutes les causes</option>
+                    {Object.entries(CAUSE_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                  <select className="sof-input" value={reactionFilter} onChange={(e) => setReactionFilter(e.target.value)}>
+                    <option value="">Toutes les réactions</option>
+                    {Object.entries(REACTION_LIGHT_META).map(([key, meta]) => (
+                      <option key={key} value={key}>{meta.label}</option>
+                    ))}
+                  </select>
+                  <select className="sof-input" value={deliveryFilter} onChange={(e) => setDeliveryFilter(e.target.value)}>
+                    <option value="">Tous les statuts de livraison</option>
+                    {Object.entries(DELIVERY_STATUS_META).map(([key, meta]) => (
+                      <option key={key} value={key}>{meta.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={`sof-adv-filter-btn${activeRangeFilterCount > 0 ? ' active' : ''}`}
+                    onClick={() => setRangeFiltersOpen((v) => !v)}
+                  >
+                    <iconify-icon icon="solar:tuning-2-bold-duotone"></iconify-icon>
+                    Filtres avancés{activeRangeFilterCount > 0 ? ` (${activeRangeFilterCount})` : ''}
+                    <iconify-icon icon={rangeFiltersOpen ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ fontSize: '12px', opacity: .6 }}></iconify-icon>
+                  </button>
+                  {activeExtraFilterCount > 0 && (
+                    <button type="button" className="sof-clear-btn" onClick={clearAllArticleFilters}>
+                      <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres
+                    </button>
+                  )}
+                </div>
+
+                {rangeFiltersOpen && (
+                  <div className="sof-range-panel">
+                    {([
+                      ['durationHours', 'Durée (heures)'],
+                      ['sellingPrice', 'Prix (CFA)'],
+                      ['qtyPerdueEstimee', 'Qté perdue'],
+                      ['caPerdueEstime', 'CA perdu (CFA)'],
+                    ] as [RangeFilterKey, string][]).map(([key, label]) => (
+                      <div key={key} className="sof-range-field">
+                        <span className="sof-range-label">{label}</span>
+                        <div className="d-flex align-items-center gap-1">
+                          <input
+                            type="number"
+                            className="sof-input"
+                            style={{ width: 90 }}
+                            placeholder="Min"
+                            value={rangeFilters[key].min}
+                            onChange={(e) => setRangeFilter(key, 'min', e.target.value)}
+                          />
+                          <span className="text-muted small">—</span>
+                          <input
+                            type="number"
+                            className="sof-input"
+                            style={{ width: 90 }}
+                            placeholder="Max"
+                            value={rangeFilters[key].max}
+                            onChange={(e) => setRangeFilter(key, 'max', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+
               <div className="table-responsive">
                 <table className="table align-middle mb-0 table-hover table-centered">
                   <thead className="bg-light-subtle">

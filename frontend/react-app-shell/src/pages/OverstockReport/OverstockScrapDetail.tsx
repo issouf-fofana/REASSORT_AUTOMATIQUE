@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
@@ -15,6 +15,7 @@ type ScrapMove = {
   date: string;
   quantity: number;
   recording: string | null;
+  typeLabel: string | null;
 };
 
 type ScrapByShop = {
@@ -25,18 +26,101 @@ type ScrapByShop = {
   moveCount: number;
 };
 
+type ScrapByDay = {
+  date: string;
+  quantity: number;
+  moveCount: number;
+};
+
 type ScrapDetailData = {
   found: boolean;
   ean?: string;
   label?: string | null;
   lookbackDays?: number;
   since?: string;
+  until?: string;
   totalQuantity?: number;
   totalMoveCount?: number;
   byShop?: ScrapByShop[];
+  byDay?: ScrapByDay[];
   moves?: ScrapMove[];
   message?: string;
 };
+
+type MovementType = {
+  typeLabel: string;
+  moveCount: number;
+  isDefaultScrapType: boolean;
+};
+
+type MovementTypesData = {
+  found: boolean;
+  lookbackDays?: number;
+  types: MovementType[];
+  message?: string;
+};
+
+// Même sélecteur de types de mouvement que sur la page Casse (ScrapReport.tsx) — demande
+// explicite du 21/10/2026 d'appliquer le choix "Partout où la casse est affichée".
+function MovementTypeSelector({
+  types,
+  selected,
+  onChange,
+}: {
+  types: MovementType[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  function toggle(typeLabel: string) {
+    const next = new Set(selected);
+    if (next.has(typeLabel)) next.delete(typeLabel);
+    else next.add(typeLabel);
+    onChange(next);
+  }
+
+  const label = selected.size === 0 ? 'Types de casse (par défaut)' : `${selected.size} type(s) sélectionné(s)`;
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="osd-preset" style={{ width: 240, textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setOpen((o) => !o)}>
+        <span className="text-truncate">{label}</span>
+        <iconify-icon icon="solar:alt-arrow-down-linear" style={{ fontSize: '.7rem' }}></iconify-icon>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '110%', right: 0, zIndex: 20, background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 8, boxShadow: '0 8px 24px rgba(27,42,74,.14)', width: 360, maxHeight: 360, overflowY: 'auto', padding: 8 }}>
+          <div className="d-flex justify-content-between align-items-center px-2 py-1">
+            <span className="text-muted" style={{ fontSize: '.72rem' }}>Cochez les types à compter comme casse</span>
+            {selected.size > 0 && (
+              <button type="button" className="btn btn-link btn-sm p-0" style={{ fontSize: '.72rem' }} onClick={() => onChange(new Set())}>
+                Réinitialiser
+              </button>
+            )}
+          </div>
+          {types.map((t) => (
+            <label key={t.typeLabel} className="d-flex align-items-center gap-2 px-2 py-1" style={{ fontSize: '.8rem', cursor: 'pointer', borderRadius: 6 }}>
+              <input type="checkbox" checked={selected.has(t.typeLabel)} onChange={() => toggle(t.typeLabel)} />
+              <span className="flex-grow-1 text-truncate" style={{ color: t.isDefaultScrapType ? '#1B2A4A' : '#5B6B85', fontWeight: t.isDefaultScrapType ? 600 : 400 }}>
+                {t.typeLabel}
+              </span>
+              <span className="text-muted" style={{ fontSize: '.7rem' }}>{t.moveCount.toLocaleString('fr-FR')}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function downloadCsv(filename: string, headers: string[], rows: (string | number | null)[][]) {
   const escapeCell = (v: string | number | null) => {
@@ -72,24 +156,45 @@ export function OverstockScrapDetail() {
   const [data, setData] = useState<ScrapDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lookbackDays, setLookbackDays] = useState(90);
+  const [movementTypes, setMovementTypes] = useState<MovementType[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(() => {
+    const raw = searchParams.get('typeLabels');
+    return raw ? new Set(raw.split(',').filter(Boolean)) : new Set();
+  });
+  // Période personnalisée (demande explicite du 21/10/2026 : "donne la possibilité de
+  // personalisé cette période") — vide par défaut, les presets 30j/90j/etc. restent utilisés tant
+  // que l'utilisateur n'a pas choisi de dates précises.
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const useCustomRange = Boolean(customStart && customEnd);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<MovementTypesData>(`/reassort/scrap-report/movement-types?lookbackDays=${lookbackDays}`)
+      .then((d) => { if (!cancelled && d.found) setMovementTypes(d.types); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [lookbackDays]);
 
   useEffect(() => {
     if (!ean) return;
     let cancelled = false;
     setData(null);
     setError(null);
-    apiFetch<ScrapDetailData>(`/reassort/overstock-report/scrap-detail?ean=${encodeURIComponent(ean)}&lookbackDays=${lookbackDays}`)
+    const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
+    const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
+    apiFetch<ScrapDetailData>(`/reassort/overstock-report/scrap-detail?ean=${encodeURIComponent(ean)}${rangeParam}${typeParam}`)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [ean, lookbackDays]);
+  }, [ean, lookbackDays, selectedTypes, useCustomRange, customStart, customEnd]);
 
   function exportCsv() {
     if (!data?.moves) return;
     downloadCsv(
       `casse-${ean}-${new Date().toISOString().slice(0, 10)}.csv`,
       ['Date', 'Magasin', 'Référence magasin', 'Quantité', 'Type de mouvement'],
-      data.moves.map((m) => [new Date(m.date).toLocaleString('fr-FR'), m.shopName, m.shopReference, m.quantity, m.recording])
+      data.moves.map((m) => [new Date(m.date).toLocaleString('fr-FR'), m.shopName, m.shopReference, m.quantity, m.typeLabel])
     );
   }
 
@@ -128,10 +233,19 @@ export function OverstockScrapDetail() {
         </div>
         <div className="osd-presets">
           {LOOKBACK_PRESETS.map((p) => (
-            <button key={p.days} type="button" className={`osd-preset${lookbackDays === p.days ? ' active' : ''}`} onClick={() => setLookbackDays(p.days)}>
+            <button key={p.days} type="button" className={`osd-preset${!useCustomRange && lookbackDays === p.days ? ' active' : ''}`} onClick={() => { setLookbackDays(p.days); setCustomStart(''); setCustomEnd(''); }}>
               {p.label}
             </button>
           ))}
+          <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customStart} max={customEnd || undefined} onChange={(e) => setCustomStart(e.target.value)} />
+          <span className="text-muted align-self-center" style={{ fontSize: '.78rem' }}>→</span>
+          <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customEnd} min={customStart || undefined} onChange={(e) => setCustomEnd(e.target.value)} />
+          {useCustomRange && (
+            <button type="button" className="osd-preset" onClick={() => { setCustomStart(''); setCustomEnd(''); }}>
+              <iconify-icon icon="solar:close-circle-linear"></iconify-icon>
+            </button>
+          )}
+          <MovementTypeSelector types={movementTypes} selected={selectedTypes} onChange={setSelectedTypes} />
         </div>
       </div>
 
@@ -159,7 +273,7 @@ export function OverstockScrapDetail() {
             <div className="osd-kpi-card">
               <div className="osd-kpi-label">Période analysée</div>
               <div className="osd-kpi-value" style={{ fontSize: '1.05rem' }}>
-                {data.since ? new Date(data.since).toLocaleDateString('fr-FR') : '—'} → aujourd'hui
+                {data.since ? new Date(data.since).toLocaleDateString('fr-FR') : '—'} → {data.until ? new Date(data.until).toLocaleDateString('fr-FR') : "aujourd'hui"}
               </div>
             </div>
           </div>
@@ -187,6 +301,34 @@ export function OverstockScrapDetail() {
                 </table>
               </div>
             </div>
+          )}
+
+          {data.byDay && data.byDay.length > 0 && (
+            <>
+              <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Récapitulatif par jour</h6>
+              <div className="osd-table-card mb-3">
+              <div className="table-responsive" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                <table className="table align-middle table-sm mb-0">
+                  <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
+                    <tr>
+                      <th>Jour</th>
+                      <th>Quantité perdue</th>
+                      <th>Nombre de mouvements</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.byDay.map((d) => (
+                      <tr key={d.date}>
+                        <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
+                        <td className="osd-scrap-qty">−{d.quantity.toLocaleString('fr-FR')}</td>
+                        <td>{d.moveCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              </div>
+            </>
           )}
 
           <div className="d-flex justify-content-between align-items-center mb-2">
@@ -218,7 +360,7 @@ export function OverstockScrapDetail() {
                         <td>{new Date(m.date).toLocaleString('fr-FR')}</td>
                         <td>{m.shopName} ({m.shopReference})</td>
                         <td className="osd-scrap-qty">−{m.quantity.toLocaleString('fr-FR')}</td>
-                        <td>{m.recording || '—'}</td>
+                        <td>{m.typeLabel || '—'}</td>
                       </tr>
                     ))
                   )}

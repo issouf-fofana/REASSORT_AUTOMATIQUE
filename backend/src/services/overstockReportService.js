@@ -295,10 +295,11 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
 
   // Agrégation par (magasin, ean) : combien de propositions sur la période avaient cet article EN
   // SURSTOCK, et les dernières valeurs connues (stock/vente/prix) pour l'affichage. En parallèle,
-  // agrégation par JOUR : nombre d'articles distincts (magasin+ean confondus) en surstock ce
-  // jour-là, pour la courbe de tendance.
+  // agrégation par (JOUR, magasin) : nombre d'articles distincts en surstock ce jour-là, par magasin
+  // — demande explicite du 21/10/2026 : "quand je fait le filtre sur un mag ou deux la coube doit
+  // mettre ajour" — permet au frontend de recalculer la courbe filtrée sans rappel serveur.
   const byShopEan = new Map(); // `${rposShopId}:${ean}` -> { overstockCount, latest: {...} }
-  const overstockEansByDay = new Map(); // 'YYYY-MM-DD' -> Set<`${rposShopId}:${ean}`>
+  const overstockEansByDayShop = new Map(); // 'YYYY-MM-DD:rposShopId' -> Set<ean>
   for (const l of lines) {
     const rposShopId = shopIdByProposalId.get(l.proposalId);
     const isOverstocked = (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage;
@@ -313,8 +314,29 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     entry.latest = l;
 
     const day = dayByProposalId.get(l.proposalId);
+    const dayShopKey = `${day}:${rposShopId}`;
+    if (!overstockEansByDayShop.has(dayShopKey)) overstockEansByDayShop.set(dayShopKey, new Set());
+    overstockEansByDayShop.get(dayShopKey).add(l.ean);
+  }
+
+  const trendPointsByShop = [...overstockEansByDayShop.entries()]
+    .map(([dayShopKey, eanSet]) => {
+      const sepIdx = dayShopKey.indexOf(':');
+      return { date: dayShopKey.slice(0, sepIdx), rposShopId: dayShopKey.slice(sepIdx + 1), count: eanSet.size };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Agrégat global tous magasins confondus (demande initiale : "la courbe affichée c'est pour un
+  // seul magasin ? ou on peut avoir plusieurs" — confirmé total cumulé par défaut) : un article en
+  // surstock dans N magasins le même jour compte une seule fois, d'où un Set par jour plutôt qu'une
+  // simple somme de trendPointsByShop (qui compterait l'article N fois).
+  const overstockEansByDay = new Map(); // 'YYYY-MM-DD' -> Set<`${rposShopId}:${ean}`>
+  for (const [dayShopKey, eanSet] of overstockEansByDayShop) {
+    const sepIdx = dayShopKey.indexOf(':');
+    const day = dayShopKey.slice(0, sepIdx);
+    const rposShopId = dayShopKey.slice(sepIdx + 1);
     if (!overstockEansByDay.has(day)) overstockEansByDay.set(day, new Set());
-    overstockEansByDay.get(day).add(key);
+    for (const ean of eanSet) overstockEansByDay.get(day).add(`${rposShopId}:${ean}`);
   }
 
   const trendPoints = [...overstockEansByDay.entries()]
@@ -381,6 +403,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     persistentArticleCount: persistentArticles.length,
     persistentArticles,
     trendPoints,
+    trendPointsByShop,
   };
 }
 
@@ -414,6 +437,23 @@ function groupCommonOverstock(articles) {
     .sort((a, b) => b.shops.length - a.shops.length);
 }
 
+// Même liste fixe de mots-clés que scrapReportService.js (demande confirmée le 21/10/2026 : "oui tu
+// met les 6 types") — réutilisée ici plutôt qu'importée directement pour ne jamais créer de
+// dépendance circulaire entre les deux services (overstockReportService require déjà
+// scrapReportService ne serait pas un problème en soi, mais ce fichier est déjà volumineux ; la
+// liste reste la source de vérité dans scrapReportService.js, copiée ici à l'identique).
+//
+// Casse affichée sur Surstock = liste FIXE (demande confirmée explicitement : "Surstock garde un
+// réglage FIXE... pas de sélecteur sur cette page") — contrairement à la page Casse dédiée, dont le
+// filtre par type est interactif, la casse ici alimente le snapshot précalculé toutes les heures
+// (overstockReportSnapshotJob.js) : un sélecteur changerait le résultat à la volée, ce qui
+// casserait la rapidité obtenue par le précalcul. Remplace le drapeau isScrap (découvert incohérent
+// d'un magasin à l'autre pour un même type de mouvement) par ce filtre textuel, plus fiable.
+const OVERSTOCK_SCRAP_TYPE_KEYWORDS = ['CASSE', 'AVARI', 'PERIM', 'MANUT', 'EXPER'];
+function overstockScrapTypeWhere() {
+  return { OR: OVERSTOCK_SCRAP_TYPE_KEYWORDS.map((kw) => ({ typeLabel: { contains: kw, mode: 'insensitive' } })) };
+}
+
 /**
  * Casse sur les 3 derniers mois pour un lot d'EAN à travers plusieurs magasins (demande explicite :
  * "si tu les casse sortir la casse de ces articles sur les 3 dernières mois") — lecture locale
@@ -433,7 +473,7 @@ async function getScrapSummaryForEans(shopEanPairs) {
   // ne permet pas nativement un "IN d'une liste de paires" propre sans OR explicite, inutile ici vu
   // le nombre de lignes modeste (quelques dizaines d'articles communs au plus).
   const rows = await prisma.stockMove.findMany({
-    where: { rposShopId: { in: shopIds }, ean: { in: eans }, isScrap: true, date: { gte: since } },
+    where: { rposShopId: { in: shopIds }, ean: { in: eans }, date: { gte: since }, ...overstockScrapTypeWhere() },
     select: { rposShopId: true, ean: true, quantity: true, date: true },
   });
 
@@ -568,6 +608,7 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     // qu'en mode période, dérivée des mêmes propositions déjà parcourues ci-dessus, aucun calcul
     // supplémentaire ni job de synchro.
     trendPoints: periodMode ? byShop.trendPoints : null,
+    trendPointsByShop: periodMode ? byShop.trendPointsByShop : null,
   };
 }
 
@@ -616,7 +657,7 @@ async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
  * stockMoveSyncJob.js), jamais d'appel RPOS — même source que stockMoveAnalysisService.js mais en
  * lot (plusieurs magasins à la fois) plutôt qu'un seul posId/shopId.
  */
-async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SCRAP_LOOKBACK_DAYS } = {}) {
+async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SCRAP_LOOKBACK_DAYS, typeLabels, startDate, endDate } = {}) {
   const shops = await prisma.shop.findMany({
     where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
     select: { rposShopId: true, reference: true, name: true },
@@ -625,11 +666,23 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
 
   const shopIds = shops.map((s) => s.rposShopId);
   const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
-  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+  // Période personnalisée (demande explicite du 21/10/2026 : "donne la possibilité de personalisé
+  // cette période") — startDate/endDate exacts priment sur lookbackDays quand fournis. endDate est
+  // inclusif jusqu'à la fin de la journée (23:59:59.999), pas minuit pile.
+  const since = startDate ? new Date(startDate) : new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const until = endDate ? new Date(new Date(endDate).setHours(23, 59, 59, 999)) : undefined;
+
+  // Même filtre par type exact que scrapReportService.getScrapOverview (demande explicite du
+  // 21/10/2026 : "je veux qui tu affiche les type de mouvement pour les casse... si je mets perimé
+  // il doit affiché") — sans sélection explicite, retombe sur la liste de mots-clés par défaut.
+  const typeFilter = Array.isArray(typeLabels) && typeLabels.length
+    ? { typeLabel: { in: typeLabels } }
+    : overstockScrapTypeWhere();
 
   const moves = await prisma.stockMove.findMany({
-    where: { rposShopId: { in: shopIds }, ean, isScrap: true, date: { gte: since } },
-    select: { rposShopId: true, ean: true, label: true, date: true, quantity: true, previousQuantity: true, recording: true },
+    where: { rposShopId: { in: shopIds }, ean, date: { gte: since, ...(until ? { lte: until } : {}) }, ...typeFilter },
+    select: { rposShopId: true, ean: true, label: true, date: true, quantity: true, previousQuantity: true, recording: true, typeLabel: true },
     orderBy: { date: 'desc' },
   });
 
@@ -643,6 +696,7 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
     // positif ici, cohérent avec le reste de ce fichier (getScrapSummaryForEans).
     quantity: Math.abs(m.quantity),
     recording: m.recording || null,
+    typeLabel: m.typeLabel,
   }));
 
   const totalQuantity = moveRows.reduce((s, m) => s + m.quantity, 0);
@@ -654,15 +708,29 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
     entry.moveCount += 1;
   }
 
+  // Récap par jour (demande explicite du 21/10/2026 : "il peux affiche aussi par detail c'est a
+  // dir me donner la possiblité de voir par jour") — en plus de la liste détaillée par mouvement,
+  // jamais à la place.
+  const byDay = new Map();
+  for (const m of moveRows) {
+    const day = m.date.slice(0, 10); // YYYY-MM-DD
+    if (!byDay.has(day)) byDay.set(day, { date: day, quantity: 0, moveCount: 0 });
+    const entry = byDay.get(day);
+    entry.quantity += m.quantity;
+    entry.moveCount += 1;
+  }
+
   return {
     found: true,
     ean,
     label,
     lookbackDays,
     since: since.toISOString(),
+    until: until ? until.toISOString() : undefined,
     totalQuantity,
     totalMoveCount: moveRows.length,
     byShop: [...byShop.values()].sort((a, b) => b.totalQuantity - a.totalQuantity),
+    byDay: [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date)),
     moves: moveRows,
   };
 }

@@ -4,17 +4,72 @@
  * aux articles déjà en surstock), ce rapport couvre TOUS les articles ayant eu de la casse sur la
  * période, qu'ils soient en surstock ou non. Lecture locale directe de StockMove (alimentée par
  * stockMoveSyncJob.js), jamais d'appel RPOS.
+ *
+ * Filtre par TYPE de mouvement ajouté le 21/10/2026 (demande explicite : "tu prend que type de
+ * mouvement car il ya plusieur type de mouvement... je veux qui tu affiche les type de mouvement
+ * pour les casse") — découvert en creusant les vraies données : le drapeau StockMove.isScrap posé
+ * par RPOS est INCOHÉRENT d'un magasin à l'autre pour un même libellé de type (ex: "DEMAR : AVARI -
+ * CASSE AVARIE" marqué is_scrap=true dans un magasin, false dans un autre). Plus fiable de filtrer
+ * directement par typeLabel (texte RPOS, stable) que par ce drapeau mal réglé côté RPOS.
  */
 const prisma = require('../utils/prisma');
 
 const DEFAULT_LOOKBACK_DAYS = 90;
+
+// Liste FIXE des types de mouvement considérés comme de la casse par défaut (demande confirmée le
+// 21/10/2026, après revue des vraies données : "oui tu met les 6 types") — mots-clés recherchés
+// dans StockMove.typeLabel (contains, insensible à la casse), pas une correspondance exacte : les
+// libellés RPOS varient légèrement en ponctuation/espaces d'un magasin à l'autre pour un même type
+// logique (ex: "DEMAR : AVARI - CASSE AVARIE  -   -1"). Exclut volontairement "client" seul (aurait
+// aussi attrapé "Cadeau client"/"CADEAUX CLIENTS", qui ne sont pas des pertes) — "CASSE CLIENTELE"
+// matche déjà via le mot "CASSE".
+const DEFAULT_SCRAP_TYPE_KEYWORDS = ['CASSE', 'AVARI', 'PERIM', 'MANUT', 'EXPER'];
+
+function isDefaultScrapType(typeLabel) {
+  if (!typeLabel) return false;
+  const upper = typeLabel.toUpperCase();
+  return DEFAULT_SCRAP_TYPE_KEYWORDS.some((kw) => upper.includes(kw));
+}
+
+/**
+ * Tous les types de mouvement distincts vus sur la période pour le périmètre magasins accessible —
+ * sert à peupler le sélecteur de types sur la page Casse (demande explicite : "met un litre pour
+ * affiche ses donner du filtre"). Inclut TOUS les types (pas seulement ceux is_scrap=true ou
+ * correspondant aux mots-clés par défaut), pour que l'utilisateur garde la main complète plutôt que
+ * de dépendre d'une présélection qui pourrait rater un type mal nommé.
+ */
+async function getMovementTypes(allowedShopIds, { lookbackDays = DEFAULT_LOOKBACK_DAYS } = {}) {
+  if (Array.isArray(allowedShopIds) && !allowedShopIds.length) {
+    return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+  }
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true },
+  });
+  if (!shops.length) return { found: true, types: [] };
+
+  const shopIds = shops.map((s) => s.rposShopId);
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+  const rows = await prisma.stockMove.groupBy({
+    by: ['typeLabel'],
+    where: { rposShopId: { in: shopIds }, date: { gte: since } },
+    _count: { _all: true },
+  });
+
+  const types = rows
+    .map((r) => ({ typeLabel: r.typeLabel, moveCount: r._count._all, isDefaultScrapType: isDefaultScrapType(r.typeLabel) }))
+    .sort((a, b) => (b.isDefaultScrapType ? 1 : 0) - (a.isDefaultScrapType ? 1 : 0) || b.moveCount - a.moveCount);
+
+  return { found: true, lookbackDays, types };
+}
 
 /**
  * Casse agrégée par (magasin, article) sur la période demandée, pour le périmètre magasins
  * accessible au compte (ADMIN : tous ; SUPERVISOR : son périmètre ; mono-magasin : son seul
  * magasin — résolu par l'appelant, cf. resolveOverstockShopFilter réutilisé par la route).
  */
-async function getScrapOverview(allowedShopIds, { lookbackDays = DEFAULT_LOOKBACK_DAYS } = {}) {
+async function getScrapOverview(allowedShopIds, { lookbackDays = DEFAULT_LOOKBACK_DAYS, typeLabels } = {}) {
   if (Array.isArray(allowedShopIds) && !allowedShopIds.length) {
     return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
   }
@@ -29,8 +84,18 @@ async function getScrapOverview(allowedShopIds, { lookbackDays = DEFAULT_LOOKBAC
   const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
   const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
+  // Filtre par type exact choisi par l'utilisateur (demande explicite du 21/10/2026 : "si je mets
+  // perimé il doit affiché, si je met casse il me donne") — remplace le drapeau isScrap (découvert
+  // incohérent d'un magasin à l'autre pour un même type) par une correspondance exacte sur les
+  // libellés réellement présents, cochés dans le sélecteur de la page. Sans sélection explicite,
+  // retombe sur la liste de mots-clés par défaut ci-dessus (comportement proche de l'ancien isScrap,
+  // en plus fiable).
+  const typeFilter = Array.isArray(typeLabels) && typeLabels.length
+    ? { typeLabel: { in: typeLabels } }
+    : { OR: DEFAULT_SCRAP_TYPE_KEYWORDS.map((kw) => ({ typeLabel: { contains: kw, mode: 'insensitive' } })) };
+
   const moves = await prisma.stockMove.findMany({
-    where: { rposShopId: { in: shopIds }, isScrap: true, date: { gte: since } },
+    where: { rposShopId: { in: shopIds }, date: { gte: since }, ...typeFilter },
     select: { rposShopId: true, ean: true, label: true, quantity: true, date: true },
   });
 
@@ -95,4 +160,4 @@ async function getScrapOverview(allowedShopIds, { lookbackDays = DEFAULT_LOOKBAC
   };
 }
 
-module.exports = { getScrapOverview, DEFAULT_LOOKBACK_DAYS };
+module.exports = { getScrapOverview, getMovementTypes, isDefaultScrapType, DEFAULT_SCRAP_TYPE_KEYWORDS, DEFAULT_LOOKBACK_DAYS };

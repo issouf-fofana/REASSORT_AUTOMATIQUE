@@ -111,9 +111,13 @@ type EpisodeDetail = {
   };
 };
 
+// AMONT_FOURNISSEUR_CENTRAL / AMONT_FOURNISSEUR_EXTERNE ajoutés le 21/10/2026 (demande explicite :
+// "Amont — ca viens de founisseur central ou du fournisseur externe") — cf. StockoutShopDetail.tsx.
 const CAUSE_LABELS: Record<string, string> = {
   MAGASIN_REASSORT: 'Magasin / réassort',
   MAGASIN_COMMANDE_NON_VALIDEE: 'Commande non validée',
+  AMONT_FOURNISSEUR_CENTRAL: 'Amont — fournisseur central',
+  AMONT_FOURNISSEUR_EXTERNE: 'Amont — fournisseur externe',
   AMONT_A_PRECISER: 'Amont — à préciser',
   ECART_STOCK_RAYON: 'Écart stock / rayon',
   INDETERMINEE: 'Indéterminée',

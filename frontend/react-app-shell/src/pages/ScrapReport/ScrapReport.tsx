@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
@@ -33,6 +33,85 @@ type ScrapOverviewData = {
   articles: ScrapArticleRow[];
   message?: string;
 };
+
+type MovementType = {
+  typeLabel: string;
+  moveCount: number;
+  isDefaultScrapType: boolean;
+};
+
+type MovementTypesData = {
+  found: boolean;
+  lookbackDays?: number;
+  types: MovementType[];
+  message?: string;
+};
+
+// Sélecteur de types de mouvement à considérer comme "casse" (demande explicite du 21/10/2026 :
+// "je veux qui tu affiche les type de mouvement pour les casse et tu me donne... quand c'est
+// visible sur le UI on peux les choisir et en fonction de ca on aura des casse"). Affiche TOUS
+// les types réels trouvés dans les données (pas seulement ceux pré-cochés), avec les types
+// "casse-like" (isDefaultScrapType) pré-cochés et triés en premier. Sans sélection explicite de
+// l'utilisateur, le backend retombe sur ces mêmes types par défaut (comportement identique).
+function MovementTypeSelector({
+  types,
+  selected,
+  onChange,
+}: {
+  types: MovementType[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  function toggle(typeLabel: string) {
+    const next = new Set(selected);
+    if (next.has(typeLabel)) next.delete(typeLabel);
+    else next.add(typeLabel);
+    onChange(next);
+  }
+
+  const label = selected.size === 0 ? 'Types de casse (par défaut)' : `${selected.size} type(s) sélectionné(s)`;
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="scr-input" style={{ width: 240, textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setOpen((o) => !o)}>
+        <span className="text-truncate">{label}</span>
+        <iconify-icon icon="solar:alt-arrow-down-linear" style={{ fontSize: '.7rem' }}></iconify-icon>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '110%', left: 0, zIndex: 20, background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 8, boxShadow: '0 8px 24px rgba(27,42,74,.14)', width: 360, maxHeight: 360, overflowY: 'auto', padding: 8 }}>
+          <div className="d-flex justify-content-between align-items-center px-2 py-1">
+            <span className="text-muted" style={{ fontSize: '.72rem' }}>Cochez les types à compter comme casse</span>
+            {selected.size > 0 && (
+              <button type="button" className="btn btn-link btn-sm p-0" style={{ fontSize: '.72rem' }} onClick={() => onChange(new Set())}>
+                Réinitialiser
+              </button>
+            )}
+          </div>
+          {types.map((t) => (
+            <label key={t.typeLabel} className="d-flex align-items-center gap-2 px-2 py-1" style={{ fontSize: '.8rem', cursor: 'pointer', borderRadius: 6 }}>
+              <input type="checkbox" checked={selected.has(t.typeLabel)} onChange={() => toggle(t.typeLabel)} />
+              <span className="flex-grow-1 text-truncate" style={{ color: t.isDefaultScrapType ? '#1B2A4A' : '#5B6B85', fontWeight: t.isDefaultScrapType ? 600 : 400 }}>
+                {t.typeLabel}
+              </span>
+              <span className="text-muted" style={{ fontSize: '.7rem' }}>{t.moveCount.toLocaleString('fr-FR')}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function fmtCfa(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';
@@ -83,16 +162,27 @@ export function ScrapReport() {
   const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [movementTypes, setMovementTypes] = useState<MovementType[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<MovementTypesData>(`/reassort/scrap-report/movement-types?lookbackDays=${lookbackDays}`)
+      .then((d) => { if (!cancelled && d.found) setMovementTypes(d.types); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [lookbackDays]);
 
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setError(null);
-    apiFetch<ScrapOverviewData>(`/reassort/scrap-report?lookbackDays=${lookbackDays}`)
+    const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
+    apiFetch<ScrapOverviewData>(`/reassort/scrap-report?lookbackDays=${lookbackDays}${typeParam}`)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [lookbackDays]);
+  }, [lookbackDays, selectedTypes]);
 
   const shopOptions = useMemo(() => {
     if (!data) return [];
@@ -132,7 +222,8 @@ export function ScrapReport() {
   }
 
   function openDetail(ean: string, label: string | null) {
-    navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label || '')}&from=scrap-report`);
+    const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
+    navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label || '')}&from=scrap-report${typeParam}`);
   }
 
   return (
@@ -189,6 +280,7 @@ export function ScrapReport() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <MovementTypeSelector types={movementTypes} selected={selectedTypes} onChange={setSelectedTypes} />
         <div className="ms-auto">
           <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportCsv} disabled={!filtered.length}>
             <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)

@@ -27,7 +27,7 @@ const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByD
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
-const { getScrapOverview } = require('../../services/scrapReportService');
+const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('../../jobs/overstockReportSnapshotJob');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -410,7 +410,10 @@ router.get('/overstock-report/scrap-detail', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
     }
     const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
-    const result = await getScrapDetailForArticle(shopIdFilter, String(ean), { lookbackDays });
+    const typeLabels = req.query.typeLabels ? String(req.query.typeLabels).split(',').filter(Boolean) : undefined;
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const result = await getScrapDetailForArticle(shopIdFilter, String(ean), { lookbackDays, typeLabels, startDate, endDate });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -426,7 +429,28 @@ router.get('/scrap-report', async (req, res) => {
   try {
     const shopIdFilter = await resolveOverstockShopFilter(req);
     const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
-    const result = await getScrapOverview(shopIdFilter, { lookbackDays });
+    // typeLabels optionnel (demande explicite du 21/10/2026 : "je veux qui tu affiche les type de
+    // mouvement pour les casse et tu me donne... et quand c'est visible sur le UI on peux les
+    // choisir") — CSV de libellés exacts cochés par l'utilisateur ; sans ce paramètre, retombe sur
+    // la liste de mots-clés par défaut (cf. scrapReportService.js).
+    const typeLabels = req.query.typeLabels ? String(req.query.typeLabels).split(',').filter(Boolean) : undefined;
+    const result = await getScrapOverview(shopIdFilter, { lookbackDays, typeLabels });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/scrap-report/movement-types?lookbackDays= - liste tous les types de mouvement
+// distincts vus sur la période pour le périmètre magasins accessible (demande explicite du
+// 21/10/2026 : "met un litre pour affiche ses donner du filtre") — peuple le sélecteur de types sur
+// la page Casse, jamais présélectionnée par mots-clés côté UI (isDefaultScrapType n'indique qu'une
+// suggestion visuelle, l'utilisateur garde la main complète sur la sélection).
+router.get('/scrap-report/movement-types', async (req, res) => {
+  try {
+    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
+    const result = await getMovementTypes(shopIdFilter, { lookbackDays });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

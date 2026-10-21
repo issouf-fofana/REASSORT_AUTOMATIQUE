@@ -4,9 +4,13 @@ import { FormulaInfoButton } from './StockoutEpisodePage';
 // Répartition des ruptures par cause probable (demande du 16/10/2026) — reçoit causeCounts déjà
 // calculé côté backend (cf. stockoutEpisodeService.js), pas de second appel API, juste la
 // visualisation en camembert de données déjà chargées par le parent.
+// AMONT_FOURNISSEUR_CENTRAL / AMONT_FOURNISSEUR_EXTERNE ajoutés le 21/10/2026 (demande explicite :
+// "Amont — ca viens de founisseur central ou du fournisseur externe") — cf. StockoutShopDetail.tsx.
 const CAUSE_LABELS: Record<string, string> = {
   MAGASIN_REASSORT: 'Magasin / réassort',
   MAGASIN_COMMANDE_NON_VALIDEE: 'Commande non validée',
+  AMONT_FOURNISSEUR_CENTRAL: 'Amont — fournisseur central',
+  AMONT_FOURNISSEUR_EXTERNE: 'Amont — fournisseur externe',
   AMONT_A_PRECISER: 'Amont — à préciser',
   ECART_STOCK_RAYON: 'Écart stock / rayon',
   INDETERMINEE: 'Indéterminée',
@@ -15,6 +19,8 @@ const CAUSE_LABELS: Record<string, string> = {
 const CAUSE_COLORS: Record<string, string> = {
   MAGASIN_REASSORT: '#F5A623',
   MAGASIN_COMMANDE_NON_VALIDEE: '#E0574C',
+  AMONT_FOURNISSEUR_CENTRAL: '#5B6B85',
+  AMONT_FOURNISSEUR_EXTERNE: '#7C6B9E',
   AMONT_A_PRECISER: '#5B6B85',
   ECART_STOCK_RAYON: '#4A90D9',
   INDETERMINEE: '#A0A8B8',
@@ -28,7 +34,9 @@ const CAUSE_COLORS: Record<string, string> = {
 const CAUSE_EXPLANATIONS: Record<string, string> = {
   MAGASIN_REASSORT: "Aucune commande n'a encore été passée sur l'article depuis le début de la rupture — cause la plus fréquente sur des ruptures récentes, avant que le magasin ait eu le temps de réagir.",
   MAGASIN_COMMANDE_NON_VALIDEE: 'Une commande existe mais ne porte pas encore cette référence — proposition générée mais pas encore validée.',
-  AMONT_A_PRECISER: "Une commande a été passée et transmise à l'entrepôt, mais sa réception n'est pas encore confirmée — le blocage se situe en amont du magasin (entrepôt/fournisseur), pas une absence de réaction locale.",
+  AMONT_FOURNISSEUR_CENTRAL: "Une commande a été passée vers l'entrepôt central (livraison centrale), mais sa réception n'est pas encore confirmée — le blocage se situe en amont du magasin, pas une absence de réaction locale.",
+  AMONT_FOURNISSEUR_EXTERNE: "Une commande a été passée vers un fournisseur externe (livraison directe), mais sa réception n'est pas encore confirmée — le blocage se situe en amont du magasin, pas une absence de réaction locale.",
+  AMONT_A_PRECISER: "Une commande a été passée et transmise à l'entrepôt, mais sa réception n'est pas encore confirmée — le blocage se situe en amont du magasin (entrepôt/fournisseur, type non précisé), pas une absence de réaction locale.",
   ECART_STOCK_RAYON: 'Une commande est déclarée reçue par le système, mais le stock reste en rupture — signe probable de désynchronisation entre le stock informatique et la réalité du rayon.',
   INDETERMINEE: "Impossible de déterminer la cause avec les informations disponibles — aucune commande récente trouvée pour cet article.",
 };
