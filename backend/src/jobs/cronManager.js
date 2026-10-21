@@ -488,6 +488,18 @@ async function startOrRestartOverstockReportSnapshotJob() {
     }).catch((err) => console.error('[cron] Erreur:', err));
   });
 
+  // Lancé une fois en tâche de fond dès la programmation du job, sans attendre le premier passage
+  // cron (demande explicite du 21/10/2026 : "je veux quand je viens il affiche a meme temps c'est
+  // a dire les calculs son fait dans la base deja") — sans ce rattrapage, un redémarrage/déploiement
+  // laisse la page Surstock retomber sur le calcul en direct (56-72s observés en prod) jusqu'au
+  // prochain créneau cron, potentiellement dans plus d'une heure. Ne bloque jamais le démarrage du
+  // serveur (fire-and-forget), et réutilise le même verrou que le cron pour ne jamais tourner deux
+  // fois en même temps si les deux se chevauchent.
+  overstockReportSnapshotLock(async () => {
+    console.log('[cron] Précalcul initial du rapport Surstock (rattrapage au démarrage)...');
+    await trackJobRun('overstockReportSnapshot', runOverstockReportSnapshotJob);
+  }).catch((err) => console.error('[cron] Erreur (précalcul initial Surstock):', err));
+
   console.log(`⏰ Précalcul du rapport Surstock planifié: ${cronSchedule}`);
 }
 

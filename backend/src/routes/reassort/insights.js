@@ -28,7 +28,7 @@ const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jo
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
 const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
-const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('../../jobs/overstockReportSnapshotJob');
+const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
 // son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
@@ -373,6 +373,31 @@ router.get('/overstock-report', async (req, res) => {
       }
       // Pas encore de snapshot (job jamais exécuté, ex: tout juste déployé) : calcul en direct
       // exceptionnel, le prochain passage du job remettra la vue par défaut sur le chemin rapide.
+    }
+
+    // Vue "3 derniers mois" (demande explicite du 21/10/2026 : devenue le mode de chargement PAR
+    // DÉFAUT de la page Surstock — "il faut affiché la courbe apres une analyser qui fait par
+    // defaut sur 3mois") : lit elle aussi un snapshot précalculé plutôt que de recalculer en
+    // direct, qui a atteint 56-72s en prod sur ~51 magasins × 90 jours (observé le 21/10/2026,
+    // concurrence avec les jobs de synchro RPOS + volume de lignes à parcourir). Tolérance de
+    // correspondance plutôt qu'une égalité stricte sur les dates ISO : le snapshot est calculé "il
+    // y a jusqu'à 1h" (fréquence du job) par "maintenant" côté job, pas par le timestamp exact de
+    // CETTE requête — on accepte donc la vue par défaut du frontend (fenêtre ~90 jours se terminant
+    // dans les dernières 24h) comme "assez proche" pour servir le cache, avec repli sur le calcul en
+    // direct pour toute période réellement choisie par l'utilisateur (presets 7j/30j/6mois, dates
+    // personnalisées, etc.).
+    if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE)) {
+      const startMs = new Date(start).getTime();
+      const endMs = new Date(end).getTime();
+      const spanDays = (endMs - startMs) / (24 * 60 * 60 * 1000);
+      const endAgeHours = (Date.now() - endMs) / (60 * 60 * 1000);
+      const isDefault90dView = Math.abs(spanDays - OVERSTOCK_REPORT_PERIOD_90D_DAYS) <= 1 && endAgeHours >= -1 && endAgeHours <= 24;
+      if (isDefault90dView) {
+        const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY);
+        if (cached) {
+          return res.json({ success: true, data: cached });
+        }
+      }
     }
 
     const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage, start, end });
