@@ -141,7 +141,11 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
 // une fois ouvert (c'est le navigateur, pas la page, qui dessine sa liste), d'où ce composant
 // maison avec recherche intégrée (28+ magasins, plus rapide à trouver qu'en faisant défiler) et le
 // même style doux (coins arrondis, surlignage au survol) que le reste de la page.
-function ShopDropdown({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (v: string) => void }) {
+// Multi-sélection (demande explicite du 21/10/2026 : "donne la possiblité de prendre un ou
+// plusieur magasin") : value est un Set d'ids magasin, vide = "Tous les magasins". Chaque clic sur
+// une ligne coche/décoche ce magasin sans fermer le panneau (contrairement à un simple choix
+// unique), pour permettre de cocher plusieurs magasins d'affilée.
+function ShopDropdown({ value, options, onChange }: { value: Set<string>; options: [string, string][]; onChange: (v: Set<string>) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
@@ -157,14 +161,19 @@ function ShopDropdown({ value, options, onChange }: { value: string; options: [s
 
   useEffect(() => { if (!open) setQuery(''); }, [open]);
 
-  const selectedLabel = value ? options.find(([id]) => id === value)?.[1] || value : 'Tous les magasins';
+  const selectedLabel = value.size === 0
+    ? 'Tous les magasins'
+    : value.size === 1
+      ? options.find(([id]) => value.has(id))?.[1] || '1 magasin'
+      : `${value.size} magasins sélectionnés`;
   const filteredOptions = query.trim()
     ? options.filter(([, label]) => label.toLowerCase().includes(query.trim().toLowerCase()))
     : options;
 
-  function select(id: string) {
-    onChange(id);
-    setOpen(false);
+  function toggle(id: string) {
+    const next = new Set(value);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onChange(next);
   }
 
   return (
@@ -185,19 +194,26 @@ function ShopDropdown({ value, options, onChange }: { value: string; options: [s
             onChange={(e) => setQuery(e.target.value)}
           />
           <div className="osr-shop-dropdown-list">
-            <div className={`osr-shop-dropdown-item${value === '' ? ' active' : ''}`} onClick={() => select('')}>
+            <div className={`osr-shop-dropdown-item${value.size === 0 ? ' active' : ''}`} onClick={() => onChange(new Set())}>
+              <iconify-icon icon="solar:check-circle-bold" style={{ opacity: value.size === 0 ? 1 : 0, color: '#2456A6' }}></iconify-icon>
               Tous les magasins
             </div>
             {filteredOptions.length === 0 ? (
               <div className="osr-shop-dropdown-empty">Aucun magasin trouvé.</div>
             ) : (
               filteredOptions.map(([id, label]) => (
-                <div key={id} className={`osr-shop-dropdown-item${value === id ? ' active' : ''}`} onClick={() => select(id)}>
+                <div key={id} className={`osr-shop-dropdown-item${value.has(id) ? ' active' : ''}`} onClick={() => toggle(id)}>
+                  <iconify-icon icon="solar:check-circle-bold" style={{ opacity: value.has(id) ? 1 : 0, color: '#2456A6' }}></iconify-icon>
                   {label}
                 </div>
               ))
             )}
           </div>
+          {value.size > 0 && (
+            <button type="button" className="osr-shop-dropdown-clear" onClick={() => onChange(new Set())}>
+              Effacer la sélection ({value.size})
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -279,6 +295,16 @@ function OverstockHero({ data, filteredCount }: { data: OverstockReportData; fil
 type TabKey = 'common' | 'byShop' | 'persistent';
 
 export function OverstockReport() {
+  // Un compte mono-magasin (Rayonniste/Chef de rayon/Directeur) a maintenant le droit de voir le
+  // surstock de SON PROPRE magasin (demande explicite du 21/10/2026 : "qui a le magasin doit avoir
+  // le droit de voir les article sur surstok" — jusque-là la page lui était entièrement bloquée).
+  // Le backend (overstockReportService.js/insights.js) le cantonne déjà à son seul magasin ; côté
+  // UI, on masque simplement ce qui n'a pas de sens pour un compte qui ne voit qu'un seul magasin :
+  // le sélecteur magasin (rien à filtrer) et l'onglet "communs à plusieurs magasins" (démarre donc
+  // directement sur "Par magasin", le seul onglet pertinent pour lui).
+  const user = window.reassortGetUser ? window.reassortGetUser() : null;
+  const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : false;
+
   const [data, setData] = useState<OverstockReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
@@ -291,8 +317,10 @@ export function OverstockReport() {
   const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const [activeTab, setActiveTab] = useState<TabKey>('common');
-  const [shopFilter, setShopFilter] = useState('');
+  const [activeTab, setActiveTab] = useState<TabKey>(isSingleShop ? 'byShop' : 'common');
+  // Multi-sélection magasin (demande explicite du 21/10/2026 : "donne la possiblité de prendre un
+  // ou plusieur magasin") — Set vide = "Tous les magasins", comme avant la chaîne vide.
+  const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
   // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
@@ -304,23 +332,14 @@ export function OverstockReport() {
   const PAGE_SIZE = 50;
   const [page, setPage] = useState(1);
 
-  // Page intrinsèquement multi-magasins (backend : requireAdminOrSupervisor) — un compte
-  // Rayonniste/Chef de département (mono-magasin) n'y a pas accès. Message explicite plutôt que de
-  // laisser le 403 backend remonter tel quel, même esprit que AdminGuard ("garde-fou cosmétique, la
-  // vraie sécurité reste le backend") mais basé sur le rôle réel plutôt que sur isAdmin seul, pour
-  // ne pas masquer la page aux SUPERVISOR qui, eux, y ont accès (cf. navConfig.ts).
-  const user = window.reassortGetUser ? window.reassortGetUser() : null;
-  const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : false;
-
   // Étendue réelle des données disponibles (demande explicite : "on doit me dire j'ai des donner de
   // quel periode... si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre
   // grisé") — chargé une fois au montage, sert de borne min au sélecteur de dates ci-dessous.
   useEffect(() => {
-    if (isSingleShop) return;
     apiFetch<Availability>('/reassort/overstock-report/availability')
       .then(setAvailability)
       .catch(() => setAvailability(null));
-  }, [isSingleShop]);
+  }, []);
 
   function runAnalysis() {
     setData(null);
@@ -338,18 +357,9 @@ export function OverstockReport() {
   // Premier chargement automatique (snapshot, paramètres par défaut) — les relances suivantes sont
   // explicitement déclenchées par l'utilisateur via "Lancer l'analyse" (demande du 21/10/2026).
   useEffect(() => {
-    if (isSingleShop) return;
     runAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSingleShop]);
-
-  if (isSingleShop) {
-    return (
-      <div className="container-fluid py-4">
-        <div className="alert alert-info">Cette page compare plusieurs magasins entre eux — réservée aux comptes ayant accès à plusieurs magasins (administrateur ou superviseur).</div>
-      </div>
-    );
-  }
+  }, []);
 
   const minAvailableDate = availability?.found && availability.oldestDate ? availability.oldestDate.slice(0, 10) : undefined;
   const maxAvailableDate = availability?.found && availability.newestDate ? availability.newestDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
@@ -367,11 +377,11 @@ export function OverstockReport() {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.articlesByShop.filter((a) => {
-      if (shopFilter && a.rposShopId !== shopFilter) return false;
+      if (shopFilters.size > 0 && !shopFilters.has(a.rposShopId)) return false;
       if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
       return true;
     });
-  }, [data, shopFilter, search]);
+  }, [data, shopFilters, search]);
 
   // Nombre de magasins distincts réellement représentés dans filteredByShop (demande explicite du
   // 21/10/2026 : "quand je vais le filtre sur un magasin je dois voir que les donner du magasin...
@@ -379,32 +389,33 @@ export function OverstockReport() {
   // (magasin + recherche), jamais les totaux bruts non filtrés renvoyés par l'API.
   const filteredShopCount = useMemo(() => new Set(filteredByShop.map((a) => a.rposShopId)).size, [filteredByShop]);
 
-  // Quand un magasin précis est filtré, chaque carte "article commun"/"persistant" ne doit montrer
-  // QUE la ligne de ce magasin, pas les autres magasins qui partagent aussi cet article (demande
-  // explicite du 21/10/2026 : "je dois voir que les donner du magasin") — restreint shops EN PLUS
-  // de filtrer quelles cartes apparaissent.
+  // Quand un ou plusieurs magasins précis sont filtrés, chaque carte "article commun"/"persistant"
+  // ne doit montrer QUE les lignes de ces magasins, pas les autres magasins qui partagent aussi cet
+  // article (demande explicite du 21/10/2026 : "je dois voir que les donner du magasin" — étendu à
+  // "un ou plusieurs magasins" avec la multi-sélection) — restreint shops EN PLUS de filtrer
+  // quelles cartes apparaissent.
   const filteredCommon = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.commonArticles
       .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
-      .map((a) => (shopFilter ? { ...a, shops: a.shops.filter((s) => s.rposShopId === shopFilter) } : a))
+      .map((a) => (shopFilters.size > 0 ? { ...a, shops: a.shops.filter((s) => shopFilters.has(s.rposShopId)) } : a))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilter, search]);
+  }, [data, shopFilters, search]);
 
   const filteredPersistent = useMemo(() => {
     if (!data?.persistentArticles) return [];
     const q = search.trim().toLowerCase();
     return data.persistentArticles
       .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
-      .map((a) => (shopFilter ? { ...a, shops: a.shops.filter((s) => s.rposShopId === shopFilter) } : a))
+      .map((a) => (shopFilters.size > 0 ? { ...a, shops: a.shops.filter((s) => shopFilters.has(s.rposShopId)) } : a))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilter, search]);
+  }, [data, shopFilters, search]);
 
   // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
   // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
   // résultat n'a que 2 pages.
-  useEffect(() => { setPage(1); }, [activeTab, shopFilter, search, data]);
+  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data]);
 
   const activeRows = activeTab === 'byShop' ? filteredByShop : activeTab === 'common' ? filteredCommon : filteredPersistent;
   const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
@@ -439,10 +450,11 @@ export function OverstockReport() {
   // appliquée dans les deux cas — seul le filtre magasin est en jeu ici). N'affiche la question que
   // si un filtre magasin est réellement actif ; sinon rien à choisir, export direct.
   function confirmShopScope(): 'filtered' | 'all' | null {
-    if (!shopFilter) return 'all';
-    const shopLabel = shopOptions.find(([id]) => id === shopFilter)?.[1] || 'ce magasin';
+    if (shopFilters.size === 0) return 'all';
+    const shopLabels = shopOptions.filter(([id]) => shopFilters.has(id)).map(([, label]) => label);
+    const shopsText = shopFilters.size === 1 ? shopLabels[0] : `${shopFilters.size} magasins sélectionnés`;
     const wantsAll = window.confirm(
-      `Un filtre magasin est actif (${shopLabel}).\n\nOK = exporter TOUS les magasins\nAnnuler = exporter seulement ${shopLabel}`
+      `Un filtre magasin est actif (${shopsText}).\n\nOK = exporter TOUS les magasins\nAnnuler = exporter seulement ${shopsText}`
     );
     return wantsAll ? 'all' : 'filtered';
   }
@@ -550,10 +562,13 @@ export function OverstockReport() {
         .osr-shop-dropdown-panel { position: absolute; top: calc(100% + 6px); left: 0; width: 280px; background: #fff; border: 1px solid rgba(27,42,74,.1); border-radius: 10px; box-shadow: 0 12px 32px rgba(27,42,74,.14); z-index: 20; overflow: hidden; }
         .osr-shop-dropdown-search { width: 100%; border: none; border-bottom: 1px solid rgba(27,42,74,.08); padding: 10px 14px; font-size: .82rem; color: #1B2A4A; outline: none; background: #F9FAFC; }
         .osr-shop-dropdown-list { max-height: 280px; overflow-y: auto; padding: 6px; }
-        .osr-shop-dropdown-item { padding: 8px 12px; border-radius: 7px; font-size: .82rem; color: #44516B; cursor: pointer; transition: background .12s, color .12s; }
+        .osr-shop-dropdown-item { padding: 8px 12px; border-radius: 7px; font-size: .82rem; color: #44516B; cursor: pointer; transition: background .12s, color .12s; display: flex; align-items: center; gap: 8px; }
         .osr-shop-dropdown-item:hover { background: #F6F8FB; color: #1B2A4A; }
         .osr-shop-dropdown-item.active { background: rgba(36,86,166,.1); color: #2456A6; font-weight: 600; }
+        .osr-shop-dropdown-item iconify-icon { font-size: 15px; flex-shrink: 0; }
         .osr-shop-dropdown-empty { padding: 14px; text-align: center; font-size: .78rem; color: #8591A0; }
+        .osr-shop-dropdown-clear { width: 100%; border: none; border-top: 1px solid rgba(27,42,74,.08); background: #F9FAFC; color: #B8302C; font-size: .78rem; font-weight: 600; padding: 9px 14px; cursor: pointer; text-align: center; }
+        .osr-shop-dropdown-clear:hover { background: #F6F8FB; }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -575,7 +590,7 @@ export function OverstockReport() {
           </div>
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Articles en surstock{shopFilter ? ' (ce magasin)' : ' (total)'}</span>
+              <span className="osr-kpi-label">Articles en surstock{shopFilters.size > 0 ? ' (sélection)' : ' (total)'}</span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
                 <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
               </span>
@@ -712,7 +727,7 @@ export function OverstockReport() {
       ) : data ? (
         <>
           <div className="osr-filter-bar">
-            <ShopDropdown value={shopFilter} options={shopOptions} onChange={setShopFilter} />
+            {!isSingleShop && <ShopDropdown value={shopFilters} options={shopOptions} onChange={setShopFilters} />}
             <input
               type="search"
               className="osr-input"
@@ -741,9 +756,11 @@ export function OverstockReport() {
           </div>
 
           <div className="osr-tabs">
-            <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>
-              Surstock commun à plusieurs magasins ({filteredCommon.length})
-            </button>
+            {!isSingleShop && (
+              <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>
+                Surstock commun à plusieurs magasins ({filteredCommon.length})
+              </button>
+            )}
             {data.periodMode && (
               <button type="button" className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`} onClick={() => setActiveTab('persistent')}>
                 Toujours en surstock ({filteredPersistent.length})

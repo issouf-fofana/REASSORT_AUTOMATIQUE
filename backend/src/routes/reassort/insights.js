@@ -3,7 +3,7 @@
 // requireSupervisedShop appliques la-bas, pas ici). Ne jamais monter ailleurs.
 const express = require('express');
 const router = express.Router();
-const { requireAdminOrSupervisor, getAccessibleShopIds, resolveShopId, resolvePosId } = require('../../middleware/auth');
+const { requireAdminOrSupervisor, getAccessibleShopIds, resolveShopId, resolvePosId, SINGLE_SHOP_ROLES } = require('../../middleware/auth');
 const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const {
@@ -320,18 +320,41 @@ router.get('/stockout-episodes', async (req, res) => {
   }
 });
 
-// GET /api/reassort/overstock-report?minWeeksOfCoverage=&start=&end= - page Surstock (demande
-// explicite du 21/10/2026 : "sortir pour les magasins chaque magasin les articles en surstock",
-// "identifier les articles que les magasins ont en commun en surstock", "sortir la casse de ces
-// articles sur les 3 dernières mois"). minWeeksOfCoverage réglable depuis la page (défaut 2
-// semaines, cf. overstockReportService.js — le seuil chatbot de 6 semaines a été jugé trop élevé).
-// start/end optionnels (demande explicite : "si moi meme je veux le surstok sur une periode
-// comment je peux faire le filtre") : sans eux, snapshot de la dernière proposition par magasin ;
-// avec eux, analyse sur la période choisie (ajoute aussi persistentArticles, "toujours en
-// surstock").
-router.get('/overstock-report', requireAdminOrSupervisor, async (req, res) => {
+// Périmètre magasins pour le rapport Surstock (demande explicite du 21/10/2026 : "qui a le magasin
+// doit avoir le droit de voir les article sur surstok" — jusque-là réservé aux comptes
+// ADMIN/SUPERVISOR, un compte mono-magasin (Rayonniste/Chef de rayon/Directeur) recevait un 403
+// alors qu'il devrait voir le surstock de SON PROPRE magasin, sans comparaison avec les autres).
+// ADMIN/SUPERVISOR : périmètre habituel (getAccessibleShopIds). Rôle mono-magasin : toujours
+// cantonné à req.user.rposShopId, jamais un ?shop= arbitraire (même cloisonnement que
+// resolveShopId ailleurs dans ce fichier).
+async function resolveOverstockShopFilter(req) {
+  if (SINGLE_SHOP_ROLES.has(req.user.role)) {
+    return req.user.rposShopId ? [req.user.rposShopId] : [];
+  }
+  return getAccessibleShopIds(req);
+}
+
+// GET /api/reassort/overstock-report?minWeeksOfCoverage=&start=&end=&shops=id1,id2 - page Surstock
+// (demande explicite du 21/10/2026 : "sortir pour les magasins chaque magasin les articles en
+// surstock", "identifier les articles que les magasins ont en commun en surstock", "sortir la
+// casse de ces articles sur les 3 dernières mois"). minWeeksOfCoverage réglable depuis la page
+// (défaut 2 semaines, cf. overstockReportService.js — le seuil chatbot de 6 semaines a été jugé
+// trop élevé). start/end optionnels (demande explicite : "si moi meme je veux le surstok sur une
+// periode comment je peux faire le filtre") : sans eux, snapshot de la dernière proposition par
+// magasin ; avec eux, analyse sur la période choisie (ajoute aussi persistentArticles, "toujours en
+// surstock"). shops optionnel (demande explicite : "donne la possiblité de prendre un ou plusieur
+// magasin") : restreint encore le périmètre déjà accessible au compte à une sélection précise de
+// magasins, jamais un moyen d'élargir l'accès au-delà de ce que le rôle autorise déjà.
+router.get('/overstock-report', async (req, res) => {
   try {
-    const shopIdFilter = await getAccessibleShopIds(req);
+    let shopIdFilter = await resolveOverstockShopFilter(req);
+    if (req.query.shops) {
+      const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
+      // Intersection avec le périmètre déjà autorisé, jamais une extension : un ADMIN (shopIdFilter
+      // === null, aucune restriction) peut choisir n'importe lequel des `requested` ; un
+      // SUPERVISOR/mono-magasin ne peut sélectionner que parmi ce qu'il a déjà le droit de voir.
+      shopIdFilter = shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+    }
     const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
     const { start, end } = req.query;
 
@@ -363,9 +386,9 @@ router.get('/overstock-report', requireAdminOrSupervisor, async (req, res) => {
 // si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre grisé") — pour que
 // le sélecteur de période de la page Surstock désactive les dates antérieures aux données réelles
 // plutôt que de laisser l'utilisateur choisir une fenêtre vide.
-router.get('/overstock-report/availability', requireAdminOrSupervisor, async (req, res) => {
+router.get('/overstock-report/availability', async (req, res) => {
   try {
-    const shopIdFilter = await getAccessibleShopIds(req);
+    const shopIdFilter = await resolveOverstockShopFilter(req);
     const result = await getOverstockDataAvailability(shopIdFilter);
     res.json({ success: true, data: result });
   } catch (error) {
