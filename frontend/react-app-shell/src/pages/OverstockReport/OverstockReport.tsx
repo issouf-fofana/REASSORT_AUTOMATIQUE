@@ -341,18 +341,25 @@ export function OverstockReport() {
     scrapQuantity90d: { min: '', max: '' },
   });
   const [rangeFiltersOpen, setRangeFiltersOpen] = useState(false);
+  // Interrupteur on/off "articles avec casse uniquement" (demande explicite du 21/10/2026 : "pour
+  // le filtre des casse ajout un bouton on/off pour ca") — distinct du min/max sur la quantité de
+  // casse ci-dessus (qui reste disponible pour affiner), ce bouton répond directement à "n'afficher
+  // que les articles qui ont eu de la casse", sans avoir à deviner une borne min=1.
+  const [scrapOnly, setScrapOnly] = useState(false);
 
   function setRangeFilter(key: string, side: 'min' | 'max', value: string) {
     setRangeFilters((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
   }
   function clearRangeFilters() {
     setRangeFilters((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, { min: '', max: '' }])) as typeof prev);
+    setScrapOnly(false);
   }
-  const activeRangeFilterCount = Object.values(rangeFilters).filter((r) => r.min !== '' || r.max !== '').length;
+  const activeRangeFilterCount = Object.values(rangeFilters).filter((r) => r.min !== '' || r.max !== '').length + (scrapOnly ? 1 : 0);
 
   // Teste une ligne (ShopArticleRow ou CommonShopEntry, mêmes noms de champs) contre toutes les
   // plages actives — une plage vide d'un côté (min ou max) ne borne pas ce côté.
   function matchesRangeFilters(row: { stock: number; avgDailySales: number; avgWeeklySales: number; avgMonthlySales: number; weeksOfCoverage: number | null; scrapQuantity90d: number }): boolean {
+    if (scrapOnly && !(row.scrapQuantity90d > 0)) return false;
     const checks: [number | null, { min: string; max: string }][] = [
       [row.stock, rangeFilters.stock],
       [row.avgDailySales, rangeFilters.avgDailySales],
@@ -366,22 +373,6 @@ export function OverstockReport() {
       if (range.max !== '' && (value === null || value > Number(range.max))) return false;
     }
     return true;
-  }
-
-  // Tri croissant/décroissant par colonne sur le tableau "Par magasin" (demande explicite du
-  // 21/10/2026 : "sur le tableau donne la possibilté de faire un fitre croissant et decroi") — un
-  // clic sur un en-tête trie par cette colonne, un second clic inverse le sens, un clic sur une
-  // autre colonne repart en décroissant (comportement standard d'un tri de tableau).
-  const [sortKey, setSortKey] = useState<keyof ShopArticleRow | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-
-  function toggleSort(key: keyof ShopArticleRow) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    } else {
-      setSortKey(key);
-      setSortDir('desc');
-    }
   }
 
   // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
@@ -443,7 +434,7 @@ export function OverstockReport() {
       if (!matchesRangeFilters(a)) return false;
       return true;
     });
-  }, [data, shopFilters, search, rangeFilters]);
+  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
 
   // Nombre de magasins distincts réellement représentés dans filteredByShop (demande explicite du
   // 21/10/2026 : "quand je vais le filtre sur un magasin je dois voir que les donner du magasin...
@@ -466,7 +457,7 @@ export function OverstockReport() {
         shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
       }))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search, rangeFilters]);
+  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
 
   const filteredPersistent = useMemo(() => {
     if (!data?.persistentArticles) return [];
@@ -478,33 +469,20 @@ export function OverstockReport() {
         shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
       }))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search, rangeFilters]);
+  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
 
   // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
   // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
   // résultat n'a que 2 pages.
-  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data, sortKey, sortDir]);
+  useEffect(() => { setPage(1); }, [activeTab, shopFilters, search, data]);
 
-  const sortedByShop = useMemo(() => {
-    if (!sortKey) return filteredByShop;
-    const sorted = [...filteredByShop].sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
-      if (av === null || av === undefined) return 1;
-      if (bv === null || bv === undefined) return -1;
-      if (typeof av === 'string' || typeof bv === 'string') {
-        return String(av).localeCompare(String(bv), 'fr-FR');
-      }
-      return (av as number) - (bv as number);
-    });
-    return sortDir === 'asc' ? sorted : sorted.reverse();
-  }, [filteredByShop, sortKey, sortDir]);
-
-  const activeRows = activeTab === 'byShop' ? sortedByShop : activeTab === 'common' ? filteredCommon : filteredPersistent;
+  // "Par magasin" utilise désormais sa propre grille ag-Grid (ByShopGrid, tri/filtre/pagination
+  // intégrés à la librairie) — la pagination "page"/PAGE_SIZE ci-dessus ne sert plus qu'aux deux
+  // onglets en cartes (commun/persistant), qui n'ont pas de tableau plat à une ligne par article.
+  const activeRows = activeTab === 'common' ? filteredCommon : filteredPersistent;
   const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedByShop = activeTab === 'byShop' ? sortedByShop.slice(pageStart, pageStart + PAGE_SIZE) : [];
   const pagedCommon = activeTab === 'common' ? filteredCommon.slice(pageStart, pageStart + PAGE_SIZE) : [];
   const pagedPersistent = activeTab === 'persistent' ? filteredPersistent.slice(pageStart, pageStart + PAGE_SIZE) : [];
 
@@ -900,6 +878,13 @@ export function OverstockReport() {
                   </div>
                 </div>
               ))}
+              <div className="osr-range-field">
+                <span className="osr-range-label">Casse</span>
+                <label className="osr-switch">
+                  <input type="checkbox" checked={scrapOnly} onChange={(e) => setScrapOnly(e.target.checked)} />
+                  <span className="small" style={{ color: '#44516B' }}>Avec casse uniquement</span>
+                </label>
+              </div>
               {activeRangeFilterCount > 0 && (
                 <button type="button" className="osr-range-clear" onClick={clearRangeFilters}>
                   <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres
@@ -950,72 +935,7 @@ export function OverstockReport() {
           )}
 
           {activeTab === 'byShop' && (
-            <>
-              <div className="osr-table-card">
-                <div className="table-responsive">
-                  <table className="table align-middle table-hover mb-0">
-                    <thead className="bg-light-subtle">
-                      <tr>
-                        <SortableTh label="Article" field="label" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <th>Magasin</th>
-                        <th>Rayon</th>
-                        <SortableTh label="Stock" field="stock" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <SortableTh label="Prix de vente" field="sellingPrice" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <SortableTh label="Vente/jour" field="avgDailySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <SortableTh label="Vente/semaine" field="avgWeeklySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <SortableTh label="Vente/mois" field="avgMonthlySales" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        <SortableTh label="Couverture" field="weeksOfCoverage" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                        {data.periodMode && <SortableTh label="% du temps en surstock" field="overstockRatio" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />}
-                        <SortableTh label="Casse (90j)" field="scrapQuantity90d" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedByShop.length === 0 ? (
-                        <tr><td colSpan={data.periodMode ? 11 : 10} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
-                      ) : (
-                        pagedByShop.map((a, i) => (
-                          <tr
-                            key={`${a.rposShopId}:${a.ean}:${i}`}
-                            role="button"
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => openScrapDetail(a.ean, a.label)}
-                          >
-                            <td>
-                              <div className="d-flex align-items-center gap-2">
-                                <span className="osr-row-avatar">{articleInitials(a.label)}</span>
-                                <div>
-                                  <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{a.label}</div>
-                                  <div className="text-muted" style={{ fontSize: '.72rem' }}>{a.ean}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td>{a.shopName} ({a.shopReference})</td>
-                            <td>{a.department || '—'}</td>
-                            <td>{a.stock}</td>
-                            <td>{fmtCfa(a.sellingPrice)}</td>
-                            <td>{a.avgDailySales}</td>
-                            <td>{a.avgWeeklySales}</td>
-                            <td>{a.avgMonthlySales}</td>
-                            <td><CoveragePill weeks={a.weeksOfCoverage} threshold={data.minWeeksOfCoverage} /></td>
-                            {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
-                            <td>
-                              {a.scrapQuantity90d > 0 ? (
-                                <span className="osr-scrap-badge" title={a.lastScrapDate ? `Dernière casse : ${new Date(a.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
-                                  −{a.scrapQuantity90d} ({a.scrapMoveCount90d})
-                                </span>
-                              ) : (
-                                <span className="text-muted small">Aucune</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredByShop.length} onChange={setPage} />
-            </>
+            <ByShopGrid rows={filteredByShop} periodMode={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />
           )}
         </>
       ) : null}
@@ -1023,25 +943,153 @@ export function OverstockReport() {
   );
 }
 
+// Tableau "Par magasin" sur ag-Grid (demande explicite du 21/10/2026 : "le tableau fais meme
+// model de tableau que pour les propostion de commande") — même thème partagé
+// (window.REASSORT_AG_GRID_THEME_SOFT) et même pattern que SalesHistory.tsx (grille simple,
+// colonnes sans cellule React, formatters DOM). Tri/filtre/pagination gérés nativement par
+// ag-Grid (filtre par colonne via l'icône d'entonnoir, tri par clic sur l'en-tête) — le panneau
+// "Filtres avancés" au-dessus continue de filtrer AVANT que les lignes n'arrivent dans la grille
+// (rowData), les deux systèmes de filtre se cumulent sans se gêner.
+function ByShopGrid({ rows, periodMode, threshold, onOpenDetail }: { rows: ShopArticleRow[]; periodMode: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
+  const gridDivRef = useRef<HTMLDivElement>(null);
+  const gridApiRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!gridDivRef.current || !window.agGrid || !window.REASSORT_AG_GRID_THEME_SOFT) return;
+
+    const numberFormatter = (p: any) => (p.value === null || p.value === undefined ? '—' : p.value.toLocaleString('fr-FR'));
+    const cfaFormatter = (p: any) => fmtCfa(p.value);
+
+    const columnDefs: any[] = [
+      {
+        field: 'label',
+        headerName: 'Article',
+        flex: 2,
+        minWidth: 220,
+        filter: 'agTextColumnFilter',
+        cellRenderer: (p: any) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'd-flex align-items-center gap-2';
+          const avatar = document.createElement('span');
+          avatar.className = 'osr-row-avatar';
+          avatar.textContent = articleInitials(p.data.label);
+          const textWrap = document.createElement('div');
+          const title = document.createElement('div');
+          title.className = 'fw-semibold';
+          title.style.fontSize = '.84rem';
+          title.style.color = '#1B2A4A';
+          title.textContent = p.data.label;
+          const ean = document.createElement('div');
+          ean.className = 'text-muted';
+          ean.style.fontSize = '.72rem';
+          ean.textContent = p.data.ean;
+          textWrap.appendChild(title);
+          textWrap.appendChild(ean);
+          wrap.appendChild(avatar);
+          wrap.appendChild(textWrap);
+          return wrap;
+        },
+      },
+      {
+        field: 'shopLabel',
+        headerName: 'Magasin',
+        filter: 'agTextColumnFilter',
+        minWidth: 180,
+        valueGetter: (p: any) => `${p.data.shopName} (${p.data.shopReference})`,
+      },
+      { field: 'department', headerName: 'Rayon', filter: 'agTextColumnFilter', minWidth: 140, valueFormatter: (p: any) => p.value || '—' },
+      { field: 'stock', headerName: 'Stock', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 110, valueFormatter: numberFormatter },
+      { field: 'sellingPrice', headerName: 'Prix de vente', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, valueFormatter: cfaFormatter },
+      { field: 'avgDailySales', headerName: 'Vente/jour', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 120, valueFormatter: numberFormatter },
+      { field: 'avgWeeklySales', headerName: 'Vente/semaine', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 130, valueFormatter: numberFormatter },
+      { field: 'avgMonthlySales', headerName: 'Vente/mois', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 120, valueFormatter: numberFormatter },
+      {
+        field: 'weeksOfCoverage',
+        headerName: 'Couverture',
+        type: 'numericColumn',
+        filter: 'agNumberColumnFilter',
+        width: 130,
+        cellRenderer: (p: any) => {
+          if (p.value === null || p.value === undefined) return '—';
+          const ratio = threshold > 0 ? p.value / threshold : 1;
+          const span = document.createElement('span');
+          span.className = `osr-pill ${ratio >= 4 ? 'osr-pill-danger' : ratio >= 2 ? 'osr-pill-warning' : 'osr-pill-neutral'}`;
+          span.textContent = `${p.value} sem.`;
+          return span;
+        },
+      },
+      ...(periodMode
+        ? [{ field: 'overstockRatio', headerName: '% du temps en surstock', type: 'numericColumn', filter: 'agNumberColumnFilter', width: 160, valueFormatter: (p: any) => fmtPct(p.value) }]
+        : []),
+      {
+        field: 'scrapQuantity90d',
+        headerName: 'Casse (90j)',
+        type: 'numericColumn',
+        filter: 'agNumberColumnFilter',
+        width: 130,
+        cellRenderer: (p: any) => {
+          const l = p.data as ShopArticleRow;
+          if (!(l.scrapQuantity90d > 0)) {
+            const span = document.createElement('span');
+            span.className = 'text-muted small';
+            span.textContent = 'Aucune';
+            return span;
+          }
+          const span = document.createElement('span');
+          span.className = 'osr-scrap-badge';
+          span.textContent = `−${l.scrapQuantity90d} (${l.scrapMoveCount90d})`;
+          if (l.lastScrapDate) span.title = `Dernière casse : ${new Date(l.lastScrapDate).toLocaleDateString('fr-FR')}`;
+          return span;
+        },
+      },
+    ];
+
+    const tableTheme = window.REASSORT_AG_GRID_THEME_SOFT.withParams({
+      rowHeight: 56,
+      headerHeight: 38,
+      headerFontSize: 11.5,
+      headerFontWeight: 700,
+      dataFontSize: 13,
+      cellHorizontalPadding: 10,
+      oddRowBackgroundColor: '#FAFAFA',
+      rowBorder: { color: '#D9DCE1' },
+    });
+
+    gridApiRef.current = window.agGrid.createGrid(gridDivRef.current, {
+      theme: tableTheme,
+      columnDefs,
+      localeText: window.AG_GRID_LOCALE_FR,
+      domLayout: 'autoHeight',
+      pagination: true,
+      paginationPageSize: 50,
+      paginationPageSizeSelector: [25, 50, 100, 200],
+      defaultColDef: { resizable: true, sortable: true },
+      rowData: rows,
+      getRowId: (p: any) => `${p.data.rposShopId}:${p.data.ean}`,
+      suppressCellFocus: true,
+      onRowClicked: (e: any) => onOpenDetail(e.data.ean, e.data.label),
+      rowStyle: { cursor: 'pointer' },
+    });
+
+    return () => {
+      if (gridApiRef.current) {
+        gridApiRef.current.destroy();
+        gridApiRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodMode, threshold]);
+
+  useEffect(() => {
+    if (gridApiRef.current) gridApiRef.current.setGridOption('rowData', rows);
+  }, [rows]);
+
+  return <div className="osr-table-card" style={{ padding: 4 }}><div ref={gridDivRef}></div></div>;
+}
+
 // Pagination (demande explicite du 21/10/2026) — numéros de page condensés (toujours la première,
 // la dernière, la page courante et ses voisines immédiates, "…" pour le reste) : afficher 40+ boutons
 // de page pour 2000 lignes serait aussi inutilisable que l'absence totale de pagination.
-// En-tête de colonne triable (demande explicite du 21/10/2026 : "sur le tableau donne la
-// possibilté de faire un fitre croissant et decroi") — un clic trie, un second clic inverse le
-// sens, une flèche indique la colonne et le sens actifs.
-function SortableTh({ label, field, sortKey, sortDir, onSort }: { label: string; field: keyof ShopArticleRow; sortKey: keyof ShopArticleRow | null; sortDir: 'asc' | 'desc'; onSort: (field: keyof ShopArticleRow) => void }) {
-  const active = sortKey === field;
-  return (
-    <th role="button" onClick={() => onSort(field)} className="osr-sortable-th">
-      {label}
-      <iconify-icon
-        icon={active ? (sortDir === 'asc' ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold') : 'solar:sort-vertical-linear'}
-        style={{ marginLeft: 5, fontSize: '12px', opacity: active ? 1 : .35, color: active ? '#2456A6' : undefined }}
-      ></iconify-icon>
-    </th>
-  );
-}
-
 function PaginationBar({ page, totalPages, totalItems, onChange }: { page: number; totalPages: number; totalItems: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null;
 
