@@ -23,6 +23,7 @@ import { Dashboard } from '../pages/Dashboard/Dashboard';
 import { Stockouts } from '../pages/Stockouts/Stockouts';
 import { StockoutEpisodePage } from '../pages/Stockouts/StockoutEpisodePage';
 import { OverstockReport } from '../pages/OverstockReport/OverstockReport';
+import { OverstockScrapDetail } from '../pages/OverstockReport/OverstockScrapDetail';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -78,6 +79,7 @@ export function AppRoutes() {
             /stockouts qui n'est pas non plus guardée alors que sa vue "Tous les magasins" a la même
             restriction — le vrai contrôle reste le 403 backend pour un compte RAYONNISTE/CHEF. */}
         <Route path="/overstock-report" element={<OverstockReport />} />
+        <Route path="/overstock-report/scrap/:ean" element={<OverstockScrapDetail />} />
         <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
         <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
         <Route path="/ai-assistant" element={<AiAssistantPage />} />

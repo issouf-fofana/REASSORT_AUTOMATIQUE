@@ -366,6 +366,23 @@ function attachScrap(shopEntries, scrapByKey, ean) {
   });
 }
 
+// Même principe qu'attachScrap, pour une liste PLATE d'articles (chacun porte son propre ean, pas
+// un article avec un sous-tableau shops) — demande explicite du 21/10/2026 : "je veux aussi fair en
+// sorte que les article qui son en sur-stok voir sil on des casse... aussi je peux avoir ca sur la
+// ligne des tableau" (onglet "Par magasin", qui jusque-là n'avait la casse que via les deux autres
+// onglets "commun"/"persistant").
+function attachScrapFlat(articles, scrapByKey) {
+  return articles.map((a) => {
+    const scrap = scrapByKey.get(`${a.rposShopId}:${a.ean}`) || { scrapQuantity: 0, scrapCount: 0, lastScrapDate: null };
+    return {
+      ...a,
+      scrapQuantity90d: scrap.scrapQuantity,
+      scrapMoveCount90d: scrap.scrapCount,
+      lastScrapDate: scrap.lastScrapDate ? scrap.lastScrapDate.toISOString() : null,
+    };
+  });
+}
+
 /**
  * Rapport complet prêt pour affichage/export (demande explicite du 21/10/2026) : combine
  * getOverstockByShop/getOverstockOverPeriod + groupCommonOverstock + la casse 3 mois des seuls
@@ -390,11 +407,13 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
   const persistent = periodMode ? groupPersistentOverstock(byShop.persistentArticles) : [];
 
   const allPairs = [
+    ...byShop.articles.map((a) => ({ rposShopId: a.rposShopId, ean: a.ean })),
     ...common.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
     ...persistent.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
   ];
   const scrapByKey = await getScrapSummaryForEans(allPairs);
 
+  const articlesByShopWithScrap = attachScrapFlat(byShop.articles, scrapByKey);
   const commonWithScrap = common.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
   const persistentWithScrap = persistent.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
 
@@ -408,7 +427,7 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     scrapLookbackDays: SCRAP_LOOKBACK_DAYS,
     shopCount: byShop.shopCount,
     articleCount: byShop.articleCount,
-    articlesByShop: byShop.articles,
+    articlesByShop: articlesByShopWithScrap,
     commonArticleCount: commonWithScrap.length,
     commonArticles: commonWithScrap,
     // "Articles communs à plusieurs magasins" ET "toujours en surstock" sont deux tris orthogonaux
@@ -462,6 +481,65 @@ async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
   };
 }
 
+/**
+ * Détail complet de la casse d'un article (demande explicite du 21/10/2026 : "quand je clique sur
+ * l'article je peux avoir... tout les casse les quantité, la date et autre") — contrairement à
+ * getScrapSummaryForEans (agrégat), renvoie CHAQUE mouvement de casse individuel sur la fenêtre
+ * demandée, pour un ou plusieurs magasins. Lecture locale directe de StockMove (alimentée par
+ * stockMoveSyncJob.js), jamais d'appel RPOS — même source que stockMoveAnalysisService.js mais en
+ * lot (plusieurs magasins à la fois) plutôt qu'un seul posId/shopId.
+ */
+async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SCRAP_LOOKBACK_DAYS } = {}) {
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true, reference: true, name: true },
+  });
+  if (!shops.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shopIds = shops.map((s) => s.rposShopId);
+  const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+  const moves = await prisma.stockMove.findMany({
+    where: { rposShopId: { in: shopIds }, ean, isScrap: true, date: { gte: since } },
+    select: { rposShopId: true, ean: true, label: true, date: true, quantity: true, previousQuantity: true, recording: true },
+    orderBy: { date: 'desc' },
+  });
+
+  const label = moves.find((m) => m.label)?.label || null;
+  const moveRows = moves.map((m) => ({
+    rposShopId: m.rposShopId,
+    shopReference: shopById.get(m.rposShopId)?.reference || null,
+    shopName: shopById.get(m.rposShopId)?.name || null,
+    date: m.date.toISOString(),
+    // quantity est négatif pour une sortie de stock (StockMove.quantity = delta signé) : affiché en
+    // positif ici, cohérent avec le reste de ce fichier (getScrapSummaryForEans).
+    quantity: Math.abs(m.quantity),
+    recording: m.recording || null,
+  }));
+
+  const totalQuantity = moveRows.reduce((s, m) => s + m.quantity, 0);
+  const byShop = new Map();
+  for (const m of moveRows) {
+    if (!byShop.has(m.rposShopId)) byShop.set(m.rposShopId, { rposShopId: m.rposShopId, shopReference: m.shopReference, shopName: m.shopName, totalQuantity: 0, moveCount: 0 });
+    const entry = byShop.get(m.rposShopId);
+    entry.totalQuantity += m.quantity;
+    entry.moveCount += 1;
+  }
+
+  return {
+    found: true,
+    ean,
+    label,
+    lookbackDays,
+    since: since.toISOString(),
+    totalQuantity,
+    totalMoveCount: moveRows.length,
+    byShop: [...byShop.values()].sort((a, b) => b.totalQuantity - a.totalQuantity),
+    moves: moveRows,
+  };
+}
+
 module.exports = {
   getOverstockByShop,
   getOverstockOverPeriod,
@@ -470,6 +548,7 @@ module.exports = {
   groupCommonOverstock,
   groupPersistentOverstock,
   getScrapSummaryForEans,
+  getScrapDetailForArticle,
   getOverstockReport,
   DEFAULT_MIN_WEEKS_OF_COVERAGE,
   SCRAP_LOOKBACK_DAYS,

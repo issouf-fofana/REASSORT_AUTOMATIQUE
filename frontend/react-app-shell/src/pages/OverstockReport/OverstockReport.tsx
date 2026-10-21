@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
 // Page Surstock (demande explicite du 21/10/2026) : "sortir pour les magasins chaque magasin les
@@ -36,6 +37,9 @@ type ShopArticleRow = {
   overstockRatio?: number;
   overstockCount?: number;
   proposalCount?: number;
+  scrapQuantity90d: number;
+  scrapMoveCount90d: number;
+  lastScrapDate: string | null;
 };
 
 type CommonShopEntry = {
@@ -295,6 +299,7 @@ function OverstockHero({ data, filteredCount }: { data: OverstockReportData; fil
 type TabKey = 'common' | 'byShop' | 'persistent';
 
 export function OverstockReport() {
+  const navigate = useNavigate();
   // Un compte mono-magasin (Rayonniste/Chef de rayon/Directeur) a maintenant le droit de voir le
   // surstock de SON PROPRE magasin (demande explicite du 21/10/2026 : "qui a le magasin doit avoir
   // le droit de voir les article sur surstok" — jusque-là la page lui était entièrement bloquée).
@@ -449,6 +454,10 @@ export function OverstockReport() {
   // actuellement filtré à l'écran, ou couvrir tous les magasins (recherche texte toujours
   // appliquée dans les deux cas — seul le filtre magasin est en jeu ici). N'affiche la question que
   // si un filtre magasin est réellement actif ; sinon rien à choisir, export direct.
+  function openScrapDetail(ean: string, label: string) {
+    navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report`);
+  }
+
   function confirmShopScope(): 'filtered' | 'all' | null {
     if (shopFilters.size === 0) return 'all';
     const shopLabels = shopOptions.filter(([id]) => shopFilters.has(id)).map(([, label]) => label);
@@ -465,8 +474,11 @@ export function OverstockReport() {
     const rows = scope === 'all' ? searchOnlyByShop : filteredByShop;
     downloadCsv(
       `surstock-par-magasin-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période'],
-      rows.map((a) => [a.shopName, a.shopReference, a.ean, a.label, a.department, a.stock, a.sellingPrice, a.avgDailySales, a.avgWeeklySales, a.avgMonthlySales, a.weeksOfCoverage, a.overstockRatio !== undefined ? fmtPct(a.overstockRatio) : ''])
+      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
+      rows.map((a) => [
+        a.shopName, a.shopReference, a.ean, a.label, a.department, a.stock, a.sellingPrice, a.avgDailySales, a.avgWeeklySales, a.avgMonthlySales, a.weeksOfCoverage, a.overstockRatio !== undefined ? fmtPct(a.overstockRatio) : '',
+        a.scrapQuantity90d, a.scrapMoveCount90d, a.lastScrapDate ? new Date(a.lastScrapDate).toLocaleDateString('fr-FR') : '',
+      ])
     );
   }
 
@@ -776,7 +788,7 @@ export function OverstockReport() {
               <div className="text-muted small py-4">Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil.</div>
             ) : (
               <>
-                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} threshold={data.minWeeksOfCoverage} />)}
+                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />)}
                 <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredCommon.length} onChange={setPage} />
               </>
             )
@@ -790,7 +802,7 @@ export function OverstockReport() {
                 <p className="text-muted small">
                   Articles en surstock dans au moins {fmtPct(data.alwaysOverstockThresholdRatio ?? 0.9)} des propositions générées sur la période, magasin par magasin.
                 </p>
-                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio threshold={data.minWeeksOfCoverage} />)}
+                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />)}
                 <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredPersistent.length} onChange={setPage} />
               </>
             )
@@ -813,14 +825,20 @@ export function OverstockReport() {
                         <th>Vente/mois</th>
                         <th>Couverture</th>
                         {data.periodMode && <th>% du temps en surstock</th>}
+                        <th>Casse (90j)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pagedByShop.length === 0 ? (
-                        <tr><td colSpan={data.periodMode ? 10 : 9} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
+                        <tr><td colSpan={data.periodMode ? 11 : 10} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
                       ) : (
                         pagedByShop.map((a, i) => (
-                          <tr key={`${a.rposShopId}:${a.ean}:${i}`}>
+                          <tr
+                            key={`${a.rposShopId}:${a.ean}:${i}`}
+                            role="button"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => openScrapDetail(a.ean, a.label)}
+                          >
                             <td>
                               <div className="d-flex align-items-center gap-2">
                                 <span className="osr-row-avatar">{articleInitials(a.label)}</span>
@@ -839,6 +857,15 @@ export function OverstockReport() {
                             <td>{a.avgMonthlySales}</td>
                             <td><CoveragePill weeks={a.weeksOfCoverage} threshold={data.minWeeksOfCoverage} /></td>
                             {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
+                            <td>
+                              {a.scrapQuantity90d > 0 ? (
+                                <span className="osr-scrap-badge" title={a.lastScrapDate ? `Dernière casse : ${new Date(a.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
+                                  −{a.scrapQuantity90d} ({a.scrapMoveCount90d})
+                                </span>
+                              ) : (
+                                <span className="text-muted small">Aucune</span>
+                              )}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -896,11 +923,17 @@ function PaginationBar({ page, totalPages, totalItems, onChange }: { page: numbe
   );
 }
 
-function CommonArticleCard({ a, showRatio, threshold }: { a: CommonArticle; showRatio: boolean; threshold: number }) {
+function CommonArticleCard({ a, showRatio, threshold, onOpenDetail }: { a: CommonArticle; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
   return (
     <div className="osr-common-card">
       <div className="osr-common-head">
-        <div className="d-flex align-items-center gap-2">
+        <div
+          className="d-flex align-items-center gap-2"
+          role="button"
+          style={{ cursor: 'pointer' }}
+          onClick={() => onOpenDetail(a.ean, a.label)}
+          title="Voir le détail de la casse"
+        >
           <span className="osr-row-avatar">{articleInitials(a.label)}</span>
           <div>
             <div className="fw-semibold" style={{ fontSize: '.86rem', color: '#1B2A4A' }}>{a.label}</div>

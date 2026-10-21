@@ -26,7 +26,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('../../jobs/overstockReportSnapshotJob');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
@@ -390,6 +390,26 @@ router.get('/overstock-report/availability', async (req, res) => {
   try {
     const shopIdFilter = await resolveOverstockShopFilter(req);
     const result = await getOverstockDataAvailability(shopIdFilter);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report/scrap-detail?ean=&lookbackDays= - page détail casse d'un
+// article en surstock (demande explicite du 21/10/2026 : "quand je clique sur l'article je peux
+// avoir ca... tout les casse les quantité, la date et autre") — chaque mouvement de casse
+// individuel sur la fenêtre demandée, pour le périmètre magasins accessible au compte (ADMIN/
+// SUPERVISOR : leur périmètre habituel ; compte mono-magasin : son seul magasin).
+router.get('/overstock-report/scrap-detail', async (req, res) => {
+  try {
+    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const { ean } = req.query;
+    if (!ean) {
+      return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
+    }
+    const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
+    const result = await getScrapDetailForArticle(shopIdFilter, String(ean), { lookbackDays });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
