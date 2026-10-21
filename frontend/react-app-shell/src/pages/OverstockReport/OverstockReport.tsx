@@ -230,10 +230,25 @@ function ShopDropdown({ value, options, onChange }: { value: Set<string>; option
 // nombre d'articles distincts en surstock jour par jour sur la période choisie (trendPoints,
 // overstockReportService.js) — n'existe qu'en mode période, pas sur un simple snapshot instantané,
 // donc affiche un repère "situation actuelle" à la place quand aucune période n'est active.
-function OverstockHero({ data, filteredCount }: { data: OverstockReportData; filteredCount: number }) {
+function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopArticleRow[] }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<any>(null);
   const points = data.trendPoints || [];
+  const filteredCount = rows.length;
+
+  // Répartition par sévérité (demande explicite du 21/10/2026 : "fait un joli style ic" — le
+  // bandeau en mode "situation actuelle" n'affichait qu'une phrase vide à la place du graphique,
+  // qui n'a de sens qu'en mode période). Mêmes seuils que CoveragePill (couverture ÷ seuil choisi :
+  // ≥4x = sévère, ≥2x = modéré, sinon léger) pour rester cohérent avec les pastilles déjà affichées
+  // dans le tableau en dessous.
+  const severity = { severe: 0, moderate: 0, light: 0 };
+  for (const r of rows) {
+    if (r.weeksOfCoverage === null) continue;
+    const ratio = data.minWeeksOfCoverage > 0 ? r.weeksOfCoverage / data.minWeeksOfCoverage : 1;
+    if (ratio >= 4) severity.severe += 1;
+    else if (ratio >= 2) severity.moderate += 1;
+    else severity.light += 1;
+  }
 
   useEffect(() => {
     if (!points.length || !chartRef.current || !window.ApexCharts) return;
@@ -263,12 +278,19 @@ function OverstockHero({ data, filteredCount }: { data: OverstockReportData; fil
   const previous = points[points.length - 2];
   const trendDiff = latest && previous ? latest.count - previous.count : null;
 
+  const totalSeverity = severity.severe + severity.moderate + severity.light;
+  const pct = (n: number) => (totalSeverity > 0 ? Math.round((n / totalSeverity) * 100) : 0);
+
   return (
     <div className="osr-hero mb-3">
+      <div className="osr-hero-decor" aria-hidden="true">
+        <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
+      </div>
       <div className="osr-hero-top">
         <div>
           <div className="osr-hero-label">{data.periodMode ? 'Articles en surstock aujourd\'hui' : 'Situation actuelle'}</div>
           <div className="osr-hero-value">
+            <iconify-icon icon="solar:box-minimalistic-bold-duotone" className="osr-hero-icon"></iconify-icon>
             {data.periodMode ? (latest ? latest.count.toLocaleString('fr-FR') : filteredCount.toLocaleString('fr-FR')) : filteredCount.toLocaleString('fr-FR')}
             {trendDiff !== null && (
               <span className={`osr-hero-trend ${trendDiff <= 0 ? 'down' : 'up'}`}>
@@ -288,8 +310,24 @@ function OverstockHero({ data, filteredCount }: { data: OverstockReportData; fil
       {data.periodMode && points.length > 1 ? (
         <div ref={chartRef}></div>
       ) : (
-        <div className="osr-hero-empty">
-          {data.periodMode ? 'Pas assez de points pour tracer une courbe sur cette période.' : 'Active "Analyser sur une période" pour voir la courbe d\'évolution dans le temps.'}
+        <div className="osr-hero-severity">
+          <div className="osr-hero-severity-bar">
+            {totalSeverity > 0 && (
+              <>
+                {severity.severe > 0 && <div style={{ width: `${pct(severity.severe)}%`, background: 'rgba(255,255,255,.95)' }}></div>}
+                {severity.moderate > 0 && <div style={{ width: `${pct(severity.moderate)}%`, background: 'rgba(255,255,255,.55)' }}></div>}
+                {severity.light > 0 && <div style={{ width: `${pct(severity.light)}%`, background: 'rgba(255,255,255,.22)' }}></div>}
+              </>
+            )}
+          </div>
+          <div className="osr-hero-severity-legend">
+            <span><i style={{ background: 'rgba(255,255,255,.95)' }}></i>Sévère (≥4x le seuil) — {severity.severe}</span>
+            <span><i style={{ background: 'rgba(255,255,255,.55)' }}></i>Modéré (≥2x) — {severity.moderate}</span>
+            <span><i style={{ background: 'rgba(255,255,255,.22)' }}></i>Léger — {severity.light}</span>
+          </div>
+          {data.periodMode && (
+            <div className="osr-hero-note">Pas assez de points pour tracer une courbe sur cette période.</div>
+          )}
         </div>
       )}
     </div>
@@ -608,16 +646,24 @@ export function OverstockReport() {
         .osr-page-btn:disabled { opacity: .4; cursor: not-allowed; }
         .osr-page-btn.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
         .osr-page-info { font-size: .76rem; color: #8591A0; margin: 0 6px; }
-        .osr-hero { background: linear-gradient(135deg, #1B2A4A 0%, #2456A6 100%); border-radius: 14px; padding: 22px 26px 10px; color: #fff; box-shadow: 0 10px 28px rgba(27,42,74,.22); }
-        .osr-hero-top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; }
+        .osr-hero { position: relative; overflow: hidden; background: linear-gradient(135deg, #1B2A4A 0%, #2456A6 100%); border-radius: 14px; padding: 22px 26px 20px; color: #fff; box-shadow: 0 10px 28px rgba(27,42,74,.22); }
+        .osr-hero-decor { position: absolute; top: -18px; right: -14px; font-size: 128px; opacity: .08; transform: rotate(-12deg); pointer-events: none; line-height: 1; }
+        .osr-hero-top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; position: relative; }
         .osr-hero-label { font-size: .8rem; opacity: .8; font-weight: 500; }
         .osr-hero-value { font-size: 2rem; font-weight: 700; display: flex; align-items: center; gap: 10px; line-height: 1.2; }
+        .osr-hero-icon { font-size: 1.6rem; opacity: .85; }
         .osr-hero-trend { font-size: .72rem; font-weight: 700; border-radius: 6px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 2px; }
         .osr-hero-trend.down { background: rgba(94,214,145,.22); color: #B6F2CF; }
         .osr-hero-trend.up { background: rgba(255,255,255,.18); color: #fff; }
         .osr-hero-sub { font-size: .76rem; opacity: .7; margin-top: 2px; }
         .osr-hero-period { background: rgba(255,255,255,.12); border-radius: 7px; padding: 6px 12px; font-size: .76rem; font-weight: 600; }
-        .osr-hero-empty { font-size: .8rem; opacity: .75; padding: 2rem 0; text-align: center; }
+        .osr-hero-severity { position: relative; margin-top: 14px; }
+        .osr-hero-severity-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,.1); }
+        .osr-hero-severity-bar > div { transition: width .3s; }
+        .osr-hero-severity-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: .76rem; opacity: .85; }
+        .osr-hero-severity-legend span { display: inline-flex; align-items: center; gap: 6px; }
+        .osr-hero-severity-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+        .osr-hero-note { font-size: .74rem; opacity: .6; margin-top: 10px; }
         .osr-kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: -34px 0 1.25rem; position: relative; z-index: 1; padding: 0 2px; }
         .osr-kpi-card { flex: 1 1 200px; background: #fff; border-radius: 12px; padding: 14px 18px; box-shadow: 0 4px 18px rgba(27,42,74,.08); border: 1px solid rgba(27,42,74,.05); }
         .osr-kpi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
@@ -656,7 +702,7 @@ export function OverstockReport() {
         <h4 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Surstock</h4>
       </div>
 
-      {data && data.found && <OverstockHero data={data} filteredCount={filteredByShop.length} />}
+      {data && data.found && <OverstockHero data={data} rows={filteredByShop} />}
 
       {data && data.found && (
         <div className="osr-kpi-row">
