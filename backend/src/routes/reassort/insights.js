@@ -378,20 +378,27 @@ router.get('/overstock-report', async (req, res) => {
     // Vue "3 derniers mois" (demande explicite du 21/10/2026 : devenue le mode de chargement PAR
     // DÉFAUT de la page Surstock — "il faut affiché la courbe apres une analyser qui fait par
     // defaut sur 3mois") : lit elle aussi un snapshot précalculé plutôt que de recalculer en
-    // direct, qui a atteint 56-72s en prod sur ~51 magasins × 90 jours (observé le 21/10/2026,
+    // direct, qui a atteint 56-97s en prod sur ~51 magasins × 90 jours (observé le 21/10/2026,
     // concurrence avec les jobs de synchro RPOS + volume de lignes à parcourir). Tolérance de
     // correspondance plutôt qu'une égalité stricte sur les dates ISO : le snapshot est calculé "il
     // y a jusqu'à 1h" (fréquence du job) par "maintenant" côté job, pas par le timestamp exact de
-    // CETTE requête — on accepte donc la vue par défaut du frontend (fenêtre ~90 jours se terminant
-    // dans les dernières 24h) comme "assez proche" pour servir le cache, avec repli sur le calcul en
-    // direct pour toute période réellement choisie par l'utilisateur (presets 7j/30j/6mois, dates
-    // personnalisées, etc.).
+    // CETTE requête.
+    //
+    // BUG CORRIGÉ le 21/10/2026 (observé en prod : 97s malgré ce correctif, le cache n'était jamais
+    // servi) : le frontend envoie end=periodEnd+'T23:59:59' (OverstockReport.tsx), donc `end` tombe
+    // systématiquement en FIN de journée — en avance de plusieurs heures sur "maintenant" selon
+    // l'heure du jour (ex: requête à 18h40, end=23:59:59 du même jour → en avance de 5h19). La
+    // première version de cette tolérance (`endAgeHours >= -1`) rejetait donc presque toujours la
+    // vue par défaut du frontend, qui retombait alors systématiquement sur le calcul en direct.
+    // Élargi à une journée entière d'avance (24h), largement suffisant pour couvrir ce décalage
+    // "fin de journée" sans risquer de confondre avec une vraie période future choisie par
+    // l'utilisateur (qui, elle, aurait un `start` tout aussi décalé — testé via spanDays ci-dessous).
     if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE)) {
       const startMs = new Date(start).getTime();
       const endMs = new Date(end).getTime();
       const spanDays = (endMs - startMs) / (24 * 60 * 60 * 1000);
       const endAgeHours = (Date.now() - endMs) / (60 * 60 * 1000);
-      const isDefault90dView = Math.abs(spanDays - OVERSTOCK_REPORT_PERIOD_90D_DAYS) <= 1 && endAgeHours >= -1 && endAgeHours <= 24;
+      const isDefault90dView = Math.abs(spanDays - OVERSTOCK_REPORT_PERIOD_90D_DAYS) <= 1 && endAgeHours >= -24 && endAgeHours <= 24;
       if (isDefault90dView) {
         const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY);
         if (cached) {
