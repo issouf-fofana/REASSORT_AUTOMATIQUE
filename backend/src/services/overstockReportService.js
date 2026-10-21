@@ -135,15 +135,27 @@ async function computeOverstockFromSales(shopIds, shopById, { minWeeksOfCoverage
   if (!articles.length) return articles;
 
   // Nom de l'article : SalesLine.label (dernière vente connue pour cet EAN dans ce magasin) —
-  // ProductCache ne stocke pas de libellé, uniquement l'EAN. Un seul aller-retour groupé plutôt
-  // qu'une requête par article.
-  const eansNeedingLabel = articles.map((a) => ({ rposShopId: a.rposShopId, ean: a.ean }));
-  const labelRows = await prisma.salesLine.findMany({
-    where: { OR: eansNeedingLabel.map((e) => ({ rposShopId: e.rposShopId, ean: e.ean })) },
-    select: { rposShopId: true, ean: true, label: true },
-    distinct: ['rposShopId', 'ean'],
-  });
-  const labelByKey = new Map(labelRows.filter((r) => r.label).map((r) => [`${r.rposShopId}:${r.ean}`, r.label]));
+  // ProductCache ne stocke pas de libellé, uniquement l'EAN. Filtré large (rposShopId IN + ean IN,
+  // comme la requête principale de cette fonction plus haut) puis réparti en mémoire par couple
+  // exact, plutôt qu'un OR avec une clause par article : un `OR` à N entrées génère N × 2 variables
+  // liées dans la requête SQL — avec plusieurs milliers d'articles sur 50+ magasins, ça dépassait la
+  // limite Postgres de variables liées par requête préparée (bug signalé le 21/10/2026 : "too many
+  // bind variables in prepared statement, expected maximum of 32767, received 76447"). Même limite
+  // atteinte par un simple `ean IN [...]` avec assez d'éléments (Prisma lie UN paramètre PAR élément
+  // du tableau pour Postgres, jamais un seul tableau groupé) — d'où le découpage en lots ci-dessous.
+  const overstockedEans = [...new Set(articles.map((a) => a.ean))];
+  const EAN_BATCH_SIZE = 5000;
+  const labelRows = [];
+  for (let i = 0; i < overstockedEans.length; i += EAN_BATCH_SIZE) {
+    const batch = overstockedEans.slice(i, i + EAN_BATCH_SIZE);
+    const rows = await prisma.salesLine.findMany({
+      where: { rposShopId: { in: shopIds }, ean: { in: batch }, label: { not: null } },
+      select: { rposShopId: true, ean: true, label: true },
+      distinct: ['rposShopId', 'ean'],
+    });
+    labelRows.push(...rows);
+  }
+  const labelByKey = new Map(labelRows.map((r) => [`${r.rposShopId}:${r.ean}`, r.label]));
   for (const a of articles) {
     a.label = labelByKey.get(`${a.rposShopId}:${a.ean}`) || a.ean;
   }
