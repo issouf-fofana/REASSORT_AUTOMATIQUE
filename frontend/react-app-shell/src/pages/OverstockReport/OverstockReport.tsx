@@ -216,24 +216,32 @@ export function OverstockReport() {
     });
   }, [data, shopFilter, search]);
 
+  // Nombre de magasins distincts réellement représentés dans filteredByShop (demande explicite du
+  // 21/10/2026 : "quand je vais le filtre sur un magasin je dois voir que les donner du magasin...
+  // Magasins concernés il doit affiché 1") — les KPI du haut de page doivent suivre le filtre actif
+  // (magasin + recherche), jamais les totaux bruts non filtrés renvoyés par l'API.
+  const filteredShopCount = useMemo(() => new Set(filteredByShop.map((a) => a.rposShopId)).size, [filteredByShop]);
+
+  // Quand un magasin précis est filtré, chaque carte "article commun"/"persistant" ne doit montrer
+  // QUE la ligne de ce magasin, pas les autres magasins qui partagent aussi cet article (demande
+  // explicite du 21/10/2026 : "je dois voir que les donner du magasin") — restreint shops EN PLUS
+  // de filtrer quelles cartes apparaissent.
   const filteredCommon = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
-    return data.commonArticles.filter((a) => {
-      if (shopFilter && !a.shops.some((s) => s.rposShopId === shopFilter)) return false;
-      if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
-      return true;
-    });
+    return data.commonArticles
+      .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
+      .map((a) => (shopFilter ? { ...a, shops: a.shops.filter((s) => s.rposShopId === shopFilter) } : a))
+      .filter((a) => a.shops.length > 0);
   }, [data, shopFilter, search]);
 
   const filteredPersistent = useMemo(() => {
     if (!data?.persistentArticles) return [];
     const q = search.trim().toLowerCase();
-    return data.persistentArticles.filter((a) => {
-      if (shopFilter && !a.shops.some((s) => s.rposShopId === shopFilter)) return false;
-      if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
-      return true;
-    });
+    return data.persistentArticles
+      .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
+      .map((a) => (shopFilter ? { ...a, shops: a.shops.filter((s) => s.rposShopId === shopFilter) } : a))
+      .filter((a) => a.shops.length > 0);
   }, [data, shopFilter, search]);
 
   // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
@@ -500,19 +508,19 @@ export function OverstockReport() {
           <div className="row g-3 mb-3">
             <div className="col-6 col-md-3">
               <div className="text-muted small">Magasins concernés</div>
-              <div className="fs-4 fw-semibold">{data.shopCount}</div>
+              <div className="fs-4 fw-semibold">{filteredShopCount}</div>
             </div>
             <div className="col-6 col-md-3">
-              <div className="text-muted small">Articles en surstock (total)</div>
-              <div className="fs-4 fw-semibold">{data.articleCount}</div>
+              <div className="text-muted small">Articles en surstock{shopFilter ? ' (ce magasin)' : ' (total)'}</div>
+              <div className="fs-4 fw-semibold">{filteredByShop.length}</div>
             </div>
             <div className="col-6 col-md-3">
               <div className="text-muted small">Communs à plusieurs magasins</div>
-              <div className="fs-4 fw-semibold">{data.commonArticleCount}</div>
+              <div className="fs-4 fw-semibold">{filteredCommon.length}</div>
             </div>
             <div className="col-6 col-md-3">
               <div className="text-muted small">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</div>
-              <div className="fs-4 fw-semibold">{data.periodMode ? (data.persistentArticleCount ?? 0) : `${data.scrapLookbackDays || 90} j`}</div>
+              <div className="fs-4 fw-semibold">{data.periodMode ? filteredPersistent.length : `${data.scrapLookbackDays || 90} j`}</div>
             </div>
           </div>
 
