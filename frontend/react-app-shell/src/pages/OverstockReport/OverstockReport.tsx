@@ -138,6 +138,15 @@ export function OverstockReport() {
   const [shopFilter, setShopFilter] = useState('');
   const [search, setSearch] = useState('');
 
+  // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
+  // il faut ajouter un systeme de pagination") — 2107+ lignes dans un seul tableau HTML sans
+  // virtualisation (contrairement à Proposition de commande, qui utilise ag-Grid) ralentissait le
+  // rendu et rendait la liste inutilisable. Un seul état de page par onglet : changer d'onglet ou de
+  // filtre revient toujours à la page 1 (cf. resets ci-dessous), jamais une page vide sur un onglet
+  // qui a moins de résultats que la page courante sur un autre.
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+
   // Page intrinsèquement multi-magasins (backend : requireAdminOrSupervisor) — un compte
   // Rayonniste/Chef de département (mono-magasin) n'y a pas accès. Message explicite plutôt que de
   // laisser le 403 backend remonter tel quel, même esprit que AdminGuard ("garde-fou cosmétique, la
@@ -227,15 +236,67 @@ export function OverstockReport() {
     });
   }, [data, shopFilter, search]);
 
+  // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
+  // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
+  // résultat n'a que 2 pages.
+  useEffect(() => { setPage(1); }, [activeTab, shopFilter, search, data]);
+
+  const activeRows = activeTab === 'byShop' ? filteredByShop : activeTab === 'common' ? filteredCommon : filteredPersistent;
+  const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pagedByShop = activeTab === 'byShop' ? filteredByShop.slice(pageStart, pageStart + PAGE_SIZE) : [];
+  const pagedCommon = activeTab === 'common' ? filteredCommon.slice(pageStart, pageStart + PAGE_SIZE) : [];
+  const pagedPersistent = activeTab === 'persistent' ? filteredPersistent.slice(pageStart, pageStart + PAGE_SIZE) : [];
+
+  // Versions "recherche seule, sans le filtre magasin" — utilisées quand l'utilisateur choisit
+  // "tous les magasins" dans la confirmation d'export ci-dessous, même si un magasin précis est
+  // sélectionné à l'écran (demande explicite du 21/10/2026 : "avant de le telecharger demande si il
+  // prend tout pour le mag ou le filtre appliqué").
+  const searchOnlyByShop = useMemo(() => {
+    if (!data) return [];
+    const q = search.trim().toLowerCase();
+    return data.articlesByShop.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
+  }, [data, search]);
+  const searchOnlyCommon = useMemo(() => {
+    if (!data) return [];
+    const q = search.trim().toLowerCase();
+    return data.commonArticles.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
+  }, [data, search]);
+  const searchOnlyPersistent = useMemo(() => {
+    if (!data?.persistentArticles) return [];
+    const q = search.trim().toLowerCase();
+    return data.persistentArticles.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
+  }, [data, search]);
+
+  // Avant chaque export, demande explicitement si l'export doit rester limité au magasin
+  // actuellement filtré à l'écran, ou couvrir tous les magasins (recherche texte toujours
+  // appliquée dans les deux cas — seul le filtre magasin est en jeu ici). N'affiche la question que
+  // si un filtre magasin est réellement actif ; sinon rien à choisir, export direct.
+  function confirmShopScope(): 'filtered' | 'all' | null {
+    if (!shopFilter) return 'all';
+    const shopLabel = shopOptions.find(([id]) => id === shopFilter)?.[1] || 'ce magasin';
+    const wantsAll = window.confirm(
+      `Un filtre magasin est actif (${shopLabel}).\n\nOK = exporter TOUS les magasins\nAnnuler = exporter seulement ${shopLabel}`
+    );
+    return wantsAll ? 'all' : 'filtered';
+  }
+
   function exportByShopCsv() {
+    const scope = confirmShopScope();
+    if (!scope) return;
+    const rows = scope === 'all' ? searchOnlyByShop : filteredByShop;
     downloadCsv(
       `surstock-par-magasin-${new Date().toISOString().slice(0, 10)}.csv`,
       ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période'],
-      filteredByShop.map((a) => [a.shopName, a.shopReference, a.ean, a.label, a.department, a.stock, a.sellingPrice, a.avgDailySales, a.avgWeeklySales, a.avgMonthlySales, a.weeksOfCoverage, a.overstockRatio !== undefined ? fmtPct(a.overstockRatio) : ''])
+      rows.map((a) => [a.shopName, a.shopReference, a.ean, a.label, a.department, a.stock, a.sellingPrice, a.avgDailySales, a.avgWeeklySales, a.avgMonthlySales, a.weeksOfCoverage, a.overstockRatio !== undefined ? fmtPct(a.overstockRatio) : ''])
     );
   }
 
-  function exportGroupedCsv(rows: CommonArticle[], filenamePrefix: string) {
+  function exportGroupedCsv(filteredRows: CommonArticle[], searchOnlyRows: CommonArticle[], filenamePrefix: string) {
+    const scope = confirmShopScope();
+    if (!scope) return;
+    const rows = scope === 'all' ? searchOnlyRows : filteredRows;
     const out: (string | number | null)[][] = [];
     for (const a of rows) {
       for (const s of a.shops) {
@@ -281,6 +342,14 @@ export function OverstockReport() {
         .osr-common-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
         .osr-scrap-badge { background: rgba(214,69,65,.08); color: #B8302C; border-radius: 5px; padding: 1px 7px; font-size: .72rem; font-weight: 700; }
         .osr-persist-badge { background: rgba(27,42,74,.06); color: #1B2A4A; border-radius: 5px; padding: 1px 7px; font-size: .72rem; font-weight: 700; }
+        .osr-period-banner { background: #F6F8FB; border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 9px 14px; font-size: .82rem; color: #44516B; }
+        .osr-period-banner strong { color: #1B2A4A; }
+        .osr-pagination { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 1.25rem 0; flex-wrap: wrap; }
+        .osr-page-btn { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .78rem; font-weight: 600; padding: 5px 11px; border-radius: 6px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .osr-page-btn:hover:not(:disabled) { background: #F6F8FB; color: #1B2A4A; border-color: rgba(27,42,74,.2); }
+        .osr-page-btn:disabled { opacity: .4; cursor: not-allowed; }
+        .osr-page-btn.active { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
+        .osr-page-info { font-size: .76rem; color: #8591A0; margin: 0 6px; }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -371,15 +440,20 @@ export function OverstockReport() {
           <button type="button" className="osr-run-btn" onClick={runAnalysis}>
             <iconify-icon icon="solar:play-bold"></iconify-icon> Lancer l'analyse
           </button>
-          {data && (
-            <span className="text-muted small">
-              {data.periodMode
-                ? `Analyse sur la période du ${new Date(data.periodStart!).toLocaleDateString('fr-FR')} au ${new Date(data.periodEnd!).toLocaleDateString('fr-FR')}`
-                : 'Analyse sur la situation actuelle (dernière proposition par magasin)'}
-            </span>
-          )}
         </div>
       </div>
+
+      {/* Bandeau "période analysée" (demande explicite du 21/10/2026 : "l'analyse deja fait c'est
+          sur quel periode il faut affiche ca aussi") — toujours visible au-dessus des résultats,
+          pas seulement dans le panneau paramètres qu'on peut avoir déjà fermé/oublié des yeux. */}
+      {data && data.found && (
+        <div className="osr-period-banner mb-3">
+          <iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon>{' '}
+          {data.periodMode
+            ? <>Analyse sur la période du <strong>{new Date(data.periodStart!).toLocaleDateString('fr-FR')}</strong> au <strong>{new Date(data.periodEnd!).toLocaleDateString('fr-FR')}</strong></>
+            : <>Analyse sur la <strong>situation actuelle</strong> (dernière proposition générée par magasin)</>}
+        </div>
+      )}
 
       {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
 
@@ -411,12 +485,12 @@ export function OverstockReport() {
                 </button>
               )}
               {activeTab === 'common' && (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredCommon, 'surstock-commun')}>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredCommon, searchOnlyCommon, 'surstock-commun')}>
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
                 </button>
               )}
               {activeTab === 'persistent' && (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredPersistent, 'surstock-toujours')}>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredPersistent, searchOnlyPersistent, 'surstock-toujours')}>
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
                 </button>
               )}
@@ -460,7 +534,10 @@ export function OverstockReport() {
             filteredCommon.length === 0 ? (
               <div className="text-muted small py-4">Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil.</div>
             ) : (
-              filteredCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} />)
+              <>
+                {pagedCommon.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio={!!data.periodMode} />)}
+                <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredCommon.length} onChange={setPage} />
+              </>
             )
           )}
 
@@ -472,55 +549,100 @@ export function OverstockReport() {
                 <p className="text-muted small">
                   Articles en surstock dans au moins {fmtPct(data.alwaysOverstockThresholdRatio ?? 0.9)} des propositions générées sur la période, magasin par magasin.
                 </p>
-                {filteredPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio />)}
+                {pagedPersistent.map((a) => <CommonArticleCard key={a.ean} a={a} showRatio />)}
+                <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredPersistent.length} onChange={setPage} />
               </>
             )
           )}
 
           {activeTab === 'byShop' && (
-            <div className="table-responsive">
-              <table className="table align-middle table-hover mb-0">
-                <thead className="bg-light-subtle">
-                  <tr>
-                    <th>Magasin</th>
-                    <th>EAN</th>
-                    <th>Article</th>
-                    <th>Rayon</th>
-                    <th>Stock</th>
-                    <th>Prix de vente</th>
-                    <th>Vente/jour</th>
-                    <th>Vente/semaine</th>
-                    <th>Vente/mois</th>
-                    <th>Couverture</th>
-                    {data.periodMode && <th>% du temps en surstock</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredByShop.length === 0 ? (
-                    <tr><td colSpan={data.periodMode ? 11 : 10} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
-                  ) : (
-                    filteredByShop.map((a, i) => (
-                      <tr key={`${a.rposShopId}:${a.ean}:${i}`}>
-                        <td>{a.shopName} ({a.shopReference})</td>
-                        <td>{a.ean}</td>
-                        <td>{a.label}</td>
-                        <td>{a.department || '—'}</td>
-                        <td>{a.stock}</td>
-                        <td>{fmtCfa(a.sellingPrice)}</td>
-                        <td>{a.avgDailySales}</td>
-                        <td>{a.avgWeeklySales}</td>
-                        <td>{a.avgMonthlySales}</td>
-                        <td>{a.weeksOfCoverage ?? '—'} sem.</td>
-                        {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="table-responsive">
+                <table className="table align-middle table-hover mb-0">
+                  <thead className="bg-light-subtle">
+                    <tr>
+                      <th>Magasin</th>
+                      <th>EAN</th>
+                      <th>Article</th>
+                      <th>Rayon</th>
+                      <th>Stock</th>
+                      <th>Prix de vente</th>
+                      <th>Vente/jour</th>
+                      <th>Vente/semaine</th>
+                      <th>Vente/mois</th>
+                      <th>Couverture</th>
+                      {data.periodMode && <th>% du temps en surstock</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedByShop.length === 0 ? (
+                      <tr><td colSpan={data.periodMode ? 11 : 10} className="text-center text-muted py-4">Aucun article en surstock pour ce seuil.</td></tr>
+                    ) : (
+                      pagedByShop.map((a, i) => (
+                        <tr key={`${a.rposShopId}:${a.ean}:${i}`}>
+                          <td>{a.shopName} ({a.shopReference})</td>
+                          <td>{a.ean}</td>
+                          <td>{a.label}</td>
+                          <td>{a.department || '—'}</td>
+                          <td>{a.stock}</td>
+                          <td>{fmtCfa(a.sellingPrice)}</td>
+                          <td>{a.avgDailySales}</td>
+                          <td>{a.avgWeeklySales}</td>
+                          <td>{a.avgMonthlySales}</td>
+                          <td>{a.weeksOfCoverage ?? '—'} sem.</td>
+                          {data.periodMode && <td>{fmtPct(a.overstockRatio)}</td>}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationBar page={currentPage} totalPages={totalPages} totalItems={filteredByShop.length} onChange={setPage} />
+            </>
           )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+// Pagination (demande explicite du 21/10/2026) — numéros de page condensés (toujours la première,
+// la dernière, la page courante et ses voisines immédiates, "…" pour le reste) : afficher 40+ boutons
+// de page pour 2000 lignes serait aussi inutilisable que l'absence totale de pagination.
+function PaginationBar({ page, totalPages, totalItems, onChange }: { page: number; totalPages: number; totalItems: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+
+  const pages: (number | '…')[] = [];
+  const add = (p: number) => { if (!pages.includes(p)) pages.push(p); };
+  add(1);
+  for (let p = page - 1; p <= page + 1; p++) if (p > 1 && p < totalPages) add(p);
+  add(totalPages);
+  const withGaps: (number | '…')[] = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (typeof p === 'number' && p - prev > 1) withGaps.push('…');
+    withGaps.push(p);
+    if (typeof p === 'number') prev = p;
+  }
+
+  return (
+    <div className="osr-pagination">
+      <button type="button" className="osr-page-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        <iconify-icon icon="solar:alt-arrow-left-linear"></iconify-icon>
+      </button>
+      {withGaps.map((p, i) =>
+        p === '…' ? (
+          <span key={`gap-${i}`} className="osr-page-info">…</span>
+        ) : (
+          <button key={p} type="button" className={`osr-page-btn${p === page ? ' active' : ''}`} onClick={() => onChange(p)}>
+            {p}
+          </button>
+        )
+      )}
+      <button type="button" className="osr-page-btn" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        <iconify-icon icon="solar:alt-arrow-right-linear"></iconify-icon>
+      </button>
+      <span className="osr-page-info">{totalItems.toLocaleString('fr-FR')} résultat(s)</span>
     </div>
   );
 }
