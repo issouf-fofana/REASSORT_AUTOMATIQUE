@@ -328,6 +328,46 @@ export function OverstockReport() {
   const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
+  // Filtres par plage de valeurs (demande explicite du 21/10/2026 : "ajoute tout ses filtre
+  // possible, dois pouvoir filtre par tout ca... Stock, Vente/jour, Vente/semaine, Vente/mois,
+  // Couverture, Casse") — chaque métrique a son min et son max, vide = pas de borne sur ce côté.
+  // Appliqués côté client sur les données déjà chargées, comme shopFilters/search ci-dessus.
+  const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>({
+    stock: { min: '', max: '' },
+    avgDailySales: { min: '', max: '' },
+    avgWeeklySales: { min: '', max: '' },
+    avgMonthlySales: { min: '', max: '' },
+    weeksOfCoverage: { min: '', max: '' },
+    scrapQuantity90d: { min: '', max: '' },
+  });
+  const [rangeFiltersOpen, setRangeFiltersOpen] = useState(false);
+
+  function setRangeFilter(key: string, side: 'min' | 'max', value: string) {
+    setRangeFilters((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
+  }
+  function clearRangeFilters() {
+    setRangeFilters((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, { min: '', max: '' }])) as typeof prev);
+  }
+  const activeRangeFilterCount = Object.values(rangeFilters).filter((r) => r.min !== '' || r.max !== '').length;
+
+  // Teste une ligne (ShopArticleRow ou CommonShopEntry, mêmes noms de champs) contre toutes les
+  // plages actives — une plage vide d'un côté (min ou max) ne borne pas ce côté.
+  function matchesRangeFilters(row: { stock: number; avgDailySales: number; avgWeeklySales: number; avgMonthlySales: number; weeksOfCoverage: number | null; scrapQuantity90d: number }): boolean {
+    const checks: [number | null, { min: string; max: string }][] = [
+      [row.stock, rangeFilters.stock],
+      [row.avgDailySales, rangeFilters.avgDailySales],
+      [row.avgWeeklySales, rangeFilters.avgWeeklySales],
+      [row.avgMonthlySales, rangeFilters.avgMonthlySales],
+      [row.weeksOfCoverage, rangeFilters.weeksOfCoverage],
+      [row.scrapQuantity90d, rangeFilters.scrapQuantity90d],
+    ];
+    for (const [value, range] of checks) {
+      if (range.min !== '' && (value === null || value < Number(range.min))) return false;
+      if (range.max !== '' && (value === null || value > Number(range.max))) return false;
+    }
+    return true;
+  }
+
   // Pagination (demande explicite du 21/10/2026 : "ici il me dis 2107 en surktok et il affuche 25...
   // il faut ajouter un systeme de pagination") — 2107+ lignes dans un seul tableau HTML sans
   // virtualisation (contrairement à Proposition de commande, qui utilise ag-Grid) ralentissait le
@@ -384,9 +424,10 @@ export function OverstockReport() {
     return data.articlesByShop.filter((a) => {
       if (shopFilters.size > 0 && !shopFilters.has(a.rposShopId)) return false;
       if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
+      if (!matchesRangeFilters(a)) return false;
       return true;
     });
-  }, [data, shopFilters, search]);
+  }, [data, shopFilters, search, rangeFilters]);
 
   // Nombre de magasins distincts réellement représentés dans filteredByShop (demande explicite du
   // 21/10/2026 : "quand je vais le filtre sur un magasin je dois voir que les donner du magasin...
@@ -404,18 +445,24 @@ export function OverstockReport() {
     const q = search.trim().toLowerCase();
     return data.commonArticles
       .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
-      .map((a) => (shopFilters.size > 0 ? { ...a, shops: a.shops.filter((s) => shopFilters.has(s.rposShopId)) } : a))
+      .map((a) => ({
+        ...a,
+        shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
+      }))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search]);
+  }, [data, shopFilters, search, rangeFilters]);
 
   const filteredPersistent = useMemo(() => {
     if (!data?.persistentArticles) return [];
     const q = search.trim().toLowerCase();
     return data.persistentArticles
       .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
-      .map((a) => (shopFilters.size > 0 ? { ...a, shops: a.shops.filter((s) => shopFilters.has(s.rposShopId)) } : a))
+      .map((a) => ({
+        ...a,
+        shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
+      }))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search]);
+  }, [data, shopFilters, search, rangeFilters]);
 
   // Revient à la page 1 dès que la liste affichée change de taille/contenu (changement d'onglet, de
   // filtre magasin, de recherche, ou nouvelle analyse) — évite une page 3 vide quand le nouveau
@@ -524,6 +571,14 @@ export function OverstockReport() {
         .osr-run-btn:hover { background: #142037; }
         .osr-availability { font-size: .74rem; color: #8591A0; }
         .osr-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; }
+        .osr-adv-filter-btn { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+        .osr-adv-filter-btn:hover { background: #F6F8FB; color: #1B2A4A; }
+        .osr-adv-filter-btn.active { background: rgba(36,86,166,.1); color: #2456A6; border-color: rgba(36,86,166,.3); }
+        .osr-range-panel { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 14px 18px; display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
+        .osr-range-field { display: flex; flex-direction: column; gap: 5px; }
+        .osr-range-label { font-size: .74rem; font-weight: 600; color: #5B6B85; }
+        .osr-range-clear { border: none; background: none; color: #B8302C; font-size: .78rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 6px 0; margin-left: auto; }
+        .osr-range-clear:hover { text-decoration: underline; }
         .osr-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(27,42,74,.08); margin-bottom: 1rem; flex-wrap: wrap; }
         .osr-tab { border: none; background: none; padding: 10px 16px; font-size: .86rem; font-weight: 600; color: #8591A0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
         .osr-tab.active { color: #1B2A4A; border-bottom-color: #1B2A4A; }
@@ -748,6 +803,15 @@ export function OverstockReport() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            <button
+              type="button"
+              className={`osr-adv-filter-btn${activeRangeFilterCount > 0 ? ' active' : ''}`}
+              onClick={() => setRangeFiltersOpen((v) => !v)}
+            >
+              <iconify-icon icon="solar:tuning-2-bold-duotone"></iconify-icon>
+              Filtres avancés{activeRangeFilterCount > 0 ? ` (${activeRangeFilterCount})` : ''}
+              <iconify-icon icon={rangeFiltersOpen ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ fontSize: '12px', opacity: .6 }}></iconify-icon>
+            </button>
             <div className="ms-auto">
               {activeTab === 'byShop' && (
                 <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportByShopCsv}>
@@ -766,6 +830,47 @@ export function OverstockReport() {
               )}
             </div>
           </div>
+
+          {rangeFiltersOpen && (
+            <div className="osr-range-panel mb-3">
+              {[
+                { key: 'stock', label: 'Stock' },
+                { key: 'avgDailySales', label: 'Vente/jour' },
+                { key: 'avgWeeklySales', label: 'Vente/semaine' },
+                { key: 'avgMonthlySales', label: 'Vente/mois' },
+                { key: 'weeksOfCoverage', label: 'Couverture (semaines)' },
+                { key: 'scrapQuantity90d', label: 'Casse (90j)' },
+              ].map(({ key, label }) => (
+                <div key={key} className="osr-range-field">
+                  <span className="osr-range-label">{label}</span>
+                  <div className="d-flex align-items-center gap-1">
+                    <input
+                      type="number"
+                      className="osr-input"
+                      style={{ width: 80 }}
+                      placeholder="Min"
+                      value={rangeFilters[key].min}
+                      onChange={(e) => setRangeFilter(key, 'min', e.target.value)}
+                    />
+                    <span className="text-muted small">—</span>
+                    <input
+                      type="number"
+                      className="osr-input"
+                      style={{ width: 80 }}
+                      placeholder="Max"
+                      value={rangeFilters[key].max}
+                      onChange={(e) => setRangeFilter(key, 'max', e.target.value)}
+                    />
+                  </div>
+                </div>
+              ))}
+              {activeRangeFilterCount > 0 && (
+                <button type="button" className="osr-range-clear" onClick={clearRangeFilters}>
+                  <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="osr-tabs">
             {!isSingleShop && (
