@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Wand2,
   PackageX,
+  PackageSearch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -55,6 +56,10 @@ export const NAV_GROUPS: NavGroup[] = [
     entries: [
       { id: 'dashboard', label: 'Tableau de bord', href: '/', icon: LayoutDashboard },
       { id: 'stockouts', label: 'Ruptures de stock', href: '/stockouts', icon: PackageX },
+      // Pas adminOnly : le backend autorise ADMIN ET SUPERVISOR (requireAdminOrSupervisor,
+      // overstockReportService.js) — adminOnly masquerait la page aux SUPERVISOR alors qu'ils y ont
+      // accès, même raisonnement que la vue "Tous les magasins" de 'stockouts' ci-dessus.
+      { id: 'overstock-report', label: 'Surstock', href: '/overstock-report', icon: PackageSearch },
       { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-guide', label: 'Mon accès', href: '/ai-guide', icon: Info },
       { id: 'project-guide', label: 'Guide du projet', href: '/project-guide', icon: BookOpen },

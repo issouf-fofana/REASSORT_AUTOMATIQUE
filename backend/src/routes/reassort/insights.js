@@ -26,6 +26,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
+const { getOverstockReport } = require('../../services/overstockReportService');
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
 // son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
@@ -312,6 +313,22 @@ router.get('/stockout-episodes', async (req, res) => {
     }
     const { start, end } = req.query;
     const result = await getDashboardSummary(shopId, { start, end });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report?minWeeksOfCoverage= - page Surstock (demande explicite du
+// 21/10/2026 : "sortir pour les magasins chaque magasin les articles en surstock", "identifier les
+// articles que les magasins ont en commun en surstock", "sortir la casse de ces articles sur les 3
+// dernières mois"). minWeeksOfCoverage réglable depuis la page (défaut 2 semaines, cf.
+// overstockReportService.js — le seuil chatbot de 6 semaines a été jugé trop élevé le 21/10/2026).
+router.get('/overstock-report', requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const shopIdFilter = await getAccessibleShopIds(req);
+    const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
+    const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
