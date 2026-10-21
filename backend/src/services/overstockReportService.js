@@ -335,6 +335,24 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     };
   }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
 
+  // Magasins accessibles SANS AUCUNE proposition sur la période (génération désactivée, confirmé
+  // par l'utilisateur le 21/10/2026) : une analyse "toujours en surstock" n'a pas de sens pour eux
+  // (pas de propositions successives à comparer), mais ils ont quand même du stock/des ventes
+  // connus — mieux vaut les montrer sur "Par magasin"/"Surstock commun" avec une photo du moment
+  // (comme la vue "situation actuelle") que de les faire disparaître entièrement du mode période
+  // (confirmé explicitement : "Oui, les inclure quand même"). overstockRatio/overstockCount restent
+  // undefined pour ces lignes — le frontend sait déjà traiter overstockRatio optionnel (fmtPct
+  // affiche '—' si absent), jamais une persistance inventée à partir d'une seule photo.
+  const shopIdsWithProposalInPeriod = new Set(proposals.map((p) => p.rposShopId));
+  const shopIdsWithoutProposalInPeriod = shopIds.filter((id) => !shopIdsWithProposalInPeriod.has(id));
+  const salesFallbackArticles = await computeOverstockFromSales(shopIdsWithoutProposalInPeriod, shopById, { minWeeksOfCoverage });
+
+  const allArticles = [...articles, ...salesFallbackArticles].sort((a, b) => {
+    const ar = a.overstockRatio ?? -1;
+    const br = b.overstockRatio ?? -1;
+    return br - ar || (b.weeksOfCoverage ?? 0) - (a.weeksOfCoverage ?? 0);
+  });
+
   const persistentArticles = articles
     .filter((a) => a.overstockRatio >= ALWAYS_OVERSTOCK_THRESHOLD_RATIO)
     .sort((a, b) => b.overstockRatio - a.overstockRatio);
@@ -345,9 +363,9 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     alwaysOverstockThresholdRatio: ALWAYS_OVERSTOCK_THRESHOLD_RATIO,
     periodStart: start,
     periodEnd: end,
-    shopCount: new Set(articles.map((a) => a.rposShopId)).size,
-    articleCount: articles.length,
-    articles,
+    shopCount: new Set(allArticles.map((a) => a.rposShopId)).size,
+    articleCount: allArticles.length,
+    articles: allArticles,
     persistentArticleCount: persistentArticles.length,
     persistentArticles,
     trendPoints,
