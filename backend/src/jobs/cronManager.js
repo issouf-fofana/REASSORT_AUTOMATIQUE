@@ -8,6 +8,7 @@ const { runProductEndOfLifeSync } = require('./productEndOfLifeSyncJob');
 const { runStockMoveSync } = require('./stockMoveSyncJob');
 const { runStockSnapshotJob } = require('./stockSnapshotJob');
 const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
+const { runStockoutDailyLossSnapshotJob } = require('./stockoutDailyLossSnapshotJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutCatchUpResolveJob } = require('./stockoutCatchUpResolveJob');
 const { runStockoutProductCacheRefreshJob } = require('./stockoutProductCacheRefreshJob');
@@ -34,6 +35,7 @@ let currentProductEolSyncTask = null;
 let currentStockMoveSyncTask = null;
 let currentStockSnapshotTask = null;
 let currentStockoutLossRecalcTask = null;
+let currentStockoutDailyLossSnapshotTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutCatchUpResolveTask = null;
 let currentStockoutProductCacheRefreshTask = null;
@@ -61,6 +63,7 @@ const productEolSyncLock = createJobLock('Synchronisation des DLV actives');
 const stockMoveSyncLock = createJobLock('Synchronisation des mouvements de stock');
 const stockSnapshotLock = createJobLock('Capture des snapshots de stock (ruptures)');
 const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
+const stockoutDailyLossSnapshotLock = createJobLock('Précalcul journalier du CA perdu par rayon');
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutCatchUpResolveLock = createJobLock('Rattrapage de résolution des ruptures (arrivage déjà en base)');
 const stockoutProductCacheRefreshLock = createJobLock('Resynchronisation du stock RPOS des ruptures en cours');
@@ -315,6 +318,44 @@ async function startOrRestartStockoutLossRecalcJob() {
   });
 
   console.log(`⏰ Recalcul de la perte des ruptures planifié: ${cronSchedule}`);
+}
+
+/** (Re)programme le précalcul journalier du CA perdu par rayon (stockoutDailyLossSnapshotJob.js). */
+async function startOrRestartStockoutDailyLossSnapshotJob() {
+  if (currentStockoutDailyLossSnapshotTask) {
+    currentStockoutDailyLossSnapshotTask.stop();
+    currentStockoutDailyLossSnapshotTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.STOCKOUT_DAILY_LOSS_SNAPSHOT_ENABLED))) {
+    console.log('⏸️  Précalcul journalier du CA perdu par rayon désactivé (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), précalcul journalier du CA perdu par rayon non planifié`);
+    return;
+  }
+
+  currentStockoutDailyLossSnapshotTask = cron.schedule(cronSchedule, () => {
+    stockoutDailyLossSnapshotLock(async () => {
+      console.log('[cron] Démarrage du précalcul journalier du CA perdu par rayon...');
+      await trackJobRun('stockoutDailyLossSnapshot', runStockoutDailyLossSnapshotJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  // Rattrapage immédiat au démarrage (même principe qu'overstockReportSnapshotJob, demande
+  // explicite du 21/10/2026 : "le chargement auto avec calcul deja prefait en base") — sans ça, le
+  // premier backfill de 95 jours n'aurait lieu qu'au prochain créneau cron, potentiellement dans
+  // plusieurs heures après un déploiement.
+  stockoutDailyLossSnapshotLock(async () => {
+    console.log('[cron] Précalcul initial du CA perdu par rayon (rattrapage au démarrage)...');
+    await trackJobRun('stockoutDailyLossSnapshot', runStockoutDailyLossSnapshotJob);
+  }).catch((err) => console.error('[cron] Erreur (précalcul initial CA perdu par rayon):', err));
+
+  console.log(`⏰ Précalcul journalier du CA perdu par rayon planifié: ${cronSchedule}`);
 }
 
 /** (Re)programme la résolution périodique du secteur/rayon des épisodes EN_COURS encore à null (stockoutSectorBackfillJob.js). */
@@ -779,6 +820,7 @@ module.exports = {
   startOrRestartStockMoveSyncJob,
   startOrRestartStockSnapshotJob,
   startOrRestartStockoutLossRecalcJob,
+  startOrRestartStockoutDailyLossSnapshotJob,
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutCatchUpResolveJob,
   startOrRestartStockoutProductCacheRefreshJob,

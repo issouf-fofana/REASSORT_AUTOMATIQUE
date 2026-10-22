@@ -85,10 +85,15 @@ function sleep(ms) {
 // (pos16), à fort volume (4975 mouvements de stock sur ~24h mesurés le 15/10/2026), met
 // systématiquement ~8s à répondre sur /api/stock_move/ même sans aucun problème réseau (confirmé
 // par test direct avec un timeout élargi à 30s : réponse HTTP 200 en 7.9s). Avec 6s, ce magasin
-// échouait à CHAQUE synchro de stockMoveSyncJob.js, pris à tort pour une coupure réseau. 10s reste
-// un compromis : toujours 1.5× plus rapide que les 15s d'origine en cas de vraie coupure réseau,
-// tout en couvrant les requêtes légitimement lentes sur un gros volume.
-const RPOS_REQUEST_TIMEOUT_MS = 10000;
+// échouait à CHAQUE synchro de stockMoveSyncJob.js, pris à tort pour une coupure réseau.
+//
+// Remonté à 20s le 22/10/2026 (demande explicite, confirmée après avoir prévenu de l'impact
+// global : "fait a 20s ou 30s") — même symptôme que ci-dessus mais sur /api/product/ : la
+// génération de proposition d'un magasin à fort catalogue (3226 articles) échouait
+// systématiquement à cette étape précise avec 10s, deux essais consécutifs confirmant que ce
+// n'était pas une coupure réseau ponctuelle. 20s reste un compromis : toujours plus rapide que les
+// 15s/30s testés historiquement en cas de vraie coupure, tout en couvrant les plus gros volumes.
+const RPOS_REQUEST_TIMEOUT_MS = 20000;
 
 /**
  * RPOS retourne parfois des 502/503 transitoires sous charge, sans lien avec la validité de la

@@ -199,6 +199,18 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   }
   const activeRangeFilterCount = Object.values(rangeFilters).filter((r) => r.min !== '' || r.max !== '').length;
   const activeExtraFilterCount = activeRangeFilterCount + (causeFilter ? 1 : 0) + (reactionFilter ? 1 : 0) + (deliveryFilter ? 1 : 0) + (articleSearch.trim() ? 1 : 0);
+  // Tri croissant/décroissant du tableau "Détail par article" (demande explicite du 21/10/2026 :
+  // "sur tout les tableau il faut ajouter la possibilité de filtrer par croissant ou decroissant").
+  const [articleSortField, setArticleSortField] = useState<'label' | 'startedAt' | 'duration' | 'sellingPrice' | 'qtyPerdueEstimee' | 'caPerdueEstime' | null>(null);
+  const [articleSortDir, setArticleSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleArticleSort(field: typeof articleSortField) {
+    if (articleSortField === field) setArticleSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setArticleSortField(field); setArticleSortDir('desc'); }
+  }
+  function articleSortIcon(field: typeof articleSortField) {
+    if (articleSortField !== field) return null;
+    return <iconify-icon icon={articleSortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
+  }
   // Rafraîchit la colonne Durée affichée en live (demande explicite du 17/10/2026 : "le user doit
   // voir compté") — toutes les minutes plutôt que chaque seconde comme sur la fiche détail : des
   // centaines de lignes potentielles ici, un tick seconde serait un gaspillage de rendu sans valeur
@@ -304,6 +316,26 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     }
     return true;
   });
+  const sortedArticlesInDepartment = (() => {
+    if (!articleSortField) return articlesInDepartment;
+    const dir = articleSortDir === 'desc' ? 1 : -1;
+    const getValue = (e: typeof articlesInDepartment[number]): number | string => {
+      switch (articleSortField) {
+        case 'label': return (e.label || e.ean).toLowerCase();
+        case 'startedAt': return new Date(e.startedAt).getTime();
+        case 'duration': return liveDurationHours(e.startedAt);
+        case 'sellingPrice': return e.sellingPrice ?? -Infinity;
+        case 'qtyPerdueEstimee': return e.qtyPerdueEstimee ?? -Infinity;
+        case 'caPerdueEstime': return e.caPerdueEstime ?? -Infinity;
+      }
+    };
+    return [...articlesInDepartment].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * (bv - av);
+    });
+  })();
   const withOrderCount = articlesInDepartmentAll.filter((e) => e.hasOrder).length;
   const withoutOrderCount = articlesInDepartmentAll.length - withOrderCount;
   const deliveredCount = articlesInDepartmentAll.filter((e) => e.deliveryStatus === 'LIVREE').length;
@@ -671,27 +703,27 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <table className="table align-middle mb-0 table-hover table-centered">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Article</th>
-                      <th>Depuis</th>
-                      <th>Durée</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('label')}>Article{articleSortIcon('label')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('startedAt')}>Depuis{articleSortIcon('startedAt')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('duration')}>Durée{articleSortIcon('duration')}</th>
                       <th>Réaction</th>
                       <th>Livraison</th>
                       <th>Reçue (estimée) le</th>
-                      <th>Prix</th>
-                      <th>Qté perdue</th>
-                      <th>Valorisation (CA perdu)</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('sellingPrice')}>Prix{articleSortIcon('sellingPrice')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('qtyPerdueEstimee')}>Qté perdue{articleSortIcon('qtyPerdueEstimee')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('caPerdueEstime')}>Valorisation (CA perdu){articleSortIcon('caPerdueEstime')}</th>
                       <th>Cause probable</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {articlesInDepartment.length === 0 ? (
+                    {sortedArticlesInDepartment.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="text-center text-muted py-4">
                           {articlesInDepartmentAll.length === 0 ? 'Aucune rupture en cours pour ce rayon.' : 'Aucun article ne correspond à ce filtre.'}
                         </td>
                       </tr>
                     ) : (
-                      articlesInDepartment.map((e) => {
+                      sortedArticlesInDepartment.map((e) => {
                         // Repli "Calcul en cours" (demande du 20/10/2026, statut désormais
                         // précalculé en base par stockoutStatusRecalcJob.js) — un épisode tout juste
                         // détecté peut, en théorie, être lu avant le premier passage du job (fenêtre

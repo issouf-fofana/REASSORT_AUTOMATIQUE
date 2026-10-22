@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { FormulaInfoButton } from './StockoutEpisodePage';
 
@@ -45,6 +45,8 @@ const LEVEL_META: Record<AnalysisResult['level'], { label: string; color: string
 // explicite du 18/10/2026 : "le filtre doit etre pour tout a emme temps tu vois ne donne pas un
 // filtre par detaut qui n'est pas modifialbe") — plus de sélecteur propre à ce composant, qui
 // dupliquait un second système de dates distinct de celui du graphe de tendance.
+type DeptSortKey = 'department' | 'caPerdue' | 'qtyPerdue' | 'episodeCount';
+
 export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
   const [summary, setSummary] = useState<PeriodSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -52,6 +54,10 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  // Tri croissant/décroissant (demande explicite du 21/10/2026 : "sur tout les tableau il faut
+  // ajouter la possibilité de filtrer par croissant ou decroissant") — ce tableau n'avait aucun tri.
+  const [deptSortKey, setDeptSortKey] = useState<DeptSortKey>('caPerdue');
+  const [deptSortDir, setDeptSortDir] = useState<'asc' | 'desc'>('desc');
 
   async function loadSummary(start: string, end: string) {
     if (!shopQueryParam) return;
@@ -105,6 +111,25 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
   }
 
   const ratioTone = summary?.lossRatioPct === null ? 'muted' : summary && summary.lossRatioPct! >= 5 ? 'danger' : summary && summary.lossRatioPct! >= 2 ? 'warning' : 'success';
+
+  const sortedDepartmentBreakdown = useMemo(() => {
+    const list = summary?.departmentBreakdown || [];
+    const dir = deptSortDir === 'desc' ? 1 : -1;
+    return [...list].sort((a, b) => {
+      if (deptSortKey === 'department') return dir * b.department.localeCompare(a.department, 'fr-FR');
+      return dir * (b[deptSortKey] - a[deptSortKey]);
+    });
+  }, [summary, deptSortKey, deptSortDir]);
+
+  function toggleDeptSort(k: DeptSortKey) {
+    if (deptSortKey === k) setDeptSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setDeptSortKey(k); setDeptSortDir('desc'); }
+  }
+
+  function deptSortIcon(k: DeptSortKey) {
+    if (deptSortKey !== k) return null;
+    return <iconify-icon icon={deptSortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
+  }
 
   return (
     <div className="card mb-3" style={{ borderTop: '3px solid #F5A623' }}>
@@ -183,14 +208,14 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
                 <table className="table table-sm align-middle mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Rayon</th>
-                      <th>CA perdu</th>
-                      <th>Qté perdue</th>
-                      <th>Ruptures d'article</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleDeptSort('department')}>Rayon{deptSortIcon('department')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleDeptSort('caPerdue')}>CA perdu{deptSortIcon('caPerdue')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleDeptSort('qtyPerdue')}>Qté perdue{deptSortIcon('qtyPerdue')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleDeptSort('episodeCount')}>Ruptures d'article{deptSortIcon('episodeCount')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {summary.departmentBreakdown.slice(0, 8).map((d) => (
+                    {sortedDepartmentBreakdown.slice(0, 8).map((d) => (
                       <tr key={d.department}>
                         <td>{d.department}</td>
                         <td>{d.caPerdue.toLocaleString('fr-FR')} CFA</td>

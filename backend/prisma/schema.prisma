@@ -2176,6 +2176,40 @@ model StockoutPeriodSummarySnapshot {
   @@map("stockout_period_summary_snapshots")
 }
 
+// Précalcul JOURNALIER du CA perdu par (magasin, rayon) — demande explicite du 21/10/2026 : "je
+// veux les valeur de l'analyse... appliqué au filtre" + "le chargement auto avec calcul deja
+// prefait en base". Contrairement à StockoutPeriodSummarySnapshot ci-dessus (UN seul snapshot par
+// magasin, fenêtre fixe de 30 jours, jamais bornable sur une période choisie par l'utilisateur),
+// une ligne par (magasin, rayon, JOUR) permet de sommer INSTANTANÉMENT n'importe quelle plage de
+// dates demandée (ex: 15/10 → 22/10) côté lecture, sans jamais recalculer estimateLoss() à la
+// volée — même principe que overstockReportSnapshotJob/stockoutLossRecalcJob : le calcul lourd
+// (vente moyenne du jour de semaine comparable × durée, par épisode) se fait une fois en tâche de
+// fond, la page ne fait plus qu'une somme SQL sur des lignes déjà calculées.
+model StockoutDailyLossByDepartment {
+  id String @id @default(cuid())
+
+  rposShopId String   @map("rpos_shop_id")
+  // Chaîne vide '' = "Sans rayon" (PAS null) — Prisma refuse un champ nullable dans un `where` de
+  // clé composite @@unique (`Argument department must not be null`, testé en sandbox le
+  // 22/10/2026) ; même piège déjà documenté ailleurs dans ce fichier pour ProposalOrder.department
+  // ("mismatch silencieux dès que department est null"). Le job normalise toujours vers '' et la
+  // route de lecture fait de même, jamais un null qui romprait silencieusement le matching.
+  department String   @default("") @map("department")
+  day        DateTime @map("day") // jour UTC (00:00:00), un snapshot par jour calendaire — jamais réécrit après coup pour un jour déjà clos
+
+  caPerdue     Float @map("ca_perdue")
+  qtyPerdue    Float @map("qty_perdue")
+  episodeCount Int   @map("episode_count") // épisodes distincts ayant contribué une perte ce jour-là (un même épisode peut contribuer sur plusieurs jours successifs)
+
+  computedAt DateTime @updatedAt @map("computed_at")
+
+  // Un seul total par (magasin, rayon, jour) — le job upsert dessus, jamais de doublon.
+  @@unique([rposShopId, department, day])
+  // Lecture dominante : somme sur une plage de jours pour un magasin donné, groupée par rayon.
+  @@index([rposShopId, day])
+  @@map("stockout_daily_loss_by_department")
+}
+
 // Précalcul du rapport Surstock (demande explicite du 21/10/2026 : "il charge trop pourqhoi ? il
 // fait les calcule quand j'actualise ?") — le calcul lui-même est rapide isolé (~0.6s mesuré), mais
 // devient lent (jusqu'à 14s observés) quand il tombe en concurrence avec les jobs de synchro RPOS

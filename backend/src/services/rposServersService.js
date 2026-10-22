@@ -44,10 +44,21 @@ async function getServer(posId) {
   return prisma.rposServer.findUnique({ where: { posId } });
 }
 
+// trim() systématique sur user/URL avant stockage — bug trouvé le 22/10/2026 (RPOS rejetait en
+// 401 "Nom d'utilisateur et/ou mot de passe non valide(s)" alors que les identifiants étaient
+// corrects : un espace de fin ("RAMIAN ") était resté dans rposUser faute de trim côté serveur, un
+// copier-coller ou un espace involontaire dans le champ suffit à casser l'authentification RPOS
+// qui compare la chaîne strictement). Le mot de passe n'est PAS trim ici : RPOS pourrait
+// légitimement avoir un mot de passe commençant/finissant par un espace, contrairement à un nom
+// d'utilisateur ou une URL.
+function cleanField(value) {
+  return typeof value === 'string' ? value.trim() : value;
+}
+
 async function upsertServerCredentials(posId, { baseUrl, rposUser, rposPassword }) {
   const data = {};
-  if (baseUrl !== undefined) data.baseUrl = baseUrl;
-  if (rposUser !== undefined) data.rposUser = rposUser;
+  if (baseUrl !== undefined) data.baseUrl = cleanField(baseUrl);
+  if (rposUser !== undefined) data.rposUser = cleanField(rposUser);
   if (rposPassword) data.rposPassword = crypto.encrypt(rposPassword);
   if (rposUser || rposPassword) data.isActive = true;
 
@@ -61,7 +72,7 @@ async function upsertServerCredentials(posId, { baseUrl, rposUser, rposPassword 
  */
 async function applyCredentialsToAllServers({ rposUser, rposPassword }) {
   const data = {};
-  if (rposUser !== undefined) data.rposUser = rposUser;
+  if (rposUser !== undefined) data.rposUser = cleanField(rposUser);
   if (rposPassword) data.rposPassword = crypto.encrypt(rposPassword);
   if (rposUser || rposPassword) data.isActive = true;
 

@@ -706,6 +706,7 @@ async function analyzeSales(posId, shopId, shopReference, periodOverride, onProg
     revenueByEanEntries: Array.from(revenueByEan.entries()),
     paretoRevenueTotal,
     salesSource,
+    orderAnomalyThresholds,
     analyzedAt: new Date().toISOString(),
   };
 }
@@ -731,6 +732,7 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     revenueShareStart, revenueShareEnd,
     shopTotalRevenue, shopTotalRevenueInclTax,
     paretoRevenueTotal,
+    orderAnomalyThresholds,
   } = analysis;
   const revenueByEan = new Map(analysis.revenueByEanEntries);
 

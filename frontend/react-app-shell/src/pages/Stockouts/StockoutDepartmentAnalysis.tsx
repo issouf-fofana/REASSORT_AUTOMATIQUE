@@ -60,6 +60,10 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
   const [data, setData] = useState<ByFieldSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('openCount');
+  // Tri croissant/décroissant (demande explicite du 21/10/2026 : "sur tout les tableau il faut
+  // ajouter la possibilité de filtrer par croissant ou decroissant") — avant, un seul sens
+  // (décroissant) était possible, choisir le champ ne changeait que la colonne triée.
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -77,8 +81,9 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
 
   const rows = useMemo(() => {
     const list = data?.groups || [];
-    return [...list].sort((a, b) => b[sortKey] - a[sortKey]);
-  }, [data, sortKey]);
+    const dir = sortDir === 'desc' ? 1 : -1;
+    return [...list].sort((a, b) => dir * (b[sortKey] - a[sortKey]));
+  }, [data, sortKey, sortDir]);
 
   const priorityCount = rows.filter((r) => priorityLevel(r).label === 'Prioritaire').length;
   const topCaPerdu = rows.length ? Math.max(...rows.map((r) => r.totalCaPerduEstime)) : 0;
@@ -86,13 +91,18 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
   const visibleRows = showAll ? rows : rows.slice(0, 5);
 
   function SortButton({ k, label }: { k: SortKey; label: string }) {
+    const active = sortKey === k;
     return (
       <button
         type="button"
-        className={`btn btn-sm ${sortKey === k ? 'btn-primary' : 'btn-outline-secondary'}`}
-        onClick={() => setSortKey(k)}
+        className={`btn btn-sm ${active ? 'btn-primary' : 'btn-outline-secondary'}`}
+        onClick={() => {
+          if (active) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+          else { setSortKey(k); setSortDir('desc'); }
+        }}
       >
         {label}
+        {active && <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>}
       </button>
     );
   }
@@ -129,7 +139,13 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                 <span className="val">{rows[0]?.group || '—'} · {rows[0]?.openCount || 0}</span>
               </div>
               <div className="stockout-rayon-stat">
-                <span className="lbl">Rayon le plus coûteux (30j)</span>
+                {/* Libellé corrigé le 21/10/2026 (demande explicite : "je veux un filtre dinamique...
+                    faut pas je vais faire le filtre du 10/10/2026 au 20/10/2026 et sur la vue il va
+                    me donner les donner de 1an 30j quelque part") — la DONNÉE suivait déjà bien la
+                    période choisie (startDate/endDate passés en props), mais ce libellé affichait
+                    "(30j)" en dur, laissant croire à tort qu'une fenêtre fixe de 30 jours était
+                    utilisée ici alors que le filtre actif en haut de page s'applique partout. */}
+                <span className="lbl">Rayon le plus coûteux ({new Date(startDate).toLocaleDateString('fr-FR')} → {new Date(endDate).toLocaleDateString('fr-FR')})</span>
                 <span className="val">{topCaRow?.group || '—'} · {topCaPerdu.toLocaleString('fr-FR')} CFA</span>
               </div>
               <div className="stockout-rayon-stat">

@@ -1128,7 +1128,11 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
   }
 
   // caPerdueEstime lu depuis la valeur stockée (maintenue à jour par stockoutLossRecalcJob.js pour
-  // les épisodes EN_COURS) — plus de recalcul temps réel ici, cf. getDashboardSummary.
+  // les épisodes EN_COURS) — plus de recalcul temps réel ici, cf. getDashboardSummary. EN MODE
+  // PÉRIODE, ce total global (perte depuis le tout premier jour de l'épisode) est remplacé plus
+  // bas par le snapshot journalier borné à [periodStart, periodEnd] — gardé ici uniquement pour la
+  // ventilation sans-commande/avec-commande (basée sur hasOrder, dynamique, impossible à
+  // reconstruire depuis le seul snapshot agrégé par jour).
   for (const e of openEpisodes) {
     const bucket = getBucket(e[field]);
     bucket.openEpisodes.push(e);
@@ -1142,6 +1146,30 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
     const bucket = getBucket(e[field]);
     bucket.resolvedCount += 1;
     bucket.totalCaPerdu += e.caPerdueEstime || 0;
+  }
+
+  // CA perdu borné PRÉCISÉMENT à la période choisie (demande explicite du 21/10/2026 : "je veux
+  // les valeur de l'analyse... appliqué au filtre" — avant, bucket.totalCaPerdu ci-dessus restait
+  // la perte TOTALE de chaque épisode depuis son tout premier jour, jamais bornée au filtre actif).
+  // Lu depuis StockoutDailyLossByDepartment (précalculé par stockoutDailyLossSnapshotJob.js, une
+  // ligne par jour calendaire), sommé sur [periodStart, periodEnd] — jamais de recalcul à la volée
+  // ici. N'existe que pour field === 'department' (le snapshot est indexé par rayon, pas par
+  // secteur) ; pour 'sector', bucket.totalCaPerdu (global) reste utilisé en repli.
+  let periodCaPerduByGroup = null;
+  if (periodMode && field === 'department') {
+    const dayStart = new Date(periodStart);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(periodEnd);
+    dayEnd.setUTCHours(0, 0, 0, 0);
+    const snapshotRows = await prisma.stockoutDailyLossByDepartment.findMany({
+      where: { rposShopId, day: { gte: dayStart, lte: dayEnd } },
+      select: { department: true, caPerdue: true },
+    });
+    periodCaPerduByGroup = new Map();
+    for (const row of snapshotRows) {
+      const key = row.department || fallbackLabel; // '' (sentinelle "Sans rayon") -> même libellé que le reste de cette fonction
+      periodCaPerduByGroup.set(key, (periodCaPerduByGroup.get(key) || 0) + row.caPerdue);
+    }
   }
 
   const results = Array.from(byGroup.values()).map((bucket) => {
@@ -1175,6 +1203,12 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
         .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
     );
 
+    // Priorité au CA perdu précis borné à la période (snapshot journalier), repli sur le total
+    // global stocké si le snapshot n'a encore rien calculé pour ce groupe (ex: tout juste après le
+    // premier déploiement, avant que le job ait fini son backfill initial de 95 jours).
+    const periodCaPerdu = periodCaPerduByGroup?.get(bucket.group);
+    const totalCaPerduEstime = Math.round(periodCaPerdu !== undefined ? periodCaPerdu : bucket.totalCaPerdu);
+
     return {
       group: bucket.group,
       openCount: bucket.openEpisodes.length,
@@ -1183,7 +1217,7 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
       longEpisodesCount,
       noOrderCount,
       causeCounts,
-      totalCaPerduEstime: Math.round(bucket.totalCaPerdu),
+      totalCaPerduEstime,
       caPerduSansCommande,
       caPerduAvecCommandeNonLivree,
     };
