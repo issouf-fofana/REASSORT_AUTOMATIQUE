@@ -1727,14 +1727,32 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
   const start = new Date(startDate);
   const end = new Date(endDate);
 
-  const [resolvedInPeriod, openOverlapping, shopRevenue] = await Promise.all([
-    prisma.stockoutEpisode.findMany({
-      where: { rposShopId, status: 'RESOLUE', endedAt: { gte: start, lte: end } },
-      select: { department: true, sector: true, ean: true, label: true, caPerdueEstime: true, qtyPerdueEstimee: true, startedAt: true, endedAt: true },
+  // RÉÉCRIT le 22/10/2026 (bug signalé : "Analyse des pertes sur une période" restait bloquée sur
+  // "Calcul en cours..." — "si on ne peux pas optimisé pour affiché au premier plan il faut le
+  // supprimé") — la version précédente appelait estimateLoss() EN TEMPS RÉEL pour chaque épisode
+  // EN_COURS chevauchant la période (cf. stockoutLossRecalcJob, même piège de performance déjà
+  // corrigé ailleurs pour les mêmes raisons) : avec plusieurs centaines d'épisodes ouverts, ce calcul
+  // à la volée prenait plusieurs secondes et semblait bloqué côté page. Remplacé par une lecture du
+  // snapshot journalier déjà précalculé par rayon (StockoutDailyLossByDepartment, cf.
+  // stockoutDailyLossSnapshotJob.js) — même table que getDashboardSummaryByField utilise déjà pour
+  // le CA perdu borné par période, juste agrégée différemment ici (par rayon, pas par jour).
+  const dayStart = new Date(start);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(end);
+  dayEnd.setUTCHours(0, 0, 0, 0);
+
+  const [dailyRows, episodeCounts, shopRevenue] = await Promise.all([
+    prisma.stockoutDailyLossByDepartment.findMany({
+      where: { rposShopId, day: { gte: dayStart, lte: dayEnd } },
+      select: { department: true, caPerdue: true, qtyPerdue: true },
     }),
+    // episodeCount du snapshot est un compte de jours-épisode (un même épisode sur 3 jours compte 3
+    // fois), pas pertinent ici — le vrai nombre d'articles distincts touchés vient des épisodes eux-
+    // mêmes, même logique que getDashboardSummary (startedAt <= end ET (toujours ouvert OU résolu
+    // après start)).
     prisma.stockoutEpisode.findMany({
-      where: { rposShopId, status: 'EN_COURS', startedAt: { lte: end } },
-      select: { id: true, department: true, sector: true, ean: true, label: true, startedAt: true, caPerdueEstime: true, qtyPerdueEstimee: true },
+      where: { rposShopId, startedAt: { lte: end }, OR: [{ endedAt: null }, { endedAt: { gte: start } }] },
+      select: { id: true },
     }),
     prisma.salesLine.aggregate({
       where: { rposShopId, date: { gte: start, lte: end } },
@@ -1742,51 +1760,17 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     }),
   ]);
 
-  // RÉÉCRIT le 19/10/2026 (bug signalé : "le filtre ne modifie pas les valeur actuelle... il
-  // affiche les CA sur 1an") — l'ancienne version prorata la perte TOTALE DE L'ÉPISODE (depuis son
-  // tout premier début, parfois des mois plus tôt) par le ratio temps-dans-la-fenêtre /
-  // temps-total-de-l'épisode. Résultat : un épisode ouvert depuis longtemps dominait le total peu
-  // importe la période choisie, et resserrer/élargir le filtre ne changeait presque rien au chiffre
-  // affiché. Corrigé en appliquant estimateLoss() directement sur la fenêtre [overlapStart,
-  // overlapEnd] de CHAQUE épisode qui chevauche la période — même méthode que la fiche détail
-  // (lossBeforeOrder/lossAfterOrder) : vente moyenne du même jour de semaine sur l'historique
-  // comparable × durée de la fenêtre, moins les ventes réellement réalisées PENDANT cette fenêtre
-  // précise. Plus de prorata approximatif : la perte affichée correspond exactement à la période
-  // demandée, à durée d'exécution raisonnable (concurrence, cf. mapWithConcurrency — le nombre
-  // d'épisodes EN_COURS sur un magasin reste de l'ordre de quelques centaines au plus, jamais des
-  // milliers comme getDashboardSummaryAllShops qui agrège tout le réseau).
-  const now = new Date();
-  const openLosses = await mapWithConcurrency(openOverlapping, 8, async (e) => {
-    const overlapStart = e.startedAt > start ? e.startedAt : start;
-    const overlapEnd = end < now ? end : now;
-    if (overlapEnd <= overlapStart) return { episode: e, qtyPerdue: 0, caPerdue: 0 };
-    const { qtyPerdue, caPerdue } = await estimateLoss(rposShopId, e.ean, overlapStart, overlapEnd);
-    return { episode: e, qtyPerdue: qtyPerdue || 0, caPerdue: caPerdue || 0 };
-  });
-
   const byDepartment = new Map();
-  function addToDept(key, caPerdue, qtyPerdue) {
-    const dept = key || 'Sans rayon';
-    if (!byDepartment.has(dept)) byDepartment.set(dept, { department: dept, caPerdue: 0, qtyPerdue: 0, episodeCount: 0 });
-    const bucket = byDepartment.get(dept);
-    bucket.caPerdue += caPerdue;
-    bucket.qtyPerdue += qtyPerdue;
-    bucket.episodeCount += 1;
-  }
-
   let totalCaPerdu = 0;
   let totalQtyPerdue = 0;
-  for (const e of resolvedInPeriod) {
-    const ca = e.caPerdueEstime || 0;
-    const qty = e.qtyPerdueEstimee || 0;
-    totalCaPerdu += ca;
-    totalQtyPerdue += qty;
-    addToDept(e.department, ca, qty);
-  }
-  for (const { episode, caPerdue, qtyPerdue } of openLosses) {
-    totalCaPerdu += caPerdue;
-    totalQtyPerdue += qtyPerdue;
-    addToDept(episode.department, caPerdue, qtyPerdue);
+  for (const row of dailyRows) {
+    const dept = row.department || 'Sans rayon';
+    if (!byDepartment.has(dept)) byDepartment.set(dept, { department: dept, caPerdue: 0, qtyPerdue: 0, episodeCount: 0 });
+    const bucket = byDepartment.get(dept);
+    bucket.caPerdue += row.caPerdue;
+    bucket.qtyPerdue += row.qtyPerdue;
+    totalCaPerdu += row.caPerdue;
+    totalQtyPerdue += row.qtyPerdue;
   }
 
   const departmentBreakdown = Array.from(byDepartment.values()).sort((a, b) => b.caPerdue - a.caPerdue);
@@ -1798,7 +1782,7 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     period: { startDate, endDate },
     totalCaPerdu: Math.round(totalCaPerdu),
     totalQtyPerdue: Math.round(totalQtyPerdue),
-    episodeCount: resolvedInPeriod.length + openOverlapping.length,
+    episodeCount: episodeCounts.length,
     shopRevenueExclTax: Math.round(shopRevenueExclTax),
     lossRatioPct: lossRatioPct !== null ? Math.round(lossRatioPct * 100) / 100 : null,
     departmentBreakdown: departmentBreakdown.map((d) => ({ ...d, caPerdue: Math.round(d.caPerdue), qtyPerdue: Math.round(d.qtyPerdue) })),
