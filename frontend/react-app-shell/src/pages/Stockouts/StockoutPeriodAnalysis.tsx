@@ -48,7 +48,14 @@ const LEVEL_META: Record<AnalysisResult['level'], { label: string; color: string
 // dupliquait un second système de dates distinct de celui du graphe de tendance.
 type DeptSortKey = 'department' | 'caPerdue' | 'qtyPerdue' | 'episodeCount';
 
-export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
+// episodeCountOverride (demande explicite du 22/10/2026, signalé une 2e fois avec capture : "593
+// vs 589 pourquoi c'est pas pareil ?" — l'infobulle explicative ajoutée au premier signalement n'a
+// pas suffi) : au lieu de laisser summary.episodeCount (calculé ici par sa PROPRE requête serveur,
+// à un instant légèrement différent de celle de StockoutShopDetail) risquer de diverger de
+// "Articles touchés (période)" plus haut sur la page, le parent transmet désormais directement SA
+// valeur déjà affichée — une seule source de vérité pour le même chiffre, plus jamais deux requêtes
+// séparées pouvant tomber de part et d'autre d'un changement d'état entre-temps.
+export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, episodeCountOverride }: { shopQueryParam: string; startDate: string; endDate: string; episodeCountOverride?: number }) {
   const [summary, setSummary] = useState<PeriodSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -230,12 +237,11 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
                   <FormulaInfoButton
                     title="Ruptures d'article sur la période"
                     steps={[
-                      { label: 'Calcul', detail: "Nombre d'articles distincts ayant eu une rupture active à un moment de la période — même principe que \"Articles touchés (période)\" plus haut sur la page." },
-                      { label: 'Léger écart possible', detail: 'Les deux chiffres sont calculés par deux requêtes séparées, à quelques instants d\'intervalle : si une rupture se résout pile entre les deux, un petit écart (quelques unités) peut apparaître — rien d\'anormal, pas de recalcul nécessaire.' },
+                      { label: 'Calcul', detail: "Nombre d'articles distincts ayant eu une rupture active à un moment de la période — même chiffre que \"Articles touchés (période)\" plus haut sur la page." },
                     ]}
                   />
                 </div>
-                <div className="fs-5 fw-semibold">{summary.episodeCount}</div>
+                <div className="fs-5 fw-semibold">{episodeCountOverride ?? summary.episodeCount}</div>
               </div>
             </div>
 
