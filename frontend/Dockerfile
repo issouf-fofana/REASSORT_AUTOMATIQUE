@@ -5,7 +5,7 @@
 FROM node:20-alpine AS react-builder
 WORKDIR /app
 COPY react-app/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app/ .
 RUN npm run build
 
@@ -16,7 +16,7 @@ RUN npm run build
 FROM node:20-alpine AS shell-builder
 WORKDIR /app
 COPY react-app-shell/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-shell/ .
 RUN npm run build
 
@@ -25,7 +25,7 @@ RUN npm run build
 FROM node:20-alpine AS sales-history-builder
 WORKDIR /app
 COPY react-app-sales-history/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-sales-history/ .
 RUN npm run build
 
@@ -34,7 +34,7 @@ RUN npm run build
 FROM node:20-alpine AS ai-predictions-builder
 WORKDIR /app
 COPY react-app-ai-predictions/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-ai-predictions/ .
 RUN npm run build
 
@@ -43,7 +43,7 @@ RUN npm run build
 FROM node:20-alpine AS ai-assistant-builder
 WORKDIR /app
 COPY react-app-ai-assistant/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-ai-assistant/ .
 RUN npm run build
 
@@ -52,7 +52,7 @@ RUN npm run build
 FROM node:20-alpine AS ai-guide-builder
 WORKDIR /app
 COPY react-app-ai-guide/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-ai-guide/ .
 RUN npm run build
 
@@ -61,7 +61,7 @@ RUN npm run build
 FROM node:20-alpine AS ai-quality-builder
 WORKDIR /app
 COPY react-app-ai-quality/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-ai-quality/ .
 RUN npm run build
 
@@ -70,7 +70,7 @@ RUN npm run build
 FROM node:20-alpine AS users-builder
 WORKDIR /app
 COPY react-app-users/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-users/ .
 RUN npm run build
 
@@ -79,7 +79,7 @@ RUN npm run build
 FROM node:20-alpine AS project-guide-builder
 WORKDIR /app
 COPY react-app-project-guide/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-project-guide/ .
 RUN npm run build
 
@@ -88,7 +88,7 @@ RUN npm run build
 FROM node:20-alpine AS user-guide-builder
 WORKDIR /app
 COPY react-app-user-guide/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-user-guide/ .
 RUN npm run build
 
@@ -97,7 +97,7 @@ RUN npm run build
 FROM node:20-alpine AS purchase-list-builder
 WORKDIR /app
 COPY react-app-purchase-list/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-purchase-list/ .
 RUN npm run build
 
@@ -106,7 +106,7 @@ RUN npm run build
 FROM node:20-alpine AS token-usage-builder
 WORKDIR /app
 COPY react-app-token-usage/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-token-usage/ .
 RUN npm run build
 
@@ -116,7 +116,7 @@ RUN npm run build
 FROM node:20-alpine AS purchase-order-builder
 WORKDIR /app
 COPY react-app-purchase-order/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-purchase-order/ .
 RUN npm run build
 
@@ -125,7 +125,7 @@ RUN npm run build
 FROM node:20-alpine AS tableau-de-bord-builder
 WORKDIR /app
 COPY react-app-tableau-de-bord/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-tableau-de-bord/ .
 RUN npm run build
 
@@ -134,7 +134,7 @@ RUN npm run build
 FROM node:20-alpine AS ai-mastery-builder
 WORKDIR /app
 COPY react-app-ai-mastery/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-ai-mastery/ .
 RUN npm run build
 
@@ -143,7 +143,7 @@ RUN npm run build
 FROM node:20-alpine AS order-anomalies-builder
 WORKDIR /app
 COPY react-app-order-anomalies/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-order-anomalies/ .
 RUN npm run build
 
@@ -151,28 +151,33 @@ RUN npm run build
 FROM node:20-alpine AS sales-analysis-builder
 WORKDIR /app
 COPY react-app-sales-analysis/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-sales-analysis/ .
 RUN npm run build
 
 FROM node:20-alpine AS feature-requests-builder
 WORKDIR /app
 COPY react-app-feature-requests/package*.json ./
-RUN npm ci
+# npm ci peut échouer à installer le binding natif rolldown spécifique à musl (bug connu
+# npm/cli#4828 : les optionalDependencies par plateforme ne sont pas toujours réinstallées
+# correctement par `ci` quand le lockfile vient d'un autre environnement) — repli documenté par
+# le message d'erreur npm lui-même : purger node_modules et réinstaller depuis zéro avec `npm
+# install`, qui redétecte la bonne plateforme cible.
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-feature-requests/ .
 RUN npm run build
 
 FROM node:20-alpine AS mail-recipients-builder
 WORKDIR /app
 COPY react-app-mail-recipients/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-mail-recipients/ .
 RUN npm run build
 
 FROM node:20-alpine AS auth-signin-builder
 WORKDIR /app
 COPY react-app-auth-signin/package*.json ./
-RUN npm ci
+RUN npm ci || (rm -rf node_modules package-lock.json && npm install)
 COPY react-app-auth-signin/ .
 RUN npm run build
 
