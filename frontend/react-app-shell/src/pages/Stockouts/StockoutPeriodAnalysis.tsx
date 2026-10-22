@@ -225,7 +225,16 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
                 </div>
               </div>
               <div className="col-6 col-md-3">
-                <div className="text-muted small">Ruptures d'article</div>
+                <div className="text-muted small">
+                  Ruptures d'article
+                  <FormulaInfoButton
+                    title="Ruptures d'article sur la période"
+                    steps={[
+                      { label: 'Calcul', detail: "Nombre d'articles distincts ayant eu une rupture active à un moment de la période — même principe que \"Articles touchés (période)\" plus haut sur la page." },
+                      { label: 'Léger écart possible', detail: 'Les deux chiffres sont calculés par deux requêtes séparées, à quelques instants d\'intervalle : si une rupture se résout pile entre les deux, un petit écart (quelques unités) peut apparaître — rien d\'anormal, pas de recalcul nécessaire.' },
+                    ]}
+                  />
+                </div>
                 <div className="fs-5 fw-semibold">{summary.episodeCount}</div>
               </div>
             </div>
