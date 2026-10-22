@@ -148,6 +148,71 @@ function liveDurationHours(startedAt: string): number {
   return (Date.now() - new Date(startedAt).getTime()) / (60 * 60 * 1000);
 }
 
+// Dropdown à cases à cocher pour les filtres globaux (demande explicite du 22/10/2026 : "les
+// filtres il me donne posibilté de choisir plusieur ou 1 tu vois ?") — composant maison plutôt
+// qu'un <select multiple> natif, dont l'UI (liste figée sans scroll contrôlé, sélection au
+// ctrl+clic non découvrable) est peu praticable sur un formulaire de filtres. Un click en dehors du
+// menu le referme (évite qu'il reste ouvert indéfiniment en changeant de filtre ou en scrollant).
+function MultiSelectFilter({
+  icon,
+  placeholder,
+  options,
+  selected,
+  onChange,
+  title,
+}: {
+  icon: string;
+  placeholder: string;
+  options: { value: string; label: string; title?: string }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  function toggleValue(value: string) {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  }
+
+  // 1-2 valeurs cochées : leurs libellés tiennent dans le bouton sans le faire déborder. Au-delà,
+  // un compteur reste plus lisible qu'une liste qui s'allonge indéfiniment ("5 sélectionnés").
+  const buttonLabel = selected.length === 0
+    ? placeholder
+    : selected.length <= 2
+      ? selected.map((v) => options.find((o) => o.value === v)?.label || v).join(', ')
+      : `${selected.length} sélectionné(s)`;
+
+  return (
+    <div className={`sof-global-filter-group sof-ms-root${selected.length ? ' active' : ''}`} ref={rootRef} title={title}>
+      <iconify-icon icon={icon}></iconify-icon>
+      <button type="button" className="sof-global-filter sof-ms-trigger" onClick={() => setOpen((v) => !v)}>
+        {buttonLabel}
+        <iconify-icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ fontSize: 12, marginLeft: 6 }}></iconify-icon>
+      </button>
+      {open && (
+        <div className="sof-ms-menu">
+          {options.map((opt) => (
+            <label key={opt.value} className="sof-ms-option" title={opt.title}>
+              <input type="checkbox" checked={selected.includes(opt.value)} onChange={() => toggleValue(opt.value)} />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string }) {
   const navigate = useNavigate();
   // Secteur/rayon sélectionnés reflétés dans l'URL (?sector=&dept=), pas seulement en state local —
@@ -200,20 +265,22 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   // de nouvel appel réseau : filtrent côté client sur summary.openEpisodes déjà chargé en mémoire
   // (même principe que orderFilter/causeFilter ci-dessous, qui eux ne s'appliquent qu'UNE FOIS entré
   // dans un rayon précis — ces filtres globaux agissent un cran plus haut).
-  const [globalStatusFilter, setGlobalStatusFilter] = useState<'' | 'EN_COURS' | 'RESOLUE'>('');
-  const [globalSectorFilter, setGlobalSectorFilter] = useState<string>('');
-  const [globalDepartmentFilter, setGlobalDepartmentFilter] = useState<string>('');
-  const [globalOrderFilter, setGlobalOrderFilter] = useState<'' | 'with-order' | 'without-order'>('');
-  const [globalCauseFilter, setGlobalCauseFilter] = useState<string>('');
+  // Multi-sélection (demande explicite du 22/10/2026 : "les filtres il me donne posibilté de
+  // choisir plusieur ou 1") — tableau vide = aucune restriction ("tous"), comme le '' précédent.
+  const [globalStatusFilter, setGlobalStatusFilter] = useState<string[]>([]);
+  const [globalSectorFilter, setGlobalSectorFilter] = useState<string[]>([]);
+  const [globalDepartmentFilter, setGlobalDepartmentFilter] = useState<string[]>([]);
+  const [globalOrderFilter, setGlobalOrderFilter] = useState<string[]>([]);
+  const [globalCauseFilter, setGlobalCauseFilter] = useState<string[]>([]);
   const activeGlobalFilterCount =
-    (globalStatusFilter ? 1 : 0) + (globalSectorFilter ? 1 : 0) + (globalDepartmentFilter ? 1 : 0) +
-    (globalOrderFilter ? 1 : 0) + (globalCauseFilter ? 1 : 0);
+    (globalStatusFilter.length ? 1 : 0) + (globalSectorFilter.length ? 1 : 0) + (globalDepartmentFilter.length ? 1 : 0) +
+    (globalOrderFilter.length ? 1 : 0) + (globalCauseFilter.length ? 1 : 0);
   function clearGlobalFilters() {
-    setGlobalStatusFilter('');
-    setGlobalSectorFilter('');
-    setGlobalDepartmentFilter('');
-    setGlobalOrderFilter('');
-    setGlobalCauseFilter('');
+    setGlobalStatusFilter([]);
+    setGlobalSectorFilter([]);
+    setGlobalDepartmentFilter([]);
+    setGlobalOrderFilter([]);
+    setGlobalCauseFilter([]);
   }
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
   const [articleSearch, setArticleSearch] = useState('');
@@ -334,12 +401,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   // juste en dessous, pour qu'un filtre actif (ex: "Sans commande") se reflète partout sur la page,
   // pas seulement sur les cartes du haut.
   const globallyFilteredEpisodes = (summary?.openEpisodes || []).filter((e) => {
-    if (globalStatusFilter && e.status !== globalStatusFilter) return false;
-    if (globalSectorFilter && (e.sector || 'Sans secteur') !== globalSectorFilter) return false;
-    if (globalDepartmentFilter && (e.department || 'Sans rayon') !== globalDepartmentFilter) return false;
-    if (globalOrderFilter === 'with-order' && !e.hasOrder) return false;
-    if (globalOrderFilter === 'without-order' && e.hasOrder) return false;
-    if (globalCauseFilter && e.causeProposee !== globalCauseFilter) return false;
+    if (globalStatusFilter.length && !globalStatusFilter.includes(e.status)) return false;
+    if (globalSectorFilter.length && !globalSectorFilter.includes(e.sector || 'Sans secteur')) return false;
+    if (globalDepartmentFilter.length && !globalDepartmentFilter.includes(e.department || 'Sans rayon')) return false;
+    if (globalOrderFilter.length) {
+      const orderKey = e.hasOrder ? 'with-order' : 'without-order';
+      if (!globalOrderFilter.includes(orderKey)) return false;
+    }
+    if (globalCauseFilter.length && !globalCauseFilter.includes(e.causeProposee)) return false;
     return true;
   });
   // Liste des rayons/secteurs distincts pour peupler les <select> des filtres globaux — dérivée de
@@ -483,6 +552,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .sof-global-filter { border: none; background: none; font-size: .86rem; font-weight: 600; padding: 9px 6px; color: #1B2A4A; min-width: 150px; cursor: pointer; }
         .sof-global-filter:focus { outline: none; }
         .sof-global-filter-group.active .sof-global-filter { color: #2456A6; }
+        .sof-ms-root { position: relative; }
+        .sof-ms-trigger { display: inline-flex; align-items: center; white-space: nowrap; }
+        .sof-ms-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; background: #fff; border: 1px solid rgba(27,42,74,.12); border-radius: 10px; box-shadow: 0 8px 24px rgba(27,42,74,.12); padding: 6px; min-width: 240px; max-height: 280px; overflow-y: auto; }
+        .sof-ms-option { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 6px; font-size: .82rem; color: #1B2A4A; cursor: pointer; white-space: nowrap; }
+        .sof-ms-option:hover { background: #F6F8FB; }
+        .sof-ms-option input { margin: 0; cursor: pointer; }
         .sof-range-panel { margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(27,42,74,.08); display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
         .sof-range-field { display: flex; flex-direction: column; gap: 6px; }
         .sof-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
@@ -559,45 +634,48 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               drill-down), pas seulement sur la liste d'articles d'un rayon déjà sélectionné. */}
           <div className="sof-filter-card mb-3">
             <div className="sof-filter-row">
-              <div className={`sof-global-filter-group${globalStatusFilter ? ' active' : ''}`}>
-                <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" title="RÉSOLUE = article réapprovisionné, le stock est redevenu positif" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
-                  <option value="">Tous les statuts</option>
-                  <option value="EN_COURS">Ruptures en cours</option>
-                  <option value="RESOLUE">Ruptures résolues (réapprovisionnées)</option>
-                </select>
-              </div>
-              <div className={`sof-global-filter-group${globalSectorFilter ? ' active' : ''}`}>
-                <iconify-icon icon="solar:widget-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" value={globalSectorFilter} onChange={(e) => setGlobalSectorFilter(e.target.value)}>
-                  <option value="">Tous les secteurs</option>
-                  {allSectorsForFilter.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className={`sof-global-filter-group${globalDepartmentFilter ? ' active' : ''}`}>
-                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" value={globalDepartmentFilter} onChange={(e) => setGlobalDepartmentFilter(e.target.value)}>
-                  <option value="">Tous les rayons</option>
-                  {allDepartmentsForFilter.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div className={`sof-global-filter-group${globalOrderFilter ? ' active' : ''}`}>
-                <iconify-icon icon="solar:cart-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" value={globalOrderFilter} onChange={(e) => setGlobalOrderFilter(e.target.value as typeof globalOrderFilter)}>
-                  <option value="">Avec ou sans commande</option>
-                  <option value="with-order">Avec commande en cours</option>
-                  <option value="without-order">Sans commande en cours</option>
-                </select>
-              </div>
-              <div className={`sof-global-filter-group${globalCauseFilter ? ' active' : ''}`}>
-                <iconify-icon icon="solar:question-circle-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
-                  <option value="">Toutes les causes</option>
-                  {Object.entries(CAUSE_FILTER_LABELS).map(([key, label]) => (
-                    <option key={key} value={key} title={CAUSE_LABELS[key]}>{label}</option>
-                  ))}
-                </select>
-              </div>
+              <MultiSelectFilter
+                icon="solar:flag-bold-duotone"
+                placeholder="Tous les statuts"
+                title="RÉSOLUE = article réapprovisionné, le stock est redevenu positif"
+                options={[
+                  { value: 'EN_COURS', label: 'Ruptures en cours' },
+                  { value: 'RESOLUE', label: 'Ruptures résolues (réapprovisionnées)' },
+                ]}
+                selected={globalStatusFilter}
+                onChange={setGlobalStatusFilter}
+              />
+              <MultiSelectFilter
+                icon="solar:widget-bold-duotone"
+                placeholder="Tous les secteurs"
+                options={allSectorsForFilter.map((s) => ({ value: s, label: s }))}
+                selected={globalSectorFilter}
+                onChange={setGlobalSectorFilter}
+              />
+              <MultiSelectFilter
+                icon="solar:shop-bold-duotone"
+                placeholder="Tous les rayons"
+                options={allDepartmentsForFilter.map((d) => ({ value: d, label: d }))}
+                selected={globalDepartmentFilter}
+                onChange={setGlobalDepartmentFilter}
+              />
+              <MultiSelectFilter
+                icon="solar:cart-bold-duotone"
+                placeholder="Avec ou sans commande"
+                options={[
+                  { value: 'with-order', label: 'Avec commande en cours' },
+                  { value: 'without-order', label: 'Sans commande en cours' },
+                ]}
+                selected={globalOrderFilter}
+                onChange={setGlobalOrderFilter}
+              />
+              <MultiSelectFilter
+                icon="solar:question-circle-bold-duotone"
+                placeholder="Toutes les causes"
+                options={Object.entries(CAUSE_FILTER_LABELS).map(([key, label]) => ({ value: key, label, title: CAUSE_LABELS[key] }))}
+                selected={globalCauseFilter}
+                onChange={setGlobalCauseFilter}
+              />
               {activeGlobalFilterCount > 0 && (
                 <button type="button" className="sof-clear-btn" onClick={clearGlobalFilters}>
                   <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres ({activeGlobalFilterCount})
