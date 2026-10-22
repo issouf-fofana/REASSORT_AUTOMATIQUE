@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
+import { consumeSseStream } from '../../shared/lib/sseStream';
 import { FormulaInfoButton } from './StockoutEpisodePage';
 
 // Analyse des pertes de rupture sur une période personnalisée, comparée au CA réellement réalisé
@@ -54,6 +55,11 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  // Texte BRUT (JSON encore incomplet, pas parsable) accumulé au fil du flux SSE (demande explicite
+  // du 22/10/2026 : "l'analyse IA dure trop ici" — bouton figé 30s à 1min sans retour visuel).
+  // Affiché tel quel pendant analyzing, puis remplacé par le rendu structuré dès que l'événement
+  // "done" arrive avec le résultat déjà parsé/fusionné côté serveur.
+  const [streamedText, setStreamedText] = useState('');
   // Tri croissant/décroissant (demande explicite du 21/10/2026 : "sur tout les tableau il faut
   // ajouter la possibilité de filtrer par croissant ou decroissant") — ce tableau n'avait aucun tri.
   const [deptSortKey, setDeptSortKey] = useState<DeptSortKey>('caPerdue');
@@ -90,19 +96,40 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
     if (!shopQueryParam) return;
     setAnalyzing(true);
     setAnalysisError(null);
+    setStreamedText('');
     try {
-      const data = await apiFetch<AnalysisResult>(
-        `/reassort/stockout-episodes/period-analysis?${shopQueryParam}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            start: new Date(startDate).toISOString(),
-            end: new Date(endDate + 'T23:59:59').toISOString(),
-          }),
+      const res = await window.reassortFetch(`/reassort/stockout-episodes/period-analysis-stream?${shopQueryParam}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start: new Date(startDate).toISOString(),
+          end: new Date(endDate + 'T23:59:59').toISOString(),
+        }),
+      });
+      if (!res.ok) throw new Error(`Erreur serveur (${res.status})`);
+
+      let done: AnalysisResult | null = null;
+      let streamError: string | null = null;
+      let accumulated = '';
+      // streamError plutôt qu'un throw direct dans le callback (BUG évité le 22/10/2026, trouvé en
+      // relisant consumeSseStream : son try/catch interne n'attrape QUE un JSON.parse invalide,
+      // "événement mal formé ignoré" — une exception levée PAR onEvent lui-même y serait avalée
+      // silencieusement de la même façon, laissant runAnalysis croire que le flux s'est juste
+      // terminé sans "done", avec un message d'erreur générique au lieu du vrai message serveur,
+      // ex: "Aucune clé API IA configurée").
+      await consumeSseStream(res, (eventName, data) => {
+        if (eventName === 'chunk') {
+          accumulated += data.text;
+          setStreamedText(accumulated);
+        } else if (eventName === 'error') {
+          streamError = data.message;
+        } else if (eventName === 'done') {
+          done = data;
         }
-      );
-      setAnalysis(data);
+      });
+      if (streamError) throw new Error(streamError);
+      if (!done) throw new Error('Flux terminé sans réponse exploitable.');
+      setAnalysis(done);
     } catch (err) {
       setAnalysisError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -242,6 +269,21 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate }: {
             )}
 
             {analysisError && <div className="text-danger small mt-2">Erreur : {analysisError}</div>}
+
+            {analyzing && (
+              <div className="stockout-ai-block" style={{ background: '#f8fafb' }}>
+                <div className="stockout-ai-block-title" style={{ color: '#5B6B85' }}>
+                  <iconify-icon icon="solar:magic-stick-3-bold-duotone" className="align-middle me-1"></iconify-icon>
+                  L'IA rédige son analyse...
+                </div>
+                {/* Texte brut (JSON en cours de génération, pas encore parsable) affiché tel quel —
+                    préférable à un bouton figé sans aucun retour, même si le format n'est pas encore
+                    celui des cartes finales (remplacées dès l'arrivée du résultat structuré). */}
+                <div style={{ fontSize: '.8rem', color: '#8591A0', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: 160, overflowY: 'auto' }}>
+                  {streamedText || '…'}
+                </div>
+              </div>
+            )}
 
             {analysis && (
               <div>

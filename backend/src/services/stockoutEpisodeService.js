@@ -1808,7 +1808,7 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
  * sensibilisation concrète pour le magasin. Jamais de nombre inventé : le prompt ne contient QUE
  * les chiffres déjà calculés côté serveur, l'IA les interprète, elle ne les recalcule pas.
  */
-async function analyzePeriodLoss(shopName, shopReference, summary) {
+async function analyzePeriodLoss(shopName, shopReference, summary, onChunk) {
   // % du total perdu par rayon calculé ICI (jamais par l'IA) — même principe que le reste du
   // prompt : le LLM interprète des chiffres déjà exacts, il n'en recalcule aucun.
   const topDepartmentsRaw = summary.departmentBreakdown.slice(0, 5).map((d) => ({
@@ -1849,7 +1849,13 @@ Réponds UNIQUEMENT avec un objet JSON strict (aucun texte avant/après, aucun b
 
 N'invente aucun chiffre qui ne figure pas ci-dessus — "departments" reprend uniquement les rayons listés ci-dessus (1 à 5 entrées, jamais un rayon absent de la liste), le pourcentage/montant affichés viendront directement des chiffres déjà fournis, tu n'as qu'à donner le conseil "prevention" pour chacun. "recommendations" : 1 à 3 entrées globales (toutes rayons confondus), pragmatiques, jamais de généralité vague ("améliorer le suivi" ne compte pas, préfère "resserrer le délai de réassort du rayon X à Y jours" ou équivalent concret). Si une donnée manque pour conclure avec certitude sur le niveau, choisis "faible" et dis-le dans verdict plutôt que de deviner.`;
 
-  const { fullText, providerUsed } = await streamWithFallback(prompt, () => {}, 'stockout-period-analysis');
+  // onChunk optionnel (streaming SSE, demande explicite du 22/10/2026 : "l'analyse IA dure trop
+  // ici" — bouton "Analyse en cours..." figé 30s à 1min sans aucun retour visuel) : le texte BRUT
+  // (JSON en cours de génération, pas encore parsable) est transmis tel quel au fur et à mesure au
+  // frontend, qui l'affiche en skeleton pendant le chargement puis bascule sur le rendu structuré
+  // une fois ce parsing ci-dessous terminé. Les appelants qui n'ont pas besoin de streaming (aucun
+  // pour l'instant, mais gardé optionnel pour rester compatible) passent simplement onChunk=undefined.
+  const { fullText, providerUsed } = await streamWithFallback(prompt, onChunk || (() => {}), 'stockout-period-analysis');
   const match = fullText.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('Réponse IA sans objet JSON reconnaissable');
   const parsed = JSON.parse(match[0]);

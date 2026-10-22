@@ -706,6 +706,44 @@ router.post('/stockout-episodes/period-analysis', async (req, res) => {
   }
 });
 
+// POST /api/reassort/stockout-episodes/period-analysis-stream - variante streamée (SSE) de la route
+// ci-dessus (demande explicite du 22/10/2026 : "l'analyse IA dure trop ici" — bouton "Analyse en
+// cours..." figé 30s à 1min sans aucun retour visuel) : le texte brut généré par l'IA s'affiche au
+// fur et à mesure côté frontend, puis l'événement "done" porte le résultat structuré final (même
+// fusion avec les chiffres serveur que la route non-streamée). Même convention SSE que
+// ai-analyze-article-stream (routes/reassort/ai.js) : POST + fetch().body.getReader() côté client,
+// jamais EventSource natif (pas de support POST/Authorization custom).
+router.post('/stockout-episodes/period-analysis-stream', async (req, res) => {
+  const shopId = resolveShopId(req);
+  if (!shopId) {
+    return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+  }
+  const { start, end } = req.body || {};
+  if (!start || !end) {
+    return res.status(400).json({ success: false, message: 'Paramètres start et end (dates) requis.' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { name: true, reference: true } });
+    const summary = await getPeriodLossSummary(shopId, { startDate: start, endDate: end });
+    const analysis = await analyzePeriodLoss(shop?.name || 'Magasin', shop?.reference || shopId, summary, (chunk) => send('chunk', { text: chunk }));
+    send('done', { ...analysis, summary });
+    res.end();
+  } catch (error) {
+    send('error', { message: error.message });
+    res.end();
+  }
+});
+
 // POST /api/reassort/stockout-episodes/:id/analyze - module Ruptures, analyse IA À LA DEMANDE
 // (bouton, jamais automatique) de la section "Détection / Commande / Prise en charge" d'UN épisode
 // précis (demande explicite du 18/10/2026 : "cette partie aussi on doit avoir une analyse Ia").
