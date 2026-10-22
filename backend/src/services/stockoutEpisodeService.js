@@ -901,10 +901,25 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
   // computeAndPersistOpenEpisodeStatuses (colonnes stockées), durationHours est calculé à la volée
   // ci-dessous comme pour getOpenEpisodes.
   const now = new Date();
+  // BUG CORRIGÉ le 22/10/2026 (signalé avec capture : colonne "Prix" affichant "NaN CFA" sur des
+  // articles) — StockoutEpisode n'a PAS de colonne sellingPrice en base (seul ProposalLine en a
+  // une) : en mode période, les épisodes bruts de prisma.findMany() ci-dessus n'ont donc jamais
+  // cette propriété (contrairement à getOpenEpisodes(), qui l'attache depuis ProductCache). Le
+  // frontend recevait `sellingPrice: undefined`, et `e.sellingPrice !== null` était vrai pour
+  // `undefined` (jamais égal à `null` en JS strict), menant à Math.round(undefined) = NaN au lieu
+  // du "—" attendu.
+  const periodModeEans = periodMode ? [...new Set(openEpisodes.map((e) => e.ean))] : [];
+  const periodModePriceByEan = periodMode && periodModeEans.length
+    ? new Map((await prisma.productCache.findMany({
+        where: { rposShopId, ean: { in: periodModeEans } },
+        select: { ean: true, sellingPrice: true },
+      })).map((p) => [p.ean, p.sellingPrice]))
+    : new Map();
   const episodesForStats = periodMode
     ? openEpisodes.map((e) => ({
         ...e,
         durationHours: Math.round((((e.endedAt || now).getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10,
+        sellingPrice: periodModePriceByEan.get(e.ean) ?? null,
       }))
     : openEpisodes;
 
