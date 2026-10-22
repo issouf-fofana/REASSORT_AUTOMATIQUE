@@ -6,7 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutDailyLossSnapshotJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOverstockReportSnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutDailyLossSnapshotJob, startOrRestartSupplierOrdersSyncJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOverstockReportSnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -244,6 +244,9 @@ async function start() {
     // "Analyse par rayon"/"Priorisation par rayon" doit refléter la période choisie, pas un total
     // global (toutes les 2h par défaut, backfill 95 jours au premier passage).
     await startOrRestartStockoutDailyLossSnapshotJob();
+    // Tableau de bord lent (10-30s, demande explicite du 22/10/2026) : GET /reassort/orders
+    // appelait RPOS en direct à chaque chargement — synchro en tâche de fond toutes les 10 min.
+    await startOrRestartSupplierOrdersSyncJob();
     // Résout automatiquement secteur/rayon pour les épisodes EN_COURS encore à null (anciens,
     // ouverts avant le correctif RPOS, ou tout cas résiduel) — filet de sécurité en continu, pas
     // seulement à la création d'un épisode (horaire configurable, toutes les 6h par défaut).

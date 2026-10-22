@@ -9,6 +9,7 @@ const { runStockMoveSync } = require('./stockMoveSyncJob');
 const { runStockSnapshotJob } = require('./stockSnapshotJob');
 const { runStockoutLossRecalcJob } = require('./stockoutLossRecalcJob');
 const { runStockoutDailyLossSnapshotJob } = require('./stockoutDailyLossSnapshotJob');
+const { runSupplierOrdersSyncJob } = require('./supplierOrdersSyncJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutCatchUpResolveJob } = require('./stockoutCatchUpResolveJob');
 const { runStockoutProductCacheRefreshJob } = require('./stockoutProductCacheRefreshJob');
@@ -36,6 +37,7 @@ let currentStockMoveSyncTask = null;
 let currentStockSnapshotTask = null;
 let currentStockoutLossRecalcTask = null;
 let currentStockoutDailyLossSnapshotTask = null;
+let currentSupplierOrdersSyncTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutCatchUpResolveTask = null;
 let currentStockoutProductCacheRefreshTask = null;
@@ -64,6 +66,7 @@ const stockMoveSyncLock = createJobLock('Synchronisation des mouvements de stock
 const stockSnapshotLock = createJobLock('Capture des snapshots de stock (ruptures)');
 const stockoutLossRecalcLock = createJobLock('Recalcul de la perte des ruptures en cours');
 const stockoutDailyLossSnapshotLock = createJobLock('Précalcul journalier du CA perdu par rayon');
+const supplierOrdersSyncLock = createJobLock('Synchronisation du cache des commandes fournisseur RPOS');
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutCatchUpResolveLock = createJobLock('Rattrapage de résolution des ruptures (arrivage déjà en base)');
 const stockoutProductCacheRefreshLock = createJobLock('Resynchronisation du stock RPOS des ruptures en cours');
@@ -356,6 +359,43 @@ async function startOrRestartStockoutDailyLossSnapshotJob() {
   }).catch((err) => console.error('[cron] Erreur (précalcul initial CA perdu par rayon):', err));
 
   console.log(`⏰ Précalcul journalier du CA perdu par rayon planifié: ${cronSchedule}`);
+}
+
+/** (Re)programme la synchro du cache local des commandes fournisseur RPOS (supplierOrdersSyncJob.js). */
+async function startOrRestartSupplierOrdersSyncJob() {
+  if (currentSupplierOrdersSyncTask) {
+    currentSupplierOrdersSyncTask.stop();
+    currentSupplierOrdersSyncTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.SUPPLIER_ORDERS_SYNC_ENABLED))) {
+    console.log('⏸️  Synchronisation du cache des commandes fournisseur désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.SUPPLIER_ORDERS_SYNC_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), synchro des commandes fournisseur non planifiée`);
+    return;
+  }
+
+  currentSupplierOrdersSyncTask = cron.schedule(cronSchedule, () => {
+    supplierOrdersSyncLock(async () => {
+      console.log('[cron] Démarrage de la synchronisation du cache des commandes fournisseur...');
+      await trackJobRun('supplierOrdersSync', runSupplierOrdersSyncJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  // Rattrapage immédiat au démarrage (même principe que les autres snapshots ci-dessus) — sans ça,
+  // le Tableau de bord resterait lent (appel RPOS direct via la route /orders avant ce correctif)
+  // jusqu'au premier créneau cron, potentiellement plusieurs minutes après un déploiement.
+  supplierOrdersSyncLock(async () => {
+    console.log('[cron] Synchronisation initiale du cache des commandes fournisseur (rattrapage au démarrage)...');
+    await trackJobRun('supplierOrdersSync', runSupplierOrdersSyncJob);
+  }).catch((err) => console.error('[cron] Erreur (synchro initiale commandes fournisseur):', err));
+
+  console.log(`⏰ Synchronisation du cache des commandes fournisseur planifiée: ${cronSchedule}`);
 }
 
 /** (Re)programme la résolution périodique du secteur/rayon des épisodes EN_COURS encore à null (stockoutSectorBackfillJob.js). */
@@ -821,6 +861,7 @@ module.exports = {
   startOrRestartStockSnapshotJob,
   startOrRestartStockoutLossRecalcJob,
   startOrRestartStockoutDailyLossSnapshotJob,
+  startOrRestartSupplierOrdersSyncJob,
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutCatchUpResolveJob,
   startOrRestartStockoutProductCacheRefreshJob,

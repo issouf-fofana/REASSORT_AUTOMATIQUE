@@ -2210,6 +2210,47 @@ model StockoutDailyLossByDepartment {
   @@map("stockout_daily_loss_by_department")
 }
 
+// Cache local des commandes fournisseur RPOS (demande explicite du 22/10/2026 : "ca prend du temps
+// pour affiché" — Tableau de bord mesuré à 10-30s avant affichage, seul coupable identifié parmi
+// tous ses widgets : GET /reassort/orders appelait rpos.getSupplierOrders() en direct à CHAQUE
+// chargement de page, un vrai aller-retour réseau vers le serveur RPOS du magasin, potentiellement
+// lent selon sa charge — même type de lenteur déjà rencontré ailleurs cette session pour d'autres
+// appels RPOS). Un job dédié (supplierOrdersSyncJob.js) synchronise régulièrement cette table ;
+// la route /orders lit désormais ce cache local, instantané, au lieu d'attendre RPOS en direct.
+model SupplierOrderCache {
+  id String @id @default(cuid())
+
+  rposShopId String @map("rpos_shop_id")
+  rposPosId  String @map("rpos_pos_id")
+  // ID RPOS de la commande elle-même (PAS l'id cuid ci-dessus, qui n'est qu'une clé primaire locale)
+  // — c'est sur CE champ que la route /orders matche currentOrderIds pour distinguer les commandes
+  // encore actives côté RPOS de celles supprimées depuis (cf. ProposalOrder.rposOrderId, lu depuis
+  // la route pour détecter ce cas, inchangé par ce cache).
+  rposOrderId String @map("rpos_order_id")
+
+  reference         String  @map("reference")
+  externalReference String? @map("external_reference")
+  date              DateTime? @map("date")
+  deliveryDate      DateTime? @map("delivery_date")
+  statusDisplay     String  @map("status_display")
+  // RPOS renvoie supplier comme un objet { code, name }, pas une chaîne (découvert en déployant ce
+  // job : "Argument supplier: Invalid value provided. Expected String or Null, provided Object.") —
+  // PurchaseList.tsx lit déjà o.supplier.code/o.supplier.name séparément (_supplierLabel), donc les
+  // deux colonnes à part plutôt qu'un seul champ String qui aurait perdu cette structure.
+  supplierCode      String? @map("supplier_code")
+  supplierName      String? @map("supplier_name")
+  createdBy         String? @map("created_by")
+
+  syncedAt DateTime @updatedAt @map("synced_at")
+
+  // Un seul enregistrement par commande RPOS pour un magasin donné — le job supprime puis réinsère
+  // toutes les lignes d'un magasin à chaque synchro (pas d'upsert ligne à ligne), donc cette
+  // contrainte sert surtout de garde-fou plutôt que d'être réellement exercée en pratique.
+  @@unique([rposShopId, rposOrderId])
+  @@index([rposShopId, rposPosId])
+  @@map("supplier_order_cache")
+}
+
 // Précalcul du rapport Surstock (demande explicite du 21/10/2026 : "il charge trop pourqhoi ? il
 // fait les calcule quand j'actualise ?") — le calcul lui-même est rapide isolé (~0.6s mesuré), mais
 // devient lent (jusqu'à 14s observés) quand il tombe en concurrence avec les jobs de synchro RPOS

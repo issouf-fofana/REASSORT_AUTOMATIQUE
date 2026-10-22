@@ -260,18 +260,35 @@ router.get('/orders', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     const posId = resolvePosId(req);
-    const page = req.query.page ? parseInt(req.query.page, 10) : 1;
 
     if (!shopId || !posId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
 
-    const data = await rpos.getSupplierOrders(posId, { shopId, page });
-    const currentOrderIds = new Set((data.results || []).map((o) => o.id));
+    // Lit le cache local (supplierOrdersSyncJob.js, toutes les 10 min) au lieu d'appeler RPOS en
+    // direct ici (BUG DE PERFORMANCE CORRIGÉ le 22/10/2026 : "ca prend du temps pour affiché" —
+    // Tableau de bord mesuré à 10-30s avant affichage, cet appel RPOS synchrone en était l'unique
+    // cause parmi tous ses widgets). Pas de vraie pagination ici (aucune page frontend n'utilise
+    // `page` sur cette route, vérifié avant ce correctif) : le cache couvre toujours les mêmes 50
+    // commandes les plus récentes que l'ancien appel par défaut (page=1).
+    const cachedOrders = await prisma.supplierOrderCache.findMany({
+      where: { rposShopId: shopId, rposPosId: posId },
+      orderBy: { date: 'desc' },
+    });
+    const currentOrderIds = new Set(cachedOrders.map((o) => o.rposOrderId));
 
-    const orders = (data.results || []).map((o) => ({
-      ...o,
-      external_reference: (o.external_reference || '').replace('[REASSORT-IA]', '').trim(),
+    const orders = cachedOrders.map((o) => ({
+      id: o.rposOrderId,
+      reference: o.reference,
+      external_reference: (o.externalReference || '').replace('[REASSORT-IA]', '').trim(),
+      date: o.date,
+      delivery_date: o.deliveryDate,
+      status_display: o.statusDisplay,
+      // Reconstruit la forme { code, name } attendue par PurchaseList.tsx (o.supplier.code/.name,
+      // cf. _supplierLabel) — stocké en 2 colonnes à part dans le cache, RPOS renvoyant supplier
+      // comme un objet, jamais une chaîne (cf. commentaire du modèle SupplierOrderCache).
+      supplier: o.supplierCode || o.supplierName ? { code: o.supplierCode, name: o.supplierName } : null,
+      created_by: o.createdBy,
       deletedOnRpos: false,
     }));
 
@@ -318,8 +335,8 @@ router.get('/orders', async (req, res) => {
       success: true,
       data: {
         orders: allOrders,
-        count: (data.count || 0) + deletedOrders.length + restrictedTotalAdjustment,
-        nextPage: data.next_page || null,
+        count: cachedOrders.length + deletedOrders.length + restrictedTotalAdjustment,
+        nextPage: null,
       },
     });
   } catch (error) {

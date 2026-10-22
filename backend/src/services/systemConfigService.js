@@ -43,6 +43,11 @@ const KEYS = {
   // l'utilisateur, pas un total global précalculé. Fréquence modérée (toutes les 2h par défaut) :
   // un jour clos n'est jamais retouché, seul le jour courant est recalculé à chaque passage.
   STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON: 'STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON',
+  // Synchro du cache local des commandes fournisseur RPOS (Tableau de bord, demande explicite du
+  // 22/10/2026 : "ca prend du temps pour affiché") — fréquence plus serrée que les autres snapshots
+  // (toutes les 10 min) car consultée par un DG/manager qui veut une fraîcheur raisonnable, pas un
+  // historique figé comme le CA perdu par rayon ci-dessus.
+  SUPPLIER_ORDERS_SYNC_CRON: 'SUPPLIER_ORDERS_SYNC_CRON',
   // Résolution automatique en continu du secteur/rayon des épisodes EN_COURS encore à null —
   // demande explicite du 18/10/2026 : "fais en sorte quil s'applique a tout ancien comme nouveau"
   // (filet de sécurité, en plus de la résolution déjà faite à la création d'un épisode).
@@ -193,6 +198,7 @@ const KEYS = {
   STOCK_SNAPSHOT_ENABLED: 'STOCK_SNAPSHOT_ENABLED',
   STOCKOUT_LOSS_RECALC_ENABLED: 'STOCKOUT_LOSS_RECALC_ENABLED',
   STOCKOUT_DAILY_LOSS_SNAPSHOT_ENABLED: 'STOCKOUT_DAILY_LOSS_SNAPSHOT_ENABLED',
+  SUPPLIER_ORDERS_SYNC_ENABLED: 'SUPPLIER_ORDERS_SYNC_ENABLED',
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   STOCKOUT_CATCH_UP_RESOLVE_ENABLED: 'STOCKOUT_CATCH_UP_RESOLVE_ENABLED',
   STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED: 'STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED',
@@ -317,6 +323,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
   [KEYS.STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON]: () => process.env.STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON || '20 */2 * * *',
+  [KEYS.SUPPLIER_ORDERS_SYNC_CRON]: () => process.env.SUPPLIER_ORDERS_SYNC_CRON || '*/10 * * * *',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_CRON]: () => process.env.STOCKOUT_CATCH_UP_RESOLVE_CRON || '20 * * * *',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '*/15 * * * *',
@@ -437,6 +444,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCK_SNAPSHOT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_LOSS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_DAILY_LOSS_SNAPSHOT_ENABLED]: () => 'true',
+  [KEYS.SUPPLIER_ORDERS_SYNC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED]: () => 'true',
