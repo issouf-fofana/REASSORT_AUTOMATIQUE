@@ -436,8 +436,13 @@ router.get('/overstock-report/by-shop', async (req, res) => {
   try {
     const { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport } = await resolveOverstockShopFilterAndCache(req);
 
+    // ?all=true (demande explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit
+    // me dire je veux le nombre actuel sur la vue ou tout") — utilisé pour l'export CSV "toutes les
+    // lignes filtrées", qui n'a pas de sens plafonné à la page affichée à l'écran. Filtres/tri
+    // restent appliqués normalement, seule la pagination est contournée.
+    const exportAll = req.query.all === 'true';
     const page = req.query.page ? Math.max(1, Number(req.query.page)) : 1;
-    const pageSize = req.query.pageSize ? Math.min(200, Math.max(1, Number(req.query.pageSize))) : 10;
+    const pageSize = exportAll ? Number.MAX_SAFE_INTEGER : (req.query.pageSize ? Math.min(200, Math.max(1, Number(req.query.pageSize))) : 10);
     const search = req.query.search ? String(req.query.search) : undefined;
     const shopIds = req.query.shops ? String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean) : undefined;
     const sortField = req.query.sortField ? String(req.query.sortField) : undefined;

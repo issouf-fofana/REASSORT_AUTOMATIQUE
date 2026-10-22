@@ -5,6 +5,7 @@ import { AllShopsView } from './AllShopsView';
 import { ConformityTrendChart } from './ConformityTrendChart';
 import { TodayProposalsCard } from './TodayProposalsCard';
 import { TopArticlesCard } from './TopArticlesCard';
+import { FormulaInfoButton } from '../Stockouts/StockoutEpisodePage';
 import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
@@ -43,6 +44,7 @@ export function TableauDeBord() {
   const [proposalCount, setProposalCount] = useState('—');
   const [proposalStatus, setProposalStatus] = useState('Proposition du jour');
   const [ordersPending, setOrdersPending] = useState('—');
+  const [ordersAwaitingDelivery, setOrdersAwaitingDelivery] = useState('—');
   const [conformity, setConformity] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Propositions validées sans modification' });
   const [stockout, setStockout] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Articles déjà en rupture' });
   const [overstock, setOverstock] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Quantités au-delà du besoin' });
@@ -129,9 +131,13 @@ export function TableauDeBord() {
     try {
       const data = await apiFetch<{ orders: SupplierOrder[] }>(`/reassort/orders?${qs}`);
       if (token !== loadTokenRef.current) return;
-      const list = data.orders.slice(0, 8);
-      setOrdersPending(String(list.filter((o) => o.status_display === 'en préparation').length));
-      setOrders(list);
+      // Compté sur TOUTES les commandes reçues (pas seulement les 8 affichées dans la liste
+      // ci-dessous) — demande explicite du 21/10/2026 : "il faut ajouter la partie commande en
+      // attente de livraion sur le dash aussi... ajout un cadre pour ca", à côté de "Commandes en
+      // préparation" qui souffrait du même souci avant (count sur une liste tronquée à 8).
+      setOrdersPending(String(data.orders.filter((o) => o.status_display === 'en préparation').length));
+      setOrdersAwaitingDelivery(String(data.orders.filter((o) => o.status_display === 'en attente de livraison').length));
+      setOrders(data.orders.slice(0, 8));
       setOrdersError(null);
     } catch (err) {
       if (token !== loadTokenRef.current) return;
@@ -193,6 +199,12 @@ export function TableauDeBord() {
         /* Onglets "Ce magasin" / "Tous les magasins" (fusion de Vue globale, 30/09/2026). */
         .reassort-tabs .nav-link { color: #5B6B85; font-weight: 600; border: none; border-bottom: 2px solid transparent; }
         .reassort-tabs .nav-link.active { color: #1B2A4A; border-bottom-color: #F5A623; background: transparent; }
+        /* Grille KPI à 7 cartes sur une seule ligne en grand écran (demande explicite du 21/10/2026 :
+           "fait en sorte que les carte soit sur la meme ligne") — Bootstrap n'a pas de row-cols-xl-7
+           natif (ne va que jusqu'à 6), remplacé par une grille CSS dédiée. */
+        .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+        @media (min-width: 768px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 1200px) { .kpi-grid { grid-template-columns: repeat(7, 1fr); } }
       `}</style>
 
       {!isSingleShop && (
@@ -214,7 +226,7 @@ export function TableauDeBord() {
         <AllShopsView />
       ) : (
         <>
-      <div className="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mb-4">
+      <div className="kpi-grid mb-4">
         <div className="col">
           <div className="card kpi-card h-100 mb-0">
             <div className="card-body d-flex align-items-start gap-2">
@@ -222,7 +234,16 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:cart-check-bold-duotone" className="text-primary"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Articles proposés</p>
+                <p className="kpi-label">
+                  Articles proposés
+                  <FormulaInfoButton
+                    title="Articles proposés"
+                    steps={[
+                      { label: 'Source', detail: 'Nombre d\'articles contenus dans la dernière proposition de réassort générée pour ce magasin (automatiquement chaque nuit, ou manuellement).' },
+                      { label: 'Ce que ça mesure', detail: 'La taille du travail de validation qui attend le magasin — combien d\'articles ont une quantité à commander suggérée.' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{proposalCount}</h3>
               </div>
             </div>
@@ -237,8 +258,50 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:box-minimalistic-bold-duotone" className="text-primary"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Commandes en préparation</p>
+                <p className="kpi-label">
+                  Commandes en préparation
+                  <FormulaInfoButton
+                    title="Commandes en préparation"
+                    steps={[
+                      { label: 'Source', detail: 'Commandes envoyées à RPOS, mais pas encore validées côté système fournisseur (statut "en préparation").' },
+                      { label: 'Ce que ça mesure', detail: 'Les commandes dont le traitement n\'est pas encore terminé — rien à vérifier côté réception pour l\'instant.' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{ordersPending}</h3>
+              </div>
+            </div>
+            <div className="kpi-footer">
+              <Link to="/purchase-list">Voir l'historique</Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Carte ajoutée le 21/10/2026 (demande explicite : "il faut ajouter la partie commande en
+            attente de livraion sur le dash aussi... ajout un cadre pour ca") — une commande "en
+            attente de livraison" est déjà validée (cf. échange du 21/10/2026 : "une commande a
+            ettent de livraison est deja validé... quand il est en preparation il n'est pas validé
+            si il est validé il passe en en attente de livrasion"), distincte de "en préparation" ;
+            même compteur global que celui-là (toutes les commandes reçues, pas seulement les 8
+            affichées dans la liste ci-dessous). */}
+        <div className="col">
+          <div className="card kpi-card h-100 mb-0">
+            <div className="card-body d-flex align-items-start gap-2">
+              <div className="kpi-icon bg-warning-subtle">
+                <iconify-icon icon="solar:delivery-bold-duotone" className="text-warning"></iconify-icon>
+              </div>
+              <div>
+                <p className="kpi-label">
+                  En attente de livraison
+                  <FormulaInfoButton
+                    title="En attente de livraison"
+                    steps={[
+                      { label: 'Source', detail: 'Commandes déjà VALIDÉES côté fournisseur (RPOS), en transit, mais pas encore réceptionnées en magasin.' },
+                      { label: 'Ce que ça mesure', detail: 'Les commandes à surveiller pour la réception — une commande "en préparation" n\'est pas encore validée ; une fois validée, elle passe ici.' },
+                    ]}
+                  />
+                </p>
+                <h3 className="kpi-value">{ordersAwaitingDelivery}</h3>
               </div>
             </div>
             <div className="kpi-footer">
@@ -254,7 +317,17 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:double-check-bold-duotone" className="text-success"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Taux de conformité</p>
+                <p className="kpi-label">
+                  Taux de conformité
+                  <FormulaInfoButton
+                    title="Taux de conformité"
+                    steps={[
+                      { label: 'Périmètre', detail: 'Parmi les lignes des propositions VALIDÉES (au moins un rayon traité) pour ce magasin.' },
+                      { label: 'Calcul', detail: 'Proportion de lignes où la quantité finalement validée par le magasin est EXACTEMENT égale à la quantité suggérée par le système, sans modification manuelle.' },
+                      { label: 'Ce que ça mesure', detail: 'À quel point le magasin fait confiance aux suggestions automatiques — un taux bas signale soit des suggestions à améliorer, soit des ajustements terrain fréquents (ex: stock réel différent du stock RPOS).' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{conformity.text}</h3>
               </div>
             </div>
@@ -269,7 +342,17 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:danger-triangle-bold-duotone" className="text-danger"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label" title="Parmi les articles des commandes validées, proportion qui était déjà en rupture de stock AU MOMENT de la génération de la proposition — mesure si le réassort intervient assez tôt, pas un taux de non-conformité de commande.">Taux de rupture de stock</p>
+                <p className="kpi-label">
+                  Taux de rupture de stock
+                  <FormulaInfoButton
+                    title="Taux de rupture de stock"
+                    steps={[
+                      { label: 'Périmètre', detail: 'Parmi les lignes des propositions VALIDÉES pour ce magasin, celles dont le délai avant rupture estimé est connu.' },
+                      { label: 'Calcul', detail: 'Proportion de ces lignes où l\'article était déjà en rupture (stock à 0 ou sous le seuil) AU MOMENT de la génération de la proposition, pas après.' },
+                      { label: 'Ce que ça mesure', detail: 'Si le réassort intervient assez tôt — ce n\'est PAS un taux de non-conformité de commande, mais un signal sur la réactivité du processus de réapprovisionnement.' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{stockout.text}</h3>
               </div>
             </div>
@@ -284,7 +367,17 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:box-bold-duotone" className="text-danger"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Taux de surstock</p>
+                <p className="kpi-label">
+                  Taux de surstock
+                  <FormulaInfoButton
+                    title="Taux de surstock"
+                    steps={[
+                      { label: 'Périmètre', detail: 'Parmi les lignes des propositions VALIDÉES pour ce magasin, celles où la quantité validée et la vente moyenne sont connues.' },
+                      { label: 'Calcul', detail: 'Proportion de ces lignes où la quantité finalement commandée (après ajustement du magasin) dépasse largement le besoin théorique (vente moyenne + stock de sécurité), au-delà d\'un seuil configurable.' },
+                      { label: 'Ce que ça mesure', detail: 'Les corrections manuelles excessives à la hausse — signale un risque de surstock créé par une décision humaine, pas par le calcul automatique.' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{overstock.text}</h3>
               </div>
             </div>
@@ -299,7 +392,17 @@ export function TableauDeBord() {
                 <iconify-icon icon="solar:target-bold-duotone" className="text-info"></iconify-icon>
               </div>
               <div>
-                <p className="kpi-label">Précision des prévisions</p>
+                <p className="kpi-label">
+                  Précision des prévisions
+                  <FormulaInfoButton
+                    title="Précision des prévisions"
+                    steps={[
+                      { label: 'Périmètre', detail: 'Parmi les lignes des propositions VALIDÉES pour ce magasin, celles dont la fenêtre d\'observation (7 jours après validation par défaut) est déjà écoulée.' },
+                      { label: 'Calcul', detail: 'Compare la quantité VENDUE réellement sur cette fenêtre à la quantité qu\'aurait prédite la vente moyenne hebdomadaire au moment de la proposition. "Précis" si l\'écart reste sous un seuil configurable (±20% par défaut).' },
+                      { label: 'Ce que ça mesure', detail: 'La fiabilité des prévisions de vente du système — reste N/A tant qu\'aucune commande validée n\'a dépassé sa fenêtre d\'observation.' },
+                    ]}
+                  />
+                </p>
                 <h3 className="kpi-value">{forecastAccuracy.text}</h3>
               </div>
             </div>

@@ -288,6 +288,18 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   const proposalCountByShop = new Map();
   for (const p of proposals) proposalCountByShop.set(p.rposShopId, (proposalCountByShop.get(p.rposShopId) || 0) + 1);
 
+  // Jour de la DERNIÈRE proposition générée par magasin sur la période (demande explicite du
+  // 21/10/2026 : "je doit voir la periode de surtok... quand es ce que ca pris fin ou ca continue")
+  // — sert à déterminer si un article encore en surstock à cette dernière génération est "toujours
+  // en cours" (periodEnd approximatif) ou s'il est réellement sorti du surstock avant la fin de la
+  // période choisie.
+  const lastProposalDayByShop = new Map();
+  for (const p of proposals) {
+    const day = p.generatedAt.toISOString().slice(0, 10);
+    const current = lastProposalDayByShop.get(p.rposShopId);
+    if (!current || day > current) lastProposalDayByShop.set(p.rposShopId, day);
+  }
+
   const lines = await prisma.proposalLine.findMany({
     where: { proposalId: { in: proposals.map((p) => p.id) } },
     select: { proposalId: true, ean: true, label: true, department: true, stockAtGeneration: true, avgWeeklySales: true, sellingPrice: true },
@@ -298,22 +310,31 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   // agrégation par (JOUR, magasin) : nombre d'articles distincts en surstock ce jour-là, par magasin
   // — demande explicite du 21/10/2026 : "quand je fait le filtre sur un mag ou deux la coube doit
   // mettre ajour" — permet au frontend de recalculer la courbe filtrée sans rappel serveur.
-  const byShopEan = new Map(); // `${rposShopId}:${ean}` -> { overstockCount, latest: {...} }
+  const byShopEan = new Map(); // `${rposShopId}:${ean}` -> { overstockCount, latest: {...}, firstOverstockDate, lastOverstockDate }
   const overstockEansByDayShop = new Map(); // 'YYYY-MM-DD:rposShopId' -> Set<ean>
   for (const l of lines) {
     const rposShopId = shopIdByProposalId.get(l.proposalId);
     const isOverstocked = (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage;
     if (!isOverstocked) continue;
     const key = `${rposShopId}:${l.ean}`;
-    if (!byShopEan.has(key)) byShopEan.set(key, { rposShopId, ean: l.ean, overstockCount: 0, latest: null });
+    const day = dayByProposalId.get(l.proposalId);
+    if (!byShopEan.has(key)) {
+      byShopEan.set(key, { rposShopId, ean: l.ean, overstockCount: 0, latest: null, firstOverstockDate: day, lastOverstockDate: day });
+    }
     const entry = byShopEan.get(key);
     entry.overstockCount += 1;
     // "latest" : la dernière ligne rencontrée l'emporte (lines n'est pas garanti trié par date, mais
     // peu importe ici — juste besoin d'UN jeu de valeurs représentatif pour l'affichage, le ratio de
     // persistance est le chiffre qui compte réellement, pas la valeur exacte affichée à côté).
     entry.latest = l;
+    // Période de surstock (demande explicite du 21/10/2026 : "je doit voir la periode de surtok...
+    // quand es ce que ca pris fin ou ca continue") — première et dernière date, parmi TOUTES les
+    // propositions de la période, où cet article était en surstock dans ce magasin. `lines` n'est
+    // pas garanti trié par date (même remarque que `latest` ci-dessus), d'où ces comparaisons plutôt
+    // qu'une simple affectation.
+    if (day < entry.firstOverstockDate) entry.firstOverstockDate = day;
+    if (day > entry.lastOverstockDate) entry.lastOverstockDate = day;
 
-    const day = dayByProposalId.get(l.proposalId);
     const dayShopKey = `${day}:${rposShopId}`;
     if (!overstockEansByDayShop.has(dayShopKey)) overstockEansByDayShop.set(dayShopKey, new Set());
     overstockEansByDayShop.get(dayShopKey).add(l.ean);
@@ -350,6 +371,13 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     const l = e.latest;
     const avgWeeklySales = Math.round((l.avgWeeklySales || 0) * 10) / 10;
     const denom = shopProposalDenominator(e.rposShopId);
+    // "Toujours en cours" (demande explicite du 21/10/2026 : "je doit voir la periode de surtok...
+    // quand es ce que ca pris fin ou ca continue") : l'article était en surstock à la DERNIÈRE
+    // proposition générée pour ce magasin sur la période — donc rien n'indique qu'il en soit sorti
+    // avant la fin de la fenêtre choisie. Sinon, lastOverstockDate est la date réelle de sortie du
+    // surstock (dernière fois où on l'a vu en surstock, avant une proposition suivante qui ne
+    // l'avait plus).
+    const stillOverstocked = e.lastOverstockDate === lastProposalDayByShop.get(e.rposShopId);
     return {
       rposShopId: e.rposShopId,
       shopReference: shop?.reference || null,
@@ -366,6 +394,9 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       overstockCount: e.overstockCount,
       proposalCount: denom,
       overstockRatio: Math.round((e.overstockCount / denom) * 100) / 100,
+      firstOverstockDate: e.firstOverstockDate,
+      lastOverstockDate: e.lastOverstockDate,
+      stillOverstocked,
     };
   }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
 
@@ -742,6 +773,7 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
 const BY_SHOP_SORTABLE_FIELDS = new Set([
   'label', 'shopName', 'department', 'stock', 'sellingPrice', 'avgDailySales',
   'avgWeeklySales', 'avgMonthlySales', 'weeksOfCoverage', 'overstockRatio', 'scrapQuantity90d',
+  'firstOverstockDate',
 ]);
 
 function getSortValue(row, field) {

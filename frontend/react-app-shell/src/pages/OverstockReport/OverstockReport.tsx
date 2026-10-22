@@ -40,6 +40,12 @@ type ShopArticleRow = {
   scrapQuantity90d: number;
   scrapMoveCount90d: number;
   lastScrapDate: string | null;
+  // Période de surstock (demande explicite du 21/10/2026 : "je doit voir la periode de surtok...
+  // quand es ce que ca pris fin ou ca continue") — n'existe qu'en mode période (undefined sinon,
+  // la notion n'a pas de sens sur un simple snapshot "situation actuelle").
+  firstOverstockDate?: string;
+  lastOverstockDate?: string;
+  stillOverstocked?: boolean;
 };
 
 type CommonShopEntry = {
@@ -454,6 +460,14 @@ export function OverstockReport() {
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [activeTab, setActiveTab] = useState<TabKey>(isSingleShop ? 'byShop' : 'common');
+  // État du bouton Export, générique aux 3 onglets (demande explicite du 21/10/2026 : le bouton
+  // export doit être sur la ligne des onglets pour "Surstock commun", "Toujours en surstock" ET
+  // "Par magasin", avec le même choix "vue actuelle / tout" partout) — remonté par chaque tableau
+  // enfant via son propre callback, car chacun gère sa page affichée différemment (ByShopTable :
+  // pagination serveur ; CommonArticlesTable : pagination client sur une liste déjà chargée).
+  const [commonPageRows, setCommonPageRows] = useState<FlatCommonRow[]>([]);
+  const [persistentPageRows, setPersistentPageRows] = useState<FlatCommonRow[]>([]);
+  const [byShopExportState, setByShopExportState] = useState<{ onClick: () => void; exporting: boolean; disabled: boolean } | null>(null);
   // Multi-sélection magasin (demande explicite du 21/10/2026 : "donne la possiblité de prendre un
   // ou plusieur magasin") — Set vide = "Tous les magasins", comme avant la chaîne vide.
   const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
@@ -604,77 +618,27 @@ export function OverstockReport() {
       .filter((a) => a.shops.length > 0);
   }, [data, shopFilters, search, rangeFilters, scrapOnly]);
 
-  // Versions "recherche seule, sans le filtre magasin" — utilisées quand l'utilisateur choisit
-  // "tous les magasins" dans la confirmation d'export ci-dessous, même si un magasin précis est
-  // sélectionné à l'écran (demande explicite du 21/10/2026 : "avant de le telecharger demande si il
-  // prend tout pour le mag ou le filtre appliqué").
-  const searchOnlyByShop = useMemo(() => {
-    if (!data) return [];
-    const q = search.trim().toLowerCase();
-    return data.articlesByShop.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
-  }, [data, search]);
-  const searchOnlyCommon = useMemo(() => {
-    if (!data) return [];
-    const q = search.trim().toLowerCase();
-    return data.commonArticles.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
-  }, [data, search]);
-  const searchOnlyPersistent = useMemo(() => {
-    if (!data?.persistentArticles) return [];
-    const q = search.trim().toLowerCase();
-    return data.persistentArticles.filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q));
-  }, [data, search]);
-
-  // Avant chaque export, demande explicitement si l'export doit rester limité au magasin
-  // actuellement filtré à l'écran, ou couvrir tous les magasins (recherche texte toujours
-  // appliquée dans les deux cas — seul le filtre magasin est en jeu ici). N'affiche la question que
-  // si un filtre magasin est réellement actif ; sinon rien à choisir, export direct.
   function openScrapDetail(ean: string, label: string) {
     navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report`);
   }
 
-  function confirmShopScope(): 'filtered' | 'all' | null {
-    if (shopFilters.size === 0) return 'all';
-    const shopLabels = shopOptions.filter(([id]) => shopFilters.has(id)).map(([, label]) => label);
-    const shopsText = shopFilters.size === 1 ? shopLabels[0] : `${shopFilters.size} magasins sélectionnés`;
+  function exportFlatCommonCsv(pageRows: FlatCommonRow[], allRows: FlatCommonRow[], filenamePrefix: string) {
+    // Même choix "vue actuelle vs tout" que ByShopTable (demande explicite du 21/10/2026 : "il me
+    // demande si je veux la feuille active ou tout les donner pour ce mag sur la periode de
+    // l'analyse ? si oui il export sinon il retourne... fait pareil pour tout les autre onglé").
     const wantsAll = window.confirm(
-      `Un filtre magasin est actif (${shopsText}).\n\nOK = exporter TOUS les magasins\nAnnuler = exporter seulement ${shopsText}`
+      `Exporter combien de lignes ?\n\nOK = TOUTES les lignes filtrées (${allRows.length.toLocaleString('fr-FR')})\nAnnuler = seulement la page affichée (${pageRows.length})`
     );
-    return wantsAll ? 'all' : 'filtered';
-  }
-
-  function exportByShopCsv() {
-    const scope = confirmShopScope();
-    if (!scope) return;
-    const rows = scope === 'all' ? searchOnlyByShop : filteredByShop;
+    const rows = wantsAll ? allRows : pageRows;
     downloadCsv(
-      `surstock-par-magasin-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
-      rows.map((a) => [
-        a.shopName, a.shopReference, a.ean, a.label, a.department, a.stock, a.sellingPrice, a.avgDailySales, a.avgWeeklySales, a.avgMonthlySales, a.weeksOfCoverage, a.overstockRatio !== undefined ? fmtPct(a.overstockRatio) : '',
-        a.scrapQuantity90d, a.scrapMoveCount90d, a.lastScrapDate ? new Date(a.lastScrapDate).toLocaleDateString('fr-FR') : '',
-      ])
-    );
-  }
-
-  function exportGroupedCsv(filteredRows: CommonArticle[], searchOnlyRows: CommonArticle[], filenamePrefix: string) {
-    const scope = confirmShopScope();
-    if (!scope) return;
-    const rows = scope === 'all' ? searchOnlyRows : filteredRows;
-    const out: (string | number | null)[][] = [];
-    for (const a of rows) {
-      for (const s of a.shops) {
-        out.push([
-          a.ean, a.label, a.department, s.shopName, s.shopReference, s.stock, s.sellingPrice,
-          s.avgDailySales, s.avgWeeklySales, s.avgMonthlySales, s.weeksOfCoverage,
-          s.overstockRatio !== undefined ? fmtPct(s.overstockRatio) : '',
-          s.scrapQuantity90d, s.scrapMoveCount90d, s.lastScrapDate ? new Date(s.lastScrapDate).toLocaleDateString('fr-FR') : '',
-        ]);
-      }
-    }
-    downloadCsv(
-      `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `${filenamePrefix}-${wantsAll ? 'complet' : 'page-actuelle'}-${new Date().toISOString().slice(0, 10)}.csv`,
       ['EAN', 'Article', 'Rayon', 'Magasin', 'Référence magasin', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
-      out
+      rows.map((r) => [
+        r.ean, r.label, r.department, r.shopName, r.shopReference, r.stock, r.sellingPrice,
+        r.avgDailySales, r.avgWeeklySales, r.avgMonthlySales, r.weeksOfCoverage,
+        r.overstockRatio !== undefined ? fmtPct(r.overstockRatio) : '',
+        r.scrapQuantity90d, r.scrapMoveCount90d, r.lastScrapDate ? new Date(r.lastScrapDate).toLocaleDateString('fr-FR') : '',
+      ])
     );
   }
 
@@ -991,23 +955,6 @@ export function OverstockReport() {
               Filtres avancés{activeRangeFilterCount > 0 ? ` (${activeRangeFilterCount})` : ''}
               <iconify-icon icon={rangeFiltersOpen ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ fontSize: '12px', opacity: .6 }}></iconify-icon>
             </button>
-            <div className="ms-auto">
-              {activeTab === 'byShop' && (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportByShopCsv}>
-                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-                </button>
-              )}
-              {activeTab === 'common' && (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredCommon, searchOnlyCommon, 'surstock-commun')}>
-                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-                </button>
-              )}
-              {activeTab === 'persistent' && (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => exportGroupedCsv(filteredPersistent, searchOnlyPersistent, 'surstock-toujours')}>
-                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-                </button>
-              )}
-            </div>
           </div>
 
           {rangeFiltersOpen && (
@@ -1113,6 +1060,11 @@ export function OverstockReport() {
         <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
       ) : data ? (
         <>
+          {/* Bouton Export sur la ligne des onglets, pour les 3 (demande explicite du 21/10/2026 :
+              "le bouton export il faut mettre a coté"... "fait pareil pour tout les autre onglé
+              comme Toujours en surstock, Par magasin") — supprimé de la barre de filtres tout en
+              haut de page, comme demandé explicitement ("le bouton export en haut il faut le
+              supprimé"). */}
           <div className="osr-tabs">
             {!isSingleShop && (
               <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>
@@ -1127,6 +1079,38 @@ export function OverstockReport() {
             <button type="button" className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`} onClick={() => setActiveTab('byShop')}>
               Par magasin ({filteredByShop.length})
             </button>
+            <div className="ms-auto d-flex align-items-center">
+              {activeTab === 'common' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={() => exportFlatCommonCsv(commonPageRows, flattenCommonArticles(filteredCommon), 'surstock-commun')}
+                  disabled={filteredCommon.length === 0}
+                >
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
+                </button>
+              )}
+              {activeTab === 'persistent' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={() => exportFlatCommonCsv(persistentPageRows, flattenCommonArticles(filteredPersistent), 'surstock-toujours')}
+                  disabled={filteredPersistent.length === 0}
+                >
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
+                </button>
+              )}
+              {activeTab === 'byShop' && byShopExportState && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={byShopExportState.onClick}
+                  disabled={byShopExportState.exporting || byShopExportState.disabled}
+                >
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> {byShopExportState.exporting ? 'Export en cours...' : 'Exporter (CSV)'}
+                </button>
+              )}
+            </div>
           </div>
 
           {activeTab === 'common' && (
@@ -1136,6 +1120,7 @@ export function OverstockReport() {
               threshold={data.minWeeksOfCoverage}
               onOpenDetail={openScrapDetail}
               emptyMessage="Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil."
+              onPageRowsChange={setCommonPageRows}
             />
           )}
 
@@ -1152,6 +1137,7 @@ export function OverstockReport() {
                 threshold={data.minWeeksOfCoverage}
                 onOpenDetail={openScrapDetail}
                 emptyMessage="Aucun article en surstock de façon persistante sur cette période pour ce seuil."
+                onPageRowsChange={setPersistentPageRows}
               />
             </>
           )}
@@ -1166,6 +1152,7 @@ export function OverstockReport() {
               scrapOnly={scrapOnly}
               threshold={data.minWeeksOfCoverage}
               onOpenDetail={openScrapDetail}
+              onExportReady={setByShopExportState}
             />
           )}
         </>
@@ -1195,7 +1182,7 @@ type ByShopPageData = {
 // de la page (search/shopFilters/rangeFilters/scrapOnly) et les paramètres de période, passés en
 // props pour reconstruire la requête serveur à chaque changement de page/tri/filtre.
 function ByShopTable({
-  periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, threshold, onOpenDetail,
+  periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, threshold, onOpenDetail, onExportReady,
 }: {
   periodParams: { start?: string; end?: string };
   minWeeksOfCoverage: number;
@@ -1205,6 +1192,11 @@ function ByShopTable({
   scrapOnly: boolean;
   threshold: number;
   onOpenDetail: (ean: string, label: string) => void;
+  // Expose le déclencheur d'export au parent (demande explicite du 21/10/2026 : bouton Export
+  // placé sur la ligne des onglets, hors de ce composant, pour les 3 onglets de la page) — plutôt
+  // que de rendre son propre bouton, ByShopTable prévient le parent à chaque changement d'état
+  // exportable (prêt/en cours/vide) via ce callback.
+  onExportReady: (state: { onClick: () => void; exporting: boolean; disabled: boolean } | null) => void;
 }) {
   const [page, setPage] = useState(1);
   const [sortField, setSortField] = useState<string | undefined>(undefined);
@@ -1215,15 +1207,17 @@ function ByShopTable({
   // pagination").
   const PAGE_SIZE = 10;
 
-  useEffect(() => { setPage(1); }, [search, shopFilters, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
-
-  useEffect(() => {
-    let cancelled = false;
+  // Construit les query params communs à l'appel paginé normal et à l'export "tout" (demande
+  // explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit me dire je veux le
+  // nombre actuel sur la vue ou tout") — mêmes filtres actifs dans les deux cas, seule la
+  // pagination diffère (gérée par l'appelant via `all`).
+  function buildQueryParams(overrides?: { all?: boolean }) {
     const params = new URLSearchParams({
       page: String(page),
       pageSize: String(PAGE_SIZE),
       minWeeksOfCoverage: String(minWeeksOfCoverage),
     });
+    if (overrides?.all) params.set('all', 'true');
     if (periodParams.start) params.set('start', periodParams.start);
     if (periodParams.end) params.set('end', periodParams.end);
     if (search.trim()) params.set('search', search.trim());
@@ -1232,11 +1226,18 @@ function ByShopTable({
     if (scrapOnly) params.set('scrapOnly', 'true');
     const activeRanges = Object.fromEntries(Object.entries(rangeFilters).filter(([, r]) => r.min !== '' || r.max !== ''));
     if (Object.keys(activeRanges).length > 0) params.set('rangeFilters', JSON.stringify(activeRanges));
+    return params;
+  }
 
-    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${params.toString()}`)
+  useEffect(() => { setPage(1); }, [search, shopFilters, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${buildQueryParams().toString()}`)
       .then((d) => { if (!cancelled) { setPageData(d); setError(null); } })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, sortField, sortDir]);
 
   function toggleSort(field: string) {
@@ -1253,71 +1254,138 @@ function ByShopTable({
     return <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
   }
 
+  function exportRowsToCsv(rows: ShopArticleRow[], suffix: string) {
+    downloadCsv(
+      `surstock-par-magasin-${suffix}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'En surstock depuis le', 'Toujours en surstock', 'Sorti du surstock le', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
+      rows.map((r) => [
+        r.shopName, r.shopReference, r.ean, r.label, r.department, r.stock, r.sellingPrice, r.avgDailySales, r.avgWeeklySales, r.avgMonthlySales, r.weeksOfCoverage,
+        r.overstockRatio !== undefined ? fmtPct(r.overstockRatio) : '',
+        r.firstOverstockDate ? new Date(r.firstOverstockDate).toLocaleDateString('fr-FR') : '',
+        r.stillOverstocked === undefined ? '' : (r.stillOverstocked ? 'Oui' : 'Non'),
+        r.stillOverstocked === false && r.lastOverstockDate ? new Date(r.lastOverstockDate).toLocaleDateString('fr-FR') : '',
+        r.scrapQuantity90d, r.scrapMoveCount90d, r.lastScrapDate ? new Date(r.lastScrapDate).toLocaleDateString('fr-FR') : '',
+      ])
+    );
+  }
+
+  // Demande explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit me dire je
+  // veux le nombre actuel sur la vue ou tout" — avec la pagination serveur, "la vue" (10 lignes
+  // affichées) et "tout" (toutes les lignes filtrées, potentiellement des milliers) sont deux
+  // exports très différents en taille, jamais la même chose par défaut.
+  const [exporting, setExporting] = useState(false);
+  function handleExportClick() {
+    if (!pageData || pageData.totalCount === 0) return;
+    const wantsAll = window.confirm(
+      `Exporter combien de lignes ?\n\nOK = TOUTES les lignes filtrées (${pageData.totalCount.toLocaleString('fr-FR')})\nAnnuler = seulement la page affichée (${pageData.rows.length})`
+    );
+    if (!wantsAll) {
+      exportRowsToCsv(pageData.rows, 'page-actuelle');
+      return;
+    }
+    setExporting(true);
+    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${buildQueryParams({ all: true }).toString()}`)
+      .then((d) => exportRowsToCsv(d.rows, 'complet'))
+      .catch((err) => window.alert(`Échec de l'export : ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => setExporting(false));
+  }
+
+  // Prévient le parent à chaque changement pertinent (jamais en render direct — setState pendant
+  // le render du parent casserait les règles de React) : le bouton Export sur la ligne des onglets
+  // doit refléter pageData/exporting à tout instant.
+  useEffect(() => {
+    if (pageData === null) { onExportReady(null); return; }
+    onExportReady({ onClick: handleExportClick, exporting, disabled: pageData.totalCount === 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageData, exporting]);
+  useEffect(() => () => onExportReady(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (error) return <div className="text-danger small py-4">Erreur : {error}</div>;
   if (pageData === null) return <div className="text-muted small py-4">Chargement...</div>;
-  if (pageData.totalCount === 0) {
-    return <div className="text-muted small py-4">Aucun article en surstock pour ce seuil.</div>;
-  }
 
   const periodMode = !!pageData.periodMode;
 
   return (
     <>
-      <div className="osr-table-card">
-        <div className="table-responsive">
-          <table className="table align-middle table-hover mb-0">
-            <thead className="bg-light-subtle">
-              <tr>
-                <th className="osr-sortable-th" onClick={() => toggleSort('label')}>Article{sortIcon('label')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('shopName')}>Magasin{sortIcon('shopName')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('department')}>Rayon{sortIcon('department')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('stock')}>Stock{sortIcon('stock')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('sellingPrice')}>Prix de vente{sortIcon('sellingPrice')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('avgDailySales')}>Vente/jour{sortIcon('avgDailySales')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('avgWeeklySales')}>Vente/semaine{sortIcon('avgWeeklySales')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('avgMonthlySales')}>Vente/mois{sortIcon('avgMonthlySales')}</th>
-                <th className="osr-sortable-th" onClick={() => toggleSort('weeksOfCoverage')}>Couverture{sortIcon('weeksOfCoverage')}</th>
-                {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('overstockRatio')}>% du temps en surstock{sortIcon('overstockRatio')}</th>}
-                <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse (90j){sortIcon('scrapQuantity90d')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageData.rows.map((r, i) => (
-                <tr
-                  key={`${r.rposShopId}:${r.ean}:${i}`}
-                  role="button"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => onOpenDetail(r.ean, r.label)}
-                >
-                  <td>
-                    <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{r.label}</div>
-                    <div className="text-muted" style={{ fontSize: '.72rem' }}>{r.ean}</div>
-                  </td>
-                  <td>{r.shopName} ({r.shopReference})</td>
-                  <td>{r.department || '—'}</td>
-                  <td>{r.stock}</td>
-                  <td>{fmtCfa(r.sellingPrice)}</td>
-                  <td>{r.avgDailySales}</td>
-                  <td>{r.avgWeeklySales}</td>
-                  <td>{r.avgMonthlySales}</td>
-                  <td><CoveragePill weeks={r.weeksOfCoverage} threshold={threshold} /></td>
-                  {periodMode && <td>{fmtPct(r.overstockRatio)}</td>}
-                  <td>
-                    {r.scrapQuantity90d > 0 ? (
-                      <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
-                        −{r.scrapQuantity90d} ({r.scrapMoveCount90d})
-                      </span>
-                    ) : (
-                      <span className="text-muted small">Aucune</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <PaginationBar page={pageData.page} totalPages={pageData.totalPages} totalItems={pageData.totalCount} onChange={setPage} />
+      {pageData.totalCount === 0 ? (
+        <div className="text-muted small py-4">Aucun article en surstock pour ce seuil.</div>
+      ) : (
+        <>
+          <div className="osr-table-card">
+            <div className="table-responsive">
+              <table className="table align-middle table-hover mb-0">
+                <thead className="bg-light-subtle">
+                  <tr>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('label')}>Article{sortIcon('label')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('shopName')}>Magasin{sortIcon('shopName')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('department')}>Rayon{sortIcon('department')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('stock')}>Stock{sortIcon('stock')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('sellingPrice')}>Prix de vente{sortIcon('sellingPrice')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('avgDailySales')}>Vente/jour{sortIcon('avgDailySales')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('avgWeeklySales')}>Vente/semaine{sortIcon('avgWeeklySales')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('avgMonthlySales')}>Vente/mois{sortIcon('avgMonthlySales')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('weeksOfCoverage')}>Couverture{sortIcon('weeksOfCoverage')}</th>
+                    {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('overstockRatio')}>% du temps en surstock{sortIcon('overstockRatio')}</th>}
+                    {/* Période de surstock (demande explicite du 21/10/2026 : "je doit voir la
+                        periode de surtok... quand es ce que ca pris fin ou ca continue") — n'existe
+                        qu'en mode période, pas sur un simple snapshot "situation actuelle". */}
+                    {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('firstOverstockDate')}>Période de surstock{sortIcon('firstOverstockDate')}</th>}
+                    <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse (90j){sortIcon('scrapQuantity90d')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageData.rows.map((r, i) => (
+                    <tr
+                      key={`${r.rposShopId}:${r.ean}:${i}`}
+                      role="button"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => onOpenDetail(r.ean, r.label)}
+                    >
+                      <td>
+                        <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{r.label}</div>
+                        <div className="text-muted" style={{ fontSize: '.72rem' }}>{r.ean}</div>
+                      </td>
+                      <td>{r.shopName} ({r.shopReference})</td>
+                      <td>{r.department || '—'}</td>
+                      <td>{r.stock}</td>
+                      <td>{fmtCfa(r.sellingPrice)}</td>
+                      <td>{r.avgDailySales}</td>
+                      <td>{r.avgWeeklySales}</td>
+                      <td>{r.avgMonthlySales}</td>
+                      <td><CoveragePill weeks={r.weeksOfCoverage} threshold={threshold} /></td>
+                      {periodMode && <td>{fmtPct(r.overstockRatio)}</td>}
+                      {periodMode && (
+                        <td style={{ fontSize: '.8rem' }}>
+                          {r.firstOverstockDate ? (
+                            <>
+                              <div>Depuis le {new Date(r.firstOverstockDate).toLocaleDateString('fr-FR')}</div>
+                              {r.stillOverstocked ? (
+                                <span className="osr-pill osr-pill-warning">Toujours en cours</span>
+                              ) : (
+                                <span className="text-muted">Sorti le {r.lastOverstockDate ? new Date(r.lastOverstockDate).toLocaleDateString('fr-FR') : '—'}</span>
+                              )}
+                            </>
+                          ) : '—'}
+                        </td>
+                      )}
+                      <td>
+                        {r.scrapQuantity90d > 0 ? (
+                          <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
+                            −{r.scrapQuantity90d} ({r.scrapMoveCount90d})
+                          </span>
+                        ) : (
+                          <span className="text-muted small">Aucune</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <PaginationBar page={pageData.page} totalPages={pageData.totalPages} totalItems={pageData.totalCount} onChange={setPage} />
+        </>
+      )}
     </>
   );
 }
@@ -1379,7 +1447,7 @@ function flattenCommonArticles(articles: CommonArticle[]): FlatCommonRow[] {
   return rows;
 }
 
-function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMessage }: { rows: FlatCommonRow[]; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void; emptyMessage: string }) {
+function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMessage, onPageRowsChange }: { rows: FlatCommonRow[]; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void; emptyMessage: string; onPageRowsChange?: (pageRows: FlatCommonRow[]) => void }) {
   const [page, setPage] = useState(1);
   // 10 par défaut, même raisonnement que ByShopTable ci-dessus (demande explicite du 21/10/2026).
   const PAGE_SIZE = 10;
@@ -1387,6 +1455,11 @@ function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMe
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paged = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Remonte la page affichée au parent (demande explicite du 21/10/2026 : "le bouton export...
+  // doit etre la pour l'export et il me demande si je veux la feuille active ou tout" — appliqué
+  // aux 3 onglets, pas seulement "Par magasin") — le bouton Export vit sur la ligne des onglets,
+  // hors de ce composant, donc il a besoin de connaître la page actuellement affichée ici.
+  useEffect(() => { onPageRowsChange?.(paged); }, [paged]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (rows.length === 0) {
     return <div className="text-muted small py-4">{emptyMessage}</div>;
