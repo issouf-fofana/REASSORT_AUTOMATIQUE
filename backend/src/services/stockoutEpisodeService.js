@@ -921,6 +921,18 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
   // la valeur reste simplement null (page "estimation indisponible", pas une erreur).
   const totalCaPerdu = [...episodesForStats, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
+  // Deux indicateurs demandés explicitement (21/10/2026) pour distinguer, dans le CA perdu total
+  // ci-dessus, la part où le magasin n'a encore rien commandé (responsabilité magasin) de celle où
+  // une commande existe mais n'est simplement pas encore livrée (délai fournisseur/logistique) —
+  // même ensemble d'épisodes que totalCaPerdu, juste reventilé par deliveryStatus.
+  const allEpisodesForLossBreakdown = [...episodesForStats, ...resolvedEpisodes];
+  const caPerdueSansCommande = allEpisodesForLossBreakdown
+    .filter((e) => e.deliveryStatus === 'SANS_COMMANDE')
+    .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  const caPerdueNonLivree = allEpisodesForLossBreakdown
+    .filter((e) => ['EN_ATTENTE_LIVRAISON', 'EN_RETARD', 'LIVRAISON_DOUTEUSE'].includes(e.deliveryStatus))
+    .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+
   // CORRIGÉ le 19/10/2026 (bug signalé avec capture : donut "99% sans commande" au global, alors
   // que le détail par rayon montrait clairement de nombreux articles "Avec commande") — causeProposee
   // est un champ STOCKÉ en base, calculé UNE SEULE FOIS par diagnoseCause() au moment de la
@@ -948,6 +960,8 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
     openCount: episodesForStats.length,
     avgDurationHours: Math.round(avgDurationHours * 10) / 10,
     totalCaPerduEstime: Math.round(totalCaPerdu),
+    caPerdueSansCommande: Math.round(caPerdueSansCommande),
+    caPerdueNonLivree: Math.round(caPerdueNonLivree),
     causeCounts,
     openEpisodes: episodesForStats,
     totalOrderableArticles,

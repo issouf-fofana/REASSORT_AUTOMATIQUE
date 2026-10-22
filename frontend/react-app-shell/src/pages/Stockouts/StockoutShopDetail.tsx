@@ -5,6 +5,7 @@ import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
 import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
+import { FormulaInfoButton } from './StockoutEpisodePage';
 
 // Détail d'un magasin pour le module Ruptures (demande explicite du 16/10/2026 : "je dois faire
 // comme pour les commande, les article son classer par rayon et quand je clique je peux voir les
@@ -32,12 +33,20 @@ type StockoutEpisode = {
   sellingPrice: number | null;
   deliveryStatus: DeliveryStatus;
   actualReceptionDate: string | null;
+  // Statut brut EN_COURS/RESOLUE (demande explicite du 22/10/2026 : filtre global par statut) —
+  // Prisma le renvoie déjà sur chaque épisode (pas de `select` restrictif côté serveur), simplement
+  // jamais exposé dans ce type avant.
+  status: 'EN_COURS' | 'RESOLUE';
 };
 
 type StockoutSummary = {
   openCount: number;
   avgDurationHours: number;
   totalCaPerduEstime: number;
+  // CA perdu reventilé par situation de commande (demande explicite du 22/10/2026) — calculés côté
+  // serveur sur le même ensemble d'épisodes que totalCaPerduEstime (cf. getDashboardSummary).
+  caPerdueSansCommande: number;
+  caPerdueNonLivree: number;
   causeCounts: Record<string, number>;
   openEpisodes: StockoutEpisode[];
   totalOrderableArticles: number;
@@ -169,6 +178,27 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   // sélecteur propre à StockoutPeriodAnalysis plus bas sur la page).
   const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  // Filtres GLOBAUX (demande explicite du 22/10/2026 : "ajoute plusieur type de filtre en fonction
+  // des donner" — Statut, Rayon/Secteur, Avec/Sans commande, Cause) appliqués à toute la page
+  // "Situation actuelle" (KPI + donut causes), AVANT le drill-down Secteur → Rayon → Articles. Jamais
+  // de nouvel appel réseau : filtrent côté client sur summary.openEpisodes déjà chargé en mémoire
+  // (même principe que orderFilter/causeFilter ci-dessous, qui eux ne s'appliquent qu'UNE FOIS entré
+  // dans un rayon précis — ces filtres globaux agissent un cran plus haut).
+  const [globalStatusFilter, setGlobalStatusFilter] = useState<'' | 'EN_COURS' | 'RESOLUE'>('');
+  const [globalSectorFilter, setGlobalSectorFilter] = useState<string>('');
+  const [globalDepartmentFilter, setGlobalDepartmentFilter] = useState<string>('');
+  const [globalOrderFilter, setGlobalOrderFilter] = useState<'' | 'with-order' | 'without-order'>('');
+  const [globalCauseFilter, setGlobalCauseFilter] = useState<string>('');
+  const activeGlobalFilterCount =
+    (globalStatusFilter ? 1 : 0) + (globalSectorFilter ? 1 : 0) + (globalDepartmentFilter ? 1 : 0) +
+    (globalOrderFilter ? 1 : 0) + (globalCauseFilter ? 1 : 0);
+  function clearGlobalFilters() {
+    setGlobalStatusFilter('');
+    setGlobalSectorFilter('');
+    setGlobalDepartmentFilter('');
+    setGlobalOrderFilter('');
+    setGlobalCauseFilter('');
+  }
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
   const [articleSearch, setArticleSearch] = useState('');
   const [causeFilter, setCauseFilter] = useState<string>('');
@@ -283,14 +313,55 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     return () => { cancelled = true; };
   }, [shopQueryParam, selectedSector, periodStart, periodEnd]);
 
+  // Filtres globaux appliqués sur l'ensemble des épisodes chargés (demande explicite du 22/10/2026)
+  // — source commune pour les KPI "Situation actuelle" ET le drill-down Secteur → Rayon → Articles
+  // juste en dessous, pour qu'un filtre actif (ex: "Sans commande") se reflète partout sur la page,
+  // pas seulement sur les cartes du haut.
+  const globallyFilteredEpisodes = (summary?.openEpisodes || []).filter((e) => {
+    if (globalStatusFilter && e.status !== globalStatusFilter) return false;
+    if (globalSectorFilter && (e.sector || 'Sans secteur') !== globalSectorFilter) return false;
+    if (globalDepartmentFilter && (e.department || 'Sans rayon') !== globalDepartmentFilter) return false;
+    if (globalOrderFilter === 'with-order' && !e.hasOrder) return false;
+    if (globalOrderFilter === 'without-order' && e.hasOrder) return false;
+    if (globalCauseFilter && e.causeProposee !== globalCauseFilter) return false;
+    return true;
+  });
+  // Liste des rayons/secteurs distincts pour peupler les <select> des filtres globaux — dérivée de
+  // summary.openEpisodes (pas filtrée par globallyFilteredEpisodes elle-même, sinon un filtre actif
+  // ferait disparaître sa propre option de la liste déroulante).
+  const allSectorsForFilter = Array.from(new Set((summary?.openEpisodes || []).map((e) => e.sector || 'Sans secteur'))).sort((a, b) => a.localeCompare(b, 'fr-FR'));
+  const allDepartmentsForFilter = Array.from(new Set((summary?.openEpisodes || []).map((e) => e.department || 'Sans rayon'))).sort((a, b) => a.localeCompare(b, 'fr-FR'));
+  // Recalcul des KPI "Situation actuelle" sur l'ensemble filtré quand au moins un filtre global est
+  // actif — sinon on garde les valeurs déjà précalculées côté serveur (summary.openCount etc.),
+  // identiques à celles qu'on obtiendrait en filtrant ici sans rien exclure, mais sans refaire le
+  // travail pour rien dans le cas (le plus fréquent) où aucun filtre global n'est utilisé.
+  const displayedOpenCount = activeGlobalFilterCount > 0 ? globallyFilteredEpisodes.length : (summary?.openCount ?? 0);
+  const displayedTotalCaPerdu = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+    : (summary?.totalCaPerduEstime ?? 0);
+  const displayedCaPerdueSansCommande = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.filter((e) => e.deliveryStatus === 'SANS_COMMANDE').reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+    : (summary?.caPerdueSansCommande ?? 0);
+  const displayedCaPerdueNonLivree = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.filter((e) => ['EN_ATTENTE_LIVRAISON', 'EN_RETARD', 'LIVRAISON_DOUTEUSE'].includes(e.deliveryStatus)).reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+    : (summary?.caPerdueNonLivree ?? 0);
+  const displayedCauseCounts = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.reduce((acc: Record<string, number>, e) => {
+        acc[e.causeProposee] = (acc[e.causeProposee] || 0) + 1;
+        return acc;
+      }, {})
+    : (summary?.causeCounts ?? {});
+
   // BUG CORRIGÉ le 18/10/2026 (signalé avec capture : "sans rayon affiche mais ya rien mais dans
   // le clique il ya contenu" — en réalité l'inverse : la tuile "0 article(s)" était correcte, la
   // liste qui s'affichait au clic (77 articles) était FAUSSE) : ce filtre ne tenait compte QUE du
   // rayon sélectionné, jamais du secteur — un clic sur "EPICERIE SUCREE" sous "Sans secteur"
   // affichait donc TOUS les articles EPICERIE SUCREE du magasin, y compris ceux ayant un vrai
   // secteur connu, au lieu des seuls articles réellement "Sans secteur" de ce rayon (0 ici).
+  // Part désormais de globallyFilteredEpisodes (22/10/2026) au lieu de summary.openEpisodes brut,
+  // pour que les filtres globaux du haut de page s'appliquent aussi au drill-down.
   const articlesInDepartmentAll = selectedDepartment
-    ? (summary?.openEpisodes || []).filter((e) =>
+    ? globallyFilteredEpisodes.filter((e) =>
         (e.department || 'Sans rayon') === selectedDepartment &&
         (e.sector || 'Sans secteur') === (selectedSector || 'Sans secteur')
       )
@@ -445,6 +516,44 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             </div>
           </div>
 
+          {/* Filtres globaux (demande explicite du 22/10/2026 : "ajoute plusieur type de filtre en
+              fonction des donner") — même style sof-pill/sof-input que le panneau de filtres
+              "Détail par article" plus bas, mais agissant ici sur TOUTE la page (KPI, donut causes,
+              drill-down), pas seulement sur la liste d'articles d'un rayon déjà sélectionné. */}
+          <div className="sof-filter-card mb-3">
+            <div className="sof-filter-row">
+              <select className="sof-input" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
+                <option value="">Tous les statuts</option>
+                <option value="EN_COURS">En cours</option>
+                <option value="RESOLUE">Résolue</option>
+              </select>
+              <select className="sof-input" value={globalSectorFilter} onChange={(e) => setGlobalSectorFilter(e.target.value)}>
+                <option value="">Tous les secteurs</option>
+                {allSectorsForFilter.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select className="sof-input" value={globalDepartmentFilter} onChange={(e) => setGlobalDepartmentFilter(e.target.value)}>
+                <option value="">Tous les rayons</option>
+                {allDepartmentsForFilter.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select className="sof-input" value={globalOrderFilter} onChange={(e) => setGlobalOrderFilter(e.target.value as typeof globalOrderFilter)}>
+                <option value="">Avec ou sans commande</option>
+                <option value="with-order">Avec commande en cours</option>
+                <option value="without-order">Sans commande en cours</option>
+              </select>
+              <select className="sof-input" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
+                <option value="">Toutes les causes</option>
+                {Object.entries(CAUSE_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+              {activeGlobalFilterCount > 0 && (
+                <button type="button" className="sof-clear-btn" onClick={clearGlobalFilters}>
+                  <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres ({activeGlobalFilterCount})
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Ordre des sections revu le 18/10/2026 (demande explicite : "met cette carte en
               premier et Ruptures en cours — 30 derniers jours et Analyse des pertes sur une
               période en deuxieme") — Situation actuelle (KPI + graphes) passe avant l'analyse de
@@ -459,11 +568,22 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       partout (20/10/2026), ce chiffre compte les ruptures ACTIVES À UN MOMENT de la
                       période choisie (pas seulement celles encore ouvertes maintenant) — cohérent
                       avec le graphe de tendance, qui fait déjà ce calcul. */}
-                  <div className="label">En cours (période)</div>
-                  <div className="value">{summary.openCount ?? 0}</div>
+                  <div className="label">
+                    Articles touchés (période)
+                    <FormulaInfoButton
+                      title="Articles touchés sur la période"
+                      steps={[
+                        { label: 'Calcul', detail: "Nombre d'articles distincts ayant eu une rupture active à N'IMPORTE QUEL moment de la période sélectionnée — pas seulement ceux encore en rupture aujourd'hui." },
+                        { label: 'Différent du graphe', detail: 'Le dernier point du graphe "Ruptures en cours" ci-dessus montre, lui, uniquement les ruptures actives le DERNIER jour de la période — un chiffre presque toujours plus petit que ce total cumulé.' },
+                      ]}
+                    />
+                  </div>
+                  <div className="value">{displayedOpenCount}</div>
                   {/* Ratio ajouté le 19/10/2026 (demande explicite : "la rupture par rapport quoi
                       la rupture est trop 90% ?") — un nombre brut d'articles en rupture ne dit rien
-                      de l'ampleur réelle sans le comparer au catalogue total du magasin. */}
+                      de l'ampleur réelle sans le comparer au catalogue total du magasin. Reste basé
+                      sur le total magasin même filtres globaux actifs (comparer un sous-ensemble
+                      filtré au catalogue entier n'aurait pas de sens). */}
                   {summary.ruptureRatioPct !== null && (
                     <div className="sub">{summary.ruptureRatioPct} % du catalogue ({summary.totalOrderableArticles} articles)</div>
                   )}
@@ -478,7 +598,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       trompeur depuis que ce KPI suit le sélecteur de période unique de la page —
                       demande explicite : "quand je fait un filtre il doit etre appliqué sur tout"). */}
                   <div className="label">CA perdu</div>
-                  <div className="value">{(summary.totalCaPerduEstime ?? 0).toLocaleString('fr-FR')} CFA</div>
+                  <div className="value">{Math.round(displayedTotalCaPerdu).toLocaleString('fr-FR')} CFA</div>
                   <div className="sub">{new Date(periodStart).toLocaleDateString('fr-FR')} → {new Date(periodEnd).toLocaleDateString('fr-FR')}</div>
                 </div>
               </div>
@@ -489,6 +609,40 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <div>
                   <div className="label">Durée moyenne</div>
                   <div className="value">{formatDuration(summary.avgDurationHours ?? 0)}</div>
+                </div>
+              </div>
+            </div>
+            <div className="col">
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-secondary-subtle"><iconify-icon icon="solar:box-minimalistic-bold-duotone" className="text-secondary"></iconify-icon></span>
+                <div>
+                  <div className="label">
+                    CA perdu sans commande
+                    <FormulaInfoButton
+                      title="CA perdu sans commande"
+                      steps={[
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des épisodes où AUCUNE commande n\'a été passée (deliveryStatus = Sans commande) — responsabilité magasin, pas un délai fournisseur.' },
+                      ]}
+                    />
+                  </div>
+                  <div className="value">{Math.round(displayedCaPerdueSansCommande).toLocaleString('fr-FR')} CFA</div>
+                </div>
+              </div>
+            </div>
+            <div className="col">
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-warning-subtle"><iconify-icon icon="solar:delivery-bold-duotone" className="text-warning"></iconify-icon></span>
+                <div>
+                  <div className="label">
+                    CA perdu non livré
+                    <FormulaInfoButton
+                      title="CA perdu non livré"
+                      steps={[
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des épisodes où une commande EXISTE mais n\'est pas encore livrée (Commandé pas livré, Livraison en retard, ou Livraison douteuse) — un délai côté fournisseur/logistique, pas une absence de réaction magasin.' },
+                      ]}
+                    />
+                  </div>
+                  <div className="value">{Math.round(displayedCaPerdueNonLivree).toLocaleString('fr-FR')} CFA</div>
                 </div>
               </div>
             </div>
@@ -506,7 +660,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <StockoutTrendChart shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} />
               </div>
               <div className="col">
-                <StockoutCauseChart causeCounts={summary.causeCounts || {}} />
+                <StockoutCauseChart causeCounts={displayedCauseCounts} />
               </div>
             </div>
           )}
