@@ -71,6 +71,22 @@ const CAUSE_LABELS: Record<string, string> = {
   INDETERMINEE: 'Indéterminée',
 };
 
+// Libellés simplifiés pour le filtre global "Cause" (demande explicite du 22/10/2026 : "ici aussi
+// fait les terme simple pour un mag ou dg") — CAUSE_LABELS ci-dessus reste technique/précis pour le
+// tableau "Détail par article" (lecteur déjà dans le contexte d'un article précis), mais un DG/
+// manager de magasin parcourant juste la liste du filtre ne sait pas ce que "Écart stock / rayon" ou
+// "Amont — à préciser" veulent dire concrètement. CAUSE_FILTER_HINTS donne, au survol (title), le
+// libellé technique d'origine pour qui en a besoin, sans l'imposer à tout le monde.
+const CAUSE_FILTER_LABELS: Record<string, string> = {
+  MAGASIN_REASSORT: "Le magasin n'a pas encore commandé",
+  MAGASIN_COMMANDE_NON_VALIDEE: 'Commande préparée mais pas validée',
+  AMONT_FOURNISSEUR_CENTRAL: 'Livraison en retard — entrepôt central',
+  AMONT_FOURNISSEUR_EXTERNE: 'Livraison en retard — fournisseur externe',
+  AMONT_A_PRECISER: 'Livraison en retard — origine à préciser',
+  ECART_STOCK_RAYON: 'Stock informatique faux (produit en rayon ou pas)',
+  INDETERMINEE: 'Cause non déterminée',
+};
+
 // Colonne "Réaction" + filtre (demande explicite du 17/10/2026 : "on doit voir... qui son en
 // rupture et qui on une commande qui a ete passe dessu et ceux qui son en rupture et il ya pas de
 // commande dessu") — version légère de REACTION_STATUS_META (StockoutEpisodePage.tsx), sans
@@ -577,8 +593,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <iconify-icon icon="solar:question-circle-bold-duotone"></iconify-icon>
                 <select className="sof-global-filter" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
                   <option value="">Toutes les causes</option>
-                  {Object.entries(CAUSE_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
+                  {Object.entries(CAUSE_FILTER_LABELS).map(([key, label]) => (
+                    <option key={key} value={key} title={CAUSE_LABELS[key]}>{label}</option>
                   ))}
                 </select>
               </div>
