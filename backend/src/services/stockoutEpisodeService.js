@@ -1042,11 +1042,22 @@ async function getDashboardSummaryAllShops(allowedShopIds, { resolvedLookbackDay
   const resolvedSince = new Date(now - resolvedLookbackDays * 24 * 60 * 60 * 1000);
   const perShopResults = await mapWithConcurrency(shops, 10, async (shop) => {
     const [openEpisodes, resolvedCount, resolvedWithLoss] = await Promise.all([
+      // BUG DE PERFORMANCE CORRIGÉ le 22/10/2026 (signalé : onglet "Tous les magasins" bloqué sur
+      // "Chargement..." en production — jamais reproduit en sandbox, qui n'a qu'un seul magasin de
+      // test) — cette requête mode période ramenait TOUTES les colonnes de chaque épisode (y compris
+      // ean/label/department/sector/niveauConfiance/reactionStatus/etc., jamais lus plus bas dans
+      // cette fonction) pour chacun des dizaines de magasins du réseau en production, démultipliant
+      // le volume transféré/désérialisé sans raison. select explicite sur les seuls champs
+      // réellement utilisés ci-dessous (durations, noOrderCount, totalCaPerdu).
       periodMode
         ? prisma.stockoutEpisode.findMany({
             where: { rposShopId: shop.rposShopId, startedAt: { lte: periodEnd }, OR: [{ endedAt: null }, { endedAt: { gte: periodStart } }] },
+            select: { startedAt: true, endedAt: true, causeProposee: true, caPerdueEstime: true },
           })
-        : prisma.stockoutEpisode.findMany({ where: { rposShopId: shop.rposShopId, status: 'EN_COURS' } }),
+        : prisma.stockoutEpisode.findMany({
+            where: { rposShopId: shop.rposShopId, status: 'EN_COURS' },
+            select: { startedAt: true, endedAt: true, causeProposee: true, caPerdueEstime: true },
+          }),
       periodMode
         ? 0 // en mode période, openEpisodes ci-dessus couvre déjà résolus ET ouverts, même convention que getDashboardSummary
         : prisma.stockoutEpisode.count({
