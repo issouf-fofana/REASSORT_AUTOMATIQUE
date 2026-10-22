@@ -459,10 +459,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
            version agrandie/espacée du .sof-input ci-dessus (lui conservé tel quel, réutilisé ailleurs
            sur cette page pour le panneau "Détail par article" plus compact) avec une icône dédiée par
            filtre pour les distinguer d'un coup d'œil, plutôt qu'une rangée de <select> identiques. */
-        .sof-global-filter-group { display: flex; align-items: center; gap: 8px; background: #F6F8FB; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 4px 6px 4px 12px; }
+        .sof-global-filter-group { display: flex; align-items: center; gap: 8px; background: #F6F8FB; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 4px 6px 4px 12px; transition: background .15s, border-color .15s; }
+        .sof-global-filter-group:hover { border-color: rgba(27,42,74,.18); }
+        .sof-global-filter-group.active { background: rgba(36,86,166,.07); border-color: rgba(36,86,166,.3); }
+        .sof-global-filter-group.active iconify-icon { color: #2456A6; }
         .sof-global-filter-group iconify-icon { font-size: 16px; color: #5B6B85; flex-shrink: 0; }
         .sof-global-filter { border: none; background: none; font-size: .86rem; font-weight: 600; padding: 9px 6px; color: #1B2A4A; min-width: 150px; cursor: pointer; }
         .sof-global-filter:focus { outline: none; }
+        .sof-global-filter-group.active .sof-global-filter { color: #2456A6; }
         .sof-range-panel { margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(27,42,74,.08); display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
         .sof-range-field { display: flex; flex-direction: column; gap: 6px; }
         .sof-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
@@ -539,29 +543,29 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               drill-down), pas seulement sur la liste d'articles d'un rayon déjà sélectionné. */}
           <div className="sof-filter-card mb-3">
             <div className="sof-filter-row">
-              <div className="sof-global-filter-group">
+              <div className={`sof-global-filter-group${globalStatusFilter ? ' active' : ''}`}>
                 <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
-                <select className="sof-global-filter" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
+                <select className="sof-global-filter" title="RÉSOLUE = article réapprovisionné, le stock est redevenu positif" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
                   <option value="">Tous les statuts</option>
-                  <option value="EN_COURS">En cours</option>
-                  <option value="RESOLUE">Résolue</option>
+                  <option value="EN_COURS">Ruptures en cours</option>
+                  <option value="RESOLUE">Ruptures résolues (réapprovisionnées)</option>
                 </select>
               </div>
-              <div className="sof-global-filter-group">
+              <div className={`sof-global-filter-group${globalSectorFilter ? ' active' : ''}`}>
                 <iconify-icon icon="solar:widget-bold-duotone"></iconify-icon>
                 <select className="sof-global-filter" value={globalSectorFilter} onChange={(e) => setGlobalSectorFilter(e.target.value)}>
                   <option value="">Tous les secteurs</option>
                   {allSectorsForFilter.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
-              <div className="sof-global-filter-group">
+              <div className={`sof-global-filter-group${globalDepartmentFilter ? ' active' : ''}`}>
                 <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
                 <select className="sof-global-filter" value={globalDepartmentFilter} onChange={(e) => setGlobalDepartmentFilter(e.target.value)}>
                   <option value="">Tous les rayons</option>
                   {allDepartmentsForFilter.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
-              <div className="sof-global-filter-group">
+              <div className={`sof-global-filter-group${globalOrderFilter ? ' active' : ''}`}>
                 <iconify-icon icon="solar:cart-bold-duotone"></iconify-icon>
                 <select className="sof-global-filter" value={globalOrderFilter} onChange={(e) => setGlobalOrderFilter(e.target.value as typeof globalOrderFilter)}>
                   <option value="">Avec ou sans commande</option>
@@ -569,7 +573,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                   <option value="without-order">Sans commande en cours</option>
                 </select>
               </div>
-              <div className="sof-global-filter-group">
+              <div className={`sof-global-filter-group${globalCauseFilter ? ' active' : ''}`}>
                 <iconify-icon icon="solar:question-circle-bold-duotone"></iconify-icon>
                 <select className="sof-global-filter" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
                   <option value="">Toutes les causes</option>
