@@ -351,6 +351,15 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         return acc;
       }, {})
     : (summary?.causeCounts ?? {});
+  // BUG CORRIGÉ le 22/10/2026 (signalé : "Durée moyenne ne change pas" quand un filtre global est
+  // actif) — oublié lors de l'ajout des filtres globaux : seuls openCount/totalCaPerdu/causeCounts
+  // avaient leur variante "displayed", pas avgDurationHours, qui restait donc toujours la moyenne
+  // calculée côté serveur sur TOUS les épisodes de la période, peu importe le filtre choisi.
+  const displayedAvgDurationHours = activeGlobalFilterCount > 0
+    ? (globallyFilteredEpisodes.length
+        ? globallyFilteredEpisodes.reduce((sum, e) => sum + e.durationHours, 0) / globallyFilteredEpisodes.length
+        : 0)
+    : (summary?.avgDurationHours ?? 0);
 
   // BUG CORRIGÉ le 18/10/2026 (signalé avec capture : "sans rayon affiche mais ya rien mais dans
   // le clique il ya contenu" — en réalité l'inverse : la tuile "0 article(s)" était correcte, la
@@ -446,6 +455,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         .sof-adv-filter-btn.active { background: rgba(36,86,166,.08); color: #2456A6; border-color: rgba(36,86,166,.25); }
         .sof-clear-btn { border: none; background: none; color: #B8302C; font-size: .78rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 6px 10px; border-radius: 20px; transition: background .15s; }
         .sof-clear-btn:hover { background: rgba(214,69,65,.08); }
+        /* Filtres globaux (22/10/2026, demande explicite : "il faut personalisé les filtre") —
+           version agrandie/espacée du .sof-input ci-dessus (lui conservé tel quel, réutilisé ailleurs
+           sur cette page pour le panneau "Détail par article" plus compact) avec une icône dédiée par
+           filtre pour les distinguer d'un coup d'œil, plutôt qu'une rangée de <select> identiques. */
+        .sof-global-filter-group { display: flex; align-items: center; gap: 8px; background: #F6F8FB; border: 1px solid rgba(27,42,74,.08); border-radius: 10px; padding: 4px 6px 4px 12px; }
+        .sof-global-filter-group iconify-icon { font-size: 16px; color: #5B6B85; flex-shrink: 0; }
+        .sof-global-filter { border: none; background: none; font-size: .86rem; font-weight: 600; padding: 9px 6px; color: #1B2A4A; min-width: 150px; cursor: pointer; }
+        .sof-global-filter:focus { outline: none; }
         .sof-range-panel { margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(27,42,74,.08); display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
         .sof-range-field { display: flex; flex-direction: column; gap: 6px; }
         .sof-range-label { font-size: .72rem; font-weight: 600; color: #8591A0; text-transform: uppercase; letter-spacing: .02em; }
@@ -522,30 +539,45 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               drill-down), pas seulement sur la liste d'articles d'un rayon déjà sélectionné. */}
           <div className="sof-filter-card mb-3">
             <div className="sof-filter-row">
-              <select className="sof-input" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
-                <option value="">Tous les statuts</option>
-                <option value="EN_COURS">En cours</option>
-                <option value="RESOLUE">Résolue</option>
-              </select>
-              <select className="sof-input" value={globalSectorFilter} onChange={(e) => setGlobalSectorFilter(e.target.value)}>
-                <option value="">Tous les secteurs</option>
-                {allSectorsForFilter.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select className="sof-input" value={globalDepartmentFilter} onChange={(e) => setGlobalDepartmentFilter(e.target.value)}>
-                <option value="">Tous les rayons</option>
-                {allDepartmentsForFilter.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <select className="sof-input" value={globalOrderFilter} onChange={(e) => setGlobalOrderFilter(e.target.value as typeof globalOrderFilter)}>
-                <option value="">Avec ou sans commande</option>
-                <option value="with-order">Avec commande en cours</option>
-                <option value="without-order">Sans commande en cours</option>
-              </select>
-              <select className="sof-input" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
-                <option value="">Toutes les causes</option>
-                {Object.entries(CAUSE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
+              <div className="sof-global-filter-group">
+                <iconify-icon icon="solar:flag-bold-duotone"></iconify-icon>
+                <select className="sof-global-filter" value={globalStatusFilter} onChange={(e) => setGlobalStatusFilter(e.target.value as typeof globalStatusFilter)}>
+                  <option value="">Tous les statuts</option>
+                  <option value="EN_COURS">En cours</option>
+                  <option value="RESOLUE">Résolue</option>
+                </select>
+              </div>
+              <div className="sof-global-filter-group">
+                <iconify-icon icon="solar:widget-bold-duotone"></iconify-icon>
+                <select className="sof-global-filter" value={globalSectorFilter} onChange={(e) => setGlobalSectorFilter(e.target.value)}>
+                  <option value="">Tous les secteurs</option>
+                  {allSectorsForFilter.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="sof-global-filter-group">
+                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
+                <select className="sof-global-filter" value={globalDepartmentFilter} onChange={(e) => setGlobalDepartmentFilter(e.target.value)}>
+                  <option value="">Tous les rayons</option>
+                  {allDepartmentsForFilter.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="sof-global-filter-group">
+                <iconify-icon icon="solar:cart-bold-duotone"></iconify-icon>
+                <select className="sof-global-filter" value={globalOrderFilter} onChange={(e) => setGlobalOrderFilter(e.target.value as typeof globalOrderFilter)}>
+                  <option value="">Avec ou sans commande</option>
+                  <option value="with-order">Avec commande en cours</option>
+                  <option value="without-order">Sans commande en cours</option>
+                </select>
+              </div>
+              <div className="sof-global-filter-group">
+                <iconify-icon icon="solar:question-circle-bold-duotone"></iconify-icon>
+                <select className="sof-global-filter" value={globalCauseFilter} onChange={(e) => setGlobalCauseFilter(e.target.value)}>
+                  <option value="">Toutes les causes</option>
+                  {Object.entries(CAUSE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
               {activeGlobalFilterCount > 0 && (
                 <button type="button" className="sof-clear-btn" onClick={clearGlobalFilters}>
                   <iconify-icon icon="solar:close-circle-bold"></iconify-icon> Effacer les filtres ({activeGlobalFilterCount})
@@ -608,7 +640,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <span className="icon bg-info-subtle"><iconify-icon icon="solar:clock-bold-duotone" className="text-info"></iconify-icon></span>
                 <div>
                   <div className="label">Durée moyenne</div>
-                  <div className="value">{formatDuration(summary.avgDurationHours ?? 0)}</div>
+                  <div className="value">{formatDuration(displayedAvgDurationHours)}</div>
                 </div>
               </div>
             </div>
