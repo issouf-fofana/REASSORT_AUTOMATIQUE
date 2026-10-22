@@ -735,6 +735,113 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
   };
 }
 
+// Colonnes autorisées pour le tri côté serveur — jamais une chaîne arbitraire passée par le
+// frontend directement en clé d'accès (cf. getSortValue ci-dessous), pour éviter qu'une requête
+// mal formée ne plante sur un champ inexistant plutôt que de retomber proprement sur le tri par
+// défaut.
+const BY_SHOP_SORTABLE_FIELDS = new Set([
+  'label', 'shopName', 'department', 'stock', 'sellingPrice', 'avgDailySales',
+  'avgWeeklySales', 'avgMonthlySales', 'weeksOfCoverage', 'overstockRatio', 'scrapQuantity90d',
+]);
+
+function getSortValue(row, field) {
+  const v = row[field];
+  return v === null || v === undefined ? -Infinity : v;
+}
+
+/**
+ * Page filtrée/triée du tableau "Par magasin" — demande explicite du 21/10/2026 : "ca prend au
+ * moins 10s pour affiché c'est normal ?" (38922 lignes observées en prod, transférées et rendues
+ * en entier côté client à chaque chargement, peu importe la pagination visuelle qui n'agissait
+ * qu'APRÈS réception du JSON complet). Lit le même snapshot précalculé que getOverstockReport
+ * (jamais de second calcul), applique filtres/tri/pagination EN MÉMOIRE côté serveur, et ne
+ * renvoie au frontend QUE la page demandée — le payload réseau passe de ~40-50 Mo (estimé sur 38922
+ * lignes, cf. 2.5 Mo mesurés pour 2591 lignes en sandbox) à quelques Ko.
+ *
+ * N'existe que pour l'onglet "Par magasin" (pas Surstock commun / Toujours en surstock, qui restent
+ * sur l'ancien chemin pour l'instant — portée volontairement limitée à la demande initiale).
+ */
+async function getOverstockByShopPage(allowedShopIds, {
+  minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE,
+  start,
+  end,
+  cachedFullReport, // si fourni (lu par l'appelant depuis un snapshot), jamais recalculé ici
+  page = 1,
+  pageSize = 10,
+  search,
+  shopIds, // sous-ensemble choisi par l'utilisateur dans le sélecteur magasin, distinct de allowedShopIds (périmètre du compte)
+  sortField,
+  sortDir = 'desc',
+  rangeFilters, // { stock: {min,max}, avgDailySales: {min,max}, ... } — mêmes clés que BY_SHOP_SORTABLE_FIELDS
+  scrapOnly,
+} = {}) {
+  const full = cachedFullReport || await getOverstockReport(allowedShopIds, { minWeeksOfCoverage, start, end });
+  if (!full.found) return full;
+
+  let rows = full.articlesByShop;
+
+  if (shopIds && shopIds.length) {
+    const set = new Set(shopIds);
+    rows = rows.filter((r) => set.has(r.rposShopId));
+  }
+  if (search) {
+    const q = search.trim().toLowerCase();
+    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q) || r.ean.includes(q));
+  }
+  if (scrapOnly) {
+    rows = rows.filter((r) => r.scrapQuantity90d > 0);
+  }
+  if (rangeFilters) {
+    for (const [field, range] of Object.entries(rangeFilters)) {
+      if (!range) continue;
+      const min = range.min !== undefined && range.min !== '' ? Number(range.min) : null;
+      const max = range.max !== undefined && range.max !== '' ? Number(range.max) : null;
+      if (min === null && max === null) continue;
+      rows = rows.filter((r) => {
+        const v = r[field];
+        if (v === null || v === undefined) return false;
+        if (min !== null && v < min) return false;
+        if (max !== null && v > max) return false;
+        return true;
+      });
+    }
+  }
+
+  // Comptage des magasins distincts AVANT tri/pagination, sur l'ensemble filtré complet (sert au
+  // KPI "Magasins concernés" affiché au-dessus du tableau) — jamais calculé sur la seule page
+  // visible, qui ne refléterait que les magasins de ces 10 lignes.
+  const filteredShopCount = new Set(rows.map((r) => r.rposShopId)).size;
+  const filteredCount = rows.length;
+
+  if (sortField && BY_SHOP_SORTABLE_FIELDS.has(sortField)) {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    rows = rows.slice().sort((a, b) => {
+      const av = getSortValue(a, sortField);
+      const bv = getSortValue(b, sortField);
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return dir * String(av).localeCompare(String(bv), 'fr-FR');
+      }
+      return dir * (av - bv);
+    });
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pageRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  return {
+    found: true,
+    page: currentPage,
+    pageSize,
+    totalPages,
+    totalCount: filteredCount,
+    filteredShopCount,
+    rows: pageRows,
+    periodMode: full.periodMode,
+    minWeeksOfCoverage: full.minWeeksOfCoverage,
+  };
+}
+
 module.exports = {
   getOverstockByShop,
   getOverstockOverPeriod,
@@ -745,6 +852,7 @@ module.exports = {
   getScrapSummaryForEans,
   getScrapDetailForArticle,
   getOverstockReport,
+  getOverstockByShopPage,
   DEFAULT_MIN_WEEKS_OF_COVERAGE,
   SCRAP_LOOKBACK_DAYS,
   ALWAYS_OVERSTOCK_THRESHOLD_RATIO,

@@ -752,6 +752,17 @@ export function OverstockReport() {
         .osr-kpi-value { font-size: 1.5rem; font-weight: 700; color: #1B2A4A; }
         .osr-kpi-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
         .osr-table-card { background: #fff; border-radius: 12px; border: 1px solid rgba(27,42,74,.06); overflow: hidden; }
+        /* Scrollbar horizontale toujours visible (demande explicite du 21/10/2026 : "tu ajoute
+           option de croll pour affiché les colonne comme dans les propostion de commande") — les
+           tableaux ont plus de colonnes que l'écran n'en affiche (Rayon, % du temps en surstock,
+           Casse...), overflow-x: auto seul ne montre la scrollbar qu'au survol sur certains OS/
+           navigateurs, peu découvrable. scrollbar-gutter réserve la place en bas même quand le
+           contenu tient déjà à l'écran, pour que la barre soit un repère visuel constant. */
+        .osr-table-card .table-responsive { scrollbar-gutter: stable bottom; }
+        .osr-table-card .table-responsive::-webkit-scrollbar { height: 10px; }
+        .osr-table-card .table-responsive::-webkit-scrollbar-track { background: #F6F8FB; }
+        .osr-table-card .table-responsive::-webkit-scrollbar-thumb { background: rgba(27,42,74,.22); border-radius: 6px; }
+        .osr-table-card .table-responsive::-webkit-scrollbar-thumb:hover { background: rgba(27,42,74,.35); }
         .osr-pill { border-radius: 20px; padding: 3px 11px; font-size: .72rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
         .osr-pill-danger { background: rgba(214,69,65,.1); color: #B8302C; }
         .osr-pill-warning { background: rgba(214,158,46,.12); color: #8A5A00; }
@@ -1146,7 +1157,16 @@ export function OverstockReport() {
           )}
 
           {activeTab === 'byShop' && (
-            <ByShopTable rows={filteredByShop} periodMode={!!data.periodMode} threshold={data.minWeeksOfCoverage} onOpenDetail={openScrapDetail} />
+            <ByShopTable
+              periodParams={{ start: data.periodMode ? data.periodStart ?? undefined : undefined, end: data.periodMode ? data.periodEnd ?? undefined : undefined }}
+              minWeeksOfCoverage={data.minWeeksOfCoverage}
+              search={search}
+              shopFilters={shopFilters}
+              rangeFilters={rangeFilters}
+              scrapOnly={scrapOnly}
+              threshold={data.minWeeksOfCoverage}
+              onOpenDetail={openScrapDetail}
+            />
           )}
         </>
       ) : null}
@@ -1154,23 +1174,92 @@ export function OverstockReport() {
   );
 }
 
-// Tableau "Par magasin" en HTML simple, même style que CommonArticlesTable (demande explicite du
-// 21/10/2026 : "les tableau ici il ne faut pas utilisé les carde de ng que tu prend fait des tab
-// avec un nouveau style" — remplace la grille ag-Grid précédente, dont la pagination à 50 par page
-// avait fini par échapper à l'écran avec des dizaines de milliers de lignes une fois le calcul
-// étendu aux ventes/stock pour les magasins sans proposition). Pagination maison (PaginationBar),
-// identique sur les 3 onglets de cette page désormais.
-function ByShopTable({ rows, periodMode, threshold, onOpenDetail }: { rows: ShopArticleRow[]; periodMode: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void }) {
-  const [page, setPage] = useState(1);
-  const PAGE_SIZE = 50;
-  useEffect(() => { setPage(1); }, [rows]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const paged = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+type ByShopPageData = {
+  found: boolean;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  totalCount: number;
+  filteredShopCount: number;
+  rows: ShopArticleRow[];
+  periodMode?: boolean;
+  minWeeksOfCoverage: number;
+};
 
-  if (rows.length === 0) {
+// Tableau "Par magasin" — pagination SERVEUR (demande explicite du 21/10/2026 : "ca prend au moins
+// 10s pour affiché c'est normal ?", 38922 lignes mesurées en prod transférées et rendues en entier
+// au client avant même la pagination visuelle). Contrairement aux deux autres onglets
+// (CommonArticlesTable, qui restent sur des listes déjà chargées en mémoire, portée volontairement
+// limitée à ce tableau), celui-ci fait son PROPRE appel réseau paginé via
+// /overstock-report/by-shop — ne reçoit plus toutes les lignes, seulement work: les filtres actifs
+// de la page (search/shopFilters/rangeFilters/scrapOnly) et les paramètres de période, passés en
+// props pour reconstruire la requête serveur à chaque changement de page/tri/filtre.
+function ByShopTable({
+  periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, threshold, onOpenDetail,
+}: {
+  periodParams: { start?: string; end?: string };
+  minWeeksOfCoverage: number;
+  search: string;
+  shopFilters: Set<string>;
+  rangeFilters: Record<string, { min: string; max: string }>;
+  scrapOnly: boolean;
+  threshold: number;
+  onOpenDetail: (ean: string, label: string) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [sortField, setSortField] = useState<string | undefined>(undefined);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [pageData, setPageData] = useState<ByShopPageData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // 10 par défaut (demande explicite du 21/10/2026 : "par defaut le tableau il faut affiché 10 par
+  // pagination").
+  const PAGE_SIZE = 10;
+
+  useEffect(() => { setPage(1); }, [search, shopFilters, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(PAGE_SIZE),
+      minWeeksOfCoverage: String(minWeeksOfCoverage),
+    });
+    if (periodParams.start) params.set('start', periodParams.start);
+    if (periodParams.end) params.set('end', periodParams.end);
+    if (search.trim()) params.set('search', search.trim());
+    if (shopFilters.size > 0) params.set('shops', [...shopFilters].join(','));
+    if (sortField) { params.set('sortField', sortField); params.set('sortDir', sortDir); }
+    if (scrapOnly) params.set('scrapOnly', 'true');
+    const activeRanges = Object.fromEntries(Object.entries(rangeFilters).filter(([, r]) => r.min !== '' || r.max !== ''));
+    if (Object.keys(activeRanges).length > 0) params.set('rangeFilters', JSON.stringify(activeRanges));
+
+    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${params.toString()}`)
+      .then((d) => { if (!cancelled) { setPageData(d); setError(null); } })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, [page, periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, sortField, sortDir]);
+
+  function toggleSort(field: string) {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortField(field);
+      setSortDir('desc');
+    }
+  }
+
+  function sortIcon(field: string) {
+    if (sortField !== field) return null;
+    return <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
+  }
+
+  if (error) return <div className="text-danger small py-4">Erreur : {error}</div>;
+  if (pageData === null) return <div className="text-muted small py-4">Chargement...</div>;
+  if (pageData.totalCount === 0) {
     return <div className="text-muted small py-4">Aucun article en surstock pour ce seuil.</div>;
   }
+
+  const periodMode = !!pageData.periodMode;
 
   return (
     <>
@@ -1179,21 +1268,21 @@ function ByShopTable({ rows, periodMode, threshold, onOpenDetail }: { rows: Shop
           <table className="table align-middle table-hover mb-0">
             <thead className="bg-light-subtle">
               <tr>
-                <th>Article</th>
-                <th>Magasin</th>
-                <th>Rayon</th>
-                <th>Stock</th>
-                <th>Prix de vente</th>
-                <th>Vente/jour</th>
-                <th>Vente/semaine</th>
-                <th>Vente/mois</th>
-                <th>Couverture</th>
-                {periodMode && <th>% du temps en surstock</th>}
-                <th>Casse (90j)</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('label')}>Article{sortIcon('label')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('shopName')}>Magasin{sortIcon('shopName')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('department')}>Rayon{sortIcon('department')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('stock')}>Stock{sortIcon('stock')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('sellingPrice')}>Prix de vente{sortIcon('sellingPrice')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgDailySales')}>Vente/jour{sortIcon('avgDailySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgWeeklySales')}>Vente/semaine{sortIcon('avgWeeklySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgMonthlySales')}>Vente/mois{sortIcon('avgMonthlySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('weeksOfCoverage')}>Couverture{sortIcon('weeksOfCoverage')}</th>
+                {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('overstockRatio')}>% du temps en surstock{sortIcon('overstockRatio')}</th>}
+                <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse (90j){sortIcon('scrapQuantity90d')}</th>
               </tr>
             </thead>
             <tbody>
-              {paged.map((r, i) => (
+              {pageData.rows.map((r, i) => (
                 <tr
                   key={`${r.rposShopId}:${r.ean}:${i}`}
                   role="button"
@@ -1228,7 +1317,7 @@ function ByShopTable({ rows, periodMode, threshold, onOpenDetail }: { rows: Shop
           </table>
         </div>
       </div>
-      <PaginationBar page={currentPage} totalPages={totalPages} totalItems={rows.length} onChange={setPage} />
+      <PaginationBar page={pageData.page} totalPages={pageData.totalPages} totalItems={pageData.totalCount} onChange={setPage} />
     </>
   );
 }
@@ -1292,7 +1381,8 @@ function flattenCommonArticles(articles: CommonArticle[]): FlatCommonRow[] {
 
 function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMessage }: { rows: FlatCommonRow[]; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void; emptyMessage: string }) {
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 50;
+  // 10 par défaut, même raisonnement que ByShopTable ci-dessus (demande explicite du 21/10/2026).
+  const PAGE_SIZE = 10;
   useEffect(() => { setPage(1); }, [rows]);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);

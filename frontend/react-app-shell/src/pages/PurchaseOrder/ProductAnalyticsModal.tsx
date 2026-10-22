@@ -284,10 +284,22 @@ function AnalyticsOverview({ data }: { data: AnalyticsData }) {
             <strong>{p.safetyStock.toFixed(1)}</strong>
           </span>
           <span className="fw-bold">−</span>
+          {/* Case "Stock actuel" affichée clampée à 0 dans la formule (demande explicite du
+              21/10/2026 : "si tu additionne a donne + donc qte negative mets le en 0 et tu met une
+              note a coté pour dire le stock est a -6") — un stock RPOS négatif (désynchronisation,
+              jamais une vraie absence de stock) ne doit jamais apparaître tel quel dans un calcul
+              additif : la vraie valeur reste visible via la petite note ET l'alerte orange
+              au-dessus, mais la formule elle-même ne montre plus un nombre qui n'a pas de sens
+              physique (un stock ne peut pas être négatif en rayon). */}
           <span className="border rounded px-2 py-1 bg-white">
             Stock actuel
             <br />
-            <strong>{p.currentStock}</strong>
+            <strong>{Math.max(0, p.currentStock)}</strong>
+            {p.currentStock < 0 && (
+              <div className="text-danger" style={{ fontSize: '.68rem', fontWeight: 600 }}>
+                (RPOS : {p.currentStock})
+              </div>
+            )}
           </span>
           <span className="fw-bold">−</span>
           <span className="border rounded px-2 py-1 bg-white">

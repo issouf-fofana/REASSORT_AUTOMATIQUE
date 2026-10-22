@@ -26,7 +26,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockByShopPage, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
 
@@ -346,68 +346,119 @@ async function resolveOverstockShopFilter(req) {
 // surstock"). shops optionnel (demande explicite : "donne la possiblité de prendre un ou plusieur
 // magasin") : restreint encore le périmètre déjà accessible au compte à une sélection précise de
 // magasins, jamais un moyen d'élargir l'accès au-delà de ce que le rôle autorise déjà.
+// Résout shopIdFilter (périmètre + ?shops= choisi par l'utilisateur) et tente de servir un snapshot
+// précalculé pour cette requête — extrait de /overstock-report le 21/10/2026 pour être partagé avec
+// /overstock-report/by-shop (pagination serveur du tableau "Par magasin"), qui a besoin de la même
+// détection de cache sans dupliquer cette logique. Retourne { shopIdFilter, cachedFullReport } :
+// cachedFullReport est le rapport COMPLET (jamais paginé) si un snapshot a pu être servi, sinon null
+// (l'appelant doit alors calculer en direct via getOverstockReport).
+async function resolveOverstockShopFilterAndCache(req) {
+  let shopIdFilter = await resolveOverstockShopFilter(req);
+  if (req.query.shops) {
+    const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
+    // Intersection avec le périmètre déjà autorisé, jamais une extension : un ADMIN (shopIdFilter
+    // === null, aucune restriction) peut choisir n'importe lequel des `requested` ; un
+    // SUPERVISOR/mono-magasin ne peut sélectionner que parmi ce qu'il a déjà le droit de voir.
+    shopIdFilter = shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+  }
+  const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
+  const { start, end } = req.query;
+
+  // Vue par défaut (aucune période, seuil par défaut ou non précisé) : lit le snapshot précalculé
+  // par overstockReportSnapshotJob.js au lieu de recalculer en direct (demande explicite du
+  // 21/10/2026 : "il charge trop pourqhoi ? il fait les calcule quand j'actualise ?" — le calcul
+  // isolé est rapide, ~0.6s mesuré, mais ralentit fortement en concurrence avec les jobs de
+  // synchro RPOS qui saturent le pool de connexions DB au même moment). Tout seuil personnalisé ou
+  // toute période retombe sur le calcul en direct, inchangé.
+  const isDefaultView = !start && !end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE);
+  if (isDefaultView) {
+    const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_CACHE_KEY);
+    if (cached) return { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport: cached };
+    // Pas encore de snapshot (job jamais exécuté, ex: tout juste déployé) : calcul en direct
+    // exceptionnel, le prochain passage du job remettra la vue par défaut sur le chemin rapide.
+  }
+
+  // Vue "3 derniers mois" (demande explicite du 21/10/2026 : devenue le mode de chargement PAR
+  // DÉFAUT de la page Surstock — "il faut affiché la courbe apres une analyser qui fait par
+  // defaut sur 3mois") : lit elle aussi un snapshot précalculé plutôt que de recalculer en
+  // direct, qui a atteint 56-97s en prod sur ~51 magasins × 90 jours (observé le 21/10/2026,
+  // concurrence avec les jobs de synchro RPOS + volume de lignes à parcourir). Tolérance de
+  // correspondance plutôt qu'une égalité stricte sur les dates ISO : le snapshot est calculé "il
+  // y a jusqu'à 1h" (fréquence du job) par "maintenant" côté job, pas par le timestamp exact de
+  // CETTE requête.
+  //
+  // BUG CORRIGÉ le 21/10/2026 (observé en prod : 97s malgré ce correctif, le cache n'était jamais
+  // servi) : le frontend envoie end=periodEnd+'T23:59:59' (OverstockReport.tsx), donc `end` tombe
+  // systématiquement en FIN de journée — en avance de plusieurs heures sur "maintenant" selon
+  // l'heure du jour (ex: requête à 18h40, end=23:59:59 du même jour → en avance de 5h19). La
+  // première version de cette tolérance (`endAgeHours >= -1`) rejetait donc presque toujours la
+  // vue par défaut du frontend, qui retombait alors systématiquement sur le calcul en direct.
+  // Élargi à une journée entière d'avance (24h), largement suffisant pour couvrir ce décalage
+  // "fin de journée" sans risquer de confondre avec une vraie période future choisie par
+  // l'utilisateur (qui, elle, aurait un `start` tout aussi décalé — testé via spanDays ci-dessous).
+  if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE)) {
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    const spanDays = (endMs - startMs) / (24 * 60 * 60 * 1000);
+    const endAgeHours = (Date.now() - endMs) / (60 * 60 * 1000);
+    const isDefault90dView = Math.abs(spanDays - OVERSTOCK_REPORT_PERIOD_90D_DAYS) <= 1 && endAgeHours >= -24 && endAgeHours <= 24;
+    if (isDefault90dView) {
+      const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY);
+      if (cached) return { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport: cached };
+    }
+  }
+
+  return { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport: null };
+}
+
 router.get('/overstock-report', async (req, res) => {
   try {
-    let shopIdFilter = await resolveOverstockShopFilter(req);
-    if (req.query.shops) {
-      const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
-      // Intersection avec le périmètre déjà autorisé, jamais une extension : un ADMIN (shopIdFilter
-      // === null, aucune restriction) peut choisir n'importe lequel des `requested` ; un
-      // SUPERVISOR/mono-magasin ne peut sélectionner que parmi ce qu'il a déjà le droit de voir.
-      shopIdFilter = shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+    const { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport } = await resolveOverstockShopFilterAndCache(req);
+    if (cachedFullReport) {
+      return res.json({ success: true, data: cachedFullReport });
     }
-    const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
-    const { start, end } = req.query;
-
-    // Vue par défaut (aucune période, seuil par défaut ou non précisé) : lit le snapshot précalculé
-    // par overstockReportSnapshotJob.js au lieu de recalculer en direct (demande explicite du
-    // 21/10/2026 : "il charge trop pourqhoi ? il fait les calcule quand j'actualise ?" — le calcul
-    // isolé est rapide, ~0.6s mesuré, mais ralentit fortement en concurrence avec les jobs de
-    // synchro RPOS qui saturent le pool de connexions DB au même moment). Tout seuil personnalisé ou
-    // toute période retombe sur le calcul en direct, inchangé.
-    const isDefaultView = !start && !end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE);
-    if (isDefaultView) {
-      const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_CACHE_KEY);
-      if (cached) {
-        return res.json({ success: true, data: cached });
-      }
-      // Pas encore de snapshot (job jamais exécuté, ex: tout juste déployé) : calcul en direct
-      // exceptionnel, le prochain passage du job remettra la vue par défaut sur le chemin rapide.
-    }
-
-    // Vue "3 derniers mois" (demande explicite du 21/10/2026 : devenue le mode de chargement PAR
-    // DÉFAUT de la page Surstock — "il faut affiché la courbe apres une analyser qui fait par
-    // defaut sur 3mois") : lit elle aussi un snapshot précalculé plutôt que de recalculer en
-    // direct, qui a atteint 56-97s en prod sur ~51 magasins × 90 jours (observé le 21/10/2026,
-    // concurrence avec les jobs de synchro RPOS + volume de lignes à parcourir). Tolérance de
-    // correspondance plutôt qu'une égalité stricte sur les dates ISO : le snapshot est calculé "il
-    // y a jusqu'à 1h" (fréquence du job) par "maintenant" côté job, pas par le timestamp exact de
-    // CETTE requête.
-    //
-    // BUG CORRIGÉ le 21/10/2026 (observé en prod : 97s malgré ce correctif, le cache n'était jamais
-    // servi) : le frontend envoie end=periodEnd+'T23:59:59' (OverstockReport.tsx), donc `end` tombe
-    // systématiquement en FIN de journée — en avance de plusieurs heures sur "maintenant" selon
-    // l'heure du jour (ex: requête à 18h40, end=23:59:59 du même jour → en avance de 5h19). La
-    // première version de cette tolérance (`endAgeHours >= -1`) rejetait donc presque toujours la
-    // vue par défaut du frontend, qui retombait alors systématiquement sur le calcul en direct.
-    // Élargi à une journée entière d'avance (24h), largement suffisant pour couvrir ce décalage
-    // "fin de journée" sans risquer de confondre avec une vraie période future choisie par
-    // l'utilisateur (qui, elle, aurait un `start` tout aussi décalé — testé via spanDays ci-dessous).
-    if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE)) {
-      const startMs = new Date(start).getTime();
-      const endMs = new Date(end).getTime();
-      const spanDays = (endMs - startMs) / (24 * 60 * 60 * 1000);
-      const endAgeHours = (Date.now() - endMs) / (60 * 60 * 1000);
-      const isDefault90dView = Math.abs(spanDays - OVERSTOCK_REPORT_PERIOD_90D_DAYS) <= 1 && endAgeHours >= -24 && endAgeHours <= 24;
-      if (isDefault90dView) {
-        const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY);
-        if (cached) {
-          return res.json({ success: true, data: cached });
-        }
-      }
-    }
-
     const result = await getOverstockReport(shopIdFilter, { minWeeksOfCoverage, start, end });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report/by-shop - page filtrée/triée du tableau "Par magasin" de la
+// page Surstock, SANS jamais transférer le rapport complet au frontend (demande explicite du
+// 21/10/2026 : "ca prend au moins 10s pour affiché c'est normal ?" — 38922 lignes mesurées en prod,
+// ~40-50 Mo de JSON transférés et rendus en entier côté client à chaque chargement, la pagination
+// visuelle n'agissant qu'APRÈS réception complète). Réutilise le même snapshot/calcul que
+// /overstock-report (jamais un second calcul), filtre/trie/pagine EN MÉMOIRE côté serveur, et ne
+// renvoie que la page demandée. Portée volontairement limitée à "Par magasin" : les onglets
+// "Surstock commun" et "Toujours en surstock" restent sur l'ancien chemin pour l'instant.
+router.get('/overstock-report/by-shop', async (req, res) => {
+  try {
+    const { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport } = await resolveOverstockShopFilterAndCache(req);
+
+    const page = req.query.page ? Math.max(1, Number(req.query.page)) : 1;
+    const pageSize = req.query.pageSize ? Math.min(200, Math.max(1, Number(req.query.pageSize))) : 10;
+    const search = req.query.search ? String(req.query.search) : undefined;
+    const shopIds = req.query.shops ? String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const sortField = req.query.sortField ? String(req.query.sortField) : undefined;
+    const sortDir = req.query.sortDir === 'asc' ? 'asc' : 'desc';
+    const scrapOnly = req.query.scrapOnly === 'true';
+    // rangeFilters attendu en JSON encodé (ex: {"stock":{"min":"5","max":""},...}) — un seul query
+    // param plutôt que d'en multiplier un par métrique, plus simple à construire côté frontend
+    // depuis l'objet rangeFilters déjà existant.
+    let rangeFilters;
+    if (req.query.rangeFilters) {
+      try {
+        rangeFilters = JSON.parse(String(req.query.rangeFilters));
+      } catch {
+        return res.status(400).json({ success: false, message: 'Paramètre rangeFilters invalide (JSON attendu).' });
+      }
+    }
+
+    const result = await getOverstockByShopPage(shopIdFilter, {
+      minWeeksOfCoverage, start, end, cachedFullReport,
+      page, pageSize, search, shopIds, sortField, sortDir, rangeFilters, scrapOnly,
+    });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
