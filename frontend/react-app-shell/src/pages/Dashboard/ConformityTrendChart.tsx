@@ -62,7 +62,18 @@ export function ConformityTrendChart({
     });
     chart.render();
     chartInstanceRef.current = chart;
-    return () => { chart.destroy(); chartInstanceRef.current = null; };
+
+    // Le conteneur (col-lg-7) peut encore avoir une largeur de 0px au moment exact du montage —
+    // son flex/grid parent n'a pas fini de se disposer (cf. commentaire dans TableauDeBord.tsx sur
+    // le montage conditionnel de ce composant). ApexCharts calcule alors ses positions sur une
+    // largeur nulle ("translate(NaN, 0)" constaté en console). Un ResizeObserver force un
+    // recalcul dès que le conteneur obtient sa vraie largeur, sans dépendre d'un délai arbitraire.
+    const el = chartRef.current;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth > 0) chart.updateOptions({});
+    });
+    observer.observe(el);
+    return () => { observer.disconnect(); chart.destroy(); chartInstanceRef.current = null; };
   }, [points]);
 
   return (

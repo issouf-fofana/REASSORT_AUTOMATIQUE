@@ -75,7 +75,16 @@ export function TodayProposalsCard() {
     });
     chart.render();
     chartInstanceRef.current = chart;
-    return () => { chart.destroy(); chartInstanceRef.current = null; };
+
+    // Même correctif que ConformityTrendChart.tsx : le conteneur peut avoir une largeur de 0px au
+    // moment du montage (col-lg-5 encore en cours de disposition flex), ApexCharts produisant alors
+    // des positions NaN. ResizeObserver force un recalcul dès que la vraie largeur est connue.
+    const el = chartRef.current;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth > 0) chart.updateOptions({});
+    });
+    observer.observe(el);
+    return () => { observer.disconnect(); chart.destroy(); chartInstanceRef.current = null; };
   }, [shops]);
 
   return (
