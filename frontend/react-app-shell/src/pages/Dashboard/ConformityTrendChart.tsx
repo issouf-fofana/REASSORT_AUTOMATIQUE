@@ -35,7 +35,11 @@ export function ConformityTrendChart({
   }, [shopQueryParam, endpoint]);
 
   useEffect(() => {
-    if (!points || !chartRef.current || !window.ApexCharts) return;
+    // Garde-fou cohérent avec le même correctif sur TodayProposalsCard.tsx (23/10/2026) — points
+    // ne devrait jamais être vide par construction (toujours 10 semaines générées, même à 0%), mais
+    // un tableau vide resterait truthy ici et casserait ApexCharts de la même façon si ce cas
+    // survenait malgré tout.
+    if (!points || !points.length || !chartRef.current || !window.ApexCharts) return;
     const categories = points.map((p) => new Date(p.weekStart).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }));
     // Le graphique s'affiche TOUJOURS, même sans aucune commande validée (demande du 05/10/2026) :
     // une semaine sans donnée vaut 0 ici (barre à hauteur nulle, visuellement vide), distinguée

@@ -109,7 +109,7 @@ export function TableauDeBord() {
     }
 
     try {
-      const s = await apiFetch<StockoutRate>(`/reassort/stockout-rate?${qs}`);
+      const s = await apiFetch<StockoutRate>(`/reassort/stockout-rate?${qs}&${periodQueryParam()}`);
       if (token !== loadTokenRef.current) return;
       setStockout({
         text: pct(s.rate),
@@ -120,7 +120,7 @@ export function TableauDeBord() {
     }
 
     try {
-      const o = await apiFetch<OverstockRate>(`/reassort/overstock-rate?${qs}`);
+      const o = await apiFetch<OverstockRate>(`/reassort/overstock-rate?${qs}&${periodQueryParam()}`);
       if (token !== loadTokenRef.current) return;
       setOverstock({
         text: pct(o.rate),
@@ -245,11 +245,12 @@ export function TableauDeBord() {
       ) : (
         <>
       {/* Filtre de période (demande explicite du 23/10/2026) — même style visuel que
-          StockoutShopDetail.tsx pour rester cohérent avec le reste de l'app. Ne pilote QUE les
-          cartes à historique daté (conformité, commandes en préparation/livraison, dernières
-          commandes fournisseur) : "Articles proposés" (toujours la proposition en attente
-          actuelle), "Taux de rupture"/"Taux de surstock" (état instantané du stock, pas un
-          historique) n'en tiennent volontairement pas compte. */}
+          StockoutShopDetail.tsx pour rester cohérent avec le reste de l'app. ÉTENDU le 23/10/2026
+          (demande explicite : "Taux de rupture de stock: du jour / Taux de surstock: du jour") pour
+          aussi piloter ces deux cartes, en réutilisant les mêmes fonctions que les pages Ruptures/
+          Surstock elles-mêmes (getDashboardSummary/getOverstockOverPeriod) — même chiffre que ces
+          pages pour la période choisie, jamais un calcul dupliqué. "Articles proposés" reste seul
+          hors du filtre (toujours LA proposition en attente actuelle, jamais un historique). */}
       <div className="stockout-period-filter-card mb-3">
         <div className="d-flex align-items-center gap-2">
           <span className="stockout-period-filter-icon">
@@ -257,7 +258,7 @@ export function TableauDeBord() {
           </span>
           <div>
             <div className="fw-semibold" style={{ color: '#1B2A4A', fontSize: '.88rem' }}>Période affichée</div>
-            <div className="text-muted" style={{ fontSize: '.74rem' }}>Pilote conformité, commandes en préparation/livraison et dernières commandes</div>
+            <div className="text-muted" style={{ fontSize: '.74rem' }}>Pilote conformité, rupture, surstock, commandes en préparation/livraison et dernières commandes</div>
           </div>
         </div>
         <div className="d-flex align-items-center gap-2 flex-wrap">

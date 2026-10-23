@@ -32,7 +32,13 @@ export function TodayProposalsCard() {
   }, []);
 
   useEffect(() => {
-    if (!shops || !chartRef.current || !window.ApexCharts) return;
+    // BUG CORRIGÉ le 23/10/2026 (signalé avec capture : axes 0-5 affichés sans aucune barre, au
+    // lieu du message "Aucun magasin...") — `!shops` est faux pour un tableau VIDE ([] est truthy
+    // en JS), donc ApexCharts recevait `series: [{ data: [] }]` et dessinait ses axes par défaut
+    // sans jamais afficher noData (qui ne se déclenche que si `series` est totalement absent, pas
+    // juste vide) — géré désormais côté React directement (cf. shops.length === 0 dans le JSX plus
+    // bas), aucun graphe créé dans ce cas.
+    if (!shops || !shops.length || !chartRef.current || !window.ApexCharts) return;
 
     // Les plus gros magasins en haut (ApexCharts dessine les barres horizontales de bas en haut,
     // donc on inverse l'ordre pour que le plus gros apparaisse visuellement en premier/en haut).
@@ -97,6 +103,8 @@ export function TodayProposalsCard() {
           <div className="text-danger small">Erreur : {error}</div>
         ) : !shops ? (
           <div className="text-muted small">Chargement...</div>
+        ) : shops.length === 0 ? (
+          <div className="text-muted small">Aucun magasin n'a de proposition générée aujourd'hui.</div>
         ) : (
           <div ref={chartRef}></div>
         )}

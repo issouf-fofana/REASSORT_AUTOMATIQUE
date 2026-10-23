@@ -24,7 +24,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockOverPeriod, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
 
@@ -286,11 +286,28 @@ router.get('/admin/conformity/weekly', requireAdminOrSupervisor, async (req, res
 
 // GET /api/reassort/stockout-rate - taux de rupture (articles déjà en rupture au moment de la
 // génération, sur les propositions validées)
+// RÉÉCRIT le 23/10/2026 (demande explicite : "Taux de rupture de stock: du jour" — doit refléter la
+// MÊME période que le filtre du Tableau de bord, pas un état figé indépendant) — réutilise
+// getDashboardSummary (stockoutEpisodeService.js), la même fonction déjà utilisée par la page
+// Ruptures de stock elle-même en mode période, pour renvoyer EXACTEMENT le même chiffre
+// (ruptureRatioPct) que cette page pour la période choisie. Sans start/end (rétrocompatibilité),
+// retombe sur l'ancien calcul getStockoutRate (basé sur les propositions validées).
 router.get('/stockout-rate', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    if (req.query.start && req.query.end) {
+      const summary = await getDashboardSummary(shopId, { start: req.query.start, end: req.query.end });
+      return res.json({
+        success: true,
+        data: {
+          rate: summary.ruptureRatioPct !== null ? summary.ruptureRatioPct / 100 : null,
+          stockoutLines: summary.openCount,
+          totalLines: summary.totalOrderableArticles,
+        },
+      });
     }
     const result = await getStockoutRate(shopId);
     res.json({ success: true, data: result });
@@ -804,6 +821,11 @@ router.get('/stockout-episodes/:id', async (req, res) => {
 // que ce KPI affiche le même chiffre que la page dédiée, pas un indicateur différent sous un nom
 // similaire. Dénominateur (totalLines) = articles commandables du magasin (ProductCache.orderable),
 // même convention que ruptureRatioPct dans stockoutEpisodeService.js.
+// start/end optionnels (demande explicite du 23/10/2026 : "Taux de surstock: du jour" — doit
+// refléter la MÊME période que le filtre du Tableau de bord). Avec start/end, réutilise
+// getOverstockOverPeriod (overstockReportService.js), la même fonction déjà utilisée par la page
+// Surstock elle-même en mode période — même chiffre (articleCount) que cette page pour la période
+// choisie. Sans start/end (rétrocompatibilité), retombe sur getOverstockByShop (état "maintenant").
 router.get('/overstock-rate', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
@@ -811,7 +833,9 @@ router.get('/overstock-rate', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const [report, totalOrderableArticles] = await Promise.all([
-      getOverstockByShop([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE }),
+      req.query.start && req.query.end
+        ? getOverstockOverPeriod([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE, start: req.query.start, end: req.query.end })
+        : getOverstockByShop([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE }),
       prisma.productCache.count({ where: { rposShopId: shopId, orderable: true } }),
     ]);
     const overstockLines = report.found ? report.articleCount : 0;
