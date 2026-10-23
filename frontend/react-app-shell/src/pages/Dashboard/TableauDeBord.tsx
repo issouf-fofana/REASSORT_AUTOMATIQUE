@@ -6,7 +6,7 @@ import { ConformityTrendChart } from './ConformityTrendChart';
 import { TodayProposalsCard } from './TodayProposalsCard';
 import { TopArticlesCard } from './TopArticlesCard';
 import { FormulaInfoButton } from '../Stockouts/StockoutEpisodePage';
-import type { ConformityRate, ForecastAccuracy, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
+import type { ConformityRate, OverstockRate, PendingProposal, StockoutRate, SupplierOrder } from './types';
 
 // Palette marine/ambre adoucie (demande du 30/09/2026), cohérente avec les classes déjà utilisées
 // sur Proposition de commande (reassort-badge-soft-warning/-danger) — dupliquées ici car chaque
@@ -48,7 +48,6 @@ export function TableauDeBord() {
   const [conformity, setConformity] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Propositions validées sans modification' });
   const [stockout, setStockout] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Articles déjà en rupture' });
   const [overstock, setOverstock] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Quantités au-delà du besoin' });
-  const [forecastAccuracy, setForecastAccuracy] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Quantité prévue vs réellement vendue' });
   const [orders, setOrders] = useState<SupplierOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
 
@@ -112,20 +111,6 @@ export function TableauDeBord() {
       });
     } catch {
       if (token === loadTokenRef.current) setOverstock((v) => ({ ...v, text: '—' }));
-    }
-
-    try {
-      const f = await apiFetch<ForecastAccuracy>(`/reassort/forecast-accuracy?${qs}`);
-      if (token !== loadTokenRef.current) return;
-      setForecastAccuracy({
-        text: pct(f.rate),
-        detail:
-          f.rate === null
-            ? `Pas encore de ligne mesurable (fenêtre de ${f.windowDays} j après validation)`
-            : `${f.accurateLines} / ${f.evaluatedLines} article(s) précis (±${f.thresholdPct}%)`,
-      });
-    } catch {
-      if (token === loadTokenRef.current) setForecastAccuracy((v) => ({ ...v, text: '—' }));
     }
 
     try {
@@ -382,31 +367,6 @@ export function TableauDeBord() {
               </div>
             </div>
             <div className="kpi-footer">{overstock.detail}</div>
-          </div>
-        </div>
-
-        <div className="col">
-          <div className="card kpi-card h-100 mb-0">
-            <div className="card-body d-flex align-items-start gap-2">
-              <div className="kpi-icon bg-info-subtle">
-                <iconify-icon icon="solar:target-bold-duotone" className="text-info"></iconify-icon>
-              </div>
-              <div>
-                <p className="kpi-label">
-                  Précision des prévisions
-                  <FormulaInfoButton
-                    title="Précision des prévisions"
-                    steps={[
-                      { label: 'Périmètre', detail: 'Parmi les lignes des propositions VALIDÉES pour ce magasin, celles dont la fenêtre d\'observation (7 jours après validation par défaut) est déjà écoulée.' },
-                      { label: 'Calcul', detail: 'Compare la quantité VENDUE réellement sur cette fenêtre à la quantité qu\'aurait prédite la vente moyenne hebdomadaire au moment de la proposition. "Précis" si l\'écart reste sous un seuil configurable (±20% par défaut).' },
-                      { label: 'Ce que ça mesure', detail: 'La fiabilité des prévisions de vente du système — reste N/A tant qu\'aucune commande validée n\'a dépassé sa fenêtre d\'observation.' },
-                    ]}
-                  />
-                </p>
-                <h3 className="kpi-value">{forecastAccuracy.text}</h3>
-              </div>
-            </div>
-            <div className="kpi-footer">{forecastAccuracy.detail}</div>
           </div>
         </div>
 

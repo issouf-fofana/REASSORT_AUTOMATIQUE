@@ -29,14 +29,6 @@ export interface OverstockRate {
   totalLines: number;
 }
 
-export interface ForecastAccuracy {
-  rate: number | null;
-  accurateLines: number;
-  evaluatedLines: number;
-  windowDays: number;
-  thresholdPct: number;
-}
-
 export interface SupplierOrder {
   reference: string;
   external_reference: string | null;

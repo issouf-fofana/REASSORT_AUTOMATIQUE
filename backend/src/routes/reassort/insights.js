@@ -11,8 +11,6 @@ const {
   getWeeklyConformityRate,
   getTodayProposalShops,
   getStockoutRate,
-  getOverstockRate,
-  getForecastAccuracy,
   getShadowAiReport,
   getAiDecisionLog,
   getAdminDashboard,
@@ -26,7 +24,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockByShopPage, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
 
@@ -797,31 +795,33 @@ router.get('/stockout-episodes/:id', async (req, res) => {
 
 // GET /api/reassort/overstock-rate - taux de surstock (quantité commandée bien au-delà du besoin
 // théorique, sur les propositions validées)
+// RÉÉCRIT le 23/10/2026 (demande explicite : "Taux de surstock: tu dois affiché les surtok sur ses
+// article tu vois ?") — l'ancien calcul (getOverstockRate, proposalService.js) mesurait la
+// proportion de COMMANDES VALIDÉES en sur-quantité par rapport au besoin théorique (une mesure de
+// correction manuelle excessive), pas le nombre d'articles RÉELLEMENT en surstock aujourd'hui.
+// Réutilise désormais la même logique que la page Surstock elle-même (getOverstockByShop,
+// overstockReportService.js : stock actuel / vente moyenne ≥ seuil de semaines de couverture) pour
+// que ce KPI affiche le même chiffre que la page dédiée, pas un indicateur différent sous un nom
+// similaire. Dénominateur (totalLines) = articles commandables du magasin (ProductCache.orderable),
+// même convention que ruptureRatioPct dans stockoutEpisodeService.js.
 router.get('/overstock-rate', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getOverstockRate(shopId);
+    const [report, totalOrderableArticles] = await Promise.all([
+      getOverstockByShop([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE }),
+      prisma.productCache.count({ where: { rposShopId: shopId, orderable: true } }),
+    ]);
+    const overstockLines = report.found ? report.articleCount : 0;
+    const result = {
+      rate: totalOrderableArticles > 0 ? overstockLines / totalOrderableArticles : null,
+      overstockLines,
+      totalLines: totalOrderableArticles,
+    };
     res.json({ success: true, data: result });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET /api/reassort/forecast-accuracy - précision des prévisions (quantité prévue vs réellement
-// vendue, sur les lignes validées dont la fenêtre de mesure est écoulée)
-router.get('/forecast-accuracy', async (req, res) => {
-  try {
-    const shopId = resolveShopId(req);
-    if (!shopId) {
-      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
-    }
-    const result = await getForecastAccuracy(shopId);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error('Forecast accuracy error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
