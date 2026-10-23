@@ -323,9 +323,21 @@ function OverstockHero({ data, rows, shopFilters }: { data: OverstockReportData;
             : 'Dernière proposition par magasin'}
         </div>
       </div>
-      {data.periodMode && points.length > 1 ? (
+      {/* BUG CORRIGÉ le 23/10/2026 (signalé : "quand je décoche tous [les magasins] la page devis
+          blanc" — en réalité un crash React sur TOUT changement de filtre faisant passer points.length
+          de >1 à ≤1 ou inversement) : le <div ref={chartRef}> et le bloc "severity" ci-dessous
+          s'excluaient mutuellement dans le JSX (ternaire), alors qu'ApexCharts insère ses propres
+          nœuds DOM à l'intérieur de chartRef.current en dehors du contrôle de React. Quand points
+          repassait sous ce seuil, React tentait de démonter le <div ref={chartRef}> pour le remplacer
+          par le bloc severity dans le MÊME render où le useEffect([points]) n'avait pas encore eu la
+          chance de détruire le graphe ApexCharts précédent — "Failed to execute 'removeChild'" :
+          React et ApexCharts se disputaient le même nœud. Les deux blocs restent désormais TOUJOURS
+          montés (jamais démontés/remontés par un changement de filtre), seule leur visibilité CSS
+          alterne — chartRef.current existe en permanence pour ApexCharts. */}
+      <div style={{ display: data.periodMode && points.length > 1 ? 'block' : 'none' }}>
         <div ref={chartRef}></div>
-      ) : (
+      </div>
+      {!(data.periodMode && points.length > 1) && (
         <div className="osr-hero-severity">
           <div className="osr-hero-severity-bar">
             {totalSeverity > 0 && (
