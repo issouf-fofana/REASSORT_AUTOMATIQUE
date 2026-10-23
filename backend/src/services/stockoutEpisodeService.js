@@ -769,24 +769,60 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     arrivalDatesByEan.get(m.ean).push(m.date);
   }
 
-  const computed = episodes.map((e) => {
-    const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
-
-    // BUG CORRIGÉ le 19/10/2026 (signalé avec capture : mail d'alerte annonçant "sans commande"
-    // pour des articles ayant pourtant une vraie commande passée visible dans l'UI) : ce filtre
-    // exigeait AUSSI que la PROPOSITION parente soit générée après le début de la rupture
-    // (`line.proposal.generatedAt < e.startedAt` -> skip), avant même de regarder si une commande
-    // existait. Or un article peut être présent dans une proposition ANCIENNE (générée avant la
-    // rupture) dont la commande n'a été créée/validée que PLUS TARD, après le début de la rupture —
-    // cette commande, pourtant bien une vraie réaction à la rupture, était ignorée car sa ligne
-    // d'origine ratait ce premier filtre. Seule la date de la COMMANDE elle-même compte pour juger
-    // si le magasin a réagi, jamais la date de la proposition qui l'a précédée.
+  // Matching local (ProposalLine -> ProposalOrder) pour chaque épisode — synchrone, aucun appel
+  // réseau. BUG CORRIGÉ le 19/10/2026 (signalé avec capture : mail d'alerte annonçant "sans
+  // commande" pour des articles ayant pourtant une vraie commande passée visible dans l'UI) : ce
+  // filtre exigeait AUSSI que la PROPOSITION parente soit générée après le début de la rupture
+  // (`line.proposal.generatedAt < e.startedAt` -> skip), avant même de regarder si une commande
+  // existait. Or un article peut être présent dans une proposition ANCIENNE (générée avant la
+  // rupture) dont la commande n'a été créée/validée que PLUS TARD, après le début de la rupture —
+  // cette commande, pourtant bien une vraie réaction à la rupture, était ignorée car sa ligne
+  // d'origine ratait ce premier filtre. Seule la date de la COMMANDE elle-même compte pour juger
+  // si le magasin a réagi, jamais la date de la proposition qui l'a précédée.
+  const localMatchByEpisode = episodes.map((e) => {
     let orderCreatedAt = null;
     let matchedOrder = null;
     for (const line of linesByEan.get(e.ean) || []) {
       const candidate = (ordersByKey.get(line.proposalId) || []).find((o) => o.createdAt >= e.startedAt);
       if (candidate) { orderCreatedAt = candidate.createdAt; matchedOrder = candidate; break; }
     }
+    return { episode: e, orderCreatedAt, matchedOrder };
+  });
+
+  // BUG CORRIGÉ le 23/10/2026 (signalé en production : filtrer "Ruptures résolues" affichait 99%
+  // "Sans commande" dans le donut) — le matching local ci-dessus ne peut JAMAIS trouver de commande
+  // pour un article qui n'a jamais été proposé par le système (jamais présent dans ProposalLine),
+  // même si une vraie commande existe dans RPOS (passée manuellement, hors du système de
+  // proposition). Vérifié en production : EAN jamais vu en ProposalLine, hasOrder figé à false.
+  // Fallback RPOS (getProductByEan + getPurchaseHistoryForProduct, déjà utilisées ailleurs pour le
+  // même usage) UNIQUEMENT quand le matching local échoue — jamais pour les épisodes déjà matchés
+  // localement, pour limiter le volume d'appels réseau. Concurrence limitée (comme l'écriture finale
+  // juste plus bas dans cette même fonction) : un appel RPOS qui échoue (serveur injoignable, déjà
+  // rencontré plusieurs fois dans ce projet) ne doit jamais faire planter les autres épisodes —
+  // simple repli sur hasOrder=false (comportement actuel, pas une régression).
+  const needsRposFallback = localMatchByEpisode.filter((m) => m.orderCreatedAt === null);
+  await mapWithConcurrency(needsRposFallback, 10, async (m) => {
+    const e = m.episode;
+    try {
+      const product = await rpos.getProductByEan(e.rposPosId, rposShopId, e.ean);
+      if (!product) return;
+      const history = await rpos.getPurchaseHistoryForProduct(e.rposPosId, rposShopId, product.id, e.startedAt.toISOString(), now.toISOString());
+      const sorted = [...history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const candidate = sorted.find((o) => o.date && new Date(o.date) >= e.startedAt);
+      if (candidate) m.orderCreatedAt = new Date(candidate.date);
+      // matchedOrder reste null : getPurchaseHistoryForProduct ne renvoie pas de date de réception,
+      // actualReceptionDate restera donc null pour les épisodes matchés par ce chemin (pas une
+      // régression, cette info n'existe simplement pas via RPOS pour une commande passée hors app).
+    } catch (err) {
+      console.error(`[stockoutEpisodeService] Fallback RPOS hasOrder échoué pour ${e.ean} (${rposShopId}/${e.rposPosId}) : ${err.message}`);
+    }
+  });
+  const localMatchByEpisodeId = new Map(localMatchByEpisode.map((m) => [m.episode.id, m]));
+
+  const computed = episodes.map((e) => {
+    const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
+
+    const { orderCreatedAt, matchedOrder } = localMatchByEpisodeId.get(e.id);
 
     const hasOrder = orderCreatedAt !== null;
     let reactionStatus;
