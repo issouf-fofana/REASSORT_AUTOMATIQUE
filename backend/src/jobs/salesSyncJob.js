@@ -125,12 +125,20 @@ async function syncShop(posId, shop) {
   }
 }
 
-// Les 18 serveurs RPOS sont des hôtes distincts (pas de contention partagée entre eux) : traités
-// tous en parallèle. À l'intérieur d'un même serveur, les magasins partagent le même hôte RPOS,
-// donc une concurrence modérée évite de le saturer tout en restant bien plus rapide que le
-// traitement strictement séquentiel d'avant (audit performance : ce job tourne toutes les 15 min,
-// un cycle trop long sur beaucoup de magasins finissait par chevaucher le suivant).
+// Les 18 serveurs RPOS sont des hôtes distincts (pas de contention RÉSEAU partagée entre eux). À
+// l'intérieur d'un même serveur, les magasins partagent le même hôte RPOS, donc une concurrence
+// modérée évite de le saturer tout en restant bien plus rapide que le traitement strictement
+// séquentiel d'avant (audit performance : ce job tourne toutes les 15 min, un cycle trop long sur
+// beaucoup de magasins finissait par chevaucher le suivant).
 const SHOP_CONCURRENCY_PER_SERVER = 4;
+// BUG DE PERFORMANCE CORRIGÉ le 23/10/2026 (signalé : pages lentes/bloquées ~15s pendant que ce job
+// et stockMoveSyncJob tournaient) — si les 18 serveurs RPOS n'ont effectivement aucune contention
+// RÉSEAU entre eux (vrai, hôtes distincts), ils PARTAGENT tous la même base de données PostgreSQL
+// locale pour écrire leurs résultats : tous en parallèle (jusqu'à 18 serveurs × 4 magasins = ~72
+// écritures DB simultanées) sature le pool de connexions Prisma, ralentissant toute autre requête
+// HTTP concurrente (dont les pages consultées par un utilisateur). Limite désormais le nombre de
+// SERVEURS traités en même temps, au prix d'un temps total de passage plus long.
+const SERVER_CONCURRENCY = 3;
 
 async function runSalesSync() {
   const servers = await rposServers.listServers();
@@ -145,7 +153,7 @@ async function runSalesSync() {
   console.log(`[salesSyncJob] Synchronisation démarrée sur ${activeServers.length} serveur(s)` +
     (restrictToShops ? ` (restreinte à ${restrictedShopIds.length} magasin(s))` : '') + '...');
 
-  await Promise.all(activeServers.map(async (server) => {
+  await mapWithConcurrency(activeServers, SERVER_CONCURRENCY, async (server) => {
     let shops;
     try {
       shops = await rpos.getShops(server.posId);
@@ -155,7 +163,7 @@ async function runSalesSync() {
     }
     if (restrictToShops) shops = shops.filter((shop) => restrictedShopIds.includes(shop.id));
     await mapWithConcurrency(shops, SHOP_CONCURRENCY_PER_SERVER, (shop) => syncShop(server.posId, shop));
-  }));
+  });
 
   console.log('[salesSyncJob] Synchronisation terminée.');
 }

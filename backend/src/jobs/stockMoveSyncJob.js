@@ -147,6 +147,17 @@ async function syncShop(posId, shop) {
 
 // Même concurrence que salesSyncJob (4 magasins en parallèle par serveur RPOS partagé).
 const SHOP_CONCURRENCY_PER_SERVER = 4;
+// BUG DE PERFORMANCE CORRIGÉ le 23/10/2026 (signalé : "Articles les plus vendus" et d'autres
+// widgets bloqués ~15s en "Chargement..." — pas un calcul lent côté route, mesuré à 375ms en
+// isolation, mais la base/l'instance saturées PENDANT que ce job tournait) — Promise.all sur TOUS
+// les serveurs RPOS actifs (~18 en prod) × 4 magasins chacun = jusqu'à ~72 synchronisations en
+// écriture simultanées, chacune insérant des milliers de lignes (11573/15051/16655 mesurés en un
+// seul passage), saturant le pool de connexions Prisma/PostgreSQL et ralentissant TOUTE requête
+// HTTP concurrente, pas seulement celle-ci. mapWithConcurrency limite désormais le nombre de
+// SERVEURS traités en même temps (le nombre de magasins en parallèle PAR serveur reste inchangé),
+// au prix d'un temps total de passage plus long — acceptable pour un job de fond, contrairement à
+// une page que l'utilisateur attend activement.
+const SERVER_CONCURRENCY = 3;
 
 async function runStockMoveSync() {
   const servers = await rposServers.listServers();
@@ -154,7 +165,7 @@ async function runStockMoveSync() {
 
   console.log(`[stockMoveSyncJob] Synchronisation démarrée sur ${activeServers.length} serveur(s)...`);
 
-  await Promise.all(activeServers.map(async (server) => {
+  await mapWithConcurrency(activeServers, SERVER_CONCURRENCY, async (server) => {
     let shops;
     try {
       shops = await rpos.getShops(server.posId);
@@ -163,7 +174,7 @@ async function runStockMoveSync() {
       return;
     }
     await mapWithConcurrency(shops, SHOP_CONCURRENCY_PER_SERVER, (shop) => syncShop(server.posId, shop));
-  }));
+  });
 
   console.log('[stockMoveSyncJob] Synchronisation terminée.');
 }
