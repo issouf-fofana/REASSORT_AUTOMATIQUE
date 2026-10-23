@@ -124,6 +124,22 @@ const DELIVERY_STATUS_META: Record<DeliveryStatus, { label: string; badge: strin
   LIVRAISON_DOUTEUSE: { label: 'Livraison douteuse', badge: 'reassort-badge-soft-danger' },
 };
 
+// Même table que DELIVERY_STATUS_TO_CAUSE côté serveur (stockoutEpisodeService.js) — BUG CORRIGÉ
+// le 23/10/2026 (signalé avec capture : donut "Ruptures avec ou sans commande" affichait 100%
+// "Sans commande" alors que le filtre global actif était justement "Avec commande en cours") :
+// displayedCauseCounts groupait par e.causeProposee, un champ STOCKÉ au moment de la détection de
+// la rupture et jamais réévalué — un épisode EN_COURS ayant reçu une commande APRÈS sa détection
+// reste étiqueté MAGASIN_REASSORT pour toujours côté causeProposee, désynchronisé du vrai
+// hasOrder/deliveryStatus (recalculés dynamiquement à chaque lecture). Pour un épisode RESOLUE, où
+// plus rien ne peut changer, causeProposee reste un instantané historique valide.
+const DELIVERY_STATUS_TO_CAUSE: Record<DeliveryStatus, string> = {
+  SANS_COMMANDE: 'MAGASIN_REASSORT',
+  EN_ATTENTE_LIVRAISON: 'AMONT_A_PRECISER',
+  EN_RETARD: 'AMONT_A_PRECISER',
+  LIVREE: 'ECART_STOCK_RAYON',
+  LIVRAISON_DOUTEUSE: 'ECART_STOCK_RAYON',
+};
+
 type OrderFilter = 'all' | 'with-order' | 'without-order' | 'delivered';
 
 // Tous les filtres possibles sur la liste d'articles d'un rayon (demande explicite du 21/10/2026 :
@@ -432,7 +448,8 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     : (summary?.caPerdueNonLivree ?? 0);
   const displayedCauseCounts = activeGlobalFilterCount > 0
     ? globallyFilteredEpisodes.reduce((acc: Record<string, number>, e) => {
-        acc[e.causeProposee] = (acc[e.causeProposee] || 0) + 1;
+        const cause = e.status === 'RESOLUE' ? e.causeProposee : (DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE');
+        acc[cause] = (acc[cause] || 0) + 1;
         return acc;
       }, {})
     : (summary?.causeCounts ?? {});
