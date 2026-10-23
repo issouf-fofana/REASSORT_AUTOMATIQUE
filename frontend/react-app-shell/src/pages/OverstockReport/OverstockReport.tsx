@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
@@ -140,6 +141,99 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// Modale de choix du nombre de lignes à exporter — REMPLACE un window.confirm("OK = tout, Annuler
+// = page actuelle") (demande explicite du 23/10/2026 : "il me donne pas le moyer de choisir
+// personalise") : la popup native ne proposait que 2 choix fixes, jamais de valeur intermédiaire.
+// Boutons rapides + un champ libre, dans le même style de carte/overlay que FormulaInfoButton
+// (StockoutEpisodePage.tsx) — rendu via portal pour échapper à tout ancêtre avec `transform` qui
+// piégerait un `position: fixed` (même piège déjà rencontré et documenté sur ce composant-là).
+// `kind` distingue explicitement "page actuelle" d'un nombre de lignes qui lui ressemblerait par
+// coïncidence (ex: la page affichée fait justement 100 lignes, même valeur que le bouton rapide
+// "100 lignes") — comparer uniquement des `count` numériques aurait rendu ces deux boutons
+// indiscernables côté appelant, "page actuelle" n'étant pas forcément les N PREMIÈRES lignes du
+// jeu complet (page 3 d'une pagination, par exemple).
+type ExportChoice = { kind: 'page' } | { kind: 'all' } | { kind: 'custom'; count: number };
+
+function ExportRowCountModal({
+  pageCount,
+  totalCount,
+  onExport,
+  onClose,
+}: {
+  pageCount: number;
+  totalCount: number;
+  onExport: (choice: ExportChoice) => void;
+  onClose: () => void;
+}) {
+  const [customValue, setCustomValue] = useState('');
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  function exportCustom() {
+    const n = parseInt(customValue, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    onExport({ kind: 'custom', count: Math.min(n, totalCount) });
+  }
+
+  return createPortal(
+    <div
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1040, background: 'rgba(27,42,74,.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff', border: '1px solid rgba(27,42,74,.12)', borderRadius: 12,
+          boxShadow: '0 12px 32px rgba(27,42,74,.3)', padding: '18px 20px',
+          width: 'min(360px, 100%)', fontSize: '.84rem', color: '#2A2F45',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, color: '#1B2A4A', fontSize: '.95rem' }}>Exporter combien de lignes ?</div>
+          <button type="button" onClick={onClose} aria-label="Fermer" style={{ border: 'none', background: 'transparent', color: '#8591A0', fontSize: '1.2rem', lineHeight: 1, padding: 0, cursor: 'pointer' }}>×</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button type="button" className="osr-export-choice-btn" onClick={() => onExport({ kind: 'page' })}>
+            Page actuelle ({pageCount.toLocaleString('fr-FR')})
+          </button>
+          {[100, 500].filter((n) => n < totalCount).map((n) => (
+            <button key={n} type="button" className="osr-export-choice-btn" onClick={() => onExport({ kind: 'custom', count: n })}>
+              {n.toLocaleString('fr-FR')} lignes
+            </button>
+          ))}
+          <button type="button" className="osr-export-choice-btn" onClick={() => onExport({ kind: 'all' })}>
+            Toutes les lignes filtrées ({totalCount.toLocaleString('fr-FR')})
+          </button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 14, borderTop: '1px dashed rgba(27,42,74,.1)' }}>
+          <input
+            type="number"
+            min={1}
+            max={totalCount}
+            placeholder="Nombre précis..."
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') exportCustom(); }}
+            className="osr-input"
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <button type="button" className="osr-run-btn" style={{ padding: '6px 14px' }} onClick={exportCustom} disabled={!customValue.trim()}>
+            Exporter
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 // Menu déroulant personnalisé pour le filtre magasin (demande explicite du 21/10/2026 : "donne moi
@@ -480,6 +574,19 @@ export function OverstockReport() {
   const [commonPageRows, setCommonPageRows] = useState<FlatCommonRow[]>([]);
   const [persistentPageRows, setPersistentPageRows] = useState<FlatCommonRow[]>([]);
   const [byShopExportState, setByShopExportState] = useState<{ onClick: () => void; exporting: boolean; disabled: boolean } | null>(null);
+  // BUG CORRIGÉ le 23/10/2026 (signalé : "les pagination ne son pas correct il ne marche pas" sur
+  // l'onglet "Par magasin") — un objet littéral {start, end} passé en prop à chaque render (tel
+  // qu'il l'était avant ce correctif) est une RÉFÉRENCE DIFFÉRENTE à chaque fois, même si start/end
+  // n'ont pas changé. ByShopTable a un useEffect(() => setPage(1), [...periodParams...]) : chaque
+  // clic sur une page déclenchait un re-render du parent (via onExportReady, appelé par un AUTRE
+  // useEffect à chaque changement de pageData/exporting), qui recréait cet objet, qui redéclenchait
+  // ce useEffect, qui remettait page à 1 — annulant systématiquement le changement de page just
+  // avant que l'utilisateur ne le voie. useMemo garde la même référence tant que periodMode/
+  // periodStart/periodEnd ne changent pas réellement.
+  const byShopPeriodParams = useMemo(
+    () => ({ start: data?.periodMode ? data.periodStart ?? undefined : undefined, end: data?.periodMode ? data.periodEnd ?? undefined : undefined }),
+    [data?.periodMode, data?.periodStart, data?.periodEnd]
+  );
   // Multi-sélection magasin (demande explicite du 21/10/2026 : "donne la possiblité de prendre un
   // ou plusieur magasin") — Set vide = "Tous les magasins", comme avant la chaîne vide.
   const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
@@ -634,16 +741,17 @@ export function OverstockReport() {
     navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report`);
   }
 
-  function exportFlatCommonCsv(pageRows: FlatCommonRow[], allRows: FlatCommonRow[], filenamePrefix: string) {
-    // Même choix "vue actuelle vs tout" que ByShopTable (demande explicite du 21/10/2026 : "il me
-    // demande si je veux la feuille active ou tout les donner pour ce mag sur la periode de
-    // l'analyse ? si oui il export sinon il retourne... fait pareil pour tout les autre onglé").
-    const wantsAll = window.confirm(
-      `Exporter combien de lignes ?\n\nOK = TOUTES les lignes filtrées (${allRows.length.toLocaleString('fr-FR')})\nAnnuler = seulement la page affichée (${pageRows.length})`
-    );
-    const rows = wantsAll ? allRows : pageRows;
+  // État de la modale "combien de lignes exporter" — RÉÉCRIT le 23/10/2026 (demande explicite :
+  // "il me donne pas le moyer de choisir personalise", remplace l'ancien window.confirm binaire
+  // tout/page). pageRows/allRows/filenamePrefix mis de côté le temps que l'utilisateur choisisse un
+  // nombre dans la modale ; count personnalisé supporté via un simple .slice(0, n) côté client, ces
+  // deux tableaux étant déjà entièrement chargés en mémoire (contrairement à ByShopTable plus bas,
+  // paginé serveur, qui gère son propre export séparément).
+  const [exportModal, setExportModal] = useState<{ pageRows: FlatCommonRow[]; allRows: FlatCommonRow[]; filenamePrefix: string } | null>(null);
+
+  function exportFlatCommonCsvRows(rows: FlatCommonRow[], label: string, filenamePrefix: string) {
     downloadCsv(
-      `${filenamePrefix}-${wantsAll ? 'complet' : 'page-actuelle'}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `${filenamePrefix}-${label}-${new Date().toISOString().slice(0, 10)}.csv`,
       ['EAN', 'Article', 'Rayon', 'Magasin', 'Référence magasin', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
       rows.map((r) => [
         r.ean, r.label, r.department, r.shopName, r.shopReference, r.stock, r.sellingPrice,
@@ -652,6 +760,19 @@ export function OverstockReport() {
         r.scrapQuantity90d, r.scrapMoveCount90d, r.lastScrapDate ? new Date(r.lastScrapDate).toLocaleDateString('fr-FR') : '',
       ])
     );
+  }
+
+  function handleFlatCommonExportChoice(choice: ExportChoice) {
+    if (!exportModal) return;
+    const { pageRows, allRows, filenamePrefix } = exportModal;
+    if (choice.kind === 'page') {
+      exportFlatCommonCsvRows(pageRows, 'page-actuelle', filenamePrefix);
+    } else if (choice.kind === 'all') {
+      exportFlatCommonCsvRows(allRows, 'complet', filenamePrefix);
+    } else {
+      exportFlatCommonCsvRows(allRows.slice(0, choice.count), `${choice.count}-lignes`, filenamePrefix);
+    }
+    setExportModal(null);
   }
 
   return (
@@ -672,6 +793,9 @@ export function OverstockReport() {
         .osr-switch input:checked::before { transform: translateX(15px); }
         .osr-run-btn { background: #1B2A4A; color: #fff; border: none; border-radius: 7px; padding: 8px 18px; font-size: .84rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; transition: background .15s; }
         .osr-run-btn:hover { background: #142037; }
+        .osr-run-btn:disabled { background: #B6BFCF; cursor: not-allowed; }
+        .osr-export-choice-btn { text-align: left; border: 1px solid rgba(27,42,74,.12); background: #fff; color: #1B2A4A; font-size: .84rem; font-weight: 600; padding: 8px 12px; border-radius: 8px; cursor: pointer; transition: background .15s, border-color .15s; }
+        .osr-export-choice-btn:hover { background: #F6F8FB; border-color: rgba(27,42,74,.2); }
         .osr-availability { font-size: .74rem; color: #8591A0; }
         .osr-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; }
         .osr-adv-filter-btn { border: 1px solid rgba(27,42,74,.1); background: #FAFBFD; color: #5B6B85; font-size: .8rem; font-weight: 600; padding: 6px 13px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
@@ -1096,7 +1220,7 @@ export function OverstockReport() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary"
-                  onClick={() => exportFlatCommonCsv(commonPageRows, flattenCommonArticles(filteredCommon), 'surstock-commun')}
+                  onClick={() => setExportModal({ pageRows: commonPageRows, allRows: flattenCommonArticles(filteredCommon), filenamePrefix: 'surstock-commun' })}
                   disabled={filteredCommon.length === 0}
                 >
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
@@ -1106,7 +1230,7 @@ export function OverstockReport() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary"
-                  onClick={() => exportFlatCommonCsv(persistentPageRows, flattenCommonArticles(filteredPersistent), 'surstock-toujours')}
+                  onClick={() => setExportModal({ pageRows: persistentPageRows, allRows: flattenCommonArticles(filteredPersistent), filenamePrefix: 'surstock-toujours' })}
                   disabled={filteredPersistent.length === 0}
                 >
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
@@ -1156,7 +1280,7 @@ export function OverstockReport() {
 
           {activeTab === 'byShop' && (
             <ByShopTable
-              periodParams={{ start: data.periodMode ? data.periodStart ?? undefined : undefined, end: data.periodMode ? data.periodEnd ?? undefined : undefined }}
+              periodParams={byShopPeriodParams}
               minWeeksOfCoverage={data.minWeeksOfCoverage}
               search={search}
               shopFilters={shopFilters}
@@ -1169,6 +1293,14 @@ export function OverstockReport() {
           )}
         </>
       ) : null}
+      {exportModal && (
+        <ExportRowCountModal
+          pageCount={exportModal.pageRows.length}
+          totalCount={exportModal.allRows.length}
+          onExport={handleFlatCommonExportChoice}
+          onClose={() => setExportModal(null)}
+        />
+      )}
     </div>
   );
 }
