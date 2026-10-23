@@ -2522,10 +2522,15 @@ async function getProposalStatus(proposalId) {
  * faisait disparaître des rayons réellement validés des KPI). Même raisonnement sur toutes les
  * autres lectures de ce fichier filtrées sur Proposal.status ci-dessous.
  */
-async function getConformityRate(shopId) {
+async function getConformityRate(shopId, { start, end } = {}) {
+  // start/end optionnels (demande explicite du 23/10/2026 : "ajouter les filtre sur des periode"
+  // sur le Tableau de bord) — filtre sur validatedAt, la date où la décision humaine a réellement
+  // eu lieu, pas generatedAt (même convention que getWeeklyConformityRate ci-dessous). Sans
+  // start/end, comportement d'origine inchangé (tout l'historique).
+  const dateFilter = start && end ? { validatedAt: { gte: new Date(start), lte: new Date(end) } } : {};
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, ...dateFilter },
     },
   });
 

@@ -243,7 +243,7 @@ router.get('/conformity', async (req, res) => {
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
-    const result = await getConformityRate(shopId);
+    const result = await getConformityRate(shopId, { start: req.query.start, end: req.query.end });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

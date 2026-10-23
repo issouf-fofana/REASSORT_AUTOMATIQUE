@@ -51,11 +51,28 @@ export function TableauDeBord() {
   const [orders, setOrders] = useState<SupplierOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
 
+  // Filtre de période (demande explicite du 23/10/2026 : "ajouter les filtre sur des periode...
+  // par defaut tu peux mettre sur le jour") — ne s'applique qu'aux cartes représentant un
+  // historique daté (conformité, commandes en préparation/livraison, dernières commandes
+  // fournisseur) : "Articles proposés" reste toujours LA proposition en attente actuelle (jamais un
+  // historique), "Taux de rupture"/"Taux de surstock" restent un état instantané du stock, non
+  // bornable dans le temps. Par défaut, les deux bornes sont aujourd'hui (une seule journée).
+  const [periodStart, setPeriodStart] = useState(() => new Date().toISOString().slice(0, 10));
+  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+
   function shopQueryParam(): string {
     const id = isSingleShop ? user?.rposShopId || '' : selectedShopId;
     const pos = isSingleShop ? user?.rposPosId || '' : selectedShop?.posId || '';
     if (!id) return '';
     return `shop=${encodeURIComponent(id)}${pos ? '&pos=' + encodeURIComponent(pos) : ''}`;
+  }
+
+  // T23:59:59 sur la borne de fin (même convention que StockoutShopDetail.tsx) pour inclure toute
+  // la journée choisie, pas seulement minuit.
+  function periodQueryParam(): string {
+    const start = new Date(periodStart).toISOString();
+    const end = new Date(periodEnd + 'T23:59:59').toISOString();
+    return `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   }
 
   const loadTokenRef = useRef(0);
@@ -81,7 +98,7 @@ export function TableauDeBord() {
     }
 
     try {
-      const c = await apiFetch<ConformityRate>(`/reassort/conformity?${qs}`);
+      const c = await apiFetch<ConformityRate>(`/reassort/conformity?${qs}&${periodQueryParam()}`);
       if (token !== loadTokenRef.current) return;
       setConformity({
         text: pct(c.rate),
@@ -114,7 +131,7 @@ export function TableauDeBord() {
     }
 
     try {
-      const data = await apiFetch<{ orders: SupplierOrder[] }>(`/reassort/orders?${qs}`);
+      const data = await apiFetch<{ orders: SupplierOrder[] }>(`/reassort/orders?${qs}&${periodQueryParam()}`);
       if (token !== loadTokenRef.current) return;
       // Compté sur TOUTES les commandes reçues (pas seulement les 8 affichées dans la liste
       // ci-dessous) — demande explicite du 21/10/2026 : "il faut ajouter la partie commande en
@@ -156,6 +173,16 @@ export function TableauDeBord() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShopId]);
 
+  // Recharge au changement de période (demande explicite du 23/10/2026) — effet séparé du
+  // précédent plutôt que d'y ajouter periodStart/periodEnd : celui-ci dépend aussi de isSingleShop
+  // pour couvrir le cas magasin unique (son propre useEffect plus haut ne dépend que de
+  // [isSingleShop], jamais rechargé sinon quand la période change).
+  useEffect(() => {
+    if (!isSingleShop && !selectedShopId) return;
+    loadDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodStart, periodEnd]);
+
   return (
     <div>
       <style>{`
@@ -190,6 +217,12 @@ export function TableauDeBord() {
         .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
         @media (min-width: 768px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
         @media (min-width: 1200px) { .kpi-grid { grid-template-columns: repeat(7, 1fr); } }
+        /* Filtre de période (23/10/2026) — mêmes classes/styles que StockoutShopDetail.tsx, dupliqués
+           ici car chaque app React a son propre bundle CSS, pas de partage direct entre elles. */
+        .stockout-period-filter-card { background: #fff; border: 1px solid rgba(27,42,74,.08); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+        .stockout-period-filter-icon { width: 30px; height: 30px; border-radius: 7px; background: rgba(27,42,74,.05); display: flex; align-items: center; justify-content: center; font-size: 15px; color: #5B6B85; flex-shrink: 0; }
+        .stockout-period-preset { border: 1px solid rgba(27,42,74,.12); background: #fff; color: #5B6B85; font-size: .76rem; font-weight: 600; padding: 5px 12px; border-radius: 6px; transition: background .15s, color .15s, border-color .15s; }
+        .stockout-period-preset:hover { background: #F6F8FB; color: #1B2A4A; border-color: rgba(27,42,74,.2); }
       `}</style>
 
       {!isSingleShop && (
@@ -211,6 +244,50 @@ export function TableauDeBord() {
         <AllShopsView />
       ) : (
         <>
+      {/* Filtre de période (demande explicite du 23/10/2026) — même style visuel que
+          StockoutShopDetail.tsx pour rester cohérent avec le reste de l'app. Ne pilote QUE les
+          cartes à historique daté (conformité, commandes en préparation/livraison, dernières
+          commandes fournisseur) : "Articles proposés" (toujours la proposition en attente
+          actuelle), "Taux de rupture"/"Taux de surstock" (état instantané du stock, pas un
+          historique) n'en tiennent volontairement pas compte. */}
+      <div className="stockout-period-filter-card mb-3">
+        <div className="d-flex align-items-center gap-2">
+          <span className="stockout-period-filter-icon">
+            <iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon>
+          </span>
+          <div>
+            <div className="fw-semibold" style={{ color: '#1B2A4A', fontSize: '.88rem' }}>Période affichée</div>
+            <div className="text-muted" style={{ fontSize: '.74rem' }}>Pilote conformité, commandes en préparation/livraison et dernières commandes</div>
+          </div>
+        </div>
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          {[
+            { label: "Aujourd'hui", days: 0 },
+            { label: '7 j', days: 7 },
+            { label: '30 j', days: 30 },
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="stockout-period-preset"
+              onClick={() => {
+                const end = new Date();
+                const start = new Date(end.getTime() - preset.days * 24 * 60 * 60 * 1000);
+                setPeriodEnd(end.toISOString().slice(0, 10));
+                setPeriodStart(start.toISOString().slice(0, 10));
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
+            <span className="text-muted small">au</span>
+            <input type="date" className="form-control form-control-sm" style={{ width: 150 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
       <div className="kpi-grid mb-4">
         <div className="col">
           <div className="card kpi-card h-100 mb-0">

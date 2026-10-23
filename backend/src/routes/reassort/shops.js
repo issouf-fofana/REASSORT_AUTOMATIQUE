@@ -271,8 +271,13 @@ router.get('/orders', async (req, res) => {
     // cause parmi tous ses widgets). Pas de vraie pagination ici (aucune page frontend n'utilise
     // `page` sur cette route, vérifié avant ce correctif) : le cache couvre toujours les mêmes 50
     // commandes les plus récentes que l'ancien appel par défaut (page=1).
+    // start/end optionnels (demande explicite du 23/10/2026 : filtre de période sur le Tableau de
+    // bord) — filtre sur la date de la commande elle-même, pas sa date de synchro dans le cache.
+    const dateFilter = req.query.start && req.query.end
+      ? { date: { gte: new Date(String(req.query.start)), lte: new Date(String(req.query.end)) } }
+      : {};
     const cachedOrders = await prisma.supplierOrderCache.findMany({
-      where: { rposShopId: shopId, rposPosId: posId },
+      where: { rposShopId: shopId, rposPosId: posId, ...dateFilter },
       orderBy: { date: 'desc' },
     });
     const currentOrderIds = new Set(cachedOrders.map((o) => o.rposOrderId));
