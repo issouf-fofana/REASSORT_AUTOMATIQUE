@@ -751,7 +751,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                     <FormulaInfoButton
                       title="CA perdu sans commande"
                       steps={[
-                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des épisodes où AUCUNE commande n\'a été passée (deliveryStatus = Sans commande) — responsabilité magasin, pas un délai fournisseur.' },
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des ruptures où AUCUNE commande n\'a encore été passée pour réapprovisionner l\'article — responsabilité magasin, pas un délai fournisseur.' },
                       ]}
                     />
                   </div>
@@ -768,7 +768,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                     <FormulaInfoButton
                       title="CA perdu non livré"
                       steps={[
-                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des épisodes où une commande EXISTE mais n\'est pas encore livrée (Commandé pas livré, Livraison en retard, ou Livraison douteuse) — un délai côté fournisseur/logistique, pas une absence de réaction magasin.' },
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) provenant des ruptures où une commande EXISTE mais n\'est pas encore livrée (commandé pas livré, livraison en retard, ou livraison douteuse) — un délai côté fournisseur/logistique, pas une absence de réaction magasin.' },
                       ]}
                     />
                   </div>
