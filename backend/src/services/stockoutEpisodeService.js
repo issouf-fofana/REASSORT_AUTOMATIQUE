@@ -167,6 +167,18 @@ async function detectStockoutEpisodes(rposShopId) {
   });
   const openByEan = new Map(openEpisodes.map((e) => [e.ean, e]));
 
+  // BUG CORRIGÉ le 23/10/2026 (signalé avec capture : filtrer "Ruptures résolues" affichait 99%
+  // "Sans commande" dans le donut, alors que beaucoup de ces articles ont bien été réapprovisionnés
+  // via une vraie commande) — hasOrder/deliveryStatus n'étaient JAMAIS recalculés au moment où un
+  // épisode passe à RESOLUE ci-dessous : ils restaient figés à leur dernière valeur connue (souvent
+  // encore `false`/SANS_COMMANDE, celle fixée à la création), le prochain passage de
+  // stockoutStatusRecalcJob ne les retouchant plus une fois l'épisode sorti d'EN_COURS. Un seul
+  // appel ici, AVANT la boucle (pas par épisode résolu individuellement) — computeAndPersistOpenEpisodeStatuses
+  // traite tout le magasin en requêtes groupées, un appel par épisode serait coûteux sans raison.
+  const freshStatusByEan = new Map(
+    (await computeAndPersistOpenEpisodeStatuses(rposShopId)).map((e) => [e.ean, e])
+  );
+
   const latestSnapshots = await prisma.stockSnapshot.findMany({
     where: { rposShopId },
     orderBy: { capturedAt: 'desc' },
@@ -203,6 +215,7 @@ async function detectStockoutEpisodes(rposShopId) {
       });
     } else if (snap.stock > 0 && open) {
       const estimation = await estimateLoss(rposShopId, open.ean, open.startedAt, snap.capturedAt);
+      const fresh = freshStatusByEan.get(open.ean);
       await prisma.stockoutEpisode.update({
         where: { id: open.id },
         data: {
@@ -210,6 +223,13 @@ async function detectStockoutEpisodes(rposShopId) {
           endedAt: snap.capturedAt,
           qtyPerdueEstimee: estimation.qtyPerdue,
           caPerdueEstime: estimation.caPerdue,
+          ...(fresh ? {
+            hasOrder: fresh.hasOrder,
+            reactionStatus: fresh.reactionStatus,
+            deliveryStatus: fresh.deliveryStatus,
+            orderCreatedAt: fresh.orderCreatedAt,
+            actualReceptionDateStatus: fresh.actualReceptionDate,
+          } : {}),
         },
       });
     }
@@ -255,6 +275,12 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
   if (!openEpisodes.length) return 0;
 
   const openByEan = new Map(openEpisodes.map((e) => [e.ean, e]));
+  // Même correctif que detectStockoutEpisodes ci-dessus (23/10/2026) : hasOrder/deliveryStatus
+  // doivent être figés à leur vraie valeur AU MOMENT de la résolution, pas laissés à leur dernier
+  // état EN_COURS connu. Un seul appel pour tout le magasin, avant la boucle de résolution.
+  const freshStatusByEan = new Map(
+    (await computeAndPersistOpenEpisodeStatuses(rposShopId)).map((e) => [e.ean, e])
+  );
   // Dernier mouvement Arrivage (le plus récent) par EAN parmi ceux qu'on vient de synchroniser —
   // sert de point de départ pour chercher le tout dernier mouvement connu depuis cette date.
   const latestArrivalByEan = new Map();
@@ -281,6 +307,7 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
     if (resultingStock <= 0) continue;
 
     const estimation = await estimateLoss(rposShopId, ean, open.startedAt, new Date(move.date));
+    const fresh = freshStatusByEan.get(ean);
     await prisma.stockoutEpisode.update({
       where: { id: open.id },
       data: {
@@ -288,6 +315,13 @@ async function resolveEpisodesFromArrivalMoves(rposShopId, arrivalMoves) {
         endedAt: new Date(move.date),
         qtyPerdueEstimee: estimation.qtyPerdue,
         caPerdueEstime: estimation.caPerdue,
+        ...(fresh ? {
+          hasOrder: fresh.hasOrder,
+          reactionStatus: fresh.reactionStatus,
+          deliveryStatus: fresh.deliveryStatus,
+          orderCreatedAt: fresh.orderCreatedAt,
+          actualReceptionDateStatus: fresh.actualReceptionDate,
+        } : {}),
       },
     });
     resolved += 1;
@@ -323,6 +357,17 @@ async function catchUpResolveStockoutEpisodes() {
     select: { id: true, rposShopId: true, ean: true, startedAt: true },
   });
 
+  // Même correctif que detectStockoutEpisodes/resolveEpisodesFromArrivalMoves ci-dessus
+  // (23/10/2026) — mais ce filet de rattrapage couvre TOUT le réseau en un seul passage (plusieurs
+  // magasins), donc un appel PAR MAGASIN concerné (jamais par épisode, computeAndPersistOpenEpisodeStatuses
+  // étant déjà optimisée en requêtes groupées PAR magasin) avant de traiter ses épisodes.
+  const shopIds = [...new Set(openEpisodes.map((e) => e.rposShopId))];
+  const freshStatusByShopAndEan = new Map();
+  for (const shopId of shopIds) {
+    const fresh = await computeAndPersistOpenEpisodeStatuses(shopId);
+    for (const e of fresh) freshStatusByShopAndEan.set(`${shopId}:${e.ean}`, e);
+  }
+
   let resolved = 0;
   for (const episode of openEpisodes) {
     const [latestMove, productCache] = await Promise.all([
@@ -352,6 +397,7 @@ async function catchUpResolveStockoutEpisodes() {
     const endedAt = resolvedByMove ? new Date(latestMove.date) : new Date();
 
     const estimation = await estimateLoss(episode.rposShopId, episode.ean, episode.startedAt, endedAt);
+    const fresh = freshStatusByShopAndEan.get(`${episode.rposShopId}:${episode.ean}`);
     await prisma.stockoutEpisode.update({
       where: { id: episode.id },
       data: {
@@ -359,6 +405,13 @@ async function catchUpResolveStockoutEpisodes() {
         endedAt,
         qtyPerdueEstimee: estimation.qtyPerdue,
         caPerdueEstime: estimation.caPerdue,
+        ...(fresh ? {
+          hasOrder: fresh.hasOrder,
+          reactionStatus: fresh.reactionStatus,
+          deliveryStatus: fresh.deliveryStatus,
+          orderCreatedAt: fresh.orderCreatedAt,
+          actualReceptionDateStatus: fresh.actualReceptionDate,
+        } : {}),
       },
     });
     resolved += 1;
