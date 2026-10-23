@@ -15,11 +15,17 @@ const prisma = require('../utils/prisma');
 
 const DEFAULT_MIN_WEEKS_OF_COVERAGE = 2;
 const SCRAP_LOOKBACK_DAYS = 90; // "3 dernières mois", demande explicite
-// Seuil de persistance pour "toujours en surstock" sur une période (demande explicite du
-// 21/10/2026 : "je dois avoir les article on son toujour en surstok" + confirmé "seuil souple
-// ≥90%" plutôt que 100% strict — tolère une génération manquée/en panne un jour sans faire sortir
-// l'article de la liste.
-const ALWAYS_OVERSTOCK_THRESHOLD_RATIO = 0.9;
+// Seuil de persistance pour "toujours en surstock" sur une période — RÉÉCRIT le 23/10/2026 (bug
+// signalé : la carte affichait 0 malgré du vrai surstock visible, "Toujours en surstock" restait
+// systématiquement vide) — l'ancien seuil ratio ≥90% des PROPOSITIONS générées sur la période se
+// basait sur `denom` = nombre de propositions du magasin sur la fenêtre choisie, souvent très
+// faible (parfois 1 seule en sandbox, et en pratique dépend de la fréquence réelle de génération,
+// pas garantie quotidienne pour tous les magasins) — avec un dénominateur aussi petit, atteindre
+// 90% est presque impossible sauf à être en surstock à CHAQUE génération, rarissime. Confirmé
+// explicitement par l'utilisateur : persistance mesurée en JOURS CALENDAIRES consécutifs
+// (firstOverstockDate -> lastOverstockDate, déjà calculées plus bas), indépendante du nombre de
+// propositions générées sur la période.
+const ALWAYS_OVERSTOCK_MIN_DAYS = 14;
 
 /**
  * Étendue réelle de l'historique de propositions disponible (demande explicite du 21/10/2026 :
@@ -396,6 +402,10 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       overstockRatio: Math.round((e.overstockCount / denom) * 100) / 100,
       firstOverstockDate: e.firstOverstockDate,
       lastOverstockDate: e.lastOverstockDate,
+      // Jours CALENDAIRES entre la première et la dernière observation en surstock (+1 pour compter
+      // le jour de début lui-même) — base du critère "Toujours en surstock" ci-dessous, indépendante
+      // du nombre de propositions générées sur la période (cf. commentaire ALWAYS_OVERSTOCK_MIN_DAYS).
+      overstockDaysSpan: Math.round((new Date(e.lastOverstockDate) - new Date(e.firstOverstockDate)) / (24 * 60 * 60 * 1000)) + 1,
       stillOverstocked,
     };
   }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
@@ -418,14 +428,18 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     return br - ar || (b.weeksOfCoverage ?? 0) - (a.weeksOfCoverage ?? 0);
   });
 
+  // "Toujours en surstock" = encore en surstock à la dernière observation (stillOverstocked) ET
+  // depuis au moins ALWAYS_OVERSTOCK_MIN_DAYS jours calendaires consécutifs — un article qui ÉTAIT
+  // en surstock il y a longtemps puis en est sorti, ou qui vient d'y entrer il y a 2 jours, n'a pas
+  // sa place ici malgré un overstockDaysSpan ou overstockRatio élevé pour d'autres raisons.
   const persistentArticles = articles
-    .filter((a) => a.overstockRatio >= ALWAYS_OVERSTOCK_THRESHOLD_RATIO)
-    .sort((a, b) => b.overstockRatio - a.overstockRatio);
+    .filter((a) => a.stillOverstocked && a.overstockDaysSpan >= ALWAYS_OVERSTOCK_MIN_DAYS)
+    .sort((a, b) => b.overstockDaysSpan - a.overstockDaysSpan);
 
   return {
     found: true,
     minWeeksOfCoverage,
-    alwaysOverstockThresholdRatio: ALWAYS_OVERSTOCK_THRESHOLD_RATIO,
+    alwaysOverstockMinDays: ALWAYS_OVERSTOCK_MIN_DAYS,
     periodStart: start,
     periodEnd: end,
     shopCount: new Set(allArticles.map((a) => a.rposShopId)).size,
@@ -591,7 +605,7 @@ function attachScrapFlat(articles, scrapByKey) {
  * Avec start/end : analyse sur la période choisie (demande explicite "si moi meme je veux le
  * surstok sur une periode comment je peux faire le filtre"), articles communs calculés sur les
  * mêmes articles mais ajoute en plus persistentArticles ("toujours en surstock" sur la période,
- * ratio ≥ ALWAYS_OVERSTOCK_THRESHOLD_RATIO).
+ * encore en surstock à la dernière observation ET depuis ≥ ALWAYS_OVERSTOCK_MIN_DAYS jours).
  */
 async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT_MIN_WEEKS_OF_COVERAGE, start, end } = {}) {
   const periodMode = !!(start && end);
@@ -621,7 +635,7 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     periodStart: periodMode ? byShop.periodStart : null,
     periodEnd: periodMode ? byShop.periodEnd : null,
     minWeeksOfCoverage,
-    alwaysOverstockThresholdRatio: periodMode ? byShop.alwaysOverstockThresholdRatio : null,
+    alwaysOverstockMinDays: periodMode ? byShop.alwaysOverstockMinDays : null,
     scrapLookbackDays: SCRAP_LOOKBACK_DAYS,
     shopCount: byShop.shopCount,
     articleCount: byShop.articleCount,
@@ -887,5 +901,5 @@ module.exports = {
   getOverstockByShopPage,
   DEFAULT_MIN_WEEKS_OF_COVERAGE,
   SCRAP_LOOKBACK_DAYS,
-  ALWAYS_OVERSTOCK_THRESHOLD_RATIO,
+  ALWAYS_OVERSTOCK_MIN_DAYS,
 };

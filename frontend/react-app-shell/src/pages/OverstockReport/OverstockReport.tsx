@@ -80,7 +80,7 @@ type OverstockReportData = {
   periodStart?: string | null;
   periodEnd?: string | null;
   minWeeksOfCoverage: number;
-  alwaysOverstockThresholdRatio?: number | null;
+  alwaysOverstockMinDays?: number | null;
   scrapLookbackDays?: number;
   shopCount: number;
   articleCount: number;
@@ -1128,7 +1128,7 @@ export function OverstockReport() {
             <>
               {filteredPersistent.length > 0 && (
                 <p className="text-muted small">
-                  Articles en surstock dans au moins {fmtPct(data.alwaysOverstockThresholdRatio ?? 0.9)} des propositions générées sur la période, magasin par magasin.
+                  Articles toujours en surstock depuis au moins {data.alwaysOverstockMinDays ?? 14} jours consécutifs, magasin par magasin.
                 </p>
               )}
               <CommonArticlesTable
