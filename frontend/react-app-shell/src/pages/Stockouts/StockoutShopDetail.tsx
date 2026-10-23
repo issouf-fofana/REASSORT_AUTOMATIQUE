@@ -812,7 +812,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
             </div>
           )}
 
-          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} episodeCountOverride={displayedOpenCount} />
+          <StockoutPeriodAnalysis shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} episodeCountOverride={displayedOpenCount} caPerdueOverride={displayedTotalCaPerdu} />
 
           {/* Analyse par rayon (demande du 16/10/2026 : "doit etre dans les detail quand je clique
               sur pour mag" — classement/priorisation, distinct de la navigation Secteur → Rayon →

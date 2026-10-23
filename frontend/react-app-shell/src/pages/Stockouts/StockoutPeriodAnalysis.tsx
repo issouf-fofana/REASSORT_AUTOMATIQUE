@@ -55,7 +55,12 @@ type DeptSortKey = 'department' | 'caPerdue' | 'qtyPerdue' | 'episodeCount';
 // "Articles touchés (période)" plus haut sur la page, le parent transmet désormais directement SA
 // valeur déjà affichée — une seule source de vérité pour le même chiffre, plus jamais deux requêtes
 // séparées pouvant tomber de part et d'autre d'un changement d'état entre-temps.
-export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, episodeCountOverride }: { shopQueryParam: string; startDate: string; endDate: string; episodeCountOverride?: number }) {
+// caPerdueOverride (demande explicite du 23/10/2026, même symptôme et même cause que
+// episodeCountOverride ci-dessus : "CA perdu" (carte "Situation actuelle") et "CA perdu (rupture)"
+// (ici) affichaient deux montants différents pour la même période — deux requêtes serveur séparées
+// (getDashboardSummary.totalCaPerduEstime vs getPeriodLossSummary.totalCaPerdu), calculées à des
+// instants légèrement différents. Même correctif : le parent transmet sa valeur déjà affichée.
+export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, episodeCountOverride, caPerdueOverride }: { shopQueryParam: string; startDate: string; endDate: string; episodeCountOverride?: number; caPerdueOverride?: number }) {
   const [summary, setSummary] = useState<PeriodSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -219,7 +224,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
                     note="Recalculé précisément pour la période choisie à chaque changement de filtre — jamais une approximation figée sur la durée totale des ruptures."
                   />
                 </div>
-                <div className="fs-5 fw-semibold">{summary.totalCaPerdu.toLocaleString('fr-FR')} CFA</div>
+                <div className="fs-5 fw-semibold">{Math.round(caPerdueOverride ?? summary.totalCaPerdu).toLocaleString('fr-FR')} CFA</div>
               </div>
               <div className="col-6 col-md-3">
                 <div className="text-muted small">CA réalisé (magasin)</div>
