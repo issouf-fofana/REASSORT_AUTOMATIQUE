@@ -737,6 +737,18 @@ export function OverstockReport() {
       .filter((a) => a.shops.length > 0);
   }, [data, shopFilters, search, rangeFilters, scrapOnly]);
 
+  // BUG CORRIGÉ le 23/10/2026 (signalé : "ca ne fonctionne pas au clique et pas de erreur" sur la
+  // pagination des onglets "Surstock commun"/"Toujours en surstock" — même symptôme et même cause
+  // que le bug de pagination de ByShopTable corrigé juste avant) : flattenCommonArticles(filteredCommon)
+  // était appelé directement dans le JSX à chaque render, créant un nouveau tableau à chaque fois
+  // même si filteredCommon n'avait pas changé. CommonArticlesTable a un
+  // useEffect(() => setPage(1), [rows]) — son propre onPageRowsChange (appelé à chaque page affichée)
+  // déclenchait un re-render du parent, qui recréait ce tableau, qui redéclenchait ce useEffect, qui
+  // remettait page à 1 juste après le clic. useMemo garde la même référence tant que filteredCommon/
+  // filteredPersistent eux-mêmes (déjà mémorisés ci-dessus) ne changent pas.
+  const flatCommonRows = useMemo(() => flattenCommonArticles(filteredCommon), [filteredCommon]);
+  const flatPersistentRows = useMemo(() => flattenCommonArticles(filteredPersistent), [filteredPersistent]);
+
   function openScrapDetail(ean: string, label: string) {
     navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report`);
   }
@@ -1220,7 +1232,7 @@ export function OverstockReport() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary"
-                  onClick={() => setExportModal({ pageRows: commonPageRows, allRows: flattenCommonArticles(filteredCommon), filenamePrefix: 'surstock-commun' })}
+                  onClick={() => setExportModal({ pageRows: commonPageRows, allRows: flatCommonRows, filenamePrefix: 'surstock-commun' })}
                   disabled={filteredCommon.length === 0}
                 >
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
@@ -1230,7 +1242,7 @@ export function OverstockReport() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary"
-                  onClick={() => setExportModal({ pageRows: persistentPageRows, allRows: flattenCommonArticles(filteredPersistent), filenamePrefix: 'surstock-toujours' })}
+                  onClick={() => setExportModal({ pageRows: persistentPageRows, allRows: flatPersistentRows, filenamePrefix: 'surstock-toujours' })}
                   disabled={filteredPersistent.length === 0}
                 >
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
@@ -1251,7 +1263,7 @@ export function OverstockReport() {
 
           {activeTab === 'common' && (
             <CommonArticlesTable
-              rows={flattenCommonArticles(filteredCommon)}
+              rows={flatCommonRows}
               showRatio={!!data.periodMode}
               threshold={data.minWeeksOfCoverage}
               onOpenDetail={openScrapDetail}
@@ -1268,7 +1280,7 @@ export function OverstockReport() {
                 </p>
               )}
               <CommonArticlesTable
-                rows={flattenCommonArticles(filteredPersistent)}
+                rows={flatPersistentRows}
                 showRatio
                 threshold={data.minWeeksOfCoverage}
                 onOpenDetail={openScrapDetail}
