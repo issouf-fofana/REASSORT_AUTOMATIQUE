@@ -988,24 +988,34 @@ async function getStockoutRisks(rposShopId, { maxDays = 3, department } = {}) {
  * (surstock probable). BUG CORRIGÉ le 24/10/2026 (demande explicite : "si on lui pose la question
  * sur les surtok il doit lme donner le nombre ext qou a tu vois et aussi quelque detail") : cette
  * fonction avait sa PROPRE logique, totalement séparée de la page Surstock (overstockReportService.js)
- * et jamais synchronisée avec ses corrections — 3 écarts constatés : (1) seuil par défaut à 6
- * semaines au lieu de 2 (DEFAULT_MIN_WEEKS_OF_COVERAGE, déjà corrigé sur la page le 21/10/2026 :
- * "6 semaine est trop"), (2) renvoyait `found: false` sans AUCUNE proposition générée, au lieu
- * d'utiliser le fallback ventes/stock (computeOverstockFromSales) qui existe déjà pour ce cas, (3)
- * utilisait stockAtGeneration (figé) sans passer par getOverstockByShop. Délègue désormais
- * entièrement à getOverstockByShop (overstockReportService.js) — même calcul, mêmes résultats que
- * la page, pour toujours, même si la page évolue encore par la suite.
+ * et jamais synchronisée avec ses corrections.
+ *
+ * RÉVISÉ une seconde fois le 24/10/2026 (signalé avec capture : page Surstock affiche 181, chatbot
+ * répondait 50 à la même question, PUIS 167 après le premier correctif ci-dessous) : même après
+ * avoir fait pointer cette fonction sur getOverstockByShop (stock live corrigé), le chiffre restait
+ * différent de la page — getOverstockByShop ne regarde QUE la toute dernière proposition par
+ * magasin, alors que la page Surstock ("Aujourd'hui") utilise getOverstockOverPeriod sur une
+ * fenêtre de 90 jours glissante (même fenêtre fixe que le frontend depuis la suppression du
+ * sélecteur de période, commit 46cf316) et son champ todayArticles — deux calculs structurellement
+ * différents. Utilise désormais EXACTEMENT la même fonction, même fenêtre, même champ que la page,
+ * pour ne plus jamais diverger.
  */
+const OVERSTOCK_CHATBOT_PERIOD_DAYS = 90;
+
 async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE, department } = {}) {
-  const report = await overstockReportService.getOverstockByShop([rposShopId], { minWeeksOfCoverage });
+  const end = new Date();
+  const start = new Date(end.getTime() - OVERSTOCK_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+  const report = await overstockReportService.getOverstockOverPeriod([rposShopId], { minWeeksOfCoverage, start: start.toISOString(), end: end.toISOString() });
   if (!report.found) return { found: false, message: report.message || 'Aucune donnée de surstock pour ce magasin.' };
 
-  const overstocked = report.articles
+  const overstocked = (report.todayArticles || [])
     .filter((a) => !department || a.department === department)
     .map((a) => ({
       ean: a.ean,
       label: a.label,
       department: a.department,
+      // Nommé stockAtGeneration pour compat (contrat déjà consommé par le LLM), mais c'est bien le
+      // stock LIVE depuis le 24/10/2026 (cf. commentaire ci-dessus), pas une photo figée.
       stockAtGeneration: a.stock,
       avgWeeklySales: roundWeeklySales(a.avgWeeklySales),
       weeksOfCoverage: a.weeksOfCoverage,
@@ -2331,11 +2341,17 @@ async function getStockoutRisksAllShops(allowedShopIds, { maxDays = 3 } = {}) {
 async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE } = {}) {
   if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
 
-  const report = await overstockReportService.getOverstockByShop(allowedShopIds, { minWeeksOfCoverage });
+  // Même alignement que getOverstockArticles ci-dessus (demande explicite : chatbot doit dire
+  // EXACTEMENT le même chiffre que la page Surstock) — getOverstockByShop (dernière proposition
+  // seule) remplacé par getOverstockOverPeriod/todayArticles (même fenêtre fixe de 90 jours que le
+  // frontend depuis le 24/10/2026, commit 46cf316).
+  const end = new Date();
+  const start = new Date(end.getTime() - OVERSTOCK_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+  const report = await overstockReportService.getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage, start: start.toISOString(), end: end.toISOString() });
   if (!report.found) return { found: false, message: report.message || 'Aucune donnée de surstock pour ce périmètre.' };
 
   const byShop = new Map();
-  for (const a of report.articles) {
+  for (const a of (report.todayArticles || [])) {
     if (!byShop.has(a.rposShopId)) byShop.set(a.rposShopId, { rposShopId: a.rposShopId, shopReference: a.shopReference, shopName: a.shopName, articlesOverstocked: 0 });
     byShop.get(a.rposShopId).articlesOverstocked += 1;
   }
