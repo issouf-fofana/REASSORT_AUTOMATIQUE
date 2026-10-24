@@ -296,31 +296,41 @@ async function start() {
     // docker-entrypoint.sh, AVANT le démarrage du serveur, a rendu le service injoignable le temps
     // de leur exécution (le job secteur/rayon fait de vrais appels RPOS un par un, potentiellement
     // des dizaines de minutes avec plusieurs milliers d'épisodes sur tout le réseau).
-    const { runStockoutSectorBackfillJob } = require('./jobs/stockoutSectorBackfillJob');
-    runStockoutSectorBackfillJob().catch((err) => console.error('[startup] Résolution secteur/rayon en arrière-plan : échec non bloquant —', err.message));
-    const { runWeekendReceptionDatesFix } = require('../scripts/fixWeekendReceptionDates');
-    runWeekendReceptionDatesFix().catch((err) => console.error('[startup] Correction des dates de livraison en arrière-plan : échec non bloquant —', err.message));
-    // Rattrapage immédiat des ruptures résolvables par un arrivage déjà en base (demande implicite
-    // du 19/10/2026 : "j'ai fait le commit il est toujour en pareil") — purement local (aucun appel
-    // RPOS), donc sûr à lancer dès le démarrage sans attendre le premier passage planifié (jusqu'à
-    // 1h par défaut, cf. STOCKOUT_CATCH_UP_RESOLVE_CRON).
-    const { runStockoutCatchUpResolveJob } = require('./jobs/stockoutCatchUpResolveJob');
-    runStockoutCatchUpResolveJob().catch((err) => console.error('[startup] Rattrapage de résolution des ruptures en arrière-plan : échec non bloquant —', err.message));
-    // Resynchronisation immédiate du stock RPOS officiel des articles en rupture — fait de vrais
-    // appels RPOS (contrairement au rattrapage ci-dessus, purement local), mais reste en
-    // arrière-plan sans bloquer le démarrage, comme les autres rattrapages ici.
-    const { runStockoutProductCacheRefreshJob } = require('./jobs/stockoutProductCacheRefreshJob');
-    runStockoutProductCacheRefreshJob().catch((err) => console.error('[startup] Resynchronisation du stock RPOS en arrière-plan : échec non bloquant —', err.message));
-    // Précalcul immédiat du statut des ruptures déjà ouvertes AVANT ce déploiement (demande
-    // explicite du 20/10/2026 : "il ne calcule ps a meme temps... le but est d'optimisé") — sans ce
-    // passage immédiat, les épisodes déjà ouverts resteraient avec hasOrder/deliveryStatus à null
-    // jusqu'au premier déclenchement planifié (jusqu'à 5 min, cf. STOCKOUT_STATUS_RECALC_CRON).
-    const { runStockoutStatusRecalcJob } = require('./jobs/stockoutStatusRecalcJob');
-    runStockoutStatusRecalcJob().catch((err) => console.error('[startup] Précalcul du statut des ruptures en arrière-plan : échec non bloquant —', err.message));
-    // Précalcul immédiat du rapport Surstock (sans ce passage, la page resterait lente jusqu'au
-    // premier déclenchement planifié, jusqu'à 1h, cf. OVERSTOCK_REPORT_SNAPSHOT_CRON).
-    const { runOverstockReportSnapshotJob } = require('./jobs/overstockReportSnapshotJob');
-    runOverstockReportSnapshotJob().catch((err) => console.error('[startup] Précalcul du rapport Surstock en arrière-plan : échec non bloquant —', err.message));
+    //
+    // ÉCHELONNÉS avec un court délai entre chacun (demande explicite du 24/10/2026 : "quand je fait
+    // un deployement le server n'est plus access a causes des jobs") — les lancer tous EN MÊME
+    // TEMPS (comme avant ce correctif) crée un pic de charge au démarrage (428% CPU, 4.8 Go RAM
+    // mesurés en prod) car plusieurs font de vrais appels RPOS en parallèle sur tous les magasins
+    // simultanément. Rien n'est supprimé ni rendu bloquant : chaque job tourne toujours en
+    // arrière-plan (pas de `await`), juste décalé de quelques secondes par rapport au précédent
+    // pour lisser le pic plutôt que de tout cumuler à la même seconde.
+    const STARTUP_JOB_STAGGER_MS = 20_000;
+    const startupJobs = [
+      ['./jobs/stockoutSectorBackfillJob', 'runStockoutSectorBackfillJob', '[startup] Résolution secteur/rayon en arrière-plan : échec non bloquant —'],
+      ['../scripts/fixWeekendReceptionDates', 'runWeekendReceptionDatesFix', '[startup] Correction des dates de livraison en arrière-plan : échec non bloquant —'],
+      // Rattrapage immédiat des ruptures résolvables par un arrivage déjà en base (demande
+      // implicite du 19/10/2026 : "j'ai fait le commit il est toujour en pareil") — purement local
+      // (aucun appel RPOS), donc sûr à lancer dès le démarrage sans attendre le premier passage
+      // planifié (jusqu'à 1h par défaut, cf. STOCKOUT_CATCH_UP_RESOLVE_CRON).
+      ['./jobs/stockoutCatchUpResolveJob', 'runStockoutCatchUpResolveJob', '[startup] Rattrapage de résolution des ruptures en arrière-plan : échec non bloquant —'],
+      // Resynchronisation immédiate du stock RPOS officiel des articles en rupture — fait de vrais
+      // appels RPOS (contrairement au rattrapage ci-dessus, purement local).
+      ['./jobs/stockoutProductCacheRefreshJob', 'runStockoutProductCacheRefreshJob', '[startup] Resynchronisation du stock RPOS en arrière-plan : échec non bloquant —'],
+      // Précalcul immédiat du statut des ruptures déjà ouvertes AVANT ce déploiement (demande
+      // explicite du 20/10/2026 : "il ne calcule ps a meme temps... le but est d'optimisé") — sans
+      // ce passage immédiat, les épisodes déjà ouverts resteraient avec hasOrder/deliveryStatus à
+      // null jusqu'au premier déclenchement planifié (jusqu'à 5 min, cf. STOCKOUT_STATUS_RECALC_CRON).
+      ['./jobs/stockoutStatusRecalcJob', 'runStockoutStatusRecalcJob', '[startup] Précalcul du statut des ruptures en arrière-plan : échec non bloquant —'],
+      // Précalcul immédiat du rapport Surstock (sans ce passage, la page resterait lente jusqu'au
+      // premier déclenchement planifié, jusqu'à 1h, cf. OVERSTOCK_REPORT_SNAPSHOT_CRON).
+      ['./jobs/overstockReportSnapshotJob', 'runOverstockReportSnapshotJob', '[startup] Précalcul du rapport Surstock en arrière-plan : échec non bloquant —'],
+    ];
+    startupJobs.forEach(([modulePath, exportName, errorPrefix], index) => {
+      setTimeout(() => {
+        const job = require(modulePath)[exportName];
+        job().catch((err) => console.error(errorPrefix, err.message));
+      }, index * STARTUP_JOB_STAGGER_MS);
+    });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
