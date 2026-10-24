@@ -140,7 +140,12 @@ const DELIVERY_STATUS_TO_CAUSE: Record<DeliveryStatus, string> = {
   LIVRAISON_DOUTEUSE: 'ECART_STOCK_RAYON',
 };
 
-type OrderFilter = 'all' | 'with-order' | 'without-order' | 'delivered';
+// 'open' ajouté le 24/10/2026 (demande explicite : "je dois avoir les articles qui son en rupture
+// Aujoudhui... il ne faut pas affiché par defaut les autres en premier lieu" — l'onglet par défaut
+// "Toutes" mélangeait les ruptures ACTIVES (Avec/Sans commande) avec celles déjà résolues
+// (Livrées), montrant un total trompeur au premier coup d'œil) — Avec commande + Sans commande,
+// sans Livrées : les seules ruptures encore réellement en cours.
+type OrderFilter = 'open' | 'all' | 'with-order' | 'without-order' | 'delivered';
 
 // Tous les filtres possibles sur la liste d'articles d'un rayon (demande explicite du 21/10/2026 :
 // "sur rupture il faut affiché tout les filtre possible... ajoute tout ce qui est filtrable") —
@@ -253,7 +258,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
 
   function setSelectedDepartment(dept: string | null) {
     setSelectedDepartmentState(dept);
-    setOrderFilter('all');
+    setOrderFilter('open');
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (dept) next.set('dept', dept); else next.delete('dept');
@@ -298,7 +303,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     setGlobalOrderFilter([]);
     setGlobalCauseFilter([]);
   }
-  const [orderFilter, setOrderFilter] = useState<OrderFilter>('all');
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('open');
   const [articleSearch, setArticleSearch] = useState('');
   const [causeFilter, setCauseFilter] = useState<string>('');
   const [reactionFilter, setReactionFilter] = useState<string>('');
@@ -314,7 +319,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     setRangeFilters((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
   }
   function clearAllArticleFilters() {
-    setOrderFilter('all');
+    setOrderFilter('open');
     setArticleSearch('');
     setCauseFilter('');
     setReactionFilter('');
@@ -478,6 +483,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
       )
     : [];
   const articlesInDepartment = articlesInDepartmentAll.filter((e) => {
+    if (orderFilter === 'open' && e.deliveryStatus === 'LIVREE') return false;
     if (orderFilter === 'with-order' && !e.hasOrder) return false;
     if (orderFilter === 'without-order' && e.hasOrder) return false;
     if (orderFilter === 'delivered' && e.deliveryStatus !== 'LIVREE') return false;
@@ -521,6 +527,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const withOrderCount = articlesInDepartmentAll.filter((e) => e.hasOrder).length;
   const withoutOrderCount = articlesInDepartmentAll.length - withOrderCount;
   const deliveredCount = articlesInDepartmentAll.filter((e) => e.deliveryStatus === 'LIVREE').length;
+  const openCount = articlesInDepartmentAll.length - deliveredCount;
 
   const showArticleList = !!selectedSector && !!selectedDepartment;
 
@@ -906,6 +913,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                   de filtres, panneau "Filtres avancés" en grille plutôt qu'une ligne compressée. */}
               <div className="sof-filter-card mb-3">
                 <div className="sof-pill-row">
+                  {/* Onglet par défaut (demande explicite du 24/10/2026 : "je dois avoir les
+                      articles qui son en rupture Aujoudhui... il ne faut pas affiché par defaut
+                      les autres en premier lieu") — exclut seulement les ruptures déjà résolues
+                      (Livrées), contrairement à "Toutes" qui les mélange avec les ruptures encore
+                      actives. */}
+                  <button type="button" className={`sof-pill${orderFilter === 'open' ? ' active' : ''}`} onClick={() => setOrderFilter('open')}>
+                    En cours <span className="sof-pill-count">{openCount}</span>
+                  </button>
                   <button type="button" className={`sof-pill${orderFilter === 'all' ? ' active' : ''}`} onClick={() => setOrderFilter('all')}>
                     Toutes <span className="sof-pill-count">{articlesInDepartmentAll.length}</span>
                   </button>
