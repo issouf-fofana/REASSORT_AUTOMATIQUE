@@ -822,7 +822,28 @@ async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
     persistentArticleCount: full.persistentArticles ? filterFlatArticlesIn(full.persistentArticles).length : null,
     todayArticles: filterFlatArticlesIn(full.todayArticles),
     todayArticleCount: full.todayArticles ? filterFlatArticlesIn(full.todayArticles).length : null,
+    // BUG CORRIGÉ le 24/10/2026 (signalé avec capture : changement de magasin dans la topbar, le
+    // graphique "Articles en surstock aujourd'hui" reste figé sur le même chiffre — 181 pour
+    // HYPER HAYAT ET pour MANDARINE KOUMASSI) : trendPoints n'était JAMAIS filtré par magasin ici,
+    // contrairement à articlesByShop/persistentArticles/todayArticles ci-dessus — il restait
+    // toujours l'agrégat GLOBAL tous magasins confondus du snapshot complet, peu importe
+    // allowedShopIds. Reconstruit désormais depuis trendPointsByShop (déjà détaillé par
+    // rposShopId), filtré puis réagrégé par jour pour le(s) seul(s) magasin(s) autorisé(s)/
+    // sélectionné(s) — même logique qu'overstockEansByDay dans getOverstockOverPeriod (un article
+    // en surstock dans N magasins filtrés le même jour ne doit compter qu'une fois).
+    trendPoints: full.trendPointsByShop ? rebuildTrendPoints(full.trendPointsByShop, allowedSet) : full.trendPoints,
   };
+}
+
+function rebuildTrendPoints(trendPointsByShop, allowedShopIdSet) {
+  const countByDay = new Map();
+  for (const p of trendPointsByShop) {
+    if (!allowedShopIdSet.has(p.rposShopId)) continue;
+    countByDay.set(p.date, (countByDay.get(p.date) || 0) + p.count);
+  }
+  return [...countByDay.entries()]
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

@@ -2657,6 +2657,19 @@ async function getTodayProposalShops(shopIdFilter = null) {
     orderBy: { generatedAt: 'desc' },
   });
 
+  // BUG CORRIGÉ le 24/10/2026 (signalé avec capture : "414 — 414" au lieu de "414 — CASH IVOIRE U
+  // PORT-BOUËT" sur le graphique "Magasins avec une proposition aujourd'hui") : Proposal.rposShopName
+  // est une COPIE figée au moment de la génération, jamais remise à jour ensuite — si Shop.name
+  // n'était pas encore synchronisé à cet instant précis (cas constaté : génération à 06h46, Shop
+  // resynchronisé seulement à 14h00), la mauvaise valeur reste collée à cette proposition pour
+  // toujours, même une fois Shop.name corrigé. Résolu ici depuis Shop (source TOUJOURS à jour),
+  // avec repli sur la copie figée seulement si le magasin a depuis disparu de la table Shop.
+  const shops = await prisma.shop.findMany({
+    where: { rposShopId: { in: [...new Set(proposals.map((p) => p.rposShopId))] } },
+    select: { rposShopId: true, reference: true, name: true },
+  });
+  const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
+
   // Une seule ligne par magasin (la génération la plus récente du jour), au cas où un magasin
   // aurait été régénéré plusieurs fois aujourd'hui — proposals déjà triées par generatedAt desc.
   const seen = new Set();
@@ -2664,11 +2677,12 @@ async function getTodayProposalShops(shopIdFilter = null) {
   for (const p of proposals) {
     if (seen.has(p.rposShopId)) continue;
     seen.add(p.rposShopId);
+    const shop = shopById.get(p.rposShopId);
     result.push({
       id: p.id,
       rposShopId: p.rposShopId,
-      rposShopReference: p.rposShopReference,
-      rposShopName: p.rposShopName,
+      rposShopReference: shop?.reference ?? p.rposShopReference,
+      rposShopName: shop?.name ?? p.rposShopName,
       generatedAt: p.generatedAt,
       linesTotal: p._count.lines,
     });
