@@ -1496,14 +1496,52 @@ function flattenCommonArticles(articles: CommonArticle[]): FlatCommonRow[] {
   return rows;
 }
 
+// Tri client (demande explicite du 24/10/2026 : "on ne peux pas filtré par croissant et decroissant
+// comment les autre ajout tout ca") — CommonArticlesTable (onglets "Aujourd'hui"/"En surstock
+// depuis 14j+") n'avait aucun tri de colonne, contrairement à ByShopTable. Les données sont déjà
+// entièrement chargées en mémoire ici (pas de pagination serveur), donc un tri côté client simple
+// suffit, jamais un second appel réseau.
+const COMMON_TABLE_SORTABLE_FIELDS = new Set(['label', 'shopName', 'stock', 'sellingPrice', 'avgDailySales', 'avgWeeklySales', 'avgMonthlySales', 'weeksOfCoverage', 'overstockRatio', 'scrapQuantity90d']);
+
 function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMessage, onPageRowsChange }: { rows: FlatCommonRow[]; showRatio: boolean; threshold: number; onOpenDetail: (ean: string, label: string) => void; emptyMessage: string; onPageRowsChange?: (pageRows: FlatCommonRow[]) => void }) {
   const [page, setPage] = useState(1);
+  const [sortField, setSortField] = useState<string | undefined>(undefined);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   // 10 par défaut, même raisonnement que ByShopTable ci-dessus (demande explicite du 21/10/2026).
   const PAGE_SIZE = 10;
   useEffect(() => { setPage(1); }, [rows]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+
+  function toggleSort(field: string) {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortField(field);
+      setSortDir('desc');
+    }
+  }
+
+  function sortIcon(field: string) {
+    if (sortField !== field) return null;
+    return <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
+  }
+
+  const sortedRows = useMemo(() => {
+    if (!sortField || !COMMON_TABLE_SORTABLE_FIELDS.has(sortField)) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = (a as any)[sortField];
+      const bv = (b as any)[sortField];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(av).localeCompare(String(bv), 'fr-FR');
+      return dir * (av - bv);
+    });
+  }, [rows, sortField, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paged = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paged = sortedRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   // Remonte la page affichée au parent (demande explicite du 21/10/2026 : "le bouton export...
   // doit etre la pour l'export et il me demande si je veux la feuille active ou tout" — appliqué
   // aux 3 onglets, pas seulement "Par magasin") — le bouton Export vit sur la ligne des onglets,
@@ -1521,16 +1559,16 @@ function CommonArticlesTable({ rows, showRatio, threshold, onOpenDetail, emptyMe
           <table className="table align-middle table-hover mb-0">
             <thead className="bg-light-subtle">
               <tr>
-                <th>Article</th>
-                <th>Magasin</th>
-                <th>Stock</th>
-                <th>Prix de vente</th>
-                <th>Vente/jour</th>
-                <th>Vente/semaine</th>
-                <th>Vente/mois</th>
-                <th>Couverture</th>
-                {showRatio && <th>% du temps en surstock</th>}
-                <th>Casse (90j)</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('label')}>Article{sortIcon('label')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('shopName')}>Magasin{sortIcon('shopName')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('stock')}>Stock{sortIcon('stock')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('sellingPrice')}>Prix de vente{sortIcon('sellingPrice')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgDailySales')}>Vente/jour{sortIcon('avgDailySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgWeeklySales')}>Vente/semaine{sortIcon('avgWeeklySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('avgMonthlySales')}>Vente/mois{sortIcon('avgMonthlySales')}</th>
+                <th className="osr-sortable-th" onClick={() => toggleSort('weeksOfCoverage')}>Couverture{sortIcon('weeksOfCoverage')}</th>
+                {showRatio && <th className="osr-sortable-th" onClick={() => toggleSort('overstockRatio')}>% du temps en surstock{sortIcon('overstockRatio')}</th>}
+                <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse (90j){sortIcon('scrapQuantity90d')}</th>
               </tr>
             </thead>
             <tbody>

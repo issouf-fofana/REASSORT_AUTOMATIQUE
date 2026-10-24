@@ -790,14 +790,26 @@ async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
 
   const allowedSet = new Set(allowedShopIds);
   const articlesByShop = full.articlesByShop.filter((a) => allowedSet.has(a.rposShopId));
-  // Un article "commun"/"persistant" dans le snapshot complet peut ne plus l'être une fois réduit au
-  // périmètre SUPERVISOR (ex: commun à 3 magasins dont 1 seul accessible) — on ne filtre donc jamais
-  // juste les lignes à l'intérieur de chaque article, on RECALCULE le regroupement sur les lignes
-  // déjà filtrées (coût négligeable, en mémoire, pas de nouvelle requête DB).
+  // Un article "commun" dans le snapshot complet peut ne plus l'être une fois réduit au périmètre
+  // SUPERVISOR (ex: commun à 3 magasins dont 1 seul accessible) — on ne filtre donc jamais juste les
+  // lignes à l'intérieur de chaque article, on RECALCULE le regroupement sur les lignes déjà
+  // filtrées (coût négligeable, en mémoire, pas de nouvelle requête DB). N'affecte QUE commonArticles
+  // (groupé par EAN avec sous-tableau shops) — pas persistentArticles/todayArticles, listes PLATES
+  // depuis le 23-24/10/2026.
   const filterShopsIn = (groups) =>
     groups
       .map((g) => ({ ...g, shops: g.shops.filter((s) => allowedSet.has(s.rposShopId)) }))
       .filter((g) => g.shops.length >= 2);
+
+  // BUG CORRIGÉ le 24/10/2026 (signalé avec capture : filtré sur HYPER HAYAT (035) dans la topbar,
+  // mais le tableau "Aujourd'hui" montrait des lignes de CASH IVOIRE U PORT-BOUËT (414) — une vraie
+  // fuite de données inter-magasins) : persistentArticles/todayArticles sont des listes PLATES
+  // (ShopArticleRow[], un rposShopId par ligne) depuis le 23-24/10/2026, PAS le format groupé par
+  // EAN {shops: [...]} qu'attend filterShopsIn ci-dessus — appeler filterShopsIn dessus ne filtrait
+  // donc rien (ou produisait un résultat incohérent), le snapshot complet (TOUS les magasins ADMIN)
+  // étant renvoyé tel quel à un compte restreint. Filtrées ici directement par rposShopId, comme
+  // articlesByShop ci-dessus.
+  const filterFlatArticlesIn = (flatArticles) => (flatArticles ? flatArticles.filter((a) => allowedSet.has(a.rposShopId)) : flatArticles);
 
   return {
     ...full,
@@ -806,8 +818,10 @@ async function getCachedDefaultOverstockReport(allowedShopIds, cacheKey) {
     articlesByShop,
     commonArticles: filterShopsIn(full.commonArticles),
     commonArticleCount: filterShopsIn(full.commonArticles).length,
-    persistentArticles: full.persistentArticles ? filterShopsIn(full.persistentArticles) : null,
-    persistentArticleCount: full.persistentArticles ? filterShopsIn(full.persistentArticles).length : null,
+    persistentArticles: filterFlatArticlesIn(full.persistentArticles),
+    persistentArticleCount: full.persistentArticles ? filterFlatArticlesIn(full.persistentArticles).length : null,
+    todayArticles: filterFlatArticlesIn(full.todayArticles),
+    todayArticleCount: full.todayArticles ? filterFlatArticlesIn(full.todayArticles).length : null,
   };
 }
 
