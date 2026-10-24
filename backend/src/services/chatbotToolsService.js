@@ -50,6 +50,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { listAnomalies } = require('./orderAnomalyService');
 const aiForecastService = require('./aiForecastService');
 const stockoutEpisodeService = require('./stockoutEpisodeService');
+const overstockReportService = require('./overstockReportService');
 
 // Arrondit une vente moyenne hebdomadaire à 1 décimale (demande du 12/10/2026, bug observé en
 // conditions réelles : le chatbot recopiait "2,26" directement depuis avgWeeklySales transmis sans
@@ -982,22 +983,32 @@ async function getStockoutRisks(rposShopId, { maxDays = 3, department } = {}) {
   return { found: true, maxDays, count: linesWithAvg.length, lines: linesWithAvg };
 }
 
-/** getOverstockArticles() — articles dont le stock couvre largement plus que la vente moyenne (surstock probable). */
-async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = 6, department } = {}) {
-  const proposal = await getLatestProposal(rposShopId);
-  if (!proposal) return { found: false, message: 'Aucune proposition générée pour ce magasin.' };
+/**
+ * getOverstockArticles() — articles dont le stock couvre largement plus que la vente moyenne
+ * (surstock probable). BUG CORRIGÉ le 24/10/2026 (demande explicite : "si on lui pose la question
+ * sur les surtok il doit lme donner le nombre ext qou a tu vois et aussi quelque detail") : cette
+ * fonction avait sa PROPRE logique, totalement séparée de la page Surstock (overstockReportService.js)
+ * et jamais synchronisée avec ses corrections — 3 écarts constatés : (1) seuil par défaut à 6
+ * semaines au lieu de 2 (DEFAULT_MIN_WEEKS_OF_COVERAGE, déjà corrigé sur la page le 21/10/2026 :
+ * "6 semaine est trop"), (2) renvoyait `found: false` sans AUCUNE proposition générée, au lieu
+ * d'utiliser le fallback ventes/stock (computeOverstockFromSales) qui existe déjà pour ce cas, (3)
+ * utilisait stockAtGeneration (figé) sans passer par getOverstockByShop. Délègue désormais
+ * entièrement à getOverstockByShop (overstockReportService.js) — même calcul, mêmes résultats que
+ * la page, pour toujours, même si la page évolue encore par la suite.
+ */
+async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE, department } = {}) {
+  const report = await overstockReportService.getOverstockByShop([rposShopId], { minWeeksOfCoverage });
+  if (!report.found) return { found: false, message: report.message || 'Aucune donnée de surstock pour ce magasin.' };
 
-  const lines = await prisma.proposalLine.findMany({
-    where: { proposalId: proposal.id, ...(department ? { department } : {}) },
-    select: { ean: true, label: true, department: true, stockAtGeneration: true, avgWeeklySales: true },
-  });
-
-  const overstocked = lines
-    .filter((l) => l.avgWeeklySales > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage)
-    .map((l) => ({
-      ...l,
-      avgWeeklySales: roundWeeklySales(l.avgWeeklySales),
-      weeksOfCoverage: Math.round(((l.stockAtGeneration || 0) / l.avgWeeklySales) * 10) / 10,
+  const overstocked = report.articles
+    .filter((a) => !department || a.department === department)
+    .map((a) => ({
+      ean: a.ean,
+      label: a.label,
+      department: a.department,
+      stockAtGeneration: a.stock,
+      avgWeeklySales: roundWeeklySales(a.avgWeeklySales),
+      weeksOfCoverage: a.weeksOfCoverage,
     }))
     .sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage)
     .slice(0, 50);
@@ -2309,23 +2320,26 @@ async function getStockoutRisksAllShops(allowedShopIds, { maxDays = 3 } = {}) {
   return { found: true, maxDays, shopCount: results.length, totalArticlesAtRisk: results.reduce((s, r) => s + r.articlesAtRisk, 0), shops: results };
 }
 
-/** getOverstockArticlesAllShops() — même principe que getStockoutRisksAllShops, pour le surstock. */
-async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage = 6 } = {}) {
+/**
+ * getOverstockArticlesAllShops() — même principe que getStockoutRisksAllShops, pour le surstock.
+ * BUG CORRIGÉ le 24/10/2026 (même correction que getOverstockArticles ci-dessus) : `if (!proposal)
+ * continue` ignorait purement et simplement tout magasin sans proposition générée — faussant le
+ * total "tous magasins" en excluant silencieusement ces magasins au lieu d'utiliser le fallback
+ * ventes (déjà disponible via getOverstockByShop). Délègue désormais à getOverstockByShop par lot
+ * (tous les magasins du périmètre en un seul appel, pas une boucle manuelle par magasin).
+ */
+async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE } = {}) {
   if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
 
-  const shops = await prisma.shop.findMany({ where: { rposShopId: { in: allowedShopIds } }, select: { rposShopId: true, reference: true, name: true } });
-  const results = [];
-  for (const shop of shops) {
-    const proposal = await getLatestProposal(shop.rposShopId);
-    if (!proposal) continue;
-    const lines = await prisma.proposalLine.findMany({
-      where: { proposalId: proposal.id },
-      select: { stockAtGeneration: true, avgWeeklySales: true },
-    });
-    const count = lines.filter((l) => l.avgWeeklySales > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage).length;
-    if (count > 0) results.push({ rposShopId: shop.rposShopId, shopReference: shop.reference, shopName: shop.name, articlesOverstocked: count });
+  const report = await overstockReportService.getOverstockByShop(allowedShopIds, { minWeeksOfCoverage });
+  if (!report.found) return { found: false, message: report.message || 'Aucune donnée de surstock pour ce périmètre.' };
+
+  const byShop = new Map();
+  for (const a of report.articles) {
+    if (!byShop.has(a.rposShopId)) byShop.set(a.rposShopId, { rposShopId: a.rposShopId, shopReference: a.shopReference, shopName: a.shopName, articlesOverstocked: 0 });
+    byShop.get(a.rposShopId).articlesOverstocked += 1;
   }
-  results.sort((a, b) => b.articlesOverstocked - a.articlesOverstocked);
+  const results = [...byShop.values()].sort((a, b) => b.articlesOverstocked - a.articlesOverstocked);
 
   if (!results.length) return { found: true, minWeeksOfCoverage, shopCount: 0, message: 'Aucun magasin en surstock notable actuellement.' };
   return { found: true, minWeeksOfCoverage, shopCount: results.length, totalArticlesOverstocked: results.reduce((s, r) => s + r.articlesOverstocked, 0), shops: results };
