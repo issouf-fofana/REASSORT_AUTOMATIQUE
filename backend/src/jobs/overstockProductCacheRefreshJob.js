@@ -56,9 +56,13 @@ async function runOverstockProductCacheRefreshJob() {
     try {
       const byEan = await rpos.getProductsByEans(posId, shopId, [...eans]);
       for (const [ean, product] of byEan) {
+        // BUG CORRIGÉ le 24/10/2026 (cf. même correctif dans stockoutProductCacheRefreshJob.js) :
+        // syncedAt a `@default(now())`, qui ne s'applique qu'à la création — jamais réappliqué par
+        // un upsert dont le bloc `update` ne le mentionne pas, rendant impossible de vérifier si un
+        // article a vraiment été resynchronisé récemment.
         await prisma.productCache.upsert({
           where: { rposShopId_ean: { rposShopId: shopId, ean } },
-          update: { stock: Number(product.stock || 0), sellingPrice: Number(product.selling_price || 0), buyingPrice: Number(product.buying_price || 0) },
+          update: { stock: Number(product.stock || 0), sellingPrice: Number(product.selling_price || 0), buyingPrice: Number(product.buying_price || 0), syncedAt: new Date() },
           create: {
             rposPosId: posId,
             rposShopId: shopId,

@@ -45,9 +45,15 @@ async function runStockoutProductCacheRefreshJob() {
     try {
       const byEan = await rpos.getProductsByEans(posId, shopId, [...eans]);
       for (const [ean, product] of byEan) {
+        // BUG CORRIGÉ le 24/10/2026 (découvert en investiguant un cas Surstock, mais affectait
+        // aussi ce job) : syncedAt a `@default(now())` dans le schéma Prisma, qui ne s'applique
+        // QU'À LA CRÉATION — jamais réappliqué par un upsert dont le bloc `update` ne le mentionne
+        // pas explicitement. stock était donc bien resynchronisé à chaque passage, mais syncedAt
+        // restait figé à sa toute première valeur pour toujours, rendant impossible de distinguer
+        // un article jamais resynchronisé d'un article resynchronisé des dizaines de fois.
         await prisma.productCache.upsert({
           where: { rposShopId_ean: { rposShopId: shopId, ean } },
-          update: { stock: Number(product.stock || 0), sellingPrice: Number(product.selling_price || 0), buyingPrice: Number(product.buying_price || 0) },
+          update: { stock: Number(product.stock || 0), sellingPrice: Number(product.selling_price || 0), buyingPrice: Number(product.buying_price || 0), syncedAt: new Date() },
           create: {
             rposPosId: posId,
             rposShopId: shopId,

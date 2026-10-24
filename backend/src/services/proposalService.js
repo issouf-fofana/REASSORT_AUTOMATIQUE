@@ -147,9 +147,15 @@ async function cacheProduct(shopId, posId, ean, product) {
     stock: Number(product.stock || 0),
     departmentId: product.department?.id || null,
   };
+  // BUG CORRIGÉ le 24/10/2026 (découvert en investiguant un cas Surstock, cf. même correctif dans
+  // stockoutProductCacheRefreshJob.js/overstockProductCacheRefreshJob.js) : syncedAt a
+  // `@default(now())` dans le schéma Prisma, qui ne s'applique qu'À LA CRÉATION — un upsert dont le
+  // bloc `update` ne le mentionne pas laisse syncedAt figé à sa toute première valeur pour toujours,
+  // cassant getProductByEanCached ci-dessous (son calcul de fraîcheur du TTL devient faux dès le
+  // second passage sur le même article).
   await prisma.productCache.upsert({
     where: { rposShopId_ean: { rposShopId: shopId, ean } },
-    update: data,
+    update: { ...data, syncedAt: new Date() },
     create: data,
   });
 }
