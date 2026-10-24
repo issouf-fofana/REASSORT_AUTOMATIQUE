@@ -374,6 +374,15 @@ function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopAr
 
 type TabKey = 'byShop' | 'today' | 'persistent';
 
+// Cache module-level (demande explicite du 24/10/2026 : "si je fait un retour il recharge toute les
+// page... il ne dois pas actualisé a tout moment") — clique sur un article → navigation vers la page
+// détail → retour démonte puis remonte OverstockReport (comportement normal de React Router), ce qui
+// relançait tout le chargement depuis zéro à chaque fois. Survit au démontage/remontage du composant
+// (contrairement à un useState), tant que l'onglet reste ouvert — jamais persisté au-delà (pas de
+// localStorage), une simple query string identique à la dernière réutilise directement le résultat
+// déjà en mémoire, sans nouvel appel réseau.
+const overstockReportCache = new Map<string, OverstockReportData>();
+
 export function OverstockReport() {
   const navigate = useNavigate();
   // Page restructurée le 23/10/2026 en vue MONO-MAGASIN (demande explicite : "fais comme les
@@ -515,8 +524,6 @@ export function OverstockReport() {
   function runAnalysisWith(overrides?: { periodEnabled?: boolean; periodStart?: string; periodEnd?: string }) {
     const shopId = activeShopId();
     if (!shopId) { setData(null); setError(null); return; }
-    setData(null);
-    setError(null);
     const effectivePeriodEnabled = overrides?.periodEnabled ?? periodEnabled;
     const effectivePeriodStart = overrides?.periodStart ?? periodStart;
     const effectivePeriodEnd = overrides?.periodEnd ?? periodEnd;
@@ -525,8 +532,15 @@ export function OverstockReport() {
       params.set('start', new Date(effectivePeriodStart).toISOString());
       params.set('end', new Date(effectivePeriodEnd + 'T23:59:59').toISOString());
     }
-    apiFetch<OverstockReportData>(`/reassort/overstock-report?${params.toString()}`)
-      .then(setData)
+    const cacheKey = params.toString();
+    // Mêmes paramètres déjà chargés (ex: retour depuis la page détail d'un article) : réutilise le
+    // résultat en mémoire, jamais de nouvel appel réseau ni de "Chargement..." pour rien.
+    const cached = overstockReportCache.get(cacheKey);
+    if (cached) { setData(cached); setError(null); return; }
+    setData(null);
+    setError(null);
+    apiFetch<OverstockReportData>(`/reassort/overstock-report?${cacheKey}`)
+      .then((d) => { overstockReportCache.set(cacheKey, d); setData(d); })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }
 
