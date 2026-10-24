@@ -236,114 +236,20 @@ function ExportRowCountModal({
   );
 }
 
-// Menu déroulant personnalisé pour le filtre magasin (demande explicite du 21/10/2026 : "donne moi
-// un bon style pour le menu deroulent") — un <select> natif ne peut pas être stylisé en profondeur
-// une fois ouvert (c'est le navigateur, pas la page, qui dessine sa liste), d'où ce composant
-// maison avec recherche intégrée (28+ magasins, plus rapide à trouver qu'en faisant défiler) et le
-// même style doux (coins arrondis, surlignage au survol) que le reste de la page.
-// Multi-sélection (demande explicite du 21/10/2026 : "donne la possiblité de prendre un ou
-// plusieur magasin") : value est un Set d'ids magasin, vide = "Tous les magasins". Chaque clic sur
-// une ligne coche/décoche ce magasin sans fermer le panneau (contrairement à un simple choix
-// unique), pour permettre de cocher plusieurs magasins d'affilée.
-function ShopDropdown({ value, options, onChange }: { value: Set<string>; options: [string, string][]; onChange: (v: Set<string>) => void }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onClickOutside(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [open]);
-
-  useEffect(() => { if (!open) setQuery(''); }, [open]);
-
-  const selectedLabel = value.size === 0
-    ? 'Tous les magasins'
-    : value.size === 1
-      ? options.find(([id]) => value.has(id))?.[1] || '1 magasin'
-      : `${value.size} magasins sélectionnés`;
-  const filteredOptions = query.trim()
-    ? options.filter(([, label]) => label.toLowerCase().includes(query.trim().toLowerCase()))
-    : options;
-
-  function toggle(id: string) {
-    const next = new Set(value);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    onChange(next);
-  }
-
-  return (
-    <div className="osr-shop-dropdown" ref={rootRef}>
-      <button type="button" className="osr-shop-dropdown-btn" onClick={() => setOpen((v) => !v)}>
-        <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
-        <span className="osr-shop-dropdown-label">{selectedLabel}</span>
-        <iconify-icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} style={{ marginLeft: 'auto', fontSize: '13px', opacity: 0.6 }}></iconify-icon>
-      </button>
-      {open && (
-        <div className="osr-shop-dropdown-panel">
-          <input
-            type="search"
-            autoFocus
-            className="osr-shop-dropdown-search"
-            placeholder="Rechercher un magasin..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className="osr-shop-dropdown-list">
-            <div className={`osr-shop-dropdown-item${value.size === 0 ? ' active' : ''}`} onClick={() => onChange(new Set())}>
-              <iconify-icon icon="solar:check-circle-bold" style={{ opacity: value.size === 0 ? 1 : 0, color: '#2456A6' }}></iconify-icon>
-              Tous les magasins
-            </div>
-            {filteredOptions.length === 0 ? (
-              <div className="osr-shop-dropdown-empty">Aucun magasin trouvé.</div>
-            ) : (
-              filteredOptions.map(([id, label]) => (
-                <div key={id} className={`osr-shop-dropdown-item${value.has(id) ? ' active' : ''}`} onClick={() => toggle(id)}>
-                  <iconify-icon icon="solar:check-circle-bold" style={{ opacity: value.has(id) ? 1 : 0, color: '#2456A6' }}></iconify-icon>
-                  {label}
-                </div>
-              ))
-            )}
-          </div>
-          {value.size > 0 && (
-            <button type="button" className="osr-shop-dropdown-clear" onClick={() => onChange(new Set())}>
-              Effacer la sélection ({value.size})
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Bandeau "hero" en dégradé bleu avec courbe de tendance (demande explicite du 21/10/2026, capture
 // d'un tableau de bord type "Today $764.39" avec graphique + cartes arrondies + badges de tendance :
 // "je veux le style sur cette vue... il faut me faire un truc bien fait"). Le graphique montre le
 // nombre d'articles distincts en surstock jour par jour sur la période choisie (trendPoints,
 // overstockReportService.js) — n'existe qu'en mode période, pas sur un simple snapshot instantané,
 // donc affiche un repère "situation actuelle" à la place quand aucune période n'est active.
-function OverstockHero({ data, rows, shopFilters }: { data: OverstockReportData; rows: ShopArticleRow[]; shopFilters: Set<string> }) {
+function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopArticleRow[] }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<any>(null);
-  // Courbe filtrée par magasin sélectionné (demande explicite du 21/10/2026 : "quand je fait le
-  // filtre sur un mag ou deux la coube doit mettre ajour comme les valeur") — recalculée côté
-  // client depuis trendPointsByShop (un point par jour×magasin), jamais de rappel serveur juste
-  // pour changer le filtre. Sans sélection, retombe sur l'agrégat global trendPoints (identique au
-  // comportement précédent).
-  const points = useMemo(() => {
-    if (shopFilters.size === 0) return data.trendPoints || [];
-    const byShop = data.trendPointsByShop || [];
-    const byDay = new Map<string, number>();
-    for (const p of byShop) {
-      if (!shopFilters.has(p.rposShopId)) continue;
-      byDay.set(p.date, (byDay.get(p.date) || 0) + p.count);
-    }
-    return [...byDay.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
-  }, [data.trendPoints, data.trendPointsByShop, shopFilters]);
+  // Page restructurée le 23/10/2026 en vue mono-magasin (suit le sélecteur global de la topbar,
+  // demande explicite : "pas pour tout les magasin a meme temps un seul magasin") — le backend ne
+  // renvoie donc déjà plus que les données du magasin actif, trendPoints suffit (plus besoin de
+  // recalculer depuis trendPointsByShop pour un filtre multi-magasin qui n'existe plus).
+  const points = data.trendPoints || [];
   const filteredCount = rows.length;
 
   // Répartition par sévérité (demande explicite du 21/10/2026 : "fait un joli style ic" — le
@@ -456,98 +362,33 @@ function OverstockHero({ data, rows, shopFilters }: { data: OverstockReportData;
   );
 }
 
-// Tableau "magasins les plus en surstock" (demande explicite du 21/10/2026 : "je dois voir les mag
-// qui on plus de sur-stok il faut les classé", confirmé "un nouveau tableau et les surbriance
-// dessu" — classé du plus grand au plus petit avec une barre de surbrillance proportionnelle au
-// rang, comme la légende de sévérité du bandeau ci-dessus). Recalculé depuis les mêmes lignes déjà
-// filtrées (shopFilters/search/rangeFilters) affichées dans les autres tableaux de la page, jamais
-// un second appel serveur.
-const TOP_SHOPS_PAGE_SIZE = 5;
-
-function TopShopsByOverstockTable({ rows }: { rows: ShopArticleRow[] }) {
-  // Affichage limité à 5 magasins par défaut (demande explicite du 21/10/2026 : "affiche 5 par
-  // defaut tu vois ? pas tout a meme temps") — "Voir plus" pour dérouler le reste plutôt que tout
-  // afficher d'un coup, utile dès qu'il y a une trentaine de magasins.
-  const [showAll, setShowAll] = useState(false);
-
-  const byShop = useMemo(() => {
-    const map = new Map<string, { rposShopId: string; shopReference: string | null; shopName: string | null; articleCount: number }>();
-    for (const r of rows) {
-      if (!map.has(r.rposShopId)) map.set(r.rposShopId, { rposShopId: r.rposShopId, shopReference: r.shopReference, shopName: r.shopName, articleCount: 0 });
-      map.get(r.rposShopId)!.articleCount += 1;
-    }
-    return [...map.values()].sort((a, b) => b.articleCount - a.articleCount);
-  }, [rows]);
-
-  useEffect(() => { setShowAll(false); }, [rows]);
-
-  const maxCount = byShop[0]?.articleCount || 1;
-  const visible = showAll ? byShop : byShop.slice(0, TOP_SHOPS_PAGE_SIZE);
-
-  if (!byShop.length) return null;
-
-  return (
-    <div className="mb-3">
-      <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Magasins les plus en surstock</h6>
-      <div className="osr-table-card">
-        <div className="table-responsive">
-          <table className="table align-middle mb-0">
-            <thead className="bg-light-subtle">
-              <tr>
-                <th style={{ width: 40 }}>#</th>
-                <th>Magasin</th>
-                <th style={{ width: '45%' }}></th>
-                <th className="text-end">Articles en surstock</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((s, i) => (
-                <tr key={s.rposShopId}>
-                  <td className="text-muted">{i + 1}</td>
-                  <td>{s.shopName} ({s.shopReference})</td>
-                  <td>
-                    <div style={{ height: 8, borderRadius: 4, background: 'rgba(27,42,74,.06)', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${Math.max(4, Math.round((s.articleCount / maxCount) * 100))}%`,
-                          borderRadius: 4,
-                          background: i === 0 ? '#B8302C' : i < 3 ? '#D69E2E' : '#2456A6',
-                        }}
-                      ></div>
-                    </div>
-                  </td>
-                  <td className="text-end fw-semibold" style={{ color: '#1B2A4A' }}>{s.articleCount.toLocaleString('fr-FR')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {byShop.length > TOP_SHOPS_PAGE_SIZE && (
-          <div className="text-center py-2 border-top">
-            <button type="button" className="btn btn-sm btn-link text-decoration-none" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? 'Voir moins' : `Voir les ${byShop.length - TOP_SHOPS_PAGE_SIZE} autres magasins`}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-type TabKey = 'common' | 'byShop' | 'persistent';
+type TabKey = 'byShop' | 'persistent';
 
 export function OverstockReport() {
   const navigate = useNavigate();
-  // Un compte mono-magasin (Rayonniste/Chef de rayon/Directeur) a maintenant le droit de voir le
-  // surstock de SON PROPRE magasin (demande explicite du 21/10/2026 : "qui a le magasin doit avoir
-  // le droit de voir les article sur surstok" — jusque-là la page lui était entièrement bloquée).
-  // Le backend (overstockReportService.js/insights.js) le cantonne déjà à son seul magasin ; côté
-  // UI, on masque simplement ce qui n'a pas de sens pour un compte qui ne voit qu'un seul magasin :
-  // le sélecteur magasin (rien à filtrer) et l'onglet "communs à plusieurs magasins" (démarre donc
-  // directement sur "Par magasin", le seul onglet pertinent pour lui).
+  // Page restructurée le 23/10/2026 en vue MONO-MAGASIN (demande explicite : "fais comme les
+  // commande et les autre page si un filtre: du magasin [sélecteur global topbar]... pas pour tout
+  // les magasin a meme temps un seul magasin" — confirmé "Supprimer complètement la vue
+  // multi-magasins"). Même pattern que Stockouts.tsx/StockoutShopDetail.tsx/TableauDeBord.tsx : un
+  // compte mono-magasin (Rayonniste/Chef de rayon/Directeur) reste cantonné à son propre magasin ;
+  // un compte ADMIN/SUPERVISOR suit le sélecteur GLOBAL de la topbar (window.reassortGetActiveShop/
+  // reassortOnActiveShopChange) au lieu du multi-sélection locale à cette page (ShopDropdown,
+  // supprimé) qui permettait de voir plusieurs/tous les magasins à la fois.
   const user = window.reassortGetUser ? window.reassortGetUser() : null;
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : false;
+  const [activeShop, setActiveShop] = useState<{ id: string; posId?: string } | null>(
+    isSingleShop && user?.rposShopId ? { id: user.rposShopId, posId: user.rposPosId ?? undefined } : null
+  );
+
+  useEffect(() => {
+    if (isSingleShop) return;
+    const active = window.reassortGetActiveShop ? window.reassortGetActiveShop() : null;
+    if (active) setActiveShop(active);
+    if (window.reassortOnActiveShopChange) {
+      window.reassortOnActiveShopChange((shop) => setActiveShop(shop ?? null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingleShop]);
 
   const [data, setData] = useState<OverstockReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -565,13 +406,12 @@ export function OverstockReport() {
   const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const [activeTab, setActiveTab] = useState<TabKey>(isSingleShop ? 'byShop' : 'common');
-  // État du bouton Export, générique aux 3 onglets (demande explicite du 21/10/2026 : le bouton
-  // export doit être sur la ligne des onglets pour "Surstock commun", "Toujours en surstock" ET
-  // "Par magasin", avec le même choix "vue actuelle / tout" partout) — remonté par chaque tableau
-  // enfant via son propre callback, car chacun gère sa page affichée différemment (ByShopTable :
-  // pagination serveur ; CommonArticlesTable : pagination client sur une liste déjà chargée).
-  const [commonPageRows, setCommonPageRows] = useState<FlatCommonRow[]>([]);
+  const [activeTab, setActiveTab] = useState<TabKey>('byShop');
+  // État du bouton Export, générique aux 2 onglets restants (demande explicite du 21/10/2026 : le
+  // bouton export doit être sur la ligne des onglets, avec le même choix "vue actuelle / tout"
+  // partout) — remonté par chaque tableau enfant via son propre callback, car chacun gère sa page
+  // affichée différemment (ByShopTable : pagination serveur ; CommonArticlesTable : pagination
+  // client sur une liste déjà chargée).
   const [persistentPageRows, setPersistentPageRows] = useState<FlatCommonRow[]>([]);
   const [byShopExportState, setByShopExportState] = useState<{ onClick: () => void; exporting: boolean; disabled: boolean } | null>(null);
   // BUG CORRIGÉ le 23/10/2026 (signalé : "les pagination ne son pas correct il ne marche pas" sur
@@ -587,15 +427,12 @@ export function OverstockReport() {
     () => ({ start: data?.periodMode ? data.periodStart ?? undefined : undefined, end: data?.periodMode ? data.periodEnd ?? undefined : undefined }),
     [data?.periodMode, data?.periodStart, data?.periodEnd]
   );
-  // Multi-sélection magasin (demande explicite du 21/10/2026 : "donne la possiblité de prendre un
-  // ou plusieur magasin") — Set vide = "Tous les magasins", comme avant la chaîne vide.
-  const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
   // Filtres par plage de valeurs (demande explicite du 21/10/2026 : "ajoute tout ses filtre
   // possible, dois pouvoir filtre par tout ca... Stock, Vente/jour, Vente/semaine, Vente/mois,
   // Couverture, Casse") — chaque métrique a son min et son max, vide = pas de borne sur ce côté.
-  // Appliqués côté client sur les données déjà chargées, comme shopFilters/search ci-dessus.
+  // Appliqués côté client sur les données déjà chargées, comme search ci-dessus.
   const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>({
     stock: { min: '', max: '' },
     avgDailySales: { min: '', max: '' },
@@ -639,26 +476,40 @@ export function OverstockReport() {
     return true;
   }
 
+  // Paramètre magasin commun à tous les appels de la page (demande explicite du 23/10/2026 :
+  // "si un filtre: du magasin [sélecteur global]... pas pour tout les magasin a meme temps un seul
+  // magasin") — même construction que shopQueryParam() dans Stockouts.tsx : magasin propre pour un
+  // compte mono-magasin, magasin actif du sélecteur global sinon. Vide si aucun magasin résolu
+  // (ADMIN sans sélection) : la page affiche alors un message d'invite plutôt qu'un calcul réseau.
+  function activeShopId(): string | null {
+    return isSingleShop ? (user?.rposShopId || null) : (activeShop?.id || null);
+  }
+
   // Étendue réelle des données disponibles (demande explicite : "on doit me dire j'ai des donner de
   // quel periode... si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre
-  // grisé") — chargé une fois au montage, sert de borne min au sélecteur de dates ci-dessous.
+  // grisé") — recalculée à chaque changement de magasin actif, borne min au sélecteur de dates.
   useEffect(() => {
-    apiFetch<Availability>('/reassort/overstock-report/availability')
+    const shopId = activeShopId();
+    if (!shopId) { setAvailability(null); return; }
+    apiFetch<Availability>(`/reassort/overstock-report/availability?shops=${encodeURIComponent(shopId)}`)
       .then(setAvailability)
       .catch(() => setAvailability(null));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeShop?.id, isSingleShop]);
 
   // Accepte des overrides explicites (demande explicite du 21/10/2026 : boutons de période remontés
   // dans la barre de filtres qui relancent directement l'analyse) — sans ça, l'appel partirait avec
   // l'état React d'AVANT le clic (setPeriodStart/setPeriodEnd/setPeriodEnabled n'ont pas encore été
   // appliqués au moment où runAnalysis() lirait periodStart/periodEnd par closure).
   function runAnalysisWith(overrides?: { periodEnabled?: boolean; periodStart?: string; periodEnd?: string }) {
+    const shopId = activeShopId();
+    if (!shopId) { setData(null); setError(null); return; }
     setData(null);
     setError(null);
     const effectivePeriodEnabled = overrides?.periodEnabled ?? periodEnabled;
     const effectivePeriodStart = overrides?.periodStart ?? periodStart;
     const effectivePeriodEnd = overrides?.periodEnd ?? periodEnd;
-    const params = new URLSearchParams({ minWeeksOfCoverage: String(minWeeksOfCoverage) });
+    const params = new URLSearchParams({ minWeeksOfCoverage: String(minWeeksOfCoverage), shops: shopId });
     if (effectivePeriodEnabled) {
       params.set('start', new Date(effectivePeriodStart).toISOString());
       params.set('end', new Date(effectivePeriodEnd + 'T23:59:59').toISOString());
@@ -672,58 +523,27 @@ export function OverstockReport() {
     runAnalysisWith();
   }
 
-  // Premier chargement automatique (snapshot, paramètres par défaut) — les relances suivantes sont
-  // explicitement déclenchées par l'utilisateur via "Lancer l'analyse" (demande du 21/10/2026).
+  // Chargement automatique (snapshot, paramètres par défaut) au montage ET à chaque changement de
+  // magasin actif (demande explicite : "que je viens dans la vue il affiché les donner du mag ou
+  // je suis") — les relances suivantes restent explicitement déclenchées par l'utilisateur via
+  // "Lancer l'analyse" (demande du 21/10/2026).
   useEffect(() => {
     runAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeShop?.id, isSingleShop]);
 
   const minAvailableDate = availability?.found && availability.oldestDate ? availability.oldestDate.slice(0, 10) : undefined;
   const maxAvailableDate = availability?.found && availability.newestDate ? availability.newestDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-
-  const shopOptions = useMemo(() => {
-    if (!data) return [];
-    const seen = new Map<string, string>();
-    for (const a of data.articlesByShop) {
-      if (a.rposShopId && !seen.has(a.rposShopId)) seen.set(a.rposShopId, `${a.shopName} (${a.shopReference})`);
-    }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr-FR'));
-  }, [data]);
 
   const filteredByShop = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.articlesByShop.filter((a) => {
-      if (shopFilters.size > 0 && !shopFilters.has(a.rposShopId)) return false;
       if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
       if (!matchesRangeFilters(a)) return false;
       return true;
     });
-  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
-
-  // Nombre de magasins distincts réellement représentés dans filteredByShop (demande explicite du
-  // 21/10/2026 : "quand je vais le filtre sur un magasin je dois voir que les donner du magasin...
-  // Magasins concernés il doit affiché 1") — les KPI du haut de page doivent suivre le filtre actif
-  // (magasin + recherche), jamais les totaux bruts non filtrés renvoyés par l'API.
-  const filteredShopCount = useMemo(() => new Set(filteredByShop.map((a) => a.rposShopId)).size, [filteredByShop]);
-
-  // Quand un ou plusieurs magasins précis sont filtrés, chaque carte "article commun"/"persistant"
-  // ne doit montrer QUE les lignes de ces magasins, pas les autres magasins qui partagent aussi cet
-  // article (demande explicite du 21/10/2026 : "je dois voir que les donner du magasin" — étendu à
-  // "un ou plusieurs magasins" avec la multi-sélection) — restreint shops EN PLUS de filtrer
-  // quelles cartes apparaissent.
-  const filteredCommon = useMemo(() => {
-    if (!data) return [];
-    const q = search.trim().toLowerCase();
-    return data.commonArticles
-      .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
-      .map((a) => ({
-        ...a,
-        shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
-      }))
-      .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
+  }, [data, search, rangeFilters, scrapOnly]);
 
   const filteredPersistent = useMemo(() => {
     if (!data?.persistentArticles) return [];
@@ -732,21 +552,19 @@ export function OverstockReport() {
       .filter((a) => !q || a.label.toLowerCase().includes(q) || a.ean.includes(q))
       .map((a) => ({
         ...a,
-        shops: a.shops.filter((s) => (shopFilters.size === 0 || shopFilters.has(s.rposShopId)) && matchesRangeFilters(s)),
+        shops: a.shops.filter((s) => matchesRangeFilters(s)),
       }))
       .filter((a) => a.shops.length > 0);
-  }, [data, shopFilters, search, rangeFilters, scrapOnly]);
+  }, [data, search, rangeFilters, scrapOnly]);
 
   // BUG CORRIGÉ le 23/10/2026 (signalé : "ca ne fonctionne pas au clique et pas de erreur" sur la
-  // pagination des onglets "Surstock commun"/"Toujours en surstock" — même symptôme et même cause
-  // que le bug de pagination de ByShopTable corrigé juste avant) : flattenCommonArticles(filteredCommon)
-  // était appelé directement dans le JSX à chaque render, créant un nouveau tableau à chaque fois
-  // même si filteredCommon n'avait pas changé. CommonArticlesTable a un
-  // useEffect(() => setPage(1), [rows]) — son propre onPageRowsChange (appelé à chaque page affichée)
-  // déclenchait un re-render du parent, qui recréait ce tableau, qui redéclenchait ce useEffect, qui
-  // remettait page à 1 juste après le clic. useMemo garde la même référence tant que filteredCommon/
-  // filteredPersistent eux-mêmes (déjà mémorisés ci-dessus) ne changent pas.
-  const flatCommonRows = useMemo(() => flattenCommonArticles(filteredCommon), [filteredCommon]);
+  // pagination de l'onglet "Toujours en surstock") : flattenCommonArticles(filteredPersistent)
+  // appelé directement dans le JSX à chaque render créait un nouveau tableau à chaque fois même si
+  // filteredPersistent n'avait pas changé. CommonArticlesTable a un
+  // useEffect(() => setPage(1), [rows]) — son propre onPageRowsChange (appelé à chaque page
+  // affichée) déclenchait un re-render du parent, qui recréait ce tableau, qui redéclenchait ce
+  // useEffect, qui remettait page à 1 juste après le clic. useMemo garde la même référence tant que
+  // filteredPersistent (déjà mémorisé ci-dessus) ne change pas.
   const flatPersistentRows = useMemo(() => flattenCommonArticles(filteredPersistent), [filteredPersistent]);
 
   function openScrapDetail(ean: string, label: string) {
@@ -887,24 +705,25 @@ export function OverstockReport() {
         .osr-settings-details[open] .osr-settings-summary { background: rgba(36,86,166,.08); border-color: rgba(36,86,166,.3); color: #2456A6; }
         .osr-settings-details[open] .osr-settings-chevron { transform: rotate(180deg); }
         .osr-settings-details .osr-settings-card { margin-top: 10px; }
-        .osr-shop-dropdown { position: relative; width: 240px; }
-        .osr-shop-dropdown-btn { width: 100%; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(27,42,74,.12); border-radius: 6px; background: #fff; padding: 6px 10px; font-size: .8rem; color: #1B2A4A; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
-        .osr-shop-dropdown-btn:hover { border-color: rgba(27,42,74,.25); }
-        .osr-shop-dropdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; flex: 1; }
-        .osr-shop-dropdown-panel { position: absolute; top: calc(100% + 6px); left: 0; width: 280px; background: #fff; border: 1px solid rgba(27,42,74,.1); border-radius: 10px; box-shadow: 0 12px 32px rgba(27,42,74,.14); z-index: 20; overflow: hidden; }
-        .osr-shop-dropdown-search { width: 100%; border: none; border-bottom: 1px solid rgba(27,42,74,.08); padding: 10px 14px; font-size: .82rem; color: #1B2A4A; outline: none; background: #F9FAFC; }
-        .osr-shop-dropdown-list { max-height: 280px; overflow-y: auto; padding: 6px; }
-        .osr-shop-dropdown-item { padding: 8px 12px; border-radius: 7px; font-size: .82rem; color: #44516B; cursor: pointer; transition: background .12s, color .12s; display: flex; align-items: center; gap: 8px; }
-        .osr-shop-dropdown-item:hover { background: #F6F8FB; color: #1B2A4A; }
-        .osr-shop-dropdown-item.active { background: rgba(36,86,166,.1); color: #2456A6; font-weight: 600; }
-        .osr-shop-dropdown-item iconify-icon { font-size: 15px; flex-shrink: 0; }
-        .osr-shop-dropdown-empty { padding: 14px; text-align: center; font-size: .78rem; color: #8591A0; }
-        .osr-shop-dropdown-clear { width: 100%; border: none; border-top: 1px solid rgba(27,42,74,.08); background: #F9FAFC; color: #B8302C; font-size: .78rem; font-weight: 600; padding: 9px 14px; cursor: pointer; text-align: center; }
-        .osr-shop-dropdown-clear:hover { background: #F6F8FB; }
+        .osr-shop-badge { background: #EDF1F7; color: #1B2A4A; }
       `}</style>
 
-      <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
         <h4 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Surstock</h4>
+      </div>
+
+      {/* Contexte explicite du magasin consulté (même pattern que Stockouts.tsx, demande explicite
+          du 18/10/2026 reprise ici le 23/10/2026 pour cette page désormais mono-magasin) — la page
+          suit le sélecteur global de la topbar pour un ADMIN/SUPERVISOR. */}
+      <div className="mb-3">
+        <span className="badge osr-shop-badge py-1 px-2">
+          <iconify-icon icon="solar:shop-bold-duotone" className="align-middle me-1"></iconify-icon>
+          {isSingleShop
+            ? (user?.rposShopName || 'Votre magasin')
+            : activeShop
+              ? (window.reassortGetActiveShop?.()?.name || 'Magasin sélectionné')
+              : 'Aucun magasin sélectionné'}
+        </span>
       </div>
 
       {/* Réglages + période analysée remontés en tout premier (demande explicite du 21/10/2026 :
@@ -1085,7 +904,6 @@ export function OverstockReport() {
                 Appliquer
               </button>
             </div>
-            {!isSingleShop && <ShopDropdown value={shopFilters} options={shopOptions} onChange={setShopFilters} />}
             <input
               type="search"
               className="osr-input"
@@ -1155,36 +973,18 @@ export function OverstockReport() {
         </>
       )}
 
-      {data && data.found && <OverstockHero data={data} rows={filteredByShop} shopFilters={shopFilters} />}
+      {data && data.found && <OverstockHero data={data} rows={filteredByShop} />}
 
       {data && data.found && (
         <div className="osr-kpi-row">
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Magasins concernés</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(36,86,166,.1)', color: '#2456A6' }}>
-                <iconify-icon icon="solar:shop-bold-duotone"></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{filteredShopCount}</div>
-          </div>
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Articles en surstock{shopFilters.size > 0 ? ' (sélection)' : ' (total)'}</span>
+              <span className="osr-kpi-label">Articles en surstock</span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
                 <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
               </span>
             </div>
             <div className="osr-kpi-value">{filteredByShop.length}</div>
-          </div>
-          <div className="osr-kpi-card">
-            <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Communs à plusieurs magasins</span>
-              <span className="osr-kpi-icon" style={{ background: 'rgba(94,214,145,.14)', color: '#1C8A52' }}>
-                <iconify-icon icon="solar:layers-bold-duotone"></iconify-icon>
-              </span>
-            </div>
-            <div className="osr-kpi-value">{filteredCommon.length}</div>
           </div>
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
@@ -1198,46 +998,35 @@ export function OverstockReport() {
         </div>
       )}
 
-      {data && data.found && !isSingleShop && <TopShopsByOverstockTable rows={filteredByShop} />}
-
       {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
 
-      {data === null && !error ? (
+      {!activeShopId() && !error ? (
+        <div className="text-muted small py-4">Sélectionnez un magasin pour voir son surstock.</div>
+      ) : null}
+
+      {activeShopId() && data === null && !error ? (
         <div className="text-muted small">Chargement...</div>
       ) : data && !data.found ? (
         <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
       ) : data ? (
         <>
-          {/* Bouton Export sur la ligne des onglets, pour les 3 (demande explicite du 21/10/2026 :
-              "le bouton export il faut mettre a coté"... "fait pareil pour tout les autre onglé
-              comme Toujours en surstock, Par magasin") — supprimé de la barre de filtres tout en
-              haut de page, comme demandé explicitement ("le bouton export en haut il faut le
-              supprimé"). */}
+          {/* Bouton Export sur la ligne des onglets (demande explicite du 21/10/2026 : "le bouton
+              export il faut mettre a coté"... "fait pareil pour tout les autre onglé comme Toujours
+              en surstock, Par magasin") — supprimé de la barre de filtres tout en haut de page,
+              comme demandé explicitement ("le bouton export en haut il faut le supprimé"). Onglet
+              "Surstock commun à plusieurs magasins" et son tableau "Magasins les plus en surstock"
+              retirés le 23/10/2026 (page désormais mono-magasin, demande explicite : "supprime les
+              autre filtre unitile") — n'ont plus de sens sans comparaison inter-magasins. */}
           <div className="osr-tabs">
-            {!isSingleShop && (
-              <button type="button" className={`osr-tab${activeTab === 'common' ? ' active' : ''}`} onClick={() => setActiveTab('common')}>
-                Surstock commun à plusieurs magasins ({filteredCommon.length})
-              </button>
-            )}
+            <button type="button" className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`} onClick={() => setActiveTab('byShop')}>
+              Articles en surstock ({filteredByShop.length})
+            </button>
             {data.periodMode && (
               <button type="button" className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`} onClick={() => setActiveTab('persistent')}>
                 Toujours en surstock ({filteredPersistent.length})
               </button>
             )}
-            <button type="button" className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`} onClick={() => setActiveTab('byShop')}>
-              Par magasin ({filteredByShop.length})
-            </button>
             <div className="ms-auto d-flex align-items-center">
-              {activeTab === 'common' && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-primary"
-                  onClick={() => setExportModal({ pageRows: commonPageRows, allRows: flatCommonRows, filenamePrefix: 'surstock-commun' })}
-                  disabled={filteredCommon.length === 0}
-                >
-                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-                </button>
-              )}
               {activeTab === 'persistent' && (
                 <button
                   type="button"
@@ -1261,17 +1050,6 @@ export function OverstockReport() {
             </div>
           </div>
 
-          {activeTab === 'common' && (
-            <CommonArticlesTable
-              rows={flatCommonRows}
-              showRatio={!!data.periodMode}
-              threshold={data.minWeeksOfCoverage}
-              onOpenDetail={openScrapDetail}
-              emptyMessage="Aucun article en surstock dans plusieurs magasins à la fois pour ce seuil."
-              onPageRowsChange={setCommonPageRows}
-            />
-          )}
-
           {activeTab === 'persistent' && (
             <>
               {filteredPersistent.length > 0 && (
@@ -1290,12 +1068,12 @@ export function OverstockReport() {
             </>
           )}
 
-          {activeTab === 'byShop' && (
+          {activeTab === 'byShop' && activeShopId() && (
             <ByShopTable
+              shopId={activeShopId()!}
               periodParams={byShopPeriodParams}
               minWeeksOfCoverage={data.minWeeksOfCoverage}
               search={search}
-              shopFilters={shopFilters}
               rangeFilters={rangeFilters}
               scrapOnly={scrapOnly}
               threshold={data.minWeeksOfCoverage}
@@ -1329,29 +1107,31 @@ type ByShopPageData = {
   minWeeksOfCoverage: number;
 };
 
-// Tableau "Par magasin" — pagination SERVEUR (demande explicite du 21/10/2026 : "ca prend au moins
-// 10s pour affiché c'est normal ?", 38922 lignes mesurées en prod transférées et rendues en entier
-// au client avant même la pagination visuelle). Contrairement aux deux autres onglets
-// (CommonArticlesTable, qui restent sur des listes déjà chargées en mémoire, portée volontairement
-// limitée à ce tableau), celui-ci fait son PROPRE appel réseau paginé via
-// /overstock-report/by-shop — ne reçoit plus toutes les lignes, seulement work: les filtres actifs
-// de la page (search/shopFilters/rangeFilters/scrapOnly) et les paramètres de période, passés en
-// props pour reconstruire la requête serveur à chaque changement de page/tri/filtre.
+// Tableau "Articles en surstock" (ex "Par magasin", renommé le 23/10/2026 — page désormais
+// mono-magasin, "par magasin" n'avait plus de sens) — pagination SERVEUR (demande explicite du
+// 21/10/2026 : "ca prend au moins 10s pour affiché c'est normal ?", 38922 lignes mesurées en prod
+// transférées et rendues en entier au client avant même la pagination visuelle). Contrairement à
+// l'onglet "Toujours en surstock" (CommonArticlesTable, qui reste sur une liste déjà chargée en
+// mémoire, portée volontairement limitée à ce tableau), celui-ci fait son PROPRE appel réseau
+// paginé via /overstock-report/by-shop — ne reçoit plus toutes les lignes, seulement la page
+// demandée. shopId (magasin actif, suivant le sélecteur global) et les filtres actifs de la page
+// (search/rangeFilters/scrapOnly) et les paramètres de période sont passés en props pour
+// reconstruire la requête serveur à chaque changement de page/tri/filtre/magasin.
 function ByShopTable({
-  periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, threshold, onOpenDetail, onExportReady,
+  shopId, periodParams, minWeeksOfCoverage, search, rangeFilters, scrapOnly, threshold, onOpenDetail, onExportReady,
 }: {
+  shopId: string;
   periodParams: { start?: string; end?: string };
   minWeeksOfCoverage: number;
   search: string;
-  shopFilters: Set<string>;
   rangeFilters: Record<string, { min: string; max: string }>;
   scrapOnly: boolean;
   threshold: number;
   onOpenDetail: (ean: string, label: string) => void;
   // Expose le déclencheur d'export au parent (demande explicite du 21/10/2026 : bouton Export
-  // placé sur la ligne des onglets, hors de ce composant, pour les 3 onglets de la page) — plutôt
-  // que de rendre son propre bouton, ByShopTable prévient le parent à chaque changement d'état
-  // exportable (prêt/en cours/vide) via ce callback.
+  // placé sur la ligne des onglets, hors de ce composant) — plutôt que de rendre son propre bouton,
+  // ByShopTable prévient le parent à chaque changement d'état exportable (prêt/en cours/vide) via
+  // ce callback.
   onExportReady: (state: { onClick: () => void; exporting: boolean; disabled: boolean } | null) => void;
 }) {
   const [page, setPage] = useState(1);
@@ -1377,7 +1157,7 @@ function ByShopTable({
     if (periodParams.start) params.set('start', periodParams.start);
     if (periodParams.end) params.set('end', periodParams.end);
     if (search.trim()) params.set('search', search.trim());
-    if (shopFilters.size > 0) params.set('shops', [...shopFilters].join(','));
+    params.set('shops', shopId);
     if (sortField) { params.set('sortField', sortField); params.set('sortDir', sortDir); }
     if (scrapOnly) params.set('scrapOnly', 'true');
     const activeRanges = Object.fromEntries(Object.entries(rangeFilters).filter(([, r]) => r.min !== '' || r.max !== ''));
@@ -1385,7 +1165,7 @@ function ByShopTable({
     return params;
   }
 
-  useEffect(() => { setPage(1); }, [search, shopFilters, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
+  useEffect(() => { setPage(1); }, [shopId, search, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1394,7 +1174,7 @@ function ByShopTable({
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, periodParams, minWeeksOfCoverage, search, shopFilters, rangeFilters, scrapOnly, sortField, sortDir]);
+  }, [shopId, page, periodParams, minWeeksOfCoverage, search, rangeFilters, scrapOnly, sortField, sortDir]);
 
   function toggleSort(field: string) {
     if (sortField === field) {
