@@ -211,25 +211,44 @@ async function getOverstockByShop(allowedShopIds, { minWeeksOfCoverage = DEFAULT
       })
     : [];
 
+  // BUG CORRIGÉ le 24/10/2026 (signalé avec capture : page Surstock affiche 181 articles pour
+  // CASH IVOIRE U PORT-BOUËT, le chatbot répond 50 pour la MÊME question "combien en surstock
+  // aujourd'hui ?") — cette fonction (utilisée par le chatbot via getOverstockArticles) utilisait
+  // encore stockAtGeneration (photo figée au moment de la DERNIÈRE proposition générée, parfois
+  // vieille de plusieurs semaines) au lieu du stock LIVE, contrairement à getOverstockOverPeriod
+  // (page Surstock, corrigé le 24/10/2026 plus tôt dans la journée — commit 9477dd4) : le fix
+  // n'avait jamais été répercuté ici. Stock live résolu via ProductCache, même principe que
+  // getOverstockOverPeriod.
+  const liveStockRows = await prisma.productCache.findMany({
+    where: { rposShopId: { in: shopIds }, ean: { in: [...new Set(lines.map((l) => l.ean))] } },
+    select: { rposShopId: true, ean: true, stock: true },
+  });
+  const liveStockByKey = new Map(liveStockRows.map((r) => [`${r.rposShopId}:${r.ean}`, r.stock]));
+
   const articlesFromProposals = lines
-    .filter((l) => (l.avgWeeklySales || 0) > 0 && (l.stockAtGeneration || 0) / l.avgWeeklySales >= minWeeksOfCoverage)
     .map((l) => {
       const rposShopId = shopIdByProposalId.get(l.proposalId);
-      const shop = shopById.get(rposShopId);
+      const liveStock = liveStockByKey.get(`${rposShopId}:${l.ean}`);
+      const stock = liveStock !== undefined ? liveStock : (l.stockAtGeneration || 0);
+      return { ...l, rposShopId, stock };
+    })
+    .filter((l) => (l.avgWeeklySales || 0) > 0 && l.stock / l.avgWeeklySales >= minWeeksOfCoverage)
+    .map((l) => {
+      const shop = shopById.get(l.rposShopId);
       const avgWeeklySales = Math.round(l.avgWeeklySales * 10) / 10;
       return {
-        rposShopId,
+        rposShopId: l.rposShopId,
         shopReference: shop?.reference || null,
         shopName: shop?.name || null,
         ean: l.ean,
         label: l.label,
         department: l.department,
-        stock: l.stockAtGeneration || 0,
+        stock: l.stock,
         sellingPrice: l.sellingPrice || null,
         avgDailySales: Math.round((avgWeeklySales / 7) * 100) / 100,
         avgWeeklySales,
         avgMonthlySales: Math.round(avgWeeklySales * (365 / 12 / 7) * 10) / 10,
-        weeksOfCoverage: Math.round((l.stockAtGeneration / l.avgWeeklySales) * 10) / 10,
+        weeksOfCoverage: Math.round((l.stock / l.avgWeeklySales) * 10) / 10,
       };
     });
 
