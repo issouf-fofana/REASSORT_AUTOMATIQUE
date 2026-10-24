@@ -990,7 +990,19 @@ export function OverstockReport() {
         <div className="osr-kpi-row">
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
-              <span className="osr-kpi-label">Articles en surstock</span>
+              {/* BUG CORRIGÉ le 24/10/2026 (signalé : "181 en surtok auj... Articles en surstock
+                  est 1825... comment expliqué ca") : ce compteur additionne TOUT article vu en
+                  surstock AU MOINS UNE FOIS sur toute la période choisie (ex: 3 mois), pas l'état du
+                  jour — très différent du graphique juste au-dessus ("Articles en surstock
+                  aujourd'hui", basé sur la dernière proposition générée). Les deux chiffres sont
+                  corrects mais répondent à deux questions différentes ; libellé clarifié + infobulle
+                  pour ne plus laisser croire que 1825 est l'état présent. */}
+              <span
+                className="osr-kpi-label"
+                title={data.periodMode ? "Total des articles ayant été en surstock AU MOINS UNE FOIS entre le début et la fin de la période choisie — pas l'état d'aujourd'hui. Pour l'état du jour, voir le graphique ci-dessus (\"Articles en surstock aujourd'hui\")." : undefined}
+              >
+                {data.periodMode ? 'Articles en surstock sur la période' : 'Articles en surstock'}
+              </span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
                 <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
               </span>
@@ -1029,8 +1041,13 @@ export function OverstockReport() {
               retirés le 23/10/2026 (page désormais mono-magasin, demande explicite : "supprime les
               autre filtre unitile") — n'ont plus de sens sans comparaison inter-magasins. */}
           <div className="osr-tabs">
-            <button type="button" className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`} onClick={() => setActiveTab('byShop')}>
-              Articles en surstock ({filteredByShop.length})
+            <button
+              type="button"
+              className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`}
+              onClick={() => setActiveTab('byShop')}
+              title={data.periodMode ? "Historique sur la période choisie, pas l'état d'aujourd'hui — voir le graphique en haut de page pour l'état du jour." : undefined}
+            >
+              {data.periodMode ? 'Articles en surstock sur la période' : 'Articles en surstock'} ({filteredByShop.length})
             </button>
             {data.periodMode && (
               <button type="button" className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`} onClick={() => setActiveTab('persistent')}>
