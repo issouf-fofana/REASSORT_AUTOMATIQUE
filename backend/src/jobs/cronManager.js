@@ -13,6 +13,7 @@ const { runSupplierOrdersSyncJob } = require('./supplierOrdersSyncJob');
 const { runStockoutSectorBackfillJob } = require('./stockoutSectorBackfillJob');
 const { runStockoutCatchUpResolveJob } = require('./stockoutCatchUpResolveJob');
 const { runStockoutProductCacheRefreshJob } = require('./stockoutProductCacheRefreshJob');
+const { runOverstockProductCacheRefreshJob } = require('./overstockProductCacheRefreshJob');
 const { runStockoutStatusRecalcJob } = require('./stockoutStatusRecalcJob');
 const { runStockoutAlertJob } = require('./stockoutAlertJob');
 const { runStockoutPeriodSummarySnapshotJob } = require('./stockoutPeriodSummarySnapshotJob');
@@ -41,6 +42,7 @@ let currentSupplierOrdersSyncTask = null;
 let currentStockoutSectorBackfillTask = null;
 let currentStockoutCatchUpResolveTask = null;
 let currentStockoutProductCacheRefreshTask = null;
+let currentOverstockProductCacheRefreshTask = null;
 let currentStockoutStatusRecalcTask = null;
 let currentStockoutAlertTask = null;
 let currentStockoutPeriodSummarySnapshotTask = null;
@@ -70,6 +72,7 @@ const supplierOrdersSyncLock = createJobLock('Synchronisation du cache des comma
 const stockoutSectorBackfillLock = createJobLock('Résolution du secteur/rayon des ruptures en cours');
 const stockoutCatchUpResolveLock = createJobLock('Rattrapage de résolution des ruptures (arrivage déjà en base)');
 const stockoutProductCacheRefreshLock = createJobLock('Resynchronisation du stock RPOS des ruptures en cours');
+const overstockProductCacheRefreshLock = createJobLock('Resynchronisation du stock RPOS des articles en surstock');
 const stockoutStatusRecalcLock = createJobLock('Précalcul du statut des ruptures en cours');
 const stockoutAlertLock = createJobLock('Alerte email des ruptures en cours');
 const stockoutPeriodSummarySnapshotLock = createJobLock('Précalcul de l\'analyse des pertes par période (ruptures)');
@@ -485,6 +488,35 @@ async function startOrRestartStockoutProductCacheRefreshJob() {
   console.log(`⏰ Resynchronisation du stock RPOS des ruptures planifiée: ${cronSchedule}`);
 }
 
+/** (Re)programme la resynchronisation du stock RPOS (ProductCache) pour les articles en SURSTOCK (overstockProductCacheRefreshJob.js). */
+async function startOrRestartOverstockProductCacheRefreshJob() {
+  if (currentOverstockProductCacheRefreshTask) {
+    currentOverstockProductCacheRefreshTask.stop();
+    currentOverstockProductCacheRefreshTask = null;
+  }
+
+  if (!(await isJobEnabled(systemConfig.KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_ENABLED))) {
+    console.log('⏸️  Resynchronisation du stock RPOS des articles en surstock désactivée (voir Paramètres).');
+    return;
+  }
+
+  const cronSchedule = await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON);
+
+  if (!cron.validate(cronSchedule)) {
+    console.error(`[cronManager] Expression cron invalide ("${cronSchedule}"), resynchronisation du stock RPOS des articles en surstock non planifiée`);
+    return;
+  }
+
+  currentOverstockProductCacheRefreshTask = cron.schedule(cronSchedule, () => {
+    overstockProductCacheRefreshLock(async () => {
+      console.log('[cron] Démarrage de la resynchronisation du stock RPOS des articles en surstock...');
+      await trackJobRun('overstockProductCacheRefresh', runOverstockProductCacheRefreshJob);
+    }).catch((err) => console.error('[cron] Erreur:', err));
+  });
+
+  console.log(`⏰ Resynchronisation du stock RPOS des articles en surstock planifiée: ${cronSchedule}`);
+}
+
 /** (Re)programme le précalcul du statut dynamique des ruptures EN_COURS (stockoutStatusRecalcJob.js). */
 async function startOrRestartStockoutStatusRecalcJob() {
   if (currentStockoutStatusRecalcTask) {
@@ -865,6 +897,7 @@ module.exports = {
   startOrRestartStockoutSectorBackfillJob,
   startOrRestartStockoutCatchUpResolveJob,
   startOrRestartStockoutProductCacheRefreshJob,
+  startOrRestartOverstockProductCacheRefreshJob,
   startOrRestartStockoutStatusRecalcJob,
   startOrRestartStockoutAlertJob,
   startOrRestartStockoutPeriodSummarySnapshotJob,

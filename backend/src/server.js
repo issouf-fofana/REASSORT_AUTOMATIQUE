@@ -6,7 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const prisma = require('./utils/prisma');
 const logger = require('./utils/logger');
-const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutDailyLossSnapshotJob, startOrRestartSupplierOrdersSyncJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOverstockReportSnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
+const { startOrRestartNightlyJob, startOrRestartReceptionSyncJob, startOrRestartSalesSyncJob, startOrRestartSalesDailyRecapJob, startOrRestartProductEolSyncJob, startOrRestartStockMoveSyncJob, startOrRestartStockSnapshotJob, startOrRestartStockoutLossRecalcJob, startOrRestartStockoutDailyLossSnapshotJob, startOrRestartSupplierOrdersSyncJob, startOrRestartStockoutSectorBackfillJob, startOrRestartStockoutCatchUpResolveJob, startOrRestartStockoutProductCacheRefreshJob, startOrRestartOverstockProductCacheRefreshJob, startOrRestartStockoutStatusRecalcJob, startOrRestartStockoutAlertJob, startOrRestartStockoutPeriodSummarySnapshotJob, startOrRestartOverstockReportSnapshotJob, startOrRestartOrderIdentitySyncJob, startOrRestartShopsSyncJob, startOrRestartDailyReviewJob, startOrRestartPredictionOutcomeJob, startOrRestartImprovementWatchdogJob, startOrRestartProposalReminderJob, startOrRestartEndOfDayValidationRecapJob, startOrRestartTokenUsageWatchdogJob } = require('./jobs/cronManager');
 const { seedServersFromJson } = require('./services/rposServersService');
 const salesBackfillService = require('./services/salesBackfillService');
 
@@ -261,6 +261,11 @@ async function start() {
     // le stock recalculé depuis l'historique StockMove restait fortement négatif malgré un vrai
     // arrivage (horaire configurable, toutes les 15 min par défaut).
     await startOrRestartStockoutProductCacheRefreshJob();
+    // Même resynchronisation ProductCache.stock, mais pour les articles ACTUELLEMENT en surstock
+    // (demande explicite du 24/10/2026 : cas constaté en production — ProductCache.stock périmé
+    // depuis des semaines pour un article en surstock, faussant la colonne Stock de la page Surstock,
+    // horaire configurable, toutes les heures par défaut).
+    await startOrRestartOverstockProductCacheRefreshJob();
     // Précalcule hasOrder/reactionStatus/deliveryStatus pour chaque rupture EN_COURS — demande
     // explicite : "il ne calcule ps a meme temps... le but est d'optimisé", même principe que le
     // recalcul de perte ci-dessus (horaire configurable, toutes les 5 min par défaut).
@@ -324,6 +329,10 @@ async function start() {
       // Précalcul immédiat du rapport Surstock (sans ce passage, la page resterait lente jusqu'au
       // premier déclenchement planifié, jusqu'à 1h, cf. OVERSTOCK_REPORT_SNAPSHOT_CRON).
       ['./jobs/overstockReportSnapshotJob', 'runOverstockReportSnapshotJob', '[startup] Précalcul du rapport Surstock en arrière-plan : échec non bloquant —'],
+      // Resynchronisation immédiate du stock RPOS officiel des articles en surstock (demande
+      // explicite du 24/10/2026) — placé après le précalcul Surstock ci-dessus pour éviter deux
+      // calculs lourds de getOverstockByShop en concurrence au même instant au démarrage.
+      ['./jobs/overstockProductCacheRefreshJob', 'runOverstockProductCacheRefreshJob', '[startup] Resynchronisation du stock RPOS des articles en surstock en arrière-plan : échec non bloquant —'],
     ];
     startupJobs.forEach(([modulePath, exportName, errorPrefix], index) => {
       setTimeout(() => {

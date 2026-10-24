@@ -62,6 +62,12 @@ const KEYS = {
   // doit etre le stok tu pos" après qu'un déficit historique dans StockMove (ventes mal enregistrées
   // accumulées) ait pu faire paraître un article toujours en rupture malgré un vrai arrivage.
   STOCKOUT_PRODUCT_CACHE_REFRESH_CRON: 'STOCKOUT_PRODUCT_CACHE_REFRESH_CRON',
+  // Même resynchronisation ProductCache.stock, mais pour les articles ACTUELLEMENT en surstock
+  // (demande explicite du 24/10/2026 : cas constaté en production — un article en surstock n'est
+  // plus jamais revu par le cache-aside de proposalService.js ni par le job ruptures ci-dessus,
+  // ProductCache.stock peut donc rester périmé des semaines pour CES articles précisément, faussant
+  // la colonne Stock de la page Surstock).
+  OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON: 'OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON',
   // Précalcul du statut dynamique des ruptures (hasOrder/reactionStatus/deliveryStatus) —
   // demande explicite du 20/10/2026 : "il ne calcule ps a meme temps... le but est d'optimisé".
   STOCKOUT_STATUS_RECALC_CRON: 'STOCKOUT_STATUS_RECALC_CRON',
@@ -202,6 +208,7 @@ const KEYS = {
   STOCKOUT_SECTOR_BACKFILL_ENABLED: 'STOCKOUT_SECTOR_BACKFILL_ENABLED',
   STOCKOUT_CATCH_UP_RESOLVE_ENABLED: 'STOCKOUT_CATCH_UP_RESOLVE_ENABLED',
   STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED: 'STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED',
+  OVERSTOCK_PRODUCT_CACHE_REFRESH_ENABLED: 'OVERSTOCK_PRODUCT_CACHE_REFRESH_ENABLED',
   STOCKOUT_STATUS_RECALC_ENABLED: 'STOCKOUT_STATUS_RECALC_ENABLED',
   STOCKOUT_ALERT_ENABLED: 'STOCKOUT_ALERT_ENABLED',
   STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED',
@@ -327,6 +334,11 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_CRON]: () => process.env.STOCKOUT_CATCH_UP_RESOLVE_CRON || '20 * * * *',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '*/15 * * * *',
+  // Moins fréquent que les ruptures (*/15 min) : le surstock évolue plus lentement par nature (un
+  // article en surstock le reste généralement plusieurs jours/semaines), et la liste d'articles
+  // concernés est potentiellement bien plus grande (tout le catalogue en excédent, pas juste les
+  // ruptures ouvertes) — toutes les heures suffit largement, cohérent avec overstockReportSnapshotJob.
+  [KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON || '30 * * * *',
   [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
   [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '0 * * * *',
@@ -448,6 +460,7 @@ Une entrée par article fourni, dans le même ordre. quantity entier positif ou 
   [KEYS.STOCKOUT_SECTOR_BACKFILL_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_ENABLED]: () => 'true',
+  [KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_STATUS_RECALC_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_ALERT_ENABLED]: () => 'true',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_ENABLED]: () => 'true',
