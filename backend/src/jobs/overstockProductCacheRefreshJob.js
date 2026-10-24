@@ -9,36 +9,41 @@
  * syncedAt du 18/09 alors que RPOS montrait déjà un stock totalement différent), faussant la
  * colonne Stock de la page Surstock qui s'appuie sur ce même stock live (overstockReportService.js).
  *
- * Portée volontairement limitée aux articles en surstock SNAPSHOT (getOverstockByShop, état
- * "maintenant", rapide) — jamais tout le catalogue, pour rester léger, même principe que le job
- * ruptures.
+ * Portée volontairement limitée aux articles en surstock SNAPSHOT — lu depuis le rapport déjà
+ * PRÉCALCULÉ par overstockReportSnapshotJob.js, jamais recalculé ici (BUG CORRIGÉ le 24/10/2026 :
+ * la première version appelait getOverstockByShop EN DIRECT, qui recalcule tout le rapport sur
+ * ~39 000 articles × 38 magasins — exactement le calcul coûteux, 56-97s en concurrence avec les
+ * autres jobs de synchro, que overstockReportSnapshotJob.js a justement été créé pour éviter ;
+ * observé en production : le job ne terminait toujours pas après plusieurs minutes alors que les
+ * autres jobs de démarrage, bien plus légers, avaient déjà fini plusieurs fois dans l'intervalle).
  */
 const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const { mapWithConcurrency } = require('../utils/concurrency');
-const { getOverstockByShop, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../services/overstockReportService');
+const { getCachedDefaultOverstockReport } = require('../services/overstockReportService');
+const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('./overstockReportSnapshotJob');
 
 const SHOP_CONCURRENCY = 5; // même prudence que stockoutProductCacheRefreshJob.js
 
 async function runOverstockProductCacheRefreshJob() {
   console.log('[overstockProductCacheRefreshJob] Resynchronisation démarrée...');
 
-  const report = await getOverstockByShop(null, { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE });
-  if (!report.found || !report.articles.length) {
-    console.log('[overstockProductCacheRefreshJob] Aucun article en surstock, rien à resynchroniser.');
+  const report = await getCachedDefaultOverstockReport(null, OVERSTOCK_REPORT_CACHE_KEY);
+  if (!report || !report.found || !report.articlesByShop.length) {
+    console.log('[overstockProductCacheRefreshJob] Aucun snapshot Surstock disponible ou aucun article en surstock, rien à resynchroniser.');
     return;
   }
 
-  // getOverstockByShop ne renvoie pas rposPosId par article (seulement rposShopId) — résolu ici via
-  // Shop, limité aux magasins effectivement concernés par du surstock.
-  const shopIds = [...new Set(report.articles.map((a) => a.rposShopId))];
+  // Le snapshot ne porte pas rposPosId par article (seulement rposShopId) — résolu ici via Shop,
+  // limité aux magasins effectivement concernés par du surstock.
+  const shopIds = [...new Set(report.articlesByShop.map((a) => a.rposShopId))];
   const shops = await prisma.shop.findMany({ where: { rposShopId: { in: shopIds } }, select: { rposShopId: true, rposPosId: true } });
   const posIdByShop = new Map(shops.map((s) => [s.rposShopId, s.rposPosId]));
 
   // Groupé par (posId, shopId) — un magasin n'a qu'un seul posId, mais on ne suppose rien (même
   // garde-fou que stockoutProductCacheRefreshJob.js).
   const byShop = new Map();
-  for (const a of report.articles) {
+  for (const a of report.articlesByShop) {
     const posId = posIdByShop.get(a.rposShopId);
     if (!posId) continue;
     const key = `${posId}::${a.rposShopId}`;
@@ -74,7 +79,7 @@ async function runOverstockProductCacheRefreshJob() {
     }
   });
 
-  console.log(`[overstockProductCacheRefreshJob] Terminé : ${updated} article(s) resynchronisé(s) sur ${report.articles.length} article(s) en surstock.`);
+  console.log(`[overstockProductCacheRefreshJob] Terminé : ${updated} article(s) resynchronisé(s) sur ${report.articlesByShop.length} article(s) en surstock.`);
 }
 
 module.exports = { runOverstockProductCacheRefreshJob };
