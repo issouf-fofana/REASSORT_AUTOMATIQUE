@@ -95,6 +95,11 @@ type OverstockReportData = {
   commonArticles: CommonArticle[];
   persistentArticleCount?: number | null;
   persistentArticles?: CommonArticle[] | null;
+  // "Aujourd'hui" (demande explicite du 24/10/2026 : "ou je vois les article en surtok auj dans le
+  // magasin ? comme les 181 ?") — liste PLATE (ShopArticleRow, comme articlesByShop), pas groupée
+  // par EAN comme persistentArticles/commonArticles. N'existe qu'en mode période.
+  todayArticleCount?: number | null;
+  todayArticles?: ShopArticleRow[] | null;
   trendPoints?: { date: string; count: number }[] | null;
   trendPointsByShop?: { date: string; rposShopId: string; count: number }[] | null;
   message?: string;
@@ -367,7 +372,7 @@ function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopAr
   );
 }
 
-type TabKey = 'byShop' | 'persistent';
+type TabKey = 'byShop' | 'today' | 'persistent';
 
 export function OverstockReport() {
   const navigate = useNavigate();
@@ -418,6 +423,7 @@ export function OverstockReport() {
   // affichée différemment (ByShopTable : pagination serveur ; CommonArticlesTable : pagination
   // client sur une liste déjà chargée).
   const [persistentPageRows, setPersistentPageRows] = useState<FlatCommonRow[]>([]);
+  const [todayPageRows, setTodayPageRows] = useState<FlatCommonRow[]>([]);
   const [byShopExportState, setByShopExportState] = useState<{ onClick: () => void; exporting: boolean; disabled: boolean } | null>(null);
   // BUG CORRIGÉ le 23/10/2026 (signalé : "les pagination ne son pas correct il ne marche pas" sur
   // l'onglet "Par magasin") — un objet littéral {start, end} passé en prop à chaque render (tel
@@ -544,6 +550,18 @@ export function OverstockReport() {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.articlesByShop.filter((a) => {
+      if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
+      if (!matchesRangeFilters(a)) return false;
+      return true;
+    });
+  }, [data, search, rangeFilters, scrapOnly]);
+
+  // "Aujourd'hui" (demande explicite du 24/10/2026) — même filtrage que filteredByShop ci-dessus,
+  // sur la liste plate todayArticles renvoyée par le backend.
+  const filteredToday = useMemo(() => {
+    if (!data?.todayArticles) return [];
+    const q = search.trim().toLowerCase();
+    return data.todayArticles.filter((a) => {
       if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
       if (!matchesRangeFilters(a)) return false;
       return true;
@@ -1061,6 +1079,16 @@ export function OverstockReport() {
             {data.periodMode && (
               <button
                 type="button"
+                className={`osr-tab${activeTab === 'today' ? ' active' : ''}`}
+                onClick={() => setActiveTab('today')}
+                title="Articles en surstock À LA DERNIÈRE proposition générée (même définition que le graphique en haut de page)."
+              >
+                Aujourd'hui ({filteredToday.length})
+              </button>
+            )}
+            {data.periodMode && (
+              <button
+                type="button"
                 className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`}
                 onClick={() => setActiveTab('persistent')}
                 title={`Encore en surstock aujourd'hui, de façon continue depuis au moins ${data.alwaysOverstockMinDays ?? 14} jours.`}
@@ -1069,6 +1097,16 @@ export function OverstockReport() {
               </button>
             )}
             <div className="ms-auto d-flex align-items-center">
+              {activeTab === 'today' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={() => setExportModal({ pageRows: todayPageRows, allRows: filteredToday, filenamePrefix: 'surstock-aujourdhui' })}
+                  disabled={filteredToday.length === 0}
+                >
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
+                </button>
+              )}
               {activeTab === 'persistent' && (
                 <button
                   type="button"
@@ -1091,6 +1129,24 @@ export function OverstockReport() {
               )}
             </div>
           </div>
+
+          {activeTab === 'today' && (
+            <>
+              {filteredToday.length > 0 && (
+                <p className="text-muted small">
+                  Articles en surstock à la dernière proposition générée pour ce magasin — même nombre que le graphique en haut de page.
+                </p>
+              )}
+              <CommonArticlesTable
+                rows={filteredToday}
+                showRatio
+                threshold={data.minWeeksOfCoverage}
+                onOpenDetail={openScrapDetail}
+                emptyMessage="Aucun article en surstock aujourd'hui pour ce seuil."
+                onPageRowsChange={setTodayPageRows}
+              />
+            </>
+          )}
 
           {activeTab === 'persistent' && (
             <>

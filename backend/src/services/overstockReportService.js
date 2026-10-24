@@ -474,6 +474,17 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     .filter((a) => a.stillOverstocked && a.overstockDaysSpan >= ALWAYS_OVERSTOCK_MIN_DAYS)
     .sort((a, b) => b.overstockDaysSpan - a.overstockDaysSpan);
 
+  // "Aujourd'hui" (demande explicite du 24/10/2026 : "ou je vois les article en surtok auj dans le
+  // magasin ? comme les 181 ?" — ni allArticles (cumul période, 1825) ni persistentArticles (14j+,
+  // 0) ne répondaient à "quels sont les 181 articles comptés par le graphique du jour"). Même
+  // définition EXACTE que trendPoints ci-dessus (le dernier point de la courbe) : stillOverstocked,
+  // sans condition de durée minimale — simplement en surstock à la DERNIÈRE proposition générée
+  // pour ce magasin sur la période. Dérivé de allComputedArticles (historique complet), comme
+  // persistentArticles, pour la même raison (ne pas dépendre du filtre stock live de `articles`).
+  const todayArticles = allComputedArticles
+    .filter((a) => a.stillOverstocked)
+    .sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+
   return {
     found: true,
     minWeeksOfCoverage,
@@ -485,6 +496,8 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     articles: allArticles,
     persistentArticleCount: persistentArticles.length,
     persistentArticles,
+    todayArticleCount: todayArticles.length,
+    todayArticles,
     trendPoints,
     trendPointsByShop,
   };
@@ -705,6 +718,7 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     ...byShop.articles.map((a) => ({ rposShopId: a.rposShopId, ean: a.ean })),
     ...common.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
     ...persistent.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
+    ...(periodMode ? byShop.todayArticles.map((a) => ({ rposShopId: a.rposShopId, ean: a.ean })) : []),
   ];
   // Casse alignée sur la période d'analyse choisie (demande explicite du 24/10/2026 : "les casse sur
   // cette periode d'analyse") en mode période ; sinon comportement d'origine (90 derniers jours
@@ -720,6 +734,7 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
   const articlesByShopWithScrap = attachScrapFlat(byShop.articles, scrapByKey, dlvByKey);
   const commonWithScrap = common.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
   const persistentWithScrap = persistent.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
+  const todayWithScrap = periodMode ? attachScrapFlat(byShop.todayArticles, scrapByKey, dlvByKey) : [];
 
   return {
     found: true,
@@ -743,6 +758,13 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     // mode période (la notion de persistance n'a pas de sens sur un simple snapshot).
     persistentArticleCount: periodMode ? persistentWithScrap.length : null,
     persistentArticles: periodMode ? persistentWithScrap : null,
+    // "Aujourd'hui" (demande explicite du 24/10/2026 : "ou je vois les article en surtok auj dans
+    // le magasin ? comme les 181 ?") — même définition EXACTE que trendPoints (le dernier point de
+    // la courbe), liste PLATE (pas groupée par EAN comme commonArticles/persistentArticles, un seul
+    // magasin affiché à la fois sur cette page de toute façon). N'existe qu'en mode période (sans
+    // période, articlesByShop EST déjà l'état du jour, pas besoin d'un sous-ensemble).
+    todayArticleCount: periodMode ? todayWithScrap.length : null,
+    todayArticles: periodMode ? todayWithScrap : null,
     // Courbe "nombre d'articles distincts en surstock par jour" (demande explicite du 21/10/2026,
     // style inspiré d'un tableau de bord avec graphique de tendance en haut de page) — n'existe
     // qu'en mode période, dérivée des mêmes propositions déjà parcourues ci-dessus, aucun calcul
