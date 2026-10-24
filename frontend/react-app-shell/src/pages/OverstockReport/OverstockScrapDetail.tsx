@@ -2,11 +2,71 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 
-// Page détail de la casse d'un article en surstock (demande explicite du 21/10/2026 : "quand je
-// clique sur l'article je peux avoir ca... tout les casse les quantité, la date et autre") — ouverte
-// depuis n'importe quelle ligne/carte de la page Surstock (onglets "Par magasin", "Surstock commun"
-// ou "Toujours en surstock"), montre CHAQUE mouvement de casse individuel sur la fenêtre choisie,
-// par magasin.
+// Page détail d'un article en surstock (demande explicite du 21/10/2026 : "quand je clique sur
+// l'article je peux avoir ca... tout les casse les quantité, la date et autre", ÉTENDUE le
+// 24/10/2026 : "quand je clique il doit me donner les movement de vente,casse,dvl sur larticle") —
+// ouverte depuis n'importe quelle ligne du tableau "Articles en surstock", 3 onglets : Ventes
+// (pourquoi la couverture est si haute — l'article s'est-il arrêté de vendre ?), Casse, DLV (une
+// partie du stock est-elle basculée hors circuit normal ?).
+
+type SalesLine = {
+  rposShopId: string;
+  shopReference: string | null;
+  shopName: string | null;
+  date: string;
+  quantity: number;
+  revenueExclTax: number;
+};
+
+type SalesByShop = {
+  rposShopId: string;
+  shopReference: string | null;
+  shopName: string | null;
+  totalQuantity: number;
+  saleCount: number;
+};
+
+type SalesByDay = {
+  date: string;
+  quantity: number;
+  saleCount: number;
+};
+
+type SalesDetailData = {
+  found: boolean;
+  ean?: string;
+  label?: string | null;
+  lookbackDays?: number;
+  since?: string;
+  until?: string;
+  totalQuantity?: number;
+  totalRevenue?: number;
+  totalSaleCount?: number;
+  byShop?: SalesByShop[];
+  byDay?: SalesByDay[];
+  sales?: SalesLine[];
+  message?: string;
+};
+
+type EndOfLifeLine = {
+  rposShopId: string;
+  shopReference: string | null;
+  shopName: string | null;
+  dlvEan: string;
+  dlvStock: number;
+  sellingPrice: number | null;
+  syncedAt: string;
+};
+
+type EndOfLifeDetailData = {
+  found: boolean;
+  ean?: string;
+  label?: string | null;
+  totalDlvStock?: number;
+  lineCount?: number;
+  lines?: EndOfLifeLine[];
+  message?: string;
+};
 
 type ScrapMove = {
   rposShopId: string;
@@ -153,7 +213,14 @@ export function OverstockScrapDetail() {
   const navigate = useNavigate();
   const labelFromQuery = searchParams.get('label') || '';
 
+  // Onglet actif (demande explicite du 24/10/2026) — "Ventes" en premier : la question la plus
+  // fréquente en cliquant sur un article en surstock est "pourquoi est-il si peu vendu ?", pas
+  // "quelle casse a-t-il eue" (déjà le comportement précédent par défaut, conservé).
+  const [activeTab, setActiveTab] = useState<'sales' | 'scrap' | 'dlv'>('sales');
+
   const [data, setData] = useState<ScrapDetailData | null>(null);
+  const [salesData, setSalesData] = useState<SalesDetailData | null>(null);
+  const [dlvData, setDlvData] = useState<EndOfLifeDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lookbackDays, setLookbackDays] = useState(90);
   const [movementTypes, setMovementTypes] = useState<MovementType[]>([]);
@@ -189,12 +256,47 @@ export function OverstockScrapDetail() {
     return () => { cancelled = true; };
   }, [ean, lookbackDays, selectedTypes, useCustomRange, customStart, customEnd]);
 
+  // Ventes (demande explicite du 24/10/2026) — même fenêtre/période que la casse ci-dessus, pour
+  // que l'utilisateur puisse comparer les deux sur la même plage de dates sans reconfigurer.
+  useEffect(() => {
+    if (!ean) return;
+    let cancelled = false;
+    setSalesData(null);
+    const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
+    apiFetch<SalesDetailData>(`/reassort/overstock-report/sales-detail?ean=${encodeURIComponent(ean)}${rangeParam}`)
+      .then((d) => { if (!cancelled) setSalesData(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [ean, lookbackDays, useCustomRange, customStart, customEnd]);
+
+  // DLV (demande explicite du 24/10/2026) — état ACTUEL, pas de fenêtre de dates (cf. commentaire
+  // getEndOfLifeDetailForArticle côté backend), donc un seul chargement par article, indépendant
+  // des presets de période ci-dessus.
+  useEffect(() => {
+    if (!ean) return;
+    let cancelled = false;
+    setDlvData(null);
+    apiFetch<EndOfLifeDetailData>(`/reassort/overstock-report/end-of-life-detail?ean=${encodeURIComponent(ean)}`)
+      .then((d) => { if (!cancelled) setDlvData(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [ean]);
+
   function exportCsv() {
     if (!data?.moves) return;
     downloadCsv(
       `casse-${ean}-${new Date().toISOString().slice(0, 10)}.csv`,
       ['Date', 'Magasin', 'Référence magasin', 'Quantité', 'Type de mouvement'],
       data.moves.map((m) => [new Date(m.date).toLocaleString('fr-FR'), m.shopName, m.shopReference, m.quantity, m.typeLabel])
+    );
+  }
+
+  function exportSalesCsv() {
+    if (!salesData?.sales) return;
+    downloadCsv(
+      `ventes-${ean}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Date', 'Magasin', 'Référence magasin', 'Quantité', 'CA HT (CFA)'],
+      salesData.sales.map((s) => [new Date(s.date).toLocaleString('fr-FR'), s.shopName, s.shopReference, s.quantity, s.revenueExclTax])
     );
   }
 
@@ -217,6 +319,9 @@ export function OverstockScrapDetail() {
         .osd-kpi-value { font-size: 1.5rem; font-weight: 700; color: #1B2A4A; }
         .osd-table-card { background: #fff; border-radius: 12px; border: 1px solid rgba(27,42,74,.06); overflow: hidden; }
         .osd-scrap-qty { color: #B8302C; font-weight: 700; }
+        .osd-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(27,42,74,.08); flex-wrap: wrap; }
+        .osd-tab { border: none; background: none; padding: 10px 16px; font-size: .86rem; font-weight: 600; color: #8591A0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+        .osd-tab.active { color: #1B2A4A; border-bottom-color: #1B2A4A; }
       `}</style>
 
       <button type="button" className="osd-back" onClick={() => navigate(-1)}>
@@ -228,148 +333,344 @@ export function OverstockScrapDetail() {
           <span className="osd-avatar">{(labelFromQuery || data?.label || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
           <div>
             <div className="osd-title">{labelFromQuery || data?.label || 'Article'}</div>
-            <div className="osd-subtitle">{ean} — Détail des mouvements de casse</div>
+            <div className="osd-subtitle">{ean} — Mouvements de vente, casse et DLV</div>
           </div>
         </div>
         <div className="osd-presets">
-          {LOOKBACK_PRESETS.map((p) => (
+          {activeTab !== 'dlv' && LOOKBACK_PRESETS.map((p) => (
             <button key={p.days} type="button" className={`osd-preset${!useCustomRange && lookbackDays === p.days ? ' active' : ''}`} onClick={() => { setLookbackDays(p.days); setCustomStart(''); setCustomEnd(''); }}>
               {p.label}
             </button>
           ))}
-          <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customStart} max={customEnd || undefined} onChange={(e) => setCustomStart(e.target.value)} />
-          <span className="text-muted align-self-center" style={{ fontSize: '.78rem' }}>→</span>
-          <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customEnd} min={customStart || undefined} onChange={(e) => setCustomEnd(e.target.value)} />
-          {useCustomRange && (
-            <button type="button" className="osd-preset" onClick={() => { setCustomStart(''); setCustomEnd(''); }}>
-              <iconify-icon icon="solar:close-circle-linear"></iconify-icon>
-            </button>
+          {activeTab !== 'dlv' && (
+            <>
+              <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customStart} max={customEnd || undefined} onChange={(e) => setCustomStart(e.target.value)} />
+              <span className="text-muted align-self-center" style={{ fontSize: '.78rem' }}>→</span>
+              <input type="date" className="osd-preset" style={{ cursor: 'auto' }} value={customEnd} min={customStart || undefined} onChange={(e) => setCustomEnd(e.target.value)} />
+              {useCustomRange && (
+                <button type="button" className="osd-preset" onClick={() => { setCustomStart(''); setCustomEnd(''); }}>
+                  <iconify-icon icon="solar:close-circle-linear"></iconify-icon>
+                </button>
+              )}
+            </>
           )}
-          <MovementTypeSelector types={movementTypes} selected={selectedTypes} onChange={setSelectedTypes} />
+          {activeTab === 'scrap' && <MovementTypeSelector types={movementTypes} selected={selectedTypes} onChange={setSelectedTypes} />}
         </div>
+      </div>
+
+      {/* Onglets Ventes/Casse/DLV (demande explicite du 24/10/2026 : "quand je clique il doit me
+          donner les movement de vente,casse,dvl sur larticle") */}
+      <div className="osd-tabs mb-3">
+        <button type="button" className={`osd-tab${activeTab === 'sales' ? ' active' : ''}`} onClick={() => setActiveTab('sales')}>
+          Ventes {salesData?.totalSaleCount !== undefined ? `(${salesData.totalSaleCount})` : ''}
+        </button>
+        <button type="button" className={`osd-tab${activeTab === 'scrap' ? ' active' : ''}`} onClick={() => setActiveTab('scrap')}>
+          Casse {data?.totalMoveCount !== undefined ? `(${data.totalMoveCount})` : ''}
+        </button>
+        <button type="button" className={`osd-tab${activeTab === 'dlv' ? ' active' : ''}`} onClick={() => setActiveTab('dlv')}>
+          DLV {dlvData?.lineCount !== undefined ? `(${dlvData.lineCount})` : ''}
+        </button>
       </div>
 
       {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
 
-      {data === null && !error ? (
-        <div className="text-muted small">Chargement...</div>
-      ) : data && !data.found ? (
-        <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
-      ) : data ? (
-        <>
-          <div className="osd-kpi-row">
-            <div className="osd-kpi-card">
-              <div className="osd-kpi-label">Quantité totale perdue</div>
-              <div className="osd-kpi-value">{data.totalQuantity?.toLocaleString('fr-FR') ?? 0}</div>
-            </div>
-            <div className="osd-kpi-card">
-              <div className="osd-kpi-label">Nombre de mouvements</div>
-              <div className="osd-kpi-value">{data.totalMoveCount ?? 0}</div>
-            </div>
-            <div className="osd-kpi-card">
-              <div className="osd-kpi-label">Magasins concernés</div>
-              <div className="osd-kpi-value">{data.byShop?.length ?? 0}</div>
-            </div>
-            <div className="osd-kpi-card">
-              <div className="osd-kpi-label">Période analysée</div>
-              <div className="osd-kpi-value" style={{ fontSize: '1.05rem' }}>
-                {data.since ? new Date(data.since).toLocaleDateString('fr-FR') : '—'} → {data.until ? new Date(data.until).toLocaleDateString('fr-FR') : "aujourd'hui"}
+      {activeTab === 'sales' && (
+        salesData === null ? (
+          <div className="text-muted small">Chargement...</div>
+        ) : !salesData.found ? (
+          <div className="text-muted small py-4">{salesData.message || 'Aucune donnée.'}</div>
+        ) : (
+          <>
+            <div className="osd-kpi-row">
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Quantité totale vendue</div>
+                <div className="osd-kpi-value">{salesData.totalQuantity?.toLocaleString('fr-FR') ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">CA HT total</div>
+                <div className="osd-kpi-value">{Math.round(salesData.totalRevenue ?? 0).toLocaleString('fr-FR')} CFA</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Nombre de ventes</div>
+                <div className="osd-kpi-value">{salesData.totalSaleCount ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Période analysée</div>
+                <div className="osd-kpi-value" style={{ fontSize: '1.05rem' }}>
+                  {salesData.since ? new Date(salesData.since).toLocaleDateString('fr-FR') : '—'} → {salesData.until ? new Date(salesData.until).toLocaleDateString('fr-FR') : "aujourd'hui"}
+                </div>
               </div>
             </div>
-          </div>
 
-          {data.byShop && data.byShop.length > 0 && (
-            <div className="osd-table-card mb-3">
+            {salesData.byShop && salesData.byShop.length > 0 && (
+              <div className="osd-table-card mb-3">
+                <div className="table-responsive">
+                  <table className="table align-middle table-sm mb-0">
+                    <thead className="bg-light-subtle">
+                      <tr>
+                        <th>Magasin</th>
+                        <th>Quantité vendue</th>
+                        <th>Nombre de ventes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salesData.byShop.map((s) => (
+                        <tr key={s.rposShopId}>
+                          <td>{s.shopName} ({s.shopReference})</td>
+                          <td className="fw-semibold" style={{ color: '#1B2A4A' }}>{s.totalQuantity.toLocaleString('fr-FR')}</td>
+                          <td>{s.saleCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {salesData.byDay && salesData.byDay.length > 0 && (
+              <>
+                <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Récapitulatif par jour</h6>
+                <div className="osd-table-card mb-3">
+                  <div className="table-responsive" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                    <table className="table align-middle table-sm mb-0">
+                      <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
+                        <tr>
+                          <th>Jour</th>
+                          <th>Quantité vendue</th>
+                          <th>Nombre de ventes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salesData.byDay.map((d) => (
+                          <tr key={d.date}>
+                            <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
+                            <td className="fw-semibold" style={{ color: '#1B2A4A' }}>{d.quantity.toLocaleString('fr-FR')}</td>
+                            <td>{d.saleCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Toutes les ventes</h6>
+              {salesData.sales && salesData.sales.length > 0 && (
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportSalesCsv}>
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
+                </button>
+              )}
+            </div>
+
+            <div className="osd-table-card">
               <div className="table-responsive">
-                <table className="table align-middle table-sm mb-0">
+                <table className="table align-middle table-hover mb-0">
+                  <thead className="bg-light-subtle">
+                    <tr>
+                      <th>Date</th>
+                      <th>Magasin</th>
+                      <th>Quantité</th>
+                      <th>CA HT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!salesData.sales || salesData.sales.length === 0 ? (
+                      <tr><td colSpan={4} className="text-center text-muted py-4">Aucune vente enregistrée sur cette période.</td></tr>
+                    ) : (
+                      salesData.sales.map((s, i) => (
+                        <tr key={i}>
+                          <td>{new Date(s.date).toLocaleString('fr-FR')}</td>
+                          <td>{s.shopName} ({s.shopReference})</td>
+                          <td>{s.quantity.toLocaleString('fr-FR')}</td>
+                          <td>{Math.round(s.revenueExclTax).toLocaleString('fr-FR')} CFA</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )
+      )}
+
+      {activeTab === 'scrap' && (
+        data === null && !error ? (
+          <div className="text-muted small">Chargement...</div>
+        ) : data && !data.found ? (
+          <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
+        ) : data ? (
+          <>
+            <div className="osd-kpi-row">
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Quantité totale perdue</div>
+                <div className="osd-kpi-value">{data.totalQuantity?.toLocaleString('fr-FR') ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Nombre de mouvements</div>
+                <div className="osd-kpi-value">{data.totalMoveCount ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Magasins concernés</div>
+                <div className="osd-kpi-value">{data.byShop?.length ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Période analysée</div>
+                <div className="osd-kpi-value" style={{ fontSize: '1.05rem' }}>
+                  {data.since ? new Date(data.since).toLocaleDateString('fr-FR') : '—'} → {data.until ? new Date(data.until).toLocaleDateString('fr-FR') : "aujourd'hui"}
+                </div>
+              </div>
+            </div>
+
+            {data.byShop && data.byShop.length > 0 && (
+              <div className="osd-table-card mb-3">
+                <div className="table-responsive">
+                  <table className="table align-middle table-sm mb-0">
+                    <thead className="bg-light-subtle">
+                      <tr>
+                        <th>Magasin</th>
+                        <th>Quantité perdue</th>
+                        <th>Nombre de mouvements</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.byShop.map((s) => (
+                        <tr key={s.rposShopId}>
+                          <td>{s.shopName} ({s.shopReference})</td>
+                          <td className="osd-scrap-qty">−{s.totalQuantity.toLocaleString('fr-FR')}</td>
+                          <td>{s.moveCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {data.byDay && data.byDay.length > 0 && (
+              <>
+                <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Récapitulatif par jour</h6>
+                <div className="osd-table-card mb-3">
+                <div className="table-responsive" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  <table className="table align-middle table-sm mb-0">
+                    <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
+                      <tr>
+                        <th>Jour</th>
+                        <th>Quantité perdue</th>
+                        <th>Nombre de mouvements</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.byDay.map((d) => (
+                        <tr key={d.date}>
+                          <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
+                          <td className="osd-scrap-qty">−{d.quantity.toLocaleString('fr-FR')}</td>
+                          <td>{d.moveCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                </div>
+              </>
+            )}
+
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Tous les mouvements de casse</h6>
+              {data.moves && data.moves.length > 0 && (
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportCsv}>
+                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
+                </button>
+              )}
+            </div>
+
+            <div className="osd-table-card">
+              <div className="table-responsive">
+                <table className="table align-middle table-hover mb-0">
+                  <thead className="bg-light-subtle">
+                    <tr>
+                      <th>Date</th>
+                      <th>Magasin</th>
+                      <th>Quantité</th>
+                      <th>Type de mouvement</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!data.moves || data.moves.length === 0 ? (
+                      <tr><td colSpan={4} className="text-center text-muted py-4">Aucune casse enregistrée sur cette période.</td></tr>
+                    ) : (
+                      data.moves.map((m, i) => (
+                        <tr key={i}>
+                          <td>{new Date(m.date).toLocaleString('fr-FR')}</td>
+                          <td>{m.shopName} ({m.shopReference})</td>
+                          <td className="osd-scrap-qty">−{m.quantity.toLocaleString('fr-FR')}</td>
+                          <td>{m.typeLabel || '—'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : null
+      )}
+
+      {activeTab === 'dlv' && (
+        dlvData === null ? (
+          <div className="text-muted small">Chargement...</div>
+        ) : !dlvData.found ? (
+          <div className="text-muted small py-4">{dlvData.message || 'Aucune donnée.'}</div>
+        ) : (
+          <>
+            <div className="osd-kpi-row">
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Stock DLV actuel</div>
+                <div className="osd-kpi-value">{dlvData.totalDlvStock?.toLocaleString('fr-FR') ?? 0}</div>
+              </div>
+              <div className="osd-kpi-card">
+                <div className="osd-kpi-label">Fiches DLV</div>
+                <div className="osd-kpi-value">{dlvData.lineCount ?? 0}</div>
+              </div>
+            </div>
+
+            <div className="osd-table-card">
+              <div className="table-responsive">
+                <table className="table align-middle table-hover mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
                       <th>Magasin</th>
-                      <th>Quantité perdue</th>
-                      <th>Nombre de mouvements</th>
+                      <th>EAN DLV</th>
+                      <th>Stock DLV</th>
+                      <th>Prix de vente DLV</th>
+                      <th>Synchronisé le</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.byShop.map((s) => (
-                      <tr key={s.rposShopId}>
-                        <td>{s.shopName} ({s.shopReference})</td>
-                        <td className="osd-scrap-qty">−{s.totalQuantity.toLocaleString('fr-FR')}</td>
-                        <td>{s.moveCount}</td>
-                      </tr>
-                    ))}
+                    {!dlvData.lines || dlvData.lines.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center text-muted py-4">Aucune fiche DLV pour cet article.</td></tr>
+                    ) : (
+                      dlvData.lines.map((l, i) => (
+                        <tr key={i}>
+                          <td>{l.shopName} ({l.shopReference})</td>
+                          <td>{l.dlvEan}</td>
+                          <td className={l.dlvStock < 0 ? 'text-muted' : 'fw-semibold'} style={l.dlvStock >= 0 ? { color: '#1B2A4A' } : undefined} title={l.dlvStock < 0 ? 'Valeur négative : ajustement/retour, pas un stock réel' : undefined}>
+                            {l.dlvStock.toLocaleString('fr-FR')}
+                          </td>
+                          <td>{l.sellingPrice !== null ? `${l.sellingPrice.toLocaleString('fr-FR')} CFA` : '—'}</td>
+                          <td>{new Date(l.syncedAt).toLocaleDateString('fr-FR')}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
-          )}
-
-          {data.byDay && data.byDay.length > 0 && (
-            <>
-              <h6 className="mb-2" style={{ color: '#1B2A4A', fontWeight: 700 }}>Récapitulatif par jour</h6>
-              <div className="osd-table-card mb-3">
-              <div className="table-responsive" style={{ maxHeight: 280, overflowY: 'auto' }}>
-                <table className="table align-middle table-sm mb-0">
-                  <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
-                    <tr>
-                      <th>Jour</th>
-                      <th>Quantité perdue</th>
-                      <th>Nombre de mouvements</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.byDay.map((d) => (
-                      <tr key={d.date}>
-                        <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
-                        <td className="osd-scrap-qty">−{d.quantity.toLocaleString('fr-FR')}</td>
-                        <td>{d.moveCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              </div>
-            </>
-          )}
-
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Tous les mouvements de casse</h6>
-            {data.moves && data.moves.length > 0 && (
-              <button type="button" className="btn btn-sm btn-outline-primary" onClick={exportCsv}>
-                <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-              </button>
-            )}
-          </div>
-
-          <div className="osd-table-card">
-            <div className="table-responsive">
-              <table className="table align-middle table-hover mb-0">
-                <thead className="bg-light-subtle">
-                  <tr>
-                    <th>Date</th>
-                    <th>Magasin</th>
-                    <th>Quantité</th>
-                    <th>Type de mouvement</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!data.moves || data.moves.length === 0 ? (
-                    <tr><td colSpan={4} className="text-center text-muted py-4">Aucune casse enregistrée sur cette période.</td></tr>
-                  ) : (
-                    data.moves.map((m, i) => (
-                      <tr key={i}>
-                        <td>{new Date(m.date).toLocaleString('fr-FR')}</td>
-                        <td>{m.shopName} ({m.shopReference})</td>
-                        <td className="osd-scrap-qty">−{m.quantity.toLocaleString('fr-FR')}</td>
-                        <td>{m.typeLabel || '—'}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : null}
+          </>
+        )
+      )}
     </div>
   );
 }

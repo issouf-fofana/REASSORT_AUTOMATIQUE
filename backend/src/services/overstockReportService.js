@@ -862,6 +862,127 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
   };
 }
 
+/**
+ * Détail des VENTES d'un article en surstock, même page/fenêtre que getScrapDetailForArticle
+ * (demande explicite du 24/10/2026 : "quand je clique il doit me donner les movement de
+ * vente,casse,dvl sur larticle") — permet de voir directement si un article jugé en surstock a
+ * réellement arrêté de se vendre, ou si les ventes continuent mais le stock est simplement
+ * disproportionné. Lecture locale de SalesLine (alimentée par salesSyncJob.js), jamais d'appel
+ * RPOS ici.
+ */
+async function getSalesDetailForArticle(allowedShopIds, ean, { lookbackDays = SCRAP_LOOKBACK_DAYS, startDate, endDate } = {}) {
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true, reference: true, name: true },
+  });
+  if (!shops.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shopIds = shops.map((s) => s.rposShopId);
+  const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
+
+  const since = startDate ? new Date(startDate) : new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const until = endDate ? new Date(new Date(endDate).setHours(23, 59, 59, 999)) : undefined;
+
+  const sales = await prisma.salesLine.findMany({
+    where: { rposShopId: { in: shopIds }, ean, date: { gte: since, ...(until ? { lte: until } : {}) } },
+    select: { rposShopId: true, label: true, date: true, quantity: true, revenueExclTax: true },
+    orderBy: { date: 'desc' },
+  });
+
+  const label = sales.find((s) => s.label)?.label || null;
+  const saleRows = sales.map((s) => ({
+    rposShopId: s.rposShopId,
+    shopReference: shopById.get(s.rposShopId)?.reference || null,
+    shopName: shopById.get(s.rposShopId)?.name || null,
+    date: s.date.toISOString(),
+    quantity: s.quantity,
+    revenueExclTax: s.revenueExclTax,
+  }));
+
+  const totalQuantity = saleRows.reduce((sum, s) => sum + s.quantity, 0);
+  const totalRevenue = saleRows.reduce((sum, s) => sum + s.revenueExclTax, 0);
+  const byShop = new Map();
+  for (const s of saleRows) {
+    if (!byShop.has(s.rposShopId)) byShop.set(s.rposShopId, { rposShopId: s.rposShopId, shopReference: s.shopReference, shopName: s.shopName, totalQuantity: 0, saleCount: 0 });
+    const entry = byShop.get(s.rposShopId);
+    entry.totalQuantity += s.quantity;
+    entry.saleCount += 1;
+  }
+
+  const byDay = new Map();
+  for (const s of saleRows) {
+    const day = s.date.slice(0, 10);
+    if (!byDay.has(day)) byDay.set(day, { date: day, quantity: 0, saleCount: 0 });
+    const entry = byDay.get(day);
+    entry.quantity += s.quantity;
+    entry.saleCount += 1;
+  }
+
+  return {
+    found: true,
+    ean,
+    label,
+    lookbackDays,
+    since: since.toISOString(),
+    until: until ? until.toISOString() : undefined,
+    totalQuantity,
+    totalRevenue,
+    totalSaleCount: saleRows.length,
+    byShop: [...byShop.values()].sort((a, b) => b.totalQuantity - a.totalQuantity),
+    byDay: [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date)),
+    sales: saleRows,
+  };
+}
+
+/**
+ * Détail des fiches DLV ACTUELLES d'un article en surstock (demande explicite du 24/10/2026, même
+ * besoin que getSalesDetailForArticle ci-dessus) — état PRÉSENT, pas une fenêtre de dates (même
+ * principe que getEndOfLifeSummaryForEans) : montre chaque fiche DLV existante aujourd'hui pour cet
+ * article, utile pour comprendre si une partie du stock a été basculée hors du circuit de vente
+ * normal plutôt que de rechercher une fenêtre de mouvements passés.
+ */
+async function getEndOfLifeDetailForArticle(allowedShopIds, ean) {
+  const shops = await prisma.shop.findMany({
+    where: allowedShopIds !== null ? { rposShopId: { in: allowedShopIds } } : {},
+    select: { rposShopId: true, reference: true, name: true },
+  });
+  if (!shops.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+
+  const shopIds = shops.map((s) => s.rposShopId);
+  const shopById = new Map(shops.map((s) => [s.rposShopId, s]));
+
+  const rows = await prisma.productEndOfLife.findMany({
+    where: { rposShopId: { in: shopIds }, originEan: ean },
+    select: { rposShopId: true, dlvEan: true, label: true, dlvStock: true, sellingPrice: true, syncedAt: true },
+    orderBy: { syncedAt: 'desc' },
+  });
+
+  const label = rows.find((r) => r.label)?.label || null;
+  // Même clamp qu'getEndOfLifeSummaryForEans (confirmé le 24/10/2026 : une fiche à dlvStock négatif
+  // n'est pas un stock physique réel, juste du bruit comptable) — affiché tel quel ici (pas clampé
+  // dans la liste détaillée, utile pour voir l'historique brut), mais le total l'est.
+  const lines = rows.map((r) => ({
+    rposShopId: r.rposShopId,
+    shopReference: shopById.get(r.rposShopId)?.reference || null,
+    shopName: shopById.get(r.rposShopId)?.name || null,
+    dlvEan: r.dlvEan,
+    dlvStock: r.dlvStock,
+    sellingPrice: r.sellingPrice,
+    syncedAt: r.syncedAt.toISOString(),
+  }));
+
+  const totalDlvStock = lines.reduce((sum, l) => sum + Math.max(0, l.dlvStock || 0), 0);
+
+  return {
+    found: true,
+    ean,
+    label,
+    totalDlvStock,
+    lineCount: lines.length,
+    lines,
+  };
+}
+
 // Colonnes autorisées pour le tri côté serveur — jamais une chaîne arbitraire passée par le
 // frontend directement en clé d'accès (cf. getSortValue ci-dessous), pour éviter qu'une requête
 // mal formée ne plante sur un champ inexistant plutôt que de retomber proprement sur le tri par
@@ -983,6 +1104,8 @@ module.exports = {
   groupPersistentOverstock,
   getScrapSummaryForEans,
   getScrapDetailForArticle,
+  getSalesDetailForArticle,
+  getEndOfLifeDetailForArticle,
   getOverstockReport,
   getOverstockByShopPage,
   DEFAULT_MIN_WEEKS_OF_COVERAGE,

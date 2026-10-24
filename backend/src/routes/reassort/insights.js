@@ -24,7 +24,7 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockOverPeriod, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockOverPeriod, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, getSalesDetailForArticle, getEndOfLifeDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
 const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
 
@@ -517,6 +517,43 @@ router.get('/overstock-report/scrap-detail', async (req, res) => {
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
     const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
     const result = await getScrapDetailForArticle(shopIdFilter, String(ean), { lookbackDays, typeLabels, startDate, endDate });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report/sales-detail?ean=&lookbackDays= - détail des VENTES d'un
+// article en surstock (demande explicite du 24/10/2026 : "quand je clique il doit me donner les
+// movement de vente,casse,dvl sur larticle") — même périmètre/fenêtre que scrap-detail ci-dessus.
+router.get('/overstock-report/sales-detail', async (req, res) => {
+  try {
+    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const { ean } = req.query;
+    if (!ean) {
+      return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
+    }
+    const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const result = await getSalesDetailForArticle(shopIdFilter, String(ean), { lookbackDays, startDate, endDate });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/overstock-report/end-of-life-detail?ean= - fiches DLV ACTUELLES d'un article
+// en surstock (demande explicite du 24/10/2026, même besoin que sales-detail ci-dessus) — état
+// présent, pas de fenêtre de dates (cf. getEndOfLifeDetailForArticle).
+router.get('/overstock-report/end-of-life-detail', async (req, res) => {
+  try {
+    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const { ean } = req.query;
+    if (!ean) {
+      return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
+    }
+    const result = await getEndOfLifeDetailForArticle(shopIdFilter, String(ean));
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
