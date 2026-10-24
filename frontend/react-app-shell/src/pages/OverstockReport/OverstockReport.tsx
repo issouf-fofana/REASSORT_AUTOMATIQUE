@@ -105,8 +105,6 @@ type OverstockReportData = {
   message?: string;
 };
 
-type Availability = { found: boolean; oldestDate?: string; newestDate?: string; message?: string };
-
 function fmtCfa(n: number | null): string {
   if (n === null || n === undefined) return '—';
   return `${Math.round(n).toLocaleString('fr-FR')} CFA`;
@@ -372,7 +370,7 @@ function OverstockHero({ data, rows }: { data: OverstockReportData; rows: ShopAr
   );
 }
 
-type TabKey = 'byShop' | 'today' | 'persistent';
+type TabKey = 'today' | 'persistent';
 
 // Cache module-level (demande explicite du 24/10/2026 : "si je fait un retour il recharge toute les
 // page... il ne dois pas actualisé a tout moment") — clique sur un article → navigation vers la page
@@ -411,19 +409,22 @@ export function OverstockReport() {
 
   const [data, setData] = useState<OverstockReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [availability, setAvailability] = useState<Availability | null>(null);
 
   // "Paramètres" de l'analyse (demande explicite : "rendre le surtok dans les parametre sur le
   // UI... le user puisse lancer lui meme") — valeurs en attente tant que l'utilisateur n'a pas
   // cliqué "Lancer l'analyse", pour ne jamais relancer un calcul coûteux à chaque frappe clavier.
   const [minWeeksOfCoverage, setMinWeeksOfCoverage] = useState(2);
-  // Mode période activé par défaut, fenêtre "3 mois" (demande explicite du 21/10/2026 : "il faut
-  // affiché la courbe apres une analyser qui fait par defaut sur 3mois") — sans ça la courbe
-  // d'évolution (qui n'existe qu'en mode période) restait invisible tant que l'utilisateur n'avait
-  // pas lui-même coché "Analyser sur une période" et cliqué "Lancer l'analyse".
-  const [periodEnabled, setPeriodEnabled] = useState(true);
-  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  // BUG CORRIGÉ le 24/10/2026 (signalé : "supprime les filtre [de période]... le surstok doit etre
+  // au jour si il n'es plus en surstok on ne dois plus le voir") — la sélection de période (presets
+  // 7j/30j/3mois/6mois + dates personnalisées, "Historique de la période") permettait de voir des
+  // articles qui ne sont PLUS en surstock aujourd'hui, contradictoire avec "je dois voir que les
+  // article qui son en surtok". Plus de sélecteur visible : periodEnabled reste TOUJOURS activé
+  // (nécessaire pour calculer "En surstock depuis 14j+", qui compare plusieurs jours entre eux),
+  // periodStart/periodEnd fixés en permanence sur une fenêtre de 3 mois glissante, jamais affichés
+  // ni modifiables depuis l'UI.
+  const periodEnabled = true;
+  const periodStart = useMemo(() => new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), []);
+  const periodEnd = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   // BUG CORRIGÉ le 24/10/2026 (signalé : "je veux voir mes perte si je viens sur la vue je dois voir
   // que les artile en surtok... je veux maintennt quel article est en surtok comme les rupture" —
@@ -434,25 +435,10 @@ export function OverstockReport() {
   const [activeTab, setActiveTab] = useState<TabKey>('today');
   // État du bouton Export, générique aux 2 onglets restants (demande explicite du 21/10/2026 : le
   // bouton export doit être sur la ligne des onglets, avec le même choix "vue actuelle / tout"
-  // partout) — remonté par chaque tableau enfant via son propre callback, car chacun gère sa page
-  // affichée différemment (ByShopTable : pagination serveur ; CommonArticlesTable : pagination
-  // client sur une liste déjà chargée).
+  // partout) — remonté par chaque tableau enfant via son propre callback (CommonArticlesTable :
+  // pagination client sur une liste déjà chargée).
   const [persistentPageRows, setPersistentPageRows] = useState<FlatCommonRow[]>([]);
   const [todayPageRows, setTodayPageRows] = useState<FlatCommonRow[]>([]);
-  const [byShopExportState, setByShopExportState] = useState<{ onClick: () => void; exporting: boolean; disabled: boolean } | null>(null);
-  // BUG CORRIGÉ le 23/10/2026 (signalé : "les pagination ne son pas correct il ne marche pas" sur
-  // l'onglet "Par magasin") — un objet littéral {start, end} passé en prop à chaque render (tel
-  // qu'il l'était avant ce correctif) est une RÉFÉRENCE DIFFÉRENTE à chaque fois, même si start/end
-  // n'ont pas changé. ByShopTable a un useEffect(() => setPage(1), [...periodParams...]) : chaque
-  // clic sur une page déclenchait un re-render du parent (via onExportReady, appelé par un AUTRE
-  // useEffect à chaque changement de pageData/exporting), qui recréait cet objet, qui redéclenchait
-  // ce useEffect, qui remettait page à 1 — annulant systématiquement le changement de page just
-  // avant que l'utilisateur ne le voie. useMemo garde la même référence tant que periodMode/
-  // periodStart/periodEnd ne changent pas réellement.
-  const byShopPeriodParams = useMemo(
-    () => ({ start: data?.periodMode ? data.periodStart ?? undefined : undefined, end: data?.periodMode ? data.periodEnd ?? undefined : undefined }),
-    [data?.periodMode, data?.periodStart, data?.periodEnd]
-  );
   const [search, setSearch] = useState('');
 
   // Filtres par plage de valeurs (demande explicite du 21/10/2026 : "ajoute tout ses filtre
@@ -511,17 +497,6 @@ export function OverstockReport() {
     return isSingleShop ? (user?.rposShopId || null) : (activeShop?.id || null);
   }
 
-  // Étendue réelle des données disponibles (demande explicite : "on doit me dire j'ai des donner de
-  // quel periode... si je clique de 10/10/2026 alors que les donner commence de 12 le 10 doit etre
-  // grisé") — recalculée à chaque changement de magasin actif, borne min au sélecteur de dates.
-  useEffect(() => {
-    const shopId = activeShopId();
-    if (!shopId) { setAvailability(null); return; }
-    apiFetch<Availability>(`/reassort/overstock-report/availability?shops=${encodeURIComponent(shopId)}`)
-      .then(setAvailability)
-      .catch(() => setAvailability(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeShop?.id, isSingleShop]);
 
   // Accepte des overrides explicites (demande explicite du 21/10/2026 : boutons de période remontés
   // dans la barre de filtres qui relancent directement l'analyse) — sans ça, l'appel partirait avec
@@ -563,20 +538,7 @@ export function OverstockReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeShop?.id, isSingleShop]);
 
-  const minAvailableDate = availability?.found && availability.oldestDate ? availability.oldestDate.slice(0, 10) : undefined;
-  const maxAvailableDate = availability?.found && availability.newestDate ? availability.newestDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-
-  const filteredByShop = useMemo(() => {
-    if (!data) return [];
-    const q = search.trim().toLowerCase();
-    return data.articlesByShop.filter((a) => {
-      if (q && !a.label.toLowerCase().includes(q) && !a.ean.includes(q)) return false;
-      if (!matchesRangeFilters(a)) return false;
-      return true;
-    });
-  }, [data, search, rangeFilters, scrapOnly]);
-
-  // "Aujourd'hui" (demande explicite du 24/10/2026) — même filtrage que filteredByShop ci-dessus,
+  // "Aujourd'hui" (demande explicite du 24/10/2026) — même filtrage que l'ancien filteredByShop,
   // sur la liste plate todayArticles renvoyée par le backend.
   const filteredToday = useMemo(() => {
     if (!data?.todayArticles) return [];
@@ -775,11 +737,11 @@ export function OverstockReport() {
         </span>
       </div>
 
-      {/* Réglages + période analysée remontés en tout premier (demande explicite du 21/10/2026 :
-          "il faut metre ca en haut... fais un style bien organisé") — "Paramètres de l'analyse"
-          est maintenant un vrai bouton plein (pas un <summary> discret qu'on ne devinait pas
-          cliquable), et le bandeau "période analysée" reste juste en dessous, visible avant même
-          la courbe et les filtres. */}
+      {/* Réglages réduits au seul seuil (demande explicite du 24/10/2026 : "supprime les filtre [de
+          période]... laisse juste la recherche d'article et les filtre avancé") — la sélection de
+          période (presets, dates personnalisées, bandeau "analyse sur la période") a été retirée de
+          l'UI : periodStart/periodEnd restent fixés en permanence à 3 mois en arrière-plan (cf.
+          déclaration plus haut), jamais affichés. */}
       <details className="osr-settings-details mb-3">
         <summary className="osr-settings-summary">
           <iconify-icon icon="solar:settings-bold-duotone"></iconify-icon> Paramètres de l'analyse
@@ -802,66 +764,6 @@ export function OverstockReport() {
         </div>
 
         <div className="osr-settings-row">
-          <span className="osr-icon"><iconify-icon icon="solar:calendar-bold-duotone"></iconify-icon></span>
-          <label className="osr-switch">
-            <input type="checkbox" checked={periodEnabled} onChange={(e) => setPeriodEnabled(e.target.checked)} />
-            <span className="osr-label">Analyser sur une période (historique)</span>
-          </label>
-          <input
-            type="date"
-            className="osr-input"
-            style={{ width: 150 }}
-            value={periodStart}
-            min={minAvailableDate}
-            max={periodEnd}
-            disabled={!periodEnabled}
-            onChange={(e) => setPeriodStart(e.target.value)}
-          />
-          <span className="text-muted small">au</span>
-          <input
-            type="date"
-            className="osr-input"
-            style={{ width: 150 }}
-            value={periodEnd}
-            min={periodStart}
-            max={maxAvailableDate}
-            disabled={!periodEnabled}
-            onChange={(e) => setPeriodEnd(e.target.value)}
-          />
-          <div className="d-flex align-items-center gap-2">
-            {[
-              { label: '7 j', days: 7 },
-              { label: '30 j', days: 30 },
-              { label: '3 mois', days: 90 },
-              { label: '6 mois', days: 180 },
-            ].map((preset) => (
-              <button
-                key={preset.days}
-                type="button"
-                className="btn btn-sm btn-outline-secondary"
-                disabled={!periodEnabled}
-                onClick={() => {
-                  const end = new Date();
-                  const earliestMs = minAvailableDate ? new Date(minAvailableDate).getTime() : 0;
-                  const start = new Date(Math.max(earliestMs, end.getTime() - preset.days * 24 * 60 * 60 * 1000));
-                  setPeriodEnd(end.toISOString().slice(0, 10));
-                  setPeriodStart(start.toISOString().slice(0, 10));
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          {availability?.found ? (
-            <span className="osr-availability ms-auto">
-              Données disponibles du {new Date(availability.oldestDate!).toLocaleDateString('fr-FR')} au {new Date(availability.newestDate!).toLocaleDateString('fr-FR')}
-            </span>
-          ) : availability && !availability.found ? (
-            <span className="osr-availability ms-auto">{availability.message}</span>
-          ) : null}
-        </div>
-
-        <div className="osr-settings-row">
           <button type="button" className="osr-run-btn" onClick={runAnalysis}>
             <iconify-icon icon="solar:play-bold"></iconify-icon> Lancer l'analyse
           </button>
@@ -870,89 +772,8 @@ export function OverstockReport() {
       </details>
 
       {data && data.found && (
-        <div className="osr-period-banner mb-3">
-          <iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon>{' '}
-          {data.periodMode
-            ? <>Analyse sur la période du <strong>{new Date(data.periodStart!).toLocaleDateString('fr-FR')}</strong> au <strong>{new Date(data.periodEnd!).toLocaleDateString('fr-FR')}</strong></>
-            : <>Analyse sur la <strong>situation actuelle</strong> (dernière proposition générée par magasin)</>}
-        </div>
-      )}
-
-      {data && data.found && (
         <>
           <div className="osr-filter-bar">
-            {/* Presets de période remontés directement dans la barre de filtres (demande explicite
-                du 21/10/2026 : "filtre periode il faut affiché ca ici") — avant, il fallait ouvrir
-                "Paramètres de l'analyse" pour changer de fenêtre temporelle ; ces boutons relancent
-                directement l'analyse sur la période choisie, sans étape intermédiaire. */}
-            <div className="d-flex align-items-center gap-1">
-              {[
-                { label: '7 j', days: 7 },
-                { label: '30 j', days: 30 },
-                { label: '3 mois', days: 90 },
-                { label: '6 mois', days: 180 },
-              ].map((preset) => {
-                const isActive = periodEnabled && periodStart === (() => {
-                  const earliestMs = minAvailableDate ? new Date(minAvailableDate).getTime() : 0;
-                  return new Date(Math.max(earliestMs, Date.now() - preset.days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
-                })();
-                return (
-                  <button
-                    key={preset.days}
-                    type="button"
-                    className={`osr-preset-pill${isActive ? ' active' : ''}`}
-                    onClick={() => {
-                      const end = new Date();
-                      const earliestMs = minAvailableDate ? new Date(minAvailableDate).getTime() : 0;
-                      const start = new Date(Math.max(earliestMs, end.getTime() - preset.days * 24 * 60 * 60 * 1000));
-                      const newStart = start.toISOString().slice(0, 10);
-                      const newEnd = end.toISOString().slice(0, 10);
-                      setPeriodEnabled(true);
-                      setPeriodStart(newStart);
-                      setPeriodEnd(newEnd);
-                      runAnalysisWith({ periodEnabled: true, periodStart: newStart, periodEnd: newEnd });
-                    }}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
-            </div>
-            {/* Période personnalisée (demande explicite du 21/10/2026 : "personalisé la periode")
-                — champs "du ... au ..." à côté des presets, pour choisir une fenêtre exacte plutôt
-                que seulement 7j/30j/3mois/6mois. "Appliquer" relance directement l'analyse, pas
-                besoin de rouvrir "Paramètres de l'analyse". */}
-            <div className="d-flex align-items-center gap-1">
-              <input
-                type="date"
-                className="osr-input"
-                style={{ width: 140 }}
-                value={periodStart}
-                min={minAvailableDate}
-                max={periodEnd}
-                onChange={(e) => setPeriodStart(e.target.value)}
-              />
-              <span className="text-muted small">→</span>
-              <input
-                type="date"
-                className="osr-input"
-                style={{ width: 140 }}
-                value={periodEnd}
-                min={periodStart}
-                max={maxAvailableDate}
-                onChange={(e) => setPeriodEnd(e.target.value)}
-              />
-              <button
-                type="button"
-                className="osr-preset-pill"
-                onClick={() => {
-                  setPeriodEnabled(true);
-                  runAnalysisWith({ periodEnabled: true, periodStart, periodEnd });
-                }}
-              >
-                Appliquer
-              </button>
-            </div>
             <input
               type="search"
               className="osr-input"
@@ -1022,30 +843,23 @@ export function OverstockReport() {
         </>
       )}
 
-      {data && data.found && <OverstockHero data={data} rows={filteredByShop} />}
+      {data && data.found && <OverstockHero data={data} rows={filteredToday} />}
 
       {data && data.found && (
         <div className="osr-kpi-row">
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
-              {/* BUG CORRIGÉ le 24/10/2026 (signalé : "181 en surtok auj... Articles en surstock
-                  est 1825... comment expliqué ca") : ce compteur additionne TOUT article vu en
-                  surstock AU MOINS UNE FOIS sur toute la période choisie (ex: 3 mois), pas l'état du
-                  jour — très différent du graphique juste au-dessus ("Articles en surstock
-                  aujourd'hui", basé sur la dernière proposition générée). Les deux chiffres sont
-                  corrects mais répondent à deux questions différentes ; libellé clarifié + infobulle
-                  pour ne plus laisser croire que 1825 est l'état présent. */}
-              <span
-                className="osr-kpi-label"
-                title={data.periodMode ? "Total des articles ayant été en surstock AU MOINS UNE FOIS entre le début et la fin de la période choisie — pas l'état d'aujourd'hui. Pour l'état du jour, voir le graphique ci-dessus (\"Articles en surstock aujourd'hui\")." : undefined}
-              >
-                {data.periodMode ? 'Historique de la période' : 'Articles en surstock'}
-              </span>
+              {/* BUG CORRIGÉ le 24/10/2026 (signalé : "le surstok doit etre au jour si il n'es plus
+                  en surstok on ne dois plus le voir") — affichait auparavant "Historique de la
+                  période" (filteredByShop, tout article vu en surstock au moins une fois sur 3
+                  mois, y compris ceux plus en surstock aujourd'hui), remplacé par l'état PRÉSENT
+                  (filteredToday), cohérent avec l'onglet "Aujourd'hui" juste en dessous. */}
+              <span className="osr-kpi-label">Articles en surstock aujourd'hui</span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
                 <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
               </span>
             </div>
-            <div className="osr-kpi-value">{filteredByShop.length}</div>
+            <div className="osr-kpi-value">{filteredToday.length}</div>
           </div>
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
@@ -1090,32 +904,20 @@ export function OverstockReport() {
           <div className="osr-tabs">
             <button
               type="button"
-              className={`osr-tab${activeTab === 'byShop' ? ' active' : ''}`}
-              onClick={() => setActiveTab('byShop')}
-              title={data.periodMode ? "Historique sur la période choisie, pas l'état d'aujourd'hui — voir le graphique en haut de page pour l'état du jour." : undefined}
+              className={`osr-tab${activeTab === 'today' ? ' active' : ''}`}
+              onClick={() => setActiveTab('today')}
+              title="Articles en surstock À LA DERNIÈRE proposition générée (même définition que le graphique en haut de page)."
             >
-              {data.periodMode ? 'Historique de la période' : 'Articles en surstock'} ({filteredByShop.length})
+              Aujourd'hui ({filteredToday.length})
             </button>
-            {data.periodMode && (
-              <button
-                type="button"
-                className={`osr-tab${activeTab === 'today' ? ' active' : ''}`}
-                onClick={() => setActiveTab('today')}
-                title="Articles en surstock À LA DERNIÈRE proposition générée (même définition que le graphique en haut de page)."
-              >
-                Aujourd'hui ({filteredToday.length})
-              </button>
-            )}
-            {data.periodMode && (
-              <button
-                type="button"
-                className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`}
-                onClick={() => setActiveTab('persistent')}
-                title={`Encore en surstock aujourd'hui, de façon continue depuis au moins ${data.alwaysOverstockMinDays ?? 14} jours.`}
-              >
-                En surstock depuis 14j+ ({filteredPersistent.length})
-              </button>
-            )}
+            <button
+              type="button"
+              className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`}
+              onClick={() => setActiveTab('persistent')}
+              title={`Encore en surstock aujourd'hui, de façon continue depuis au moins ${data.alwaysOverstockMinDays ?? 14} jours.`}
+            >
+              En surstock depuis 14j+ ({filteredPersistent.length})
+            </button>
             <div className="ms-auto d-flex align-items-center">
               {activeTab === 'today' && (
                 <button
@@ -1135,16 +937,6 @@ export function OverstockReport() {
                   disabled={filteredPersistent.length === 0}
                 >
                   <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> Exporter (CSV)
-                </button>
-              )}
-              {activeTab === 'byShop' && byShopExportState && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-primary"
-                  onClick={byShopExportState.onClick}
-                  disabled={byShopExportState.exporting || byShopExportState.disabled}
-                >
-                  <iconify-icon icon="solar:download-bold-duotone"></iconify-icon> {byShopExportState.exporting ? 'Export en cours...' : 'Exporter (CSV)'}
                 </button>
               )}
             </div>
@@ -1186,19 +978,6 @@ export function OverstockReport() {
             </>
           )}
 
-          {activeTab === 'byShop' && activeShopId() && (
-            <ByShopTable
-              shopId={activeShopId()!}
-              periodParams={byShopPeriodParams}
-              minWeeksOfCoverage={data.minWeeksOfCoverage}
-              search={search}
-              rangeFilters={rangeFilters}
-              scrapOnly={scrapOnly}
-              threshold={data.minWeeksOfCoverage}
-              onOpenDetail={openScrapDetail}
-              onExportReady={setByShopExportState}
-            />
-          )}
         </>
       ) : null}
       {exportModal && (
@@ -1213,267 +992,6 @@ export function OverstockReport() {
   );
 }
 
-type ByShopPageData = {
-  found: boolean;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-  totalCount: number;
-  filteredShopCount: number;
-  rows: ShopArticleRow[];
-  periodMode?: boolean;
-  minWeeksOfCoverage: number;
-  scrapLookbackDays?: number;
-};
-
-// Tableau "Articles en surstock" (ex "Par magasin", renommé le 23/10/2026 — page désormais
-// mono-magasin, "par magasin" n'avait plus de sens) — pagination SERVEUR (demande explicite du
-// 21/10/2026 : "ca prend au moins 10s pour affiché c'est normal ?", 38922 lignes mesurées en prod
-// transférées et rendues en entier au client avant même la pagination visuelle). Contrairement à
-// l'onglet "Toujours en surstock" (CommonArticlesTable, qui reste sur une liste déjà chargée en
-// mémoire, portée volontairement limitée à ce tableau), celui-ci fait son PROPRE appel réseau
-// paginé via /overstock-report/by-shop — ne reçoit plus toutes les lignes, seulement la page
-// demandée. shopId (magasin actif, suivant le sélecteur global) et les filtres actifs de la page
-// (search/rangeFilters/scrapOnly) et les paramètres de période sont passés en props pour
-// reconstruire la requête serveur à chaque changement de page/tri/filtre/magasin.
-function ByShopTable({
-  shopId, periodParams, minWeeksOfCoverage, search, rangeFilters, scrapOnly, threshold, onOpenDetail, onExportReady,
-}: {
-  shopId: string;
-  periodParams: { start?: string; end?: string };
-  minWeeksOfCoverage: number;
-  search: string;
-  rangeFilters: Record<string, { min: string; max: string }>;
-  scrapOnly: boolean;
-  threshold: number;
-  onOpenDetail: (ean: string, label: string) => void;
-  // Expose le déclencheur d'export au parent (demande explicite du 21/10/2026 : bouton Export
-  // placé sur la ligne des onglets, hors de ce composant) — plutôt que de rendre son propre bouton,
-  // ByShopTable prévient le parent à chaque changement d'état exportable (prêt/en cours/vide) via
-  // ce callback.
-  onExportReady: (state: { onClick: () => void; exporting: boolean; disabled: boolean } | null) => void;
-}) {
-  const [page, setPage] = useState(1);
-  const [sortField, setSortField] = useState<string | undefined>(undefined);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [pageData, setPageData] = useState<ByShopPageData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // 10 par défaut (demande explicite du 21/10/2026 : "par defaut le tableau il faut affiché 10 par
-  // pagination").
-  const PAGE_SIZE = 10;
-
-  // Construit les query params communs à l'appel paginé normal et à l'export "tout" (demande
-  // explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit me dire je veux le
-  // nombre actuel sur la vue ou tout") — mêmes filtres actifs dans les deux cas, seule la
-  // pagination diffère (gérée par l'appelant via `all`).
-  function buildQueryParams(overrides?: { all?: boolean }) {
-    const params = new URLSearchParams({
-      page: String(page),
-      pageSize: String(PAGE_SIZE),
-      minWeeksOfCoverage: String(minWeeksOfCoverage),
-    });
-    if (overrides?.all) params.set('all', 'true');
-    if (periodParams.start) params.set('start', periodParams.start);
-    if (periodParams.end) params.set('end', periodParams.end);
-    if (search.trim()) params.set('search', search.trim());
-    params.set('shops', shopId);
-    if (sortField) { params.set('sortField', sortField); params.set('sortDir', sortDir); }
-    if (scrapOnly) params.set('scrapOnly', 'true');
-    const activeRanges = Object.fromEntries(Object.entries(rangeFilters).filter(([, r]) => r.min !== '' || r.max !== ''));
-    if (Object.keys(activeRanges).length > 0) params.set('rangeFilters', JSON.stringify(activeRanges));
-    return params;
-  }
-
-  useEffect(() => { setPage(1); }, [shopId, search, rangeFilters, scrapOnly, periodParams, minWeeksOfCoverage]);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${buildQueryParams().toString()}`)
-      .then((d) => { if (!cancelled) { setPageData(d); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shopId, page, periodParams, minWeeksOfCoverage, search, rangeFilters, scrapOnly, sortField, sortDir]);
-
-  function toggleSort(field: string) {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    } else {
-      setSortField(field);
-      setSortDir('desc');
-    }
-  }
-
-  function sortIcon(field: string) {
-    if (sortField !== field) return null;
-    return <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
-  }
-
-  function exportRowsToCsv(rows: ShopArticleRow[], suffix: string) {
-    downloadCsv(
-      `surstock-par-magasin-${suffix}-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'En surstock depuis le', 'Toujours en surstock', 'Sorti du surstock le', 'DLV actuelle (qté)', 'Casse (qté)', 'Casse (nb mouvements)', 'Dernière casse'],
-      rows.map((r) => [
-        r.shopName, r.shopReference, r.ean, r.label, r.department, r.stock, r.sellingPrice, r.avgDailySales, r.avgWeeklySales, r.avgMonthlySales, r.weeksOfCoverage,
-        r.overstockRatio !== undefined ? fmtPct(r.overstockRatio) : '',
-        r.firstOverstockDate ? new Date(r.firstOverstockDate).toLocaleDateString('fr-FR') : '',
-        r.stillOverstocked === undefined ? '' : (r.stillOverstocked ? 'Oui' : 'Non'),
-        r.stillOverstocked === false && r.lastOverstockDate ? new Date(r.lastOverstockDate).toLocaleDateString('fr-FR') : '',
-        r.dlvStock ?? 0,
-        r.scrapQuantity90d, r.scrapMoveCount90d, r.lastScrapDate ? new Date(r.lastScrapDate).toLocaleDateString('fr-FR') : '',
-      ])
-    );
-  }
-
-  // Demande explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit me dire je
-  // veux le nombre actuel sur la vue ou tout" — avec la pagination serveur, "la vue" (10 lignes
-  // affichées) et "tout" (toutes les lignes filtrées, potentiellement des milliers) sont deux
-  // exports très différents en taille, jamais la même chose par défaut. MIGRÉ le 24/10/2026 vers
-  // ExportRowCountModal (demande explicite : "il doit me donner un truc personalisé") — restait sur
-  // l'ancien window.confirm binaire, contrairement aux 2 autres onglets déjà migrés le 23/10/2026
-  // (travail interrompu par un problème disque à l'époque, jamais terminé). "custom N lignes"
-  // récupère TOUT via all=true (même coût réseau que "tout"), puis tronque côté client — ByShopTable
-  // n'a pas de endpoint ?limit=N dédié, pas la peine d'en ajouter un pour ce besoin ponctuel.
-  const [exporting, setExporting] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
-  function handleExportClick() {
-    if (!pageData || pageData.totalCount === 0) return;
-    setShowExportModal(true);
-  }
-  function handleExportChoice(choice: ExportChoice) {
-    setShowExportModal(false);
-    if (!pageData) return;
-    if (choice.kind === 'page') {
-      exportRowsToCsv(pageData.rows, 'page-actuelle');
-      return;
-    }
-    setExporting(true);
-    apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${buildQueryParams({ all: true }).toString()}`)
-      .then((d) => exportRowsToCsv(choice.kind === 'custom' ? d.rows.slice(0, choice.count) : d.rows, choice.kind === 'custom' ? `${choice.count}-lignes` : 'complet'))
-      .catch((err) => window.alert(`Échec de l'export : ${err instanceof Error ? err.message : String(err)}`))
-      .finally(() => setExporting(false));
-  }
-
-  // Prévient le parent à chaque changement pertinent (jamais en render direct — setState pendant
-  // le render du parent casserait les règles de React) : le bouton Export sur la ligne des onglets
-  // doit refléter pageData/exporting à tout instant.
-  useEffect(() => {
-    if (pageData === null) { onExportReady(null); return; }
-    onExportReady({ onClick: handleExportClick, exporting, disabled: pageData.totalCount === 0 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageData, exporting]);
-  useEffect(() => () => onExportReady(null), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (error) return <div className="text-danger small py-4">Erreur : {error}</div>;
-  if (pageData === null) return <div className="text-muted small py-4">Chargement...</div>;
-
-  const periodMode = !!pageData.periodMode;
-
-  return (
-    <>
-      {pageData.totalCount === 0 ? (
-        <div className="text-muted small py-4">Aucun article en surstock pour ce seuil.</div>
-      ) : (
-        <>
-          <div className="osr-table-card">
-            <div className="table-responsive">
-              <table className="table align-middle table-hover mb-0">
-                <thead className="bg-light-subtle">
-                  <tr>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('label')}>Article{sortIcon('label')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('shopName')}>Magasin{sortIcon('shopName')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('department')}>Rayon{sortIcon('department')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('stock')}>Stock{sortIcon('stock')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('sellingPrice')}>Prix de vente{sortIcon('sellingPrice')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('avgDailySales')}>Vente/jour{sortIcon('avgDailySales')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('avgWeeklySales')}>Vente/semaine{sortIcon('avgWeeklySales')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('avgMonthlySales')}>Vente/mois{sortIcon('avgMonthlySales')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('weeksOfCoverage')}>Couverture{sortIcon('weeksOfCoverage')}</th>
-                    {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('overstockRatio')}>% du temps en surstock{sortIcon('overstockRatio')}</th>}
-                    {/* Période de surstock (demande explicite du 21/10/2026 : "je doit voir la
-                        periode de surtok... quand es ce que ca pris fin ou ca continue") — n'existe
-                        qu'en mode période, pas sur un simple snapshot "situation actuelle". */}
-                    {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('firstOverstockDate')}>Période de surstock{sortIcon('firstOverstockDate')}</th>}
-                    {/* DLV actuelle (demande explicite du 24/10/2026 : "une colonne de combien est
-                        en dlv actu pour les surstok") — état présent, jamais borné par la période
-                        choisie (contrairement à la casse juste à côté). */}
-                    <th className="osr-sortable-th" onClick={() => toggleSort('dlvStock')}>DLV actuelle{sortIcon('dlvStock')}</th>
-                    <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse ({pageData.scrapLookbackDays ?? 90}j){sortIcon('scrapQuantity90d')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageData.rows.map((r, i) => (
-                    <tr
-                      key={`${r.rposShopId}:${r.ean}:${i}`}
-                      role="button"
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => onOpenDetail(r.ean, r.label)}
-                    >
-                      <td>
-                        <div className="fw-semibold" style={{ fontSize: '.84rem', color: '#1B2A4A' }}>{r.label}</div>
-                        <div className="text-muted" style={{ fontSize: '.72rem' }}>{r.ean}</div>
-                      </td>
-                      <td>{r.shopName} ({r.shopReference})</td>
-                      <td>{r.department || '—'}</td>
-                      <td>{r.stock}</td>
-                      <td>{fmtCfa(r.sellingPrice)}</td>
-                      <td>{r.avgDailySales}</td>
-                      <td>{r.avgWeeklySales}</td>
-                      <td>{r.avgMonthlySales}</td>
-                      <td><CoveragePill weeks={r.weeksOfCoverage} threshold={threshold} /></td>
-                      {periodMode && <td>{fmtPct(r.overstockRatio)}</td>}
-                      {periodMode && (
-                        <td style={{ fontSize: '.8rem' }}>
-                          {r.firstOverstockDate ? (
-                            <>
-                              <div>Depuis le {new Date(r.firstOverstockDate).toLocaleDateString('fr-FR')}</div>
-                              {r.stillOverstocked ? (
-                                <span className="osr-pill osr-pill-warning">Toujours en cours</span>
-                              ) : (
-                                <span className="text-muted">Sorti le {r.lastOverstockDate ? new Date(r.lastOverstockDate).toLocaleDateString('fr-FR') : '—'}</span>
-                              )}
-                            </>
-                          ) : '—'}
-                        </td>
-                      )}
-                      <td>
-                        {r.dlvStock && r.dlvStock > 0 ? (
-                          <span className="osr-scrap-badge" title={r.dlvLineCount ? `${r.dlvLineCount} fiche(s) DLV` : undefined}>
-                            {r.dlvStock}
-                          </span>
-                        ) : (
-                          <span className="text-muted small">Aucune</span>
-                        )}
-                      </td>
-                      <td>
-                        {r.scrapQuantity90d > 0 ? (
-                          <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>
-                            −{r.scrapQuantity90d} ({r.scrapMoveCount90d})
-                          </span>
-                        ) : (
-                          <span className="text-muted small">Aucune</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <PaginationBar page={pageData.page} totalPages={pageData.totalPages} totalItems={pageData.totalCount} onChange={setPage} />
-        </>
-      )}
-      {showExportModal && pageData && (
-        <ExportRowCountModal
-          pageCount={pageData.rows.length}
-          totalCount={pageData.totalCount}
-          onExport={handleExportChoice}
-          onClose={() => setShowExportModal(false)}
-        />
-      )}
-    </>
-  );
-}
 
 // Pagination (demande explicite du 21/10/2026) — numéros de page condensés (toujours la première,
 // la dernière, la page courante et ses voisines immédiates, "…" pour le reste) : afficher 40+ boutons
