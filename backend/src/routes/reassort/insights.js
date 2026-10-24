@@ -500,14 +500,28 @@ router.get('/overstock-report/availability', async (req, res) => {
   }
 });
 
-// GET /api/reassort/overstock-report/scrap-detail?ean=&lookbackDays= - page détail casse d'un
-// article en surstock (demande explicite du 21/10/2026 : "quand je clique sur l'article je peux
-// avoir ca... tout les casse les quantité, la date et autre") — chaque mouvement de casse
-// individuel sur la fenêtre demandée, pour le périmètre magasins accessible au compte (ADMIN/
-// SUPERVISOR : leur périmètre habituel ; compte mono-magasin : son seul magasin).
+// Résout le périmètre magasins (ADMIN/SUPERVISOR/mono-magasin) PUIS restreint encore à ?shops=
+// quand fourni — même raisonnement que resolveOverstockShopFilterAndCache (intersection avec le
+// périmètre déjà autorisé, jamais une extension). BUG CORRIGÉ le 24/10/2026 (signalé : "je suis
+// dans un magasin il ne dois pas me donner pour tout les mag... je dois voir pour un seul magasin")
+// : les 3 routes de détail article ci-dessous (scrap/sales/end-of-life) ignoraient le magasin actif
+// de la topbar et retombaient sur le périmètre COMPLET du compte — incohérent avec la page Surstock
+// elle-même, mono-magasin depuis la refonte du 23/10/2026.
+function applyShopsQueryFilter(shopIdFilter, req) {
+  if (!req.query.shops) return shopIdFilter;
+  const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
+  return shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+}
+
+// GET /api/reassort/overstock-report/scrap-detail?ean=&lookbackDays=&shops= - page détail casse
+// d'un article en surstock (demande explicite du 21/10/2026 : "quand je clique sur l'article je
+// peux avoir ca... tout les casse les quantité, la date et autre") — chaque mouvement de casse
+// individuel sur la fenêtre demandée, restreint au magasin actif (?shops=) dans le périmètre
+// accessible au compte (ADMIN/SUPERVISOR : leur périmètre habituel ; compte mono-magasin : son seul
+// magasin, ?shops= alors sans effet).
 router.get('/overstock-report/scrap-detail', async (req, res) => {
   try {
-    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const shopIdFilter = applyShopsQueryFilter(await resolveOverstockShopFilter(req), req);
     const { ean } = req.query;
     if (!ean) {
       return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
@@ -523,12 +537,12 @@ router.get('/overstock-report/scrap-detail', async (req, res) => {
   }
 });
 
-// GET /api/reassort/overstock-report/sales-detail?ean=&lookbackDays= - détail des VENTES d'un
-// article en surstock (demande explicite du 24/10/2026 : "quand je clique il doit me donner les
-// movement de vente,casse,dvl sur larticle") — même périmètre/fenêtre que scrap-detail ci-dessus.
+// GET /api/reassort/overstock-report/sales-detail?ean=&lookbackDays=&shops= - détail des VENTES
+// d'un article en surstock (demande explicite du 24/10/2026 : "quand je clique il doit me donner
+// les movement de vente,casse,dvl sur larticle") — même périmètre/fenêtre que scrap-detail ci-dessus.
 router.get('/overstock-report/sales-detail', async (req, res) => {
   try {
-    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const shopIdFilter = applyShopsQueryFilter(await resolveOverstockShopFilter(req), req);
     const { ean } = req.query;
     if (!ean) {
       return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });
@@ -543,12 +557,12 @@ router.get('/overstock-report/sales-detail', async (req, res) => {
   }
 });
 
-// GET /api/reassort/overstock-report/end-of-life-detail?ean= - fiches DLV ACTUELLES d'un article
-// en surstock (demande explicite du 24/10/2026, même besoin que sales-detail ci-dessus) — état
-// présent, pas de fenêtre de dates (cf. getEndOfLifeDetailForArticle).
+// GET /api/reassort/overstock-report/end-of-life-detail?ean=&shops= - fiches DLV ACTUELLES d'un
+// article en surstock (demande explicite du 24/10/2026, même besoin que sales-detail ci-dessus) —
+// état présent, pas de fenêtre de dates (cf. getEndOfLifeDetailForArticle).
 router.get('/overstock-report/end-of-life-detail', async (req, res) => {
   try {
-    const shopIdFilter = await resolveOverstockShopFilter(req);
+    const shopIdFilter = applyShopsQueryFilter(await resolveOverstockShopFilter(req), req);
     const { ean } = req.query;
     if (!ean) {
       return res.status(400).json({ success: false, message: 'Paramètre ean requis.' });

@@ -572,8 +572,14 @@ export function OverstockReport() {
   // filteredPersistent (déjà mémorisé ci-dessus) ne change pas.
   const flatPersistentRows = useMemo(() => flattenCommonArticles(filteredPersistent), [filteredPersistent]);
 
+  // BUG CORRIGÉ le 24/10/2026 (signalé : "je suis dans un magasin il ne dois pas me donner pour
+  // tout les mag... je dois voir pour un seul magasin") — shopId du magasin actif transmis en query
+  // param, repris par OverstockScrapDetail.tsx pour restreindre les 3 onglets (Ventes/Casse/DLV) au
+  // même magasin que celui affiché sur la page Surstock, au lieu du périmètre complet du compte.
   function openScrapDetail(ean: string, label: string) {
-    navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report`);
+    const shopId = activeShopId();
+    const shopParam = shopId ? `&shops=${encodeURIComponent(shopId)}` : '';
+    navigate(`/overstock-report/scrap/${encodeURIComponent(ean)}?label=${encodeURIComponent(label)}&from=overstock-report${shopParam}`);
   }
 
   // État de la modale "combien de lignes exporter" — RÉÉCRIT le 23/10/2026 (demande explicite :

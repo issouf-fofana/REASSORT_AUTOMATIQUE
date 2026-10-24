@@ -212,6 +212,13 @@ export function OverstockScrapDetail() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const labelFromQuery = searchParams.get('label') || '';
+  // Magasin actif transmis par OverstockReport.tsx (demande explicite du 24/10/2026 : "je suis dans
+  // un magasin il ne dois pas me donner pour tout les mag... je dois voir pour un seul magasin") —
+  // restreint les 3 onglets Ventes/Casse/DLV au même magasin que celui affiché sur la page Surstock,
+  // au lieu du périmètre complet du compte (ADMIN/SUPERVISOR). Vide si absent (ex: lien direct sans
+  // ce paramètre) : retombe alors sur le comportement d'origine, périmètre complet.
+  const shopIdFromQuery = searchParams.get('shops') || '';
+  const shopQueryParam = shopIdFromQuery ? `&shops=${encodeURIComponent(shopIdFromQuery)}` : '';
 
   // Onglet actif (demande explicite du 24/10/2026) — "Ventes" en premier : la question la plus
   // fréquente en cliquant sur un article en surstock est "pourquoi est-il si peu vendu ?", pas
@@ -250,7 +257,7 @@ export function OverstockScrapDetail() {
     setError(null);
     const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
     const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
-    apiFetch<ScrapDetailData>(`/reassort/overstock-report/scrap-detail?ean=${encodeURIComponent(ean)}${rangeParam}${typeParam}`)
+    apiFetch<ScrapDetailData>(`/reassort/overstock-report/scrap-detail?ean=${encodeURIComponent(ean)}${rangeParam}${typeParam}${shopQueryParam}`)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
@@ -263,7 +270,7 @@ export function OverstockScrapDetail() {
     let cancelled = false;
     setSalesData(null);
     const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
-    apiFetch<SalesDetailData>(`/reassort/overstock-report/sales-detail?ean=${encodeURIComponent(ean)}${rangeParam}`)
+    apiFetch<SalesDetailData>(`/reassort/overstock-report/sales-detail?ean=${encodeURIComponent(ean)}${rangeParam}${shopQueryParam}`)
       .then((d) => { if (!cancelled) setSalesData(d); })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -276,7 +283,7 @@ export function OverstockScrapDetail() {
     if (!ean) return;
     let cancelled = false;
     setDlvData(null);
-    apiFetch<EndOfLifeDetailData>(`/reassort/overstock-report/end-of-life-detail?ean=${encodeURIComponent(ean)}`)
+    apiFetch<EndOfLifeDetailData>(`/reassort/overstock-report/end-of-life-detail?ean=${encodeURIComponent(ean)}${shopQueryParam}`)
       .then((d) => { if (!cancelled) setDlvData(d); })
       .catch(() => {});
     return () => { cancelled = true; };
