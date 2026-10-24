@@ -366,7 +366,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
     for (const ean of eanSet) overstockEansByDay.get(day).add(`${rposShopId}:${ean}`);
   }
 
-  const trendPoints = [...overstockEansByDay.entries()]
+  let trendPoints = [...overstockEansByDay.entries()]
     .map(([date, set]) => ({ date, count: set.size }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -455,6 +455,24 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   const shopIdsWithProposalInPeriod = new Set(proposals.map((p) => p.rposShopId));
   const shopIdsWithoutProposalInPeriod = shopIds.filter((id) => !shopIdsWithProposalInPeriod.has(id));
   const salesFallbackArticles = await computeOverstockFromSales(shopIdsWithoutProposalInPeriod, shopById, { minWeeksOfCoverage });
+
+  // BUG CORRIGÉ le 24/10/2026 (signalé : graphique "Articles en surstock aujourd'hui" affiche 1895
+  // alors que l'onglet "Aujourd'hui" juste en dessous affiche 0, pour un magasin SANS proposition
+  // comme S2P HYPER U/HYPER HAYAT) : trendPoints (ce graphique) et todayArticles (cet onglet) sont
+  // deux calculs distincts, et seul todayArticles avait été étendu avec salesFallbackArticles — pas
+  // trendPoints, resté basé uniquement sur les propositions (donc vide pour ces magasins). Ajoute un
+  // point "aujourd'hui" (date du jour) basé sur salesFallbackArticles.length quand ce fallback
+  // s'applique, pour que les deux widgets racontent la même histoire pour les mêmes magasins. Pas
+  // une vraie courbe jour par jour (ce fallback n'a pas d'historique à comparer), juste CE point.
+  if (salesFallbackArticles.length > 0) {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const existingToday = trendPoints.find((p) => p.date === todayKey);
+    if (existingToday) {
+      existingToday.count += salesFallbackArticles.length;
+    } else {
+      trendPoints = [...trendPoints, { date: todayKey, count: salesFallbackArticles.length }].sort((a, b) => a.date.localeCompare(b.date));
+    }
+  }
 
   const allArticles = [...articles, ...salesFallbackArticles].sort((a, b) => {
     const ar = a.overstockRatio ?? -1;
