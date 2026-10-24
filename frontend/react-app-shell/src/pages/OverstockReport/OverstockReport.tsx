@@ -1001,7 +1001,7 @@ export function OverstockReport() {
                 className="osr-kpi-label"
                 title={data.periodMode ? "Total des articles ayant été en surstock AU MOINS UNE FOIS entre le début et la fin de la période choisie — pas l'état d'aujourd'hui. Pour l'état du jour, voir le graphique ci-dessus (\"Articles en surstock aujourd'hui\")." : undefined}
               >
-                {data.periodMode ? 'Articles en surstock sur la période' : 'Articles en surstock'}
+                {data.periodMode ? 'Historique de la période' : 'Articles en surstock'}
               </span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,158,46,.12)', color: '#8A5A00' }}>
                 <iconify-icon icon="solar:box-bold-duotone"></iconify-icon>
@@ -1011,7 +1011,16 @@ export function OverstockReport() {
           </div>
           <div className="osr-kpi-card">
             <div className="osr-kpi-top">
-              <span className="osr-kpi-label">{data.periodMode ? 'Toujours en surstock' : 'Casse analysée sur'}</span>
+              {/* BUG CORRIGÉ le 24/10/2026 (signalé : "Toujours en surstock (0)... il faut corrigé
+                  les terme") : renommé pour clarifier que c'est un sous-ensemble ENCORE en
+                  surstock aujourd'hui ET depuis longtemps — le calcul lui-même était aussi cassé
+                  (voir overstockReportService.js), corrigé en même temps. */}
+              <span
+                className="osr-kpi-label"
+                title={data.periodMode ? `Articles encore en surstock aujourd'hui, de façon continue depuis au moins ${data.alwaysOverstockMinDays ?? 14} jours.` : undefined}
+              >
+                {data.periodMode ? 'En surstock depuis 14j+' : 'Casse analysée sur'}
+              </span>
               <span className="osr-kpi-icon" style={{ background: 'rgba(214,69,65,.1)', color: '#B8302C' }}>
                 <iconify-icon icon={data.periodMode ? 'solar:repeat-bold-duotone' : 'solar:trash-bin-trash-bold-duotone'}></iconify-icon>
               </span>
@@ -1047,11 +1056,16 @@ export function OverstockReport() {
               onClick={() => setActiveTab('byShop')}
               title={data.periodMode ? "Historique sur la période choisie, pas l'état d'aujourd'hui — voir le graphique en haut de page pour l'état du jour." : undefined}
             >
-              {data.periodMode ? 'Articles en surstock sur la période' : 'Articles en surstock'} ({filteredByShop.length})
+              {data.periodMode ? 'Historique de la période' : 'Articles en surstock'} ({filteredByShop.length})
             </button>
             {data.periodMode && (
-              <button type="button" className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`} onClick={() => setActiveTab('persistent')}>
-                Toujours en surstock ({filteredPersistent.length})
+              <button
+                type="button"
+                className={`osr-tab${activeTab === 'persistent' ? ' active' : ''}`}
+                onClick={() => setActiveTab('persistent')}
+                title={`Encore en surstock aujourd'hui, de façon continue depuis au moins ${data.alwaysOverstockMinDays ?? 14} jours.`}
+              >
+                En surstock depuis 14j+ ({filteredPersistent.length})
               </button>
             )}
             <div className="ms-auto d-flex align-items-center">

@@ -388,7 +388,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   });
   const liveStockByKey = new Map(liveStockRows.map((r) => [`${r.rposShopId}:${r.ean}`, r.stock]));
 
-  const articles = [...byShopEan.values()].map((e) => {
+  let articles = [...byShopEan.values()].map((e) => {
     const shop = shopById.get(e.rposShopId);
     const l = e.latest;
     const avgWeeklySales = Math.round((l.avgWeeklySales || 0) * 10) / 10;
@@ -425,15 +425,24 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       overstockDaysSpan: Math.round((new Date(e.lastOverstockDate) - new Date(e.firstOverstockDate)) / (24 * 60 * 60 * 1000)) + 1,
       stillOverstocked,
     };
-  })
-    // Ne garde que les articles ENCORE en surstock sur le stock live (demande explicite du
-    // 24/10/2026 : un article vu en surstock pendant la période mais dont le stock actuel est
-    // repassé sous le seuil ne doit plus apparaître dans "Articles en surstock", qui doit refléter
-    // l'état PRÉSENT — son historique reste par ailleurs consultable via overstockRatio/la période
-    // de surstock sur les lignes qui restent). weeksOfCoverage === null (avgWeeklySales = 0) exclu
-    // aussi : pas de vente connue, donc pas de couverture calculable sur le stock live.
-    .filter((a) => a.weeksOfCoverage !== null && a.weeksOfCoverage >= minWeeksOfCoverage)
-    .sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+  }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+
+  // BUG CORRIGÉ le 24/10/2026 (signalé : "Toujours en surstock (0)" alors que des articles sont
+  // réellement en surstock depuis des semaines) — le filtre "stock live" ci-dessous (ajouté plus
+  // tôt le même jour) retirait un article de `articles` AVANT que persistentArticles ne puisse même
+  // le considérer, donc un article dont le stock live vient de repasser sous le seuil (même s'il
+  // était en surstock continu depuis des mois d'après l'historique) disparaissait purement et
+  // simplement, sans jamais pouvoir apparaître comme "toujours en surstock". persistentArticles
+  // doit se baser sur l'HISTORIQUE complet (allComputedArticles, non filtré), jamais sur la liste
+  // déjà réduite à l'état présent.
+  const allComputedArticles = articles;
+  // Ne garde que les articles ENCORE en surstock sur le stock live (demande explicite du 24/10/2026
+  // : un article vu en surstock pendant la période mais dont le stock actuel est repassé sous le
+  // seuil ne doit plus apparaître dans "Articles en surstock", qui doit refléter l'état PRÉSENT —
+  // son historique reste par ailleurs consultable via overstockRatio/la période de surstock sur les
+  // lignes qui restent). weeksOfCoverage === null (avgWeeklySales = 0) exclu aussi : pas de vente
+  // connue, donc pas de couverture calculable sur le stock live.
+  articles = allComputedArticles.filter((a) => a.weeksOfCoverage !== null && a.weeksOfCoverage >= minWeeksOfCoverage);
 
   // Magasins accessibles SANS AUCUNE proposition sur la période (génération désactivée, confirmé
   // par l'utilisateur le 21/10/2026) : une analyse "toujours en surstock" n'a pas de sens pour eux
@@ -456,8 +465,12 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   // "Toujours en surstock" = encore en surstock à la dernière observation (stillOverstocked) ET
   // depuis au moins ALWAYS_OVERSTOCK_MIN_DAYS jours calendaires consécutifs — un article qui ÉTAIT
   // en surstock il y a longtemps puis en est sorti, ou qui vient d'y entrer il y a 2 jours, n'a pas
-  // sa place ici malgré un overstockDaysSpan ou overstockRatio élevé pour d'autres raisons.
-  const persistentArticles = articles
+  // sa place ici malgré un overstockDaysSpan ou overstockRatio élevé pour d'autres raisons. Dérivé
+  // de allComputedArticles (HISTORIQUE complet, non filtré par le stock live) — jamais de `articles`
+  // (déjà réduit à l'état présent), sinon un article dont le stock live vient de repasser sous le
+  // seuil disparaîtrait ici aussi malgré un historique de persistance réel (bug corrigé le
+  // 24/10/2026).
+  const persistentArticles = allComputedArticles
     .filter((a) => a.stillOverstocked && a.overstockDaysSpan >= ALWAYS_OVERSTOCK_MIN_DAYS)
     .sort((a, b) => b.overstockDaysSpan - a.overstockDaysSpan);
 
