@@ -207,6 +207,54 @@ const LOOKBACK_PRESETS = [
   { label: '1 an', days: 365 },
 ];
 
+// Pagination CLIENT (demande explicite du 24/10/2026 : "ajoute une pagination ici" — 1677 ventes
+// rendues d'un coup sur l'onglet "Toutes les ventes") — les 3 listes (ventes/casse/DLV) sont déjà
+// entièrement chargées en mémoire par apiFetch, jamais un second appel réseau juste pour paginer.
+const DETAIL_PAGE_SIZE = 50;
+
+function paginate<T>(rows: T[], page: number): T[] {
+  return rows.slice((page - 1) * DETAIL_PAGE_SIZE, page * DETAIL_PAGE_SIZE);
+}
+
+function DetailPaginationBar({ page, totalItems, onChange }: { page: number; totalItems: number; onChange: (p: number) => void }) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / DETAIL_PAGE_SIZE));
+  if (totalPages <= 1) return null;
+
+  const pages: (number | '…')[] = [];
+  const add = (p: number) => { if (!pages.includes(p)) pages.push(p); };
+  add(1);
+  for (let p = page - 1; p <= page + 1; p++) if (p > 1 && p < totalPages) add(p);
+  add(totalPages);
+  const withGaps: (number | '…')[] = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (typeof p === 'number' && p - prev > 1) withGaps.push('…');
+    withGaps.push(p);
+    if (typeof p === 'number') prev = p;
+  }
+
+  return (
+    <div className="d-flex align-items-center gap-2 py-3 flex-wrap">
+      <button type="button" className="btn btn-sm btn-outline-secondary" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        <iconify-icon icon="solar:alt-arrow-left-linear"></iconify-icon>
+      </button>
+      {withGaps.map((p, i) =>
+        p === '…' ? (
+          <span key={`gap-${i}`} className="text-muted small">…</span>
+        ) : (
+          <button key={p} type="button" className={`btn btn-sm ${p === page ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => onChange(p)}>
+            {p}
+          </button>
+        )
+      )}
+      <button type="button" className="btn btn-sm btn-outline-secondary" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        <iconify-icon icon="solar:alt-arrow-right-linear"></iconify-icon>
+      </button>
+      <span className="text-muted small">{totalItems.toLocaleString('fr-FR')} résultat(s)</span>
+    </div>
+  );
+}
+
 export function OverstockScrapDetail() {
   const { ean } = useParams<{ ean: string }>();
   const [searchParams] = useSearchParams();
@@ -224,6 +272,11 @@ export function OverstockScrapDetail() {
   // fréquente en cliquant sur un article en surstock est "pourquoi est-il si peu vendu ?", pas
   // "quelle casse a-t-il eue" (déjà le comportement précédent par défaut, conservé).
   const [activeTab, setActiveTab] = useState<'sales' | 'scrap' | 'dlv'>('sales');
+  // Page courante par onglet (demande explicite du 24/10/2026) — indépendante entre les 3 onglets,
+  // pour que changer d'onglet ne perde pas la position dans l'autre liste.
+  const [salesPage, setSalesPage] = useState(1);
+  const [scrapPage, setScrapPage] = useState(1);
+  const [dlvPage, setDlvPage] = useState(1);
 
   const [data, setData] = useState<ScrapDetailData | null>(null);
   const [salesData, setSalesData] = useState<SalesDetailData | null>(null);
@@ -255,6 +308,7 @@ export function OverstockScrapDetail() {
     let cancelled = false;
     setData(null);
     setError(null);
+    setScrapPage(1);
     const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
     const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
     apiFetch<ScrapDetailData>(`/reassort/overstock-report/scrap-detail?ean=${encodeURIComponent(ean)}${rangeParam}${typeParam}${shopQueryParam}`)
@@ -269,6 +323,7 @@ export function OverstockScrapDetail() {
     if (!ean) return;
     let cancelled = false;
     setSalesData(null);
+    setSalesPage(1);
     const rangeParam = useCustomRange ? `&startDate=${customStart}&endDate=${customEnd}` : `&lookbackDays=${lookbackDays}`;
     apiFetch<SalesDetailData>(`/reassort/overstock-report/sales-detail?ean=${encodeURIComponent(ean)}${rangeParam}${shopQueryParam}`)
       .then((d) => { if (!cancelled) setSalesData(d); })
@@ -283,6 +338,7 @@ export function OverstockScrapDetail() {
     if (!ean) return;
     let cancelled = false;
     setDlvData(null);
+    setDlvPage(1);
     apiFetch<EndOfLifeDetailData>(`/reassort/overstock-report/end-of-life-detail?ean=${encodeURIComponent(ean)}${shopQueryParam}`)
       .then((d) => { if (!cancelled) setDlvData(d); })
       .catch(() => {});
@@ -486,7 +542,7 @@ export function OverstockScrapDetail() {
                     {!salesData.sales || salesData.sales.length === 0 ? (
                       <tr><td colSpan={4} className="text-center text-muted py-4">Aucune vente enregistrée sur cette période.</td></tr>
                     ) : (
-                      salesData.sales.map((s, i) => (
+                      paginate(salesData.sales, salesPage).map((s, i) => (
                         <tr key={i}>
                           <td>{new Date(s.date).toLocaleString('fr-FR')}</td>
                           <td>{s.shopName} ({s.shopReference})</td>
@@ -498,6 +554,7 @@ export function OverstockScrapDetail() {
                   </tbody>
                 </table>
               </div>
+              <DetailPaginationBar page={salesPage} totalItems={salesData.sales?.length ?? 0} onChange={setSalesPage} />
             </div>
           </>
         )
@@ -608,7 +665,7 @@ export function OverstockScrapDetail() {
                     {!data.moves || data.moves.length === 0 ? (
                       <tr><td colSpan={4} className="text-center text-muted py-4">Aucune casse enregistrée sur cette période.</td></tr>
                     ) : (
-                      data.moves.map((m, i) => (
+                      paginate(data.moves, scrapPage).map((m, i) => (
                         <tr key={i}>
                           <td>{new Date(m.date).toLocaleString('fr-FR')}</td>
                           <td>{m.shopName} ({m.shopReference})</td>
@@ -620,6 +677,7 @@ export function OverstockScrapDetail() {
                   </tbody>
                 </table>
               </div>
+              <DetailPaginationBar page={scrapPage} totalItems={data.moves?.length ?? 0} onChange={setScrapPage} />
             </div>
           </>
         ) : null
@@ -659,7 +717,7 @@ export function OverstockScrapDetail() {
                     {!dlvData.lines || dlvData.lines.length === 0 ? (
                       <tr><td colSpan={5} className="text-center text-muted py-4">Aucune fiche DLV pour cet article.</td></tr>
                     ) : (
-                      dlvData.lines.map((l, i) => (
+                      paginate(dlvData.lines, dlvPage).map((l, i) => (
                         <tr key={i}>
                           <td>{l.shopName} ({l.shopReference})</td>
                           <td>{l.dlvEan}</td>
@@ -674,6 +732,7 @@ export function OverstockScrapDetail() {
                   </tbody>
                 </table>
               </div>
+              <DetailPaginationBar page={dlvPage} totalItems={dlvData.lines?.length ?? 0} onChange={setDlvPage} />
             </div>
           </>
         )
