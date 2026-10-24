@@ -425,7 +425,13 @@ export function OverstockReport() {
   const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const [activeTab, setActiveTab] = useState<TabKey>('byShop');
+  // BUG CORRIGÉ le 24/10/2026 (signalé : "je veux voir mes perte si je viens sur la vue je dois voir
+  // que les artile en surtok... je veux maintennt quel article est en surtok comme les rupture" —
+  // même correction que l'onglet "En cours" par défaut sur Ruptures de stock) : "byShop" ("Historique
+  // de la période") était l'onglet par défaut, mélangeant des articles qui ONT ÉTÉ en surstock à un
+  // moment donné sur la période avec l'état ACTUEL — "today" ("Aujourd'hui") ne montre, lui, que les
+  // articles réellement en surstock maintenant, exactement la question posée en arrivant sur la page.
+  const [activeTab, setActiveTab] = useState<TabKey>('today');
   // État du bouton Export, générique aux 2 onglets restants (demande explicite du 21/10/2026 : le
   // bouton export doit être sur la ligne des onglets, avec le même choix "vue actuelle / tout"
   // partout) — remonté par chaque tableau enfant via son propre callback, car chacun gère sa page
