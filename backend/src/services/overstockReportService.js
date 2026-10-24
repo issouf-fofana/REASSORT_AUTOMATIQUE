@@ -586,12 +586,17 @@ async function getEndOfLifeSummaryForEans(shopEanPairs) {
     select: { rposShopId: true, originEan: true, dlvStock: true },
   });
 
+  // Une fiche DLV à dlvStock NÉGATIF n'est PAS un stock physique encore présent (confirmé
+  // explicitement le 24/10/2026, capture à l'appui : 7 fiches DLV historiques pour un même article,
+  // négatives pour la plupart — du bruit comptable (retours, ajustements, corrections), pas une
+  // vraie quantité restante) — clampée à 0 avant somme, sinon une fiche négative annulerait à tort
+  // une fiche positive réelle d'un autre lot du même article.
   const byKey = new Map(); // `${rposShopId}:${ean}` -> { dlvStock, dlvLineCount }
   for (const r of rows) {
     const key = `${r.rposShopId}:${r.originEan}`;
     if (!byKey.has(key)) byKey.set(key, { dlvStock: 0, dlvLineCount: 0 });
     const entry = byKey.get(key);
-    entry.dlvStock += r.dlvStock || 0;
+    entry.dlvStock += Math.max(0, r.dlvStock || 0);
     entry.dlvLineCount += 1;
   }
   return byKey;
