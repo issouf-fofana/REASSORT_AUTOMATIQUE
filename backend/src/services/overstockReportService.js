@@ -481,9 +481,18 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   // sans condition de durée minimale — simplement en surstock à la DERNIÈRE proposition générée
   // pour ce magasin sur la période. Dérivé de allComputedArticles (historique complet), comme
   // persistentArticles, pour la même raison (ne pas dépendre du filtre stock live de `articles`).
-  const todayArticles = allComputedArticles
-    .filter((a) => a.stillOverstocked)
-    .sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+  //
+  // ÉTENDU le 24/10/2026 (signalé : "si tu as l'historryque des ventes et surtok de 035 tu doit me
+  // donner auj les surtok" — un magasin SANS génération de proposition, comme HYPER HAYAT, avait
+  // "Aujourd'hui" bloqué à 0 malgré 1816 articles détectés en surstock via le fallback ventes dans
+  // allArticles/"Historique de la période") : salesFallbackArticles ajouté ici aussi — c'est déjà
+  // un calcul sur le stock LIVE et les ventes récentes, donc déjà littéralement "l'état présent",
+  // contrairement à persistentArticles (14j+) qui, lui, exige un vrai historique de propositions
+  // successives à comparer et reste donc à bon droit vide pour ces magasins.
+  const todayArticles = [
+    ...allComputedArticles.filter((a) => a.stillOverstocked),
+    ...salesFallbackArticles,
+  ].sort((a, b) => (b.overstockRatio ?? -1) - (a.overstockRatio ?? -1) || (b.weeksOfCoverage ?? 0) - (a.weeksOfCoverage ?? 0));
 
   return {
     found: true,
