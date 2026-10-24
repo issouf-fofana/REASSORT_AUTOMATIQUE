@@ -41,6 +41,11 @@ type ShopArticleRow = {
   scrapQuantity90d: number;
   scrapMoveCount90d: number;
   lastScrapDate: string | null;
+  // DLV actuelle (demande explicite du 24/10/2026 : "une colonne de combien est en dlv actu pour
+  // les surstok") — quantité ACTUELLEMENT basculée en DLV pour cet article dans ce magasin, pas
+  // bornée par la période d'analyse choisie (contrairement à la casse) : la DLV est un état présent.
+  dlvStock?: number;
+  dlvLineCount?: number;
   // Période de surstock (demande explicite du 21/10/2026 : "je doit voir la periode de surtok...
   // quand es ce que ca pris fin ou ca continue") — n'existe qu'en mode période (undefined sinon,
   // la notion n'a pas de sens sur un simple snapshot "situation actuelle").
@@ -1105,6 +1110,7 @@ type ByShopPageData = {
   rows: ShopArticleRow[];
   periodMode?: boolean;
   minWeeksOfCoverage: number;
+  scrapLookbackDays?: number;
 };
 
 // Tableau "Articles en surstock" (ex "Par magasin", renommé le 23/10/2026 — page désormais
@@ -1193,13 +1199,14 @@ function ByShopTable({
   function exportRowsToCsv(rows: ShopArticleRow[], suffix: string) {
     downloadCsv(
       `surstock-par-magasin-${suffix}-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'En surstock depuis le', 'Toujours en surstock', 'Sorti du surstock le', 'Casse (qté, 90j)', 'Casse (nb mouvements, 90j)', 'Dernière casse'],
+      ['Magasin', 'Référence magasin', 'EAN', 'Article', 'Rayon', 'Stock actuel', 'Prix de vente (CFA)', 'Vente moy./jour', 'Vente moy./semaine', 'Vente moy./mois', 'Semaines de couverture', '% du temps en surstock sur la période', 'En surstock depuis le', 'Toujours en surstock', 'Sorti du surstock le', 'DLV actuelle (qté)', 'Casse (qté)', 'Casse (nb mouvements)', 'Dernière casse'],
       rows.map((r) => [
         r.shopName, r.shopReference, r.ean, r.label, r.department, r.stock, r.sellingPrice, r.avgDailySales, r.avgWeeklySales, r.avgMonthlySales, r.weeksOfCoverage,
         r.overstockRatio !== undefined ? fmtPct(r.overstockRatio) : '',
         r.firstOverstockDate ? new Date(r.firstOverstockDate).toLocaleDateString('fr-FR') : '',
         r.stillOverstocked === undefined ? '' : (r.stillOverstocked ? 'Oui' : 'Non'),
         r.stillOverstocked === false && r.lastOverstockDate ? new Date(r.lastOverstockDate).toLocaleDateString('fr-FR') : '',
+        r.dlvStock ?? 0,
         r.scrapQuantity90d, r.scrapMoveCount90d, r.lastScrapDate ? new Date(r.lastScrapDate).toLocaleDateString('fr-FR') : '',
       ])
     );
@@ -1266,7 +1273,11 @@ function ByShopTable({
                         periode de surtok... quand es ce que ca pris fin ou ca continue") — n'existe
                         qu'en mode période, pas sur un simple snapshot "situation actuelle". */}
                     {periodMode && <th className="osr-sortable-th" onClick={() => toggleSort('firstOverstockDate')}>Période de surstock{sortIcon('firstOverstockDate')}</th>}
-                    <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse (90j){sortIcon('scrapQuantity90d')}</th>
+                    {/* DLV actuelle (demande explicite du 24/10/2026 : "une colonne de combien est
+                        en dlv actu pour les surstok") — état présent, jamais borné par la période
+                        choisie (contrairement à la casse juste à côté). */}
+                    <th className="osr-sortable-th" onClick={() => toggleSort('dlvStock')}>DLV actuelle{sortIcon('dlvStock')}</th>
+                    <th className="osr-sortable-th" onClick={() => toggleSort('scrapQuantity90d')}>Casse ({pageData.scrapLookbackDays ?? 90}j){sortIcon('scrapQuantity90d')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1304,6 +1315,15 @@ function ByShopTable({
                           ) : '—'}
                         </td>
                       )}
+                      <td>
+                        {r.dlvStock && r.dlvStock > 0 ? (
+                          <span className="osr-scrap-badge" title={r.dlvLineCount ? `${r.dlvLineCount} fiche(s) DLV` : undefined}>
+                            {r.dlvStock}
+                          </span>
+                        ) : (
+                          <span className="text-muted small">Aucune</span>
+                        )}
+                      </td>
                       <td>
                         {r.scrapQuantity90d > 0 ? (
                           <span className="osr-scrap-badge" title={r.lastScrapDate ? `Dernière casse : ${new Date(r.lastScrapDate).toLocaleDateString('fr-FR')}` : undefined}>

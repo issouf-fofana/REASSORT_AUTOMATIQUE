@@ -532,10 +532,15 @@ function overstockScrapTypeWhere() {
  * sur 90 jours pour potentiellement des dizaines d'articles × dizaines de magasins serait bien trop
  * coûteuse en aller-retours réseau RPOS un par un.
  */
-async function getScrapSummaryForEans(shopEanPairs) {
+async function getScrapSummaryForEans(shopEanPairs, { since: sinceOverride, until } = {}) {
   if (!shopEanPairs.length) return new Map();
 
-  const since = new Date(Date.now() - SCRAP_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  // Fenêtre alignée sur la période d'analyse choisie (demande explicite du 24/10/2026 : "les casse
+  // sur cette periode d'analyse") quand sinceOverride/until sont fournis par l'appelant (mode
+  // période de getOverstockReport) — sinon, comportement d'origine : 90 derniers jours glissants
+  // (snapshot "situation actuelle", sans période choisie).
+  const since = sinceOverride || new Date(Date.now() - SCRAP_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const dateFilter = until ? { gte: since, lte: until } : { gte: since };
   const shopIds = [...new Set(shopEanPairs.map((p) => p.rposShopId))];
   const eans = [...new Set(shopEanPairs.map((p) => p.ean))];
 
@@ -543,7 +548,7 @@ async function getScrapSummaryForEans(shopEanPairs) {
   // ne permet pas nativement un "IN d'une liste de paires" propre sans OR explicite, inutile ici vu
   // le nombre de lignes modeste (quelques dizaines d'articles communs au plus).
   const rows = await prisma.stockMove.findMany({
-    where: { rposShopId: { in: shopIds }, ean: { in: eans }, date: { gte: since }, ...overstockScrapTypeWhere() },
+    where: { rposShopId: { in: shopIds }, ean: { in: eans }, date: dateFilter, ...overstockScrapTypeWhere() },
     select: { rposShopId: true, ean: true, quantity: true, date: true },
   });
 
@@ -557,6 +562,37 @@ async function getScrapSummaryForEans(shopEanPairs) {
     entry.scrapQuantity += Math.abs(r.quantity);
     entry.scrapCount += 1;
     if (!entry.lastScrapDate || r.date > entry.lastScrapDate) entry.lastScrapDate = r.date;
+  }
+  return byKey;
+}
+
+/**
+ * Quantité actuellement basculée en DLV pour un lot d'(magasin, ean) (demande explicite du
+ * 24/10/2026 : "une colonne de combien est en dlv actu pour les surstok") — lecture locale directe
+ * de ProductEndOfLife (alimentée par productEndOfLifeSyncJob.js), jamais un appel RPOS ici. TOUJOURS
+ * l'état ACTUEL (pas de fenêtre de dates) : contrairement à la casse, qui est un historique de
+ * mouvements sur une période, la DLV est un état présent — un article en DLV aujourd'hui peut
+ * expliquer pourquoi son stock normal s'écoule plus lentement que prévu (une partie du stock est
+ * déjà basculée en vente à prix réduit, hors du circuit normal).
+ */
+async function getEndOfLifeSummaryForEans(shopEanPairs) {
+  if (!shopEanPairs.length) return new Map();
+
+  const shopIds = [...new Set(shopEanPairs.map((p) => p.rposShopId))];
+  const eans = [...new Set(shopEanPairs.map((p) => p.ean))];
+
+  const rows = await prisma.productEndOfLife.findMany({
+    where: { rposShopId: { in: shopIds }, originEan: { in: eans } },
+    select: { rposShopId: true, originEan: true, dlvStock: true },
+  });
+
+  const byKey = new Map(); // `${rposShopId}:${ean}` -> { dlvStock, dlvLineCount }
+  for (const r of rows) {
+    const key = `${r.rposShopId}:${r.originEan}`;
+    if (!byKey.has(key)) byKey.set(key, { dlvStock: 0, dlvLineCount: 0 });
+    const entry = byKey.get(key);
+    entry.dlvStock += r.dlvStock || 0;
+    entry.dlvLineCount += 1;
   }
   return byKey;
 }
@@ -607,15 +643,19 @@ function attachScrap(shopEntries, scrapByKey, ean) {
 // un article avec un sous-tableau shops) — demande explicite du 21/10/2026 : "je veux aussi fair en
 // sorte que les article qui son en sur-stok voir sil on des casse... aussi je peux avoir ca sur la
 // ligne des tableau" (onglet "Par magasin", qui jusque-là n'avait la casse que via les deux autres
-// onglets "commun"/"persistant").
-function attachScrapFlat(articles, scrapByKey) {
+// onglets "commun"/"persistant"). dlvByKey optionnel (demande explicite du 24/10/2026 : "une colonne
+// de combien est en dlv actu pour les surstok") — ajoute dlvStock/dlvLineCount sans dépendre de
+// attachScrap/les onglets "commun"/"persistant", pas demandé pour eux.
+function attachScrapFlat(articles, scrapByKey, dlvByKey) {
   return articles.map((a) => {
     const scrap = scrapByKey.get(`${a.rposShopId}:${a.ean}`) || { scrapQuantity: 0, scrapCount: 0, lastScrapDate: null };
+    const dlv = dlvByKey ? (dlvByKey.get(`${a.rposShopId}:${a.ean}`) || { dlvStock: 0, dlvLineCount: 0 }) : null;
     return {
       ...a,
       scrapQuantity90d: scrap.scrapQuantity,
       scrapMoveCount90d: scrap.scrapCount,
       lastScrapDate: scrap.lastScrapDate ? scrap.lastScrapDate.toISOString() : null,
+      ...(dlv ? { dlvStock: dlv.dlvStock, dlvLineCount: dlv.dlvLineCount } : {}),
     };
   });
 }
@@ -648,9 +688,18 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     ...common.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
     ...persistent.flatMap((e) => e.shops.map((s) => ({ rposShopId: s.rposShopId, ean: e.ean }))),
   ];
-  const scrapByKey = await getScrapSummaryForEans(allPairs);
+  // Casse alignée sur la période d'analyse choisie (demande explicite du 24/10/2026 : "les casse sur
+  // cette periode d'analyse") en mode période ; sinon comportement d'origine (90 derniers jours
+  // glissants, snapshot "situation actuelle" sans période choisie).
+  const scrapByKey = periodMode
+    ? await getScrapSummaryForEans(allPairs, { since: new Date(start), until: new Date(end) })
+    : await getScrapSummaryForEans(allPairs);
+  // DLV actuelle (demande explicite du 24/10/2026 : "une colonne de combien est en dlv actu pour les
+  // surstok") — toujours l'état PRÉSENT, jamais borné par la période choisie (cf. commentaire sur
+  // getEndOfLifeSummaryForEans).
+  const dlvByKey = await getEndOfLifeSummaryForEans(allPairs);
 
-  const articlesByShopWithScrap = attachScrapFlat(byShop.articles, scrapByKey);
+  const articlesByShopWithScrap = attachScrapFlat(byShop.articles, scrapByKey, dlvByKey);
   const commonWithScrap = common.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
   const persistentWithScrap = persistent.map((e) => ({ ...e, shops: attachScrap(e.shops, scrapByKey, e.ean) }));
 
@@ -661,7 +710,10 @@ async function getOverstockReport(allowedShopIds, { minWeeksOfCoverage = DEFAULT
     periodEnd: periodMode ? byShop.periodEnd : null,
     minWeeksOfCoverage,
     alwaysOverstockMinDays: periodMode ? byShop.alwaysOverstockMinDays : null,
-    scrapLookbackDays: SCRAP_LOOKBACK_DAYS,
+    // Casse alignée sur la période choisie en mode période (demande explicite du 24/10/2026) : le
+    // frontend affiche ce nombre dans le libellé de la colonne Casse, qui doit donc refléter la
+    // vraie fenêtre utilisée (ex: "Casse (7j)" plutôt que le fixe "Casse (90j)" d'origine).
+    scrapLookbackDays: periodMode ? Math.round((new Date(end) - new Date(start)) / (24 * 60 * 60 * 1000)) : SCRAP_LOOKBACK_DAYS,
     shopCount: byShop.shopCount,
     articleCount: byShop.articleCount,
     articlesByShop: articlesByShopWithScrap,
@@ -812,7 +864,7 @@ async function getScrapDetailForArticle(allowedShopIds, ean, { lookbackDays = SC
 const BY_SHOP_SORTABLE_FIELDS = new Set([
   'label', 'shopName', 'department', 'stock', 'sellingPrice', 'avgDailySales',
   'avgWeeklySales', 'avgMonthlySales', 'weeksOfCoverage', 'overstockRatio', 'scrapQuantity90d',
-  'firstOverstockDate',
+  'firstOverstockDate', 'dlvStock',
 ]);
 
 function getSortValue(row, field) {
@@ -910,6 +962,10 @@ async function getOverstockByShopPage(allowedShopIds, {
     rows: pageRows,
     periodMode: full.periodMode,
     minWeeksOfCoverage: full.minWeeksOfCoverage,
+    // Libellé dynamique de la colonne Casse côté frontend (demande explicite du 24/10/2026 : "les
+    // casse sur cette periode d'analyse") — même valeur que getOverstockReport, transmise ici car ce
+    // tableau paginé a son propre appel réseau distinct, ne reçoit pas le rapport complet.
+    scrapLookbackDays: full.scrapLookbackDays,
   };
 }
 
