@@ -376,9 +376,12 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
   // le server il est a 22 pourqui ce delacalage ?") — l.stockAtGeneration ci-dessous est une photo
   // au moment de la DERNIÈRE observation en surstock sur la période choisie, qui peut remonter à
   // plusieurs semaines pour une période large (ex: "3 derniers mois") et diverger fortement du
-  // stock RPOS actuel. weeksOfCoverage/overstockRatio restent calculés sur l'historique
-  // (stockAtGeneration), volontairement inchangés : seule la colonne "Stock" affichée doit refléter
-  // la réalité RPOS d'aujourd'hui, pas le ratio de persistance sur la période.
+  // stock RPOS actuel. weeksOfCoverage recalculé sur ce stock live aussi (demande explicite :
+  // "le surtok ce fait en fonction du stok actuel du magasin... pour voir si je suis en surtok sur
+  // un article il doit me dire pourquoi" — la couverture affichée doit expliquer le stock affiché
+  // juste à côté, jamais deux grandeurs découplées sur la même ligne). Seul overstockRatio/la
+  // persistance sur la période restent basés sur l'historique (stockAtGeneration), qui mesure autre
+  // chose : combien de fois l'article a été vu en surstock sur la période, pas son état actuel.
   const liveStockRows = await prisma.productCache.findMany({
     where: { rposShopId: { in: shopIds }, ean: { in: [...new Set(lines.map((l) => l.ean))] } },
     select: { rposShopId: true, ean: true, stock: true },
@@ -410,7 +413,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       avgDailySales: Math.round((avgWeeklySales / 7) * 100) / 100,
       avgWeeklySales,
       avgMonthlySales: Math.round(avgWeeklySales * (365 / 12 / 7) * 10) / 10,
-      weeksOfCoverage: avgWeeklySales > 0 ? Math.round(((l.stockAtGeneration || 0) / avgWeeklySales) * 10) / 10 : null,
+      weeksOfCoverage: avgWeeklySales > 0 ? Math.round(((liveStock !== undefined ? liveStock : (l.stockAtGeneration || 0)) / avgWeeklySales) * 10) / 10 : null,
       overstockCount: e.overstockCount,
       proposalCount: denom,
       overstockRatio: Math.round((e.overstockCount / denom) * 100) / 100,
@@ -422,7 +425,15 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       overstockDaysSpan: Math.round((new Date(e.lastOverstockDate) - new Date(e.firstOverstockDate)) / (24 * 60 * 60 * 1000)) + 1,
       stillOverstocked,
     };
-  }).sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
+  })
+    // Ne garde que les articles ENCORE en surstock sur le stock live (demande explicite du
+    // 24/10/2026 : un article vu en surstock pendant la période mais dont le stock actuel est
+    // repassé sous le seuil ne doit plus apparaître dans "Articles en surstock", qui doit refléter
+    // l'état PRÉSENT — son historique reste par ailleurs consultable via overstockRatio/la période
+    // de surstock sur les lignes qui restent). weeksOfCoverage === null (avgWeeklySales = 0) exclu
+    // aussi : pas de vente connue, donc pas de couverture calculable sur le stock live.
+    .filter((a) => a.weeksOfCoverage !== null && a.weeksOfCoverage >= minWeeksOfCoverage)
+    .sort((a, b) => b.overstockRatio - a.overstockRatio || b.weeksOfCoverage - a.weeksOfCoverage);
 
   // Magasins accessibles SANS AUCUNE proposition sur la période (génération désactivée, confirmé
   // par l'utilisateur le 21/10/2026) : une analyse "toujours en surstock" n'a pas de sens pour eux
