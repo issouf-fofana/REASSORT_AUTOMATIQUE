@@ -341,6 +341,14 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     if (articleSortField === field) setArticleSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
     else { setArticleSortField(field); setArticleSortDir('desc'); }
   }
+  // Pagination CLIENT (demande explicite du 24/10/2026 : "ajout une pagination" — 237 lignes
+  // rendues d'un coup sur "Détail par article") — la liste est déjà entièrement chargée en mémoire
+  // (globallyFilteredEpisodes), jamais un second appel réseau juste pour paginer.
+  const ARTICLE_PAGE_SIZE = 25;
+  const [articlePage, setArticlePage] = useState(1);
+  useEffect(() => {
+    setArticlePage(1);
+  }, [selectedDepartment, selectedSector, orderFilter, articleSearch, causeFilter, reactionFilter, deliveryFilter, rangeFilters]);
   function articleSortIcon(field: typeof articleSortField) {
     if (articleSortField !== field) return null;
     return <iconify-icon icon={articleSortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
@@ -528,6 +536,9 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const withoutOrderCount = articlesInDepartmentAll.length - withOrderCount;
   const deliveredCount = articlesInDepartmentAll.filter((e) => e.deliveryStatus === 'LIVREE').length;
   const openCount = articlesInDepartmentAll.length - deliveredCount;
+  const articleTotalPages = Math.max(1, Math.ceil(sortedArticlesInDepartment.length / ARTICLE_PAGE_SIZE));
+  const articleCurrentPage = Math.min(articlePage, articleTotalPages);
+  const pagedArticlesInDepartment = sortedArticlesInDepartment.slice((articleCurrentPage - 1) * ARTICLE_PAGE_SIZE, articleCurrentPage * ARTICLE_PAGE_SIZE);
 
   const showArticleList = !!selectedSector && !!selectedDepartment;
 
@@ -1039,7 +1050,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                         </td>
                       </tr>
                     ) : (
-                      sortedArticlesInDepartment.map((e) => {
+                      pagedArticlesInDepartment.map((e) => {
                         // Repli "Calcul en cours" (demande du 20/10/2026, statut désormais
                         // précalculé en base par stockoutStatusRecalcJob.js) — un épisode tout juste
                         // détecté peut, en théorie, être lu avant le premier passage du job (fenêtre
@@ -1079,6 +1090,21 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                   </tbody>
                 </table>
               </div>
+              {articleTotalPages > 1 && (
+                <div className="d-flex align-items-center justify-content-between py-3">
+                  <span className="text-muted small">
+                    {sortedArticlesInDepartment.length.toLocaleString('fr-FR')} résultat(s) — page {articleCurrentPage}/{articleTotalPages}
+                  </span>
+                  <div className="d-flex align-items-center gap-2">
+                    <button type="button" className="btn btn-sm btn-outline-secondary" disabled={articleCurrentPage <= 1} onClick={() => setArticlePage(articleCurrentPage - 1)}>
+                      <iconify-icon icon="solar:alt-arrow-left-linear"></iconify-icon>
+                    </button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary" disabled={articleCurrentPage >= articleTotalPages} onClick={() => setArticlePage(articleCurrentPage + 1)}>
+                      <iconify-icon icon="solar:alt-arrow-right-linear"></iconify-icon>
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
