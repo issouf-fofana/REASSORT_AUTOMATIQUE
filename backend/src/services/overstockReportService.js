@@ -372,11 +372,25 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
 
   const shopProposalDenominator = (rposShopId) => proposalCountByShop.get(rposShopId) || 1;
 
+  // Stock LIVE depuis ProductCache (demande explicite du 24/10/2026 : "le Stok est a 110084 or sur
+  // le server il est a 22 pourqui ce delacalage ?") — l.stockAtGeneration ci-dessous est une photo
+  // au moment de la DERNIÈRE observation en surstock sur la période choisie, qui peut remonter à
+  // plusieurs semaines pour une période large (ex: "3 derniers mois") et diverger fortement du
+  // stock RPOS actuel. weeksOfCoverage/overstockRatio restent calculés sur l'historique
+  // (stockAtGeneration), volontairement inchangés : seule la colonne "Stock" affichée doit refléter
+  // la réalité RPOS d'aujourd'hui, pas le ratio de persistance sur la période.
+  const liveStockRows = await prisma.productCache.findMany({
+    where: { rposShopId: { in: shopIds }, ean: { in: [...new Set(lines.map((l) => l.ean))] } },
+    select: { rposShopId: true, ean: true, stock: true },
+  });
+  const liveStockByKey = new Map(liveStockRows.map((r) => [`${r.rposShopId}:${r.ean}`, r.stock]));
+
   const articles = [...byShopEan.values()].map((e) => {
     const shop = shopById.get(e.rposShopId);
     const l = e.latest;
     const avgWeeklySales = Math.round((l.avgWeeklySales || 0) * 10) / 10;
     const denom = shopProposalDenominator(e.rposShopId);
+    const liveStock = liveStockByKey.get(`${e.rposShopId}:${e.ean}`);
     // "Toujours en cours" (demande explicite du 21/10/2026 : "je doit voir la periode de surtok...
     // quand es ce que ca pris fin ou ca continue") : l'article était en surstock à la DERNIÈRE
     // proposition générée pour ce magasin sur la période — donc rien n'indique qu'il en soit sorti
@@ -391,7 +405,7 @@ async function getOverstockOverPeriod(allowedShopIds, { minWeeksOfCoverage = DEF
       ean: e.ean,
       label: l.label,
       department: l.department,
-      stock: l.stockAtGeneration || 0,
+      stock: liveStock !== undefined ? liveStock : (l.stockAtGeneration || 0),
       sellingPrice: l.sellingPrice || null,
       avgDailySales: Math.round((avgWeeklySales / 7) * 100) / 100,
       avgWeeklySales,
