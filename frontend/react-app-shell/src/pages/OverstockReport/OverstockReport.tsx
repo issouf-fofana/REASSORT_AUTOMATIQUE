@@ -1322,20 +1322,28 @@ function ByShopTable({
   // Demande explicite du 21/10/2026 : "quand je clique sur le bouton export iil doit me dire je
   // veux le nombre actuel sur la vue ou tout" — avec la pagination serveur, "la vue" (10 lignes
   // affichées) et "tout" (toutes les lignes filtrées, potentiellement des milliers) sont deux
-  // exports très différents en taille, jamais la même chose par défaut.
+  // exports très différents en taille, jamais la même chose par défaut. MIGRÉ le 24/10/2026 vers
+  // ExportRowCountModal (demande explicite : "il doit me donner un truc personalisé") — restait sur
+  // l'ancien window.confirm binaire, contrairement aux 2 autres onglets déjà migrés le 23/10/2026
+  // (travail interrompu par un problème disque à l'époque, jamais terminé). "custom N lignes"
+  // récupère TOUT via all=true (même coût réseau que "tout"), puis tronque côté client — ByShopTable
+  // n'a pas de endpoint ?limit=N dédié, pas la peine d'en ajouter un pour ce besoin ponctuel.
   const [exporting, setExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   function handleExportClick() {
     if (!pageData || pageData.totalCount === 0) return;
-    const wantsAll = window.confirm(
-      `Exporter combien de lignes ?\n\nOK = TOUTES les lignes filtrées (${pageData.totalCount.toLocaleString('fr-FR')})\nAnnuler = seulement la page affichée (${pageData.rows.length})`
-    );
-    if (!wantsAll) {
+    setShowExportModal(true);
+  }
+  function handleExportChoice(choice: ExportChoice) {
+    setShowExportModal(false);
+    if (!pageData) return;
+    if (choice.kind === 'page') {
       exportRowsToCsv(pageData.rows, 'page-actuelle');
       return;
     }
     setExporting(true);
     apiFetch<ByShopPageData>(`/reassort/overstock-report/by-shop?${buildQueryParams({ all: true }).toString()}`)
-      .then((d) => exportRowsToCsv(d.rows, 'complet'))
+      .then((d) => exportRowsToCsv(choice.kind === 'custom' ? d.rows.slice(0, choice.count) : d.rows, choice.kind === 'custom' ? `${choice.count}-lignes` : 'complet'))
       .catch((err) => window.alert(`Échec de l'export : ${err instanceof Error ? err.message : String(err)}`))
       .finally(() => setExporting(false));
   }
@@ -1448,6 +1456,14 @@ function ByShopTable({
           </div>
           <PaginationBar page={pageData.page} totalPages={pageData.totalPages} totalItems={pageData.totalCount} onChange={setPage} />
         </>
+      )}
+      {showExportModal && pageData && (
+        <ExportRowCountModal
+          pageCount={pageData.rows.length}
+          totalCount={pageData.totalCount}
+          onExport={handleExportChoice}
+          onClose={() => setShowExportModal(false)}
+        />
       )}
     </>
   );
