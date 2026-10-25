@@ -1404,6 +1404,21 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
         .filter((e) => e.hasOrder && e.deliveryStatus !== 'LIVREE')
         .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
     );
+    // AJOUTÉ le 25/10/2026 (demande explicite : "je dois avoir le ca total perdu, avant commande et
+    // apres commande pas encore livré avant 48h... 3 colonnes") — caPerduAvecCommandeNonLivree
+    // ci-dessus mélangeait EN_ATTENTE_LIVRAISON (commande passée depuis MOINS de 48h, délai normal,
+    // rien à signaler) et LIVRAISON_DOUTEUSE (plus de 48h sans arrivage, cas anormal à surveiller) —
+    // deux situations très différentes pour un DG, désormais ventilées séparément.
+    const caPerduEnAttenteLivraison = Math.round(
+      bucket.openEpisodes
+        .filter((e) => e.hasOrder && e.deliveryStatus === 'EN_ATTENTE_LIVRAISON')
+        .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+    const caPerduLivraisonDouteuse = Math.round(
+      bucket.openEpisodes
+        .filter((e) => e.hasOrder && e.deliveryStatus === 'LIVRAISON_DOUTEUSE')
+        .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
 
     // Priorité au CA perdu précis borné à la période (snapshot journalier), repli sur le total
     // global stocké si le snapshot n'a encore rien calculé pour ce groupe (ex: tout juste après le
@@ -1422,6 +1437,8 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
       totalCaPerduEstime,
       caPerduSansCommande,
       caPerduAvecCommandeNonLivree,
+      caPerduEnAttenteLivraison,
+      caPerduLivraisonDouteuse,
     };
   });
 

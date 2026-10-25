@@ -27,6 +27,13 @@ type DepartmentRow = {
   // une réaction déjà en cours, à ne pas confondre dans le même total.
   caPerduSansCommande: number;
   caPerduAvecCommandeNonLivree: number;
+  // Ventilation plus fine ajoutée le 25/10/2026 (demande explicite : "je dois avoir le ca total
+  // perdu, avant commande et apres commande pas encore livré avant 48h... 3 colonnes") —
+  // caPerduAvecCommandeNonLivree ci-dessus mélange deux situations très différentes : une commande
+  // encore dans le délai normal (EN_ATTENTE_LIVRAISON, <48h) et une commande qui dépasse le délai
+  // sans aucun arrivage détecté (LIVRAISON_DOUTEUSE, >48h, cas anormal à surveiller en priorité).
+  caPerduEnAttenteLivraison: number;
+  caPerduLivraisonDouteuse: number;
 };
 
 type ByFieldSummary = { found: boolean; groupCount: number; groups: DepartmentRow[]; message?: string };
@@ -162,8 +169,10 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                     <th>En cours</th>
                     <th>Durée moy.</th>
                     <th>Sans commande</th>
-                    <th>CA perdu sans commande</th>
-                    <th>CA perdu, commandé non livré</th>
+                    <th>CA perdu total</th>
+                    <th>CA perdu avant commande</th>
+                    <th>CA perdu, commandé (&lt;48h)</th>
+                    <th>CA perdu, livraison douteuse (&gt;48h)</th>
                     <th>Priorité</th>
                   </tr>
                 </thead>
@@ -176,8 +185,10 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                         <td>{r.openCount}</td>
                         <td>{formatDuration(r.avgDurationHours)}</td>
                         <td>{r.noOrderCount}</td>
+                        <td className="fw-semibold">{(r.caPerduSansCommande + r.caPerduEnAttenteLivraison + r.caPerduLivraisonDouteuse).toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
-                        <td>{r.caPerduAvecCommandeNonLivree.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
                         <td><span className={`badge ${priority.badge} py-1 px-2`}>{priority.label}</span></td>
                       </tr>
                     );
