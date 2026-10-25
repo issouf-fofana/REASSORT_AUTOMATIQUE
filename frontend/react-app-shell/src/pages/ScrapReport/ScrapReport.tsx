@@ -205,9 +205,48 @@ export function ScrapReport() {
 
   useEffect(() => { setPage(1); }, [shopFilters, search, data]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
+  type ScrapSortKey = 'label' | 'shopName' | 'sellingPrice' | 'quantity' | 'moveCount' | 'estimatedLoss' | 'lastDate';
+  const [sortKey, setSortKey] = useState<ScrapSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(key: ScrapSortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  }
+  function SortTh({ k, children }: { k: ScrapSortKey; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (a: ScrapArticleRow): number | string => {
+      switch (sortKey) {
+        case 'label': return (a.label || a.ean).toLowerCase();
+        case 'shopName': return (a.shopName || '').toLowerCase();
+        case 'sellingPrice': return a.sellingPrice ?? -Infinity;
+        case 'quantity': return a.quantity;
+        case 'moveCount': return a.moveCount;
+        case 'estimatedLoss': return a.estimatedLoss ?? -Infinity;
+        case 'lastDate': return new Date(a.lastDate).getTime();
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paged = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const totalQuantity = filtered.reduce((s, a) => s + a.quantity, 0);
   const totalLoss = filtered.reduce((s, a) => s + (a.estimatedLoss || 0), 0);
@@ -320,13 +359,13 @@ export function ScrapReport() {
               <table className="table align-middle table-hover mb-0">
                 <thead className="bg-light-subtle">
                   <tr>
-                    <th>Article</th>
-                    <th>Magasin</th>
-                    <th>Prix de vente</th>
-                    <th>Quantité cassée</th>
-                    <th>Mouvements</th>
-                    <th>Perte estimée</th>
-                    <th>Dernière casse</th>
+                    <SortTh k="label">Article</SortTh>
+                    <SortTh k="shopName">Magasin</SortTh>
+                    <SortTh k="sellingPrice">Prix de vente</SortTh>
+                    <SortTh k="quantity">Quantité cassée</SortTh>
+                    <SortTh k="moveCount">Mouvements</SortTh>
+                    <SortTh k="estimatedLoss">Perte estimée</SortTh>
+                    <SortTh k="lastDate">Dernière casse</SortTh>
                   </tr>
                 </thead>
                 <tbody>
