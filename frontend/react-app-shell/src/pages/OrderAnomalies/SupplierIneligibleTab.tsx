@@ -51,6 +51,39 @@ export function SupplierIneligibleTab() {
   const shops = rows ? Array.from(new Set(rows.map((r) => `${r.shopReference} — ${r.shopName}`))).sort() : [];
   const filteredRows = rows ? rows.filter((r) => !shopFilter || `${r.shopReference} — ${r.shopName}` === shopFilter) : [];
 
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
+  type SortKey = 'shopName' | 'label' | 'ean' | 'department' | 'currentSuppliers' | 'isCommandable';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedRows = !sortKey ? filteredRows : [...filteredRows].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (r: SupplierIneligibleItem): number | string => {
+      if (sortKey === 'shopName') return `${r.shopReference} — ${r.shopName}`.toLowerCase();
+      if (sortKey === 'label') return (r.label || r.ean).toLowerCase();
+      if (sortKey === 'ean') return r.ean;
+      if (sortKey === 'department') return (r.department || '').toLowerCase();
+      if (sortKey === 'currentSuppliers') return (r.currentSuppliers || '').toLowerCase();
+      return r.isCommandable ? 1 : 0;
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
+
   return (
     <div>
       <div className="oa-intro">
@@ -87,16 +120,16 @@ export function SupplierIneligibleTab() {
           <table className="table table-sm table-hover align-middle">
             <thead>
               <tr>
-                <th>Magasin</th>
-                <th>Article</th>
-                <th>EAN</th>
-                <th>Rayon</th>
-                <th>Fournisseur actuel</th>
-                <th>Commandable</th>
+                <SortTh k="shopName">Magasin</SortTh>
+                <SortTh k="label">Article</SortTh>
+                <SortTh k="ean">EAN</SortTh>
+                <SortTh k="department">Rayon</SortTh>
+                <SortTh k="currentSuppliers">Fournisseur actuel</SortTh>
+                <SortTh k="isCommandable">Commandable</SortTh>
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((r) => (
+              {sortedRows.map((r) => (
                 <tr key={r.lineId}>
                   <td>{r.shopReference} — {r.shopName}</td>
                   <td>{r.label || '—'}</td>

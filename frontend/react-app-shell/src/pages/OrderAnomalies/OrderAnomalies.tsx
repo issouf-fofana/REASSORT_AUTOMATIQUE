@@ -21,6 +21,34 @@ function fmtNum(n: number): number {
 // ne pas alourdir chaque carte, la plupart des utilisateurs n'ayant besoin que du résumé au-dessus.
 function HistoryDetail({ history }: { history: { quantity: number; generatedAt: string; orderReference: string | null }[] }) {
   const [open, setOpen] = useState(false);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — ce détail n'avait aucun tri.
+  const [sortKey, setSortKey] = useState<'generatedAt' | 'orderReference' | 'quantity' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: typeof sortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children }: { k: NonNullable<typeof sortKey>; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedHistory = !sortKey ? history : [...history].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (h: typeof history[number]): number | string => {
+      if (sortKey === 'generatedAt') return new Date(h.generatedAt).getTime();
+      if (sortKey === 'orderReference') return (h.orderReference || '').toLowerCase();
+      return h.quantity;
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
   return (
     <div className="oa-history mt-2">
       <button type="button" className="btn btn-link btn-sm p-0 oa-history-toggle" onClick={() => setOpen((v) => !v)}>
@@ -31,13 +59,13 @@ function HistoryDetail({ history }: { history: { quantity: number; generatedAt: 
         <table className="table table-sm oa-history-table mt-2 mb-0">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>N° commande</th>
-              <th>Quantité validée</th>
+              <SortTh k="generatedAt">Date</SortTh>
+              <SortTh k="orderReference">N° commande</SortTh>
+              <SortTh k="quantity">Quantité validée</SortTh>
             </tr>
           </thead>
           <tbody>
-            {history.map((h, i) => (
+            {sortedHistory.map((h, i) => (
               <tr key={i}>
                 <td>{fmtDate(h.generatedAt)}</td>
                 <td>{h.orderReference || '—'}</td>
