@@ -423,6 +423,15 @@ function TokenUsageChartCard({
 // --- Widget "Détail jour/mois" (carte dédiée, tableau seul) ---
 function TokenUsageDetailCard({ dailyHistory }: { dailyHistory: { date: string; tokens: number }[] }) {
   const [grouping, setGrouping] = useState<'day' | 'month'>('day');
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri explicite
+  // (ordre chronologique fixe uniquement).
+  const [sortKey, setSortKey] = useState<'key' | 'tokens' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: 'key' | 'tokens') {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
 
   if (!dailyHistory.length) return null;
 
@@ -435,7 +444,12 @@ function TokenUsageDetailCard({ dailyHistory }: { dailyHistory: { date: string; 
     }
     return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a));
   })();
-  const rows = grouping === 'day' ? dayRows : monthRows;
+  const baseRows = grouping === 'day' ? dayRows : monthRows;
+  const rows = !sortKey ? baseRows : [...baseRows].sort(([ka, ta], [kb, tb]) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    if (sortKey === 'key') return dir * kb.localeCompare(ka, 'fr-FR');
+    return dir * (tb - ta);
+  });
 
   return (
     <div className="card">
@@ -455,8 +469,12 @@ function TokenUsageDetailCard({ dailyHistory }: { dailyHistory: { date: string; 
           <table className="table table-sm table-hover mb-0">
             <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fff' }}>
               <tr>
-                <th>{grouping === 'day' ? 'Jour' : 'Mois'}</th>
-                <th className="text-end">Tokens</th>
+                <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('key')}>
+                  {grouping === 'day' ? 'Jour' : 'Mois'} {sortKey === 'key' ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+                </th>
+                <th className="text-end" role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('tokens')}>
+                  Tokens {sortKey === 'tokens' ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+                </th>
               </tr>
             </thead>
             <tbody>
