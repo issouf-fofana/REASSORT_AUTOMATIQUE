@@ -1020,10 +1020,9 @@ async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstock
       avgWeeklySales: roundWeeklySales(a.avgWeeklySales),
       weeksOfCoverage: a.weeksOfCoverage,
     }))
-    .sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage)
-    .slice(0, 50);
+    .sort((a, b) => b.weeksOfCoverage - a.weeksOfCoverage);
 
-  return { found: true, minWeeksOfCoverage, count: overstocked.length, lines: overstocked };
+  return { found: true, minWeeksOfCoverage, count: overstocked.length, lines: overstocked.slice(0, 50) };
 }
 
 /**
