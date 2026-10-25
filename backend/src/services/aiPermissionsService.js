@@ -49,6 +49,13 @@ const TOOL_CAPABILITY = {
   getStoreStock: 'stock',
   getStockoutRisks: 'stock',
   getStockoutEpisodes: 'stock',
+  // BUG CORRIGÉ le 25/10/2026 (même cause que getArticleStockAllShops ci-dessous, trouvé le
+  // 27/09/2026) : getStockoutPeriodSummary était fonctionnel dans chatbotService.js/
+  // chatbotToolsService.js mais absent de cette table — bloqué en fail-closed pour TOUT
+  // utilisateur, y compris ADMIN ("vous n'avez pas les droits d'accès à cette fonctionnalité avec
+  // votre compte" pour "combien j'ai perdu le mois dernier ?"). Même capacité que
+  // getStockoutEpisodes (porte sur la même donnée, juste une fenêtre de dates différente).
+  getStockoutPeriodSummary: 'stock',
   getOverstockArticles: 'stock',
   getStockoutRisksAllShops: 'stock', // même capacité que la version single-shop, restriction ADMIN/SUPERVISOR appliquée dans chatbotService.js
   getOverstockArticlesAllShops: 'stock',

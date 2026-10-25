@@ -2561,6 +2561,29 @@ async function getShopUsers(rposShopId) {
   };
 }
 
+// Libellés simples pour les causes de rupture (demande explicite du 25/10/2026 : "cause amont à
+// préciser... il doit mettre les vrai terme") — mêmes clés/libellés que CAUSE_FILTER_LABELS
+// (StockoutShopDetail.tsx), pensés pour un DG/manager sans jargon technique interne. causeCounts
+// est exposé au LLM avec les clés techniques brutes (AMONT_A_PRECISER, MAGASIN_REASSORT...) sans
+// cette traduction, qu'il répétait alors telles quelles dans sa réponse.
+const CHATBOT_CAUSE_LABELS = {
+  MAGASIN_REASSORT: "Le magasin n'a pas encore commandé",
+  MAGASIN_COMMANDE_NON_VALIDEE: 'Commande préparée mais pas validée',
+  AMONT_FOURNISSEUR_CENTRAL: 'Livraison en retard — entrepôt central',
+  AMONT_FOURNISSEUR_EXTERNE: 'Livraison en retard — fournisseur externe',
+  AMONT_A_PRECISER: 'Livraison en retard — origine à préciser',
+  ECART_STOCK_RAYON: 'Stock informatique faux (produit en rayon ou pas)',
+  INDETERMINEE: 'Cause non déterminée',
+};
+function translateCauseCounts(causeCounts) {
+  if (!causeCounts) return causeCounts;
+  const translated = {};
+  for (const [key, count] of Object.entries(causeCounts)) {
+    translated[CHATBOT_CAUSE_LABELS[key] || key] = count;
+  }
+  return translated;
+}
+
 /**
  * getStockoutEpisodes(rposShopId) — ruptures de stock EN COURS du module Ruptures (demande
  * explicite du 18/10/2026 : "il doit me donner tout les infos sur les rupture, si je demande il
@@ -2617,7 +2640,7 @@ async function getStockoutEpisodes(rposShopId, { department } = {}) {
     caPerdueSansCommande: summary.caPerdueSansCommande,
     caPerdueNonLivree: summary.caPerdueNonLivree,
     ruptureRatioPct: summary.ruptureRatioPct,
-    causeCounts: summary.causeCounts,
+    causeCounts: translateCauseCounts(summary.causeCounts),
     departmentsMostAffected: (byDepartment.groups || [])
       .slice(0, 10)
       .map((g) => ({
