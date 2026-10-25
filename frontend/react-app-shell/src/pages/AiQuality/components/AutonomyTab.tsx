@@ -93,21 +93,50 @@ function Criteria({ readiness }: { readiness: Readiness | null }) {
   );
 }
 
+// Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+// explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
 function History({ rows }: { rows: HistoryRow[] }) {
+  type SortKey = 'computedAt' | 'globalScore' | 'level' | 'currentStreakCount' | 'measuredCriteriaCount';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   if (!rows.length) return <p className="text-muted">Aucun historique.</p>;
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedRows = !sortKey ? rows : [...rows].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (r: HistoryRow): number | string => {
+      if (sortKey === 'computedAt') return new Date(r.computedAt).getTime();
+      if (sortKey === 'level') return LEVELS.find((l) => l.key === r.level)?.label || r.level;
+      return r[sortKey];
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
   return (
     <table className="table table-sm">
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Score global</th>
-          <th>Palier</th>
-          <th>Continuité</th>
-          <th>Critères mesurés</th>
+          <SortTh k="computedAt">Date</SortTh>
+          <SortTh k="globalScore">Score global</SortTh>
+          <SortTh k="level">Palier</SortTh>
+          <SortTh k="currentStreakCount">Continuité</SortTh>
+          <SortTh k="measuredCriteriaCount">Critères mesurés</SortTh>
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
+        {sortedRows.map((r, i) => (
           <tr key={i}>
             <td>{fmtDate(r.computedAt)}</td>
             <td>{Math.round(r.globalScore)} / 100</td>
