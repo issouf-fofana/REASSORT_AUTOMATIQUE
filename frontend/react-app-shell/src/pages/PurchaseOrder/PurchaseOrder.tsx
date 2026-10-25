@@ -71,6 +71,15 @@ export function PurchaseOrder() {
   // rendant l'écran chargé même quand tout va bien — demande explicite de les masquer derrière un
   // clic, comme les autres listes de détail (excludedModal ci-dessus, déjà sur ce même principe).
   const [supplierListModal, setSupplierListModal] = useState<{ title: string; items: { ean: string; label: string | null; currentSuppliers: string | null | undefined }[] } | null>(null);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — aucune des 2 modales ci-dessus/ci-dessous
+  // n'avait de tri.
+  type ExcludedSortKey = 'ean' | 'label' | 'revenueSharePct';
+  const [excludedSortKey, setExcludedSortKey] = useState<ExcludedSortKey | null>(null);
+  const [excludedSortDir, setExcludedSortDir] = useState<'asc' | 'desc'>('desc');
+  type SupplierSortKey = 'label' | 'ean' | 'currentSuppliers';
+  const [supplierSortKey, setSupplierSortKey] = useState<SupplierSortKey | null>(null);
+  const [supplierSortDir, setSupplierSortDir] = useState<'asc' | 'desc'>('desc');
   // Panneau de détail d'une ligne (30/09/2026) : remplace l'ancienne sufficiencyModal (texte brut de
   // orderSufficiencyReasoning seul) — réunit désormais toutes les infos autrefois en badges empilés
   // dans le tableau (commande en cours, anomalie, suffisance, saisonnalité, stock).
@@ -508,6 +517,58 @@ export function PurchaseOrder() {
           ))
         )}
       </>
+    );
+  }
+
+  const sortedExcludedItems = (() => {
+    const items = excludedModal?.items;
+    if (!items || !excludedSortKey) return items;
+    const dir = excludedSortDir === 'desc' ? 1 : -1;
+    const getValue = (it: ExcludedItem): number | string => {
+      if (excludedSortKey === 'ean') return it.ean;
+      if (excludedSortKey === 'label') return (it.label || '').toLowerCase();
+      return it.revenueSharePct ?? -Infinity;
+    };
+    return [...items].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+  })();
+  function toggleExcludedSort(key: ExcludedSortKey) {
+    if (excludedSortKey === key) setExcludedSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setExcludedSortKey(key); setExcludedSortDir('desc'); }
+  }
+  function ExcludedSortTh({ k, children }: { k: ExcludedSortKey; children: React.ReactNode }) {
+    const active = excludedSortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleExcludedSort(k)}>
+        {children} {active ? (excludedSortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+
+  const sortedSupplierItems = (() => {
+    const items = supplierListModal?.items;
+    if (!items || !supplierSortKey) return items;
+    const dir = supplierSortDir === 'desc' ? 1 : -1;
+    return [...items].sort((a, b) => {
+      const av = (supplierSortKey === 'label' ? a.label : supplierSortKey === 'ean' ? a.ean : a.currentSuppliers) || '';
+      const bv = (supplierSortKey === 'label' ? b.label : supplierSortKey === 'ean' ? b.ean : b.currentSuppliers) || '';
+      return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    });
+  })();
+  function toggleSupplierSort(key: SupplierSortKey) {
+    if (supplierSortKey === key) setSupplierSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSupplierSortKey(key); setSupplierSortDir('desc'); }
+  }
+  function SupplierSortTh({ k, children }: { k: SupplierSortKey; children: React.ReactNode }) {
+    const active = supplierSortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSupplierSort(k)}>
+        {children} {active ? (supplierSortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
     );
   }
 
@@ -1025,13 +1086,15 @@ export function PurchaseOrder() {
                       <table className="table table-sm table-hover">
                         <thead>
                           <tr>
-                            <th>EAN</th>
-                            <th>Article</th>
-                            <th className="text-end">% CA magasin</th>
+                            <ExcludedSortTh k="ean">EAN</ExcludedSortTh>
+                            <ExcludedSortTh k="label">Article</ExcludedSortTh>
+                            <th className="text-end" role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleExcludedSort('revenueSharePct')}>
+                              % CA magasin {excludedSortKey === 'revenueSharePct' ? (excludedSortDir === 'desc' ? '▼' : '▲') : ''}
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {excludedModal.items.map((it) => (
+                          {(sortedExcludedItems || []).map((it) => (
                             <tr key={it.ean}>
                               <td>{it.ean}</td>
                               <td>{it.label || '—'}</td>
@@ -1067,13 +1130,13 @@ export function PurchaseOrder() {
                       <table className="table table-sm table-hover">
                         <thead>
                           <tr>
-                            <th>Article</th>
-                            <th>EAN</th>
-                            <th>Fournisseur actuel</th>
+                            <SupplierSortTh k="label">Article</SupplierSortTh>
+                            <SupplierSortTh k="ean">EAN</SupplierSortTh>
+                            <SupplierSortTh k="currentSuppliers">Fournisseur actuel</SupplierSortTh>
                           </tr>
                         </thead>
                         <tbody>
-                          {supplierListModal.items.map((item) => (
+                          {(sortedSupplierItems || []).map((item) => (
                             <tr key={item.ean}>
                               <td>{item.label || '—'}</td>
                               <td>{item.ean}</td>
