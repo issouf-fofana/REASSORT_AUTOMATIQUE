@@ -2629,10 +2629,15 @@ async function getStockoutEpisodes(rposShopId, { department } = {}) {
         caPerduSansCommande: g.caPerduSansCommande,
         caPerduAvecCommandeNonLivree: g.caPerduAvecCommandeNonLivree,
       })),
+    // qtyPerdueEstimee ajoutée le 25/10/2026 (bug signalé : "combien de quantité pour ses article on
+    // ete perdu" répondait juste pour 1 article sur 8 — le LLM n'avait cette donnée QUE pour les
+    // articles présents par coïncidence aussi dans `episodes` ci-dessous, limité aux 50 premiers
+    // triés par ancienneté, pas par perte de CA).
     episodesSortedByRevenueLost: topByRevenue.slice(0, 10).map((e) => ({
       ean: e.ean,
       label: e.label,
       caPerdueEstime: e.caPerdueEstime,
+      qtyPerdueEstimee: e.qtyPerdueEstimee,
     })),
     episodes: filtered.slice(0, 50).map((e) => ({
       ean: e.ean,
