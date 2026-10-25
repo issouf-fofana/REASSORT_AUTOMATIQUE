@@ -119,11 +119,12 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
 
   // Remplace les 3 anciens boutons de tri (pills au-dessus du tableau, limités à 3 colonnes) par des
   // en-têtes de colonne cliquables couvrant TOUTES les colonnes (demande explicite du 25/10/2026).
-  function SortableHeader({ k, label }: { k: SortKey; label: string }) {
+  function SortableHeader({ k, label, className }: { k: SortKey; label: string; className?: string }) {
     const active = sortKey === k;
     return (
       <th
         role="button"
+        className={className}
         onClick={() => {
           if (active) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
           else { setSortKey(k); setSortDir('desc'); }
@@ -142,6 +143,14 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
         .stockout-rayon-stat .lbl { font-size: .7rem; color: #8591A0; text-transform: uppercase; letter-spacing: .03em; }
         .stockout-rayon-stat .val { font-size: .95rem; font-weight: 700; color: #1B2A4A; }
         .stockout-rayon-table td, .stockout-rayon-table th { padding: 7px 10px; font-size: .82rem; }
+        /* Ligne de total et colonne "CA perdu total" mises en évidence (demande explicite du
+           25/10/2026 : "il faut metre en bleu ou gris pour faire la difference... et la colonne de
+           total aussi") — même teinte bleu clair que le reste du design system (cf. stockout-period-
+           filter-card), pour signaler "récapitulatif" sans détonner visuellement du reste du tableau. */
+        .stockout-rayon-table .stockout-total-row td { background: #EEF2FA; border-top: 2px solid rgba(27,42,74,.18); }
+        .stockout-rayon-table .stockout-total-col { background: #F6F9FF; }
+        .stockout-rayon-table thead th.stockout-total-col { background: #E4ECFB; }
+        .stockout-rayon-table .stockout-total-row td.stockout-total-col { background: #DCE6F8; }
       `}</style>
       <div className="card-body py-3">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
@@ -185,7 +194,7 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                     <SortableHeader k="openCount" label="En cours" />
                     <SortableHeader k="avgDurationHours" label="Durée moy." />
                     <SortableHeader k="noOrderCount" label="Sans commande" />
-                    <SortableHeader k="totalCaPerduEstime" label="CA perdu total" />
+                    <SortableHeader k="totalCaPerduEstime" label="CA perdu total" className="stockout-total-col" />
                     <SortableHeader k="caPerduSansCommande" label="CA perdu avant commande" />
                     <SortableHeader k="caPerduEnAttenteLivraison" label="CA perdu, commandé (<48h)" />
                     <SortableHeader k="caPerduLivraisonDouteuse" label="CA perdu, livraison douteuse (>48h)" />
@@ -201,7 +210,7 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                         <td>{r.openCount}</td>
                         <td>{formatDuration(r.avgDurationHours)}</td>
                         <td>{r.noOrderCount}</td>
-                        <td className="fw-semibold">{(r.caPerduSansCommande + r.caPerduEnAttenteLivraison + r.caPerduLivraisonDouteuse).toLocaleString('fr-FR')} CFA</td>
+                        <td className="fw-semibold stockout-total-col">{(r.caPerduSansCommande + r.caPerduEnAttenteLivraison + r.caPerduLivraisonDouteuse).toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
@@ -211,12 +220,12 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="fw-semibold" style={{ borderTop: '2px solid rgba(27,42,74,.12)' }}>
+                  <tr className="fw-semibold stockout-total-row">
                     <td>Total ({rows.length} rayon{rows.length > 1 ? 's' : ''})</td>
                     <td>{totals.openCount}</td>
                     <td>—</td>
                     <td>{totals.noOrderCount}</td>
-                    <td>{totalCaPerduGeneral.toLocaleString('fr-FR')} CFA</td>
+                    <td className="stockout-total-col">{totalCaPerduGeneral.toLocaleString('fr-FR')} CFA</td>
                     <td>{totals.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
                     <td>{totals.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
                     <td>{totals.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
