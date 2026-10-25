@@ -227,7 +227,14 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
                 <div className="fs-5 fw-semibold">{Math.round(caPerdueOverride ?? summary.totalCaPerdu).toLocaleString('fr-FR')} CFA</div>
               </div>
               <div className="col-6 col-md-3">
-                <div className="text-muted small">CA réalisé (magasin)</div>
+                {/* Période ajoutée le 25/10/2026 (demande explicite : "le CA réalisé (magasin)...
+                    c'est quel periode il faut ajoute ca dessu") — ce chiffre suit déjà la même
+                    période que le reste de ce bloc (summary.period, piloté par le sélecteur unique
+                    en haut de page), mais ne l'affichait jamais, contrairement à "CA perdu (rupture)"
+                    au-dessus qui précise sa formule via FormulaInfoButton. */}
+                <div className="text-muted small">
+                  CA réalisé (magasin) ({new Date(summary.period.startDate).toLocaleDateString('fr-FR')} → {new Date(summary.period.endDate).toLocaleDateString('fr-FR')})
+                </div>
                 <div className="fs-5 fw-semibold">{summary.shopRevenueExclTax.toLocaleString('fr-FR')} CFA</div>
               </div>
               <div className="col-6 col-md-3">
