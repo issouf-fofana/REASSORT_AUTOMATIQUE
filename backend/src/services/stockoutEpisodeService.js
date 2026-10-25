@@ -1023,17 +1023,26 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
   // de commande"). Un job dédié (stockoutLossRecalcJob.js, toutes les heures) maintient ce champ à
   // jour pour les épisodes EN_COURS — avant son premier passage sur un épisode tout juste détecté,
   // la valeur reste simplement null (page "estimation indisponible", pas une erreur).
-  const totalCaPerdu = [...episodesForStats, ...resolvedEpisodes].reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  //
+  // CORRIGÉ le 25/10/2026 (capture : CA perdu/donut causes affichaient des totaux bien supérieurs à
+  // openCount pour la même vue "maintenant" — ex: 642 dans le donut causes contre 285 ruptures en
+  // cours) — resolvedEpisodes (ruptures RÉSOLUES sur les 30 derniers jours) était mélangé aux
+  // épisodes en cours même en mode "maintenant" (hors periodMode), où le reste de cette fonction
+  // (openCount, ruptureRatioPct, openEpisodes) ne porte QUE sur les ruptures encore ouvertes. Ce
+  // mélange n'a de sens qu'en mode période (voir plus bas, où resolvedEpisodes fait partie de la
+  // même fenêtre temporelle que episodesForStats) ; en mode "maintenant", les totaux de perte et le
+  // détail par cause doivent porter EXACTEMENT sur le même ensemble d'épisodes que les autres KPI.
+  const episodesForLoss = periodMode ? [...episodesForStats, ...resolvedEpisodes] : episodesForStats;
+  const totalCaPerdu = episodesForLoss.reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
   // Deux indicateurs demandés explicitement (21/10/2026) pour distinguer, dans le CA perdu total
   // ci-dessus, la part où le magasin n'a encore rien commandé (responsabilité magasin) de celle où
   // une commande existe mais n'est simplement pas encore livrée (délai fournisseur/logistique) —
   // même ensemble d'épisodes que totalCaPerdu, juste reventilé par deliveryStatus.
-  const allEpisodesForLossBreakdown = [...episodesForStats, ...resolvedEpisodes];
-  const caPerdueSansCommande = allEpisodesForLossBreakdown
+  const caPerdueSansCommande = episodesForLoss
     .filter((e) => e.deliveryStatus === 'SANS_COMMANDE')
     .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
-  const caPerdueNonLivree = allEpisodesForLossBreakdown
+  const caPerdueNonLivree = episodesForLoss
     .filter((e) => ['EN_ATTENTE_LIVRAISON', 'EN_RETARD', 'LIVRAISON_DOUTEUSE'].includes(e.deliveryStatus))
     .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
@@ -1056,8 +1065,14 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
       causeCounts[cause] = (causeCounts[cause] || 0) + 1;
     }
   }
-  for (const e of resolvedEpisodes) {
-    causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
+  // CORRIGÉ le 25/10/2026 (même bug que totalCaPerdu ci-dessus) : resolvedEpisodes n'a de sens à
+  // ajouter ici qu'en mode période (où il fait partie de la même fenêtre temporelle que
+  // episodesForStats) — en mode "maintenant", le détail par cause doit porter uniquement sur les
+  // épisodes encore ouverts, sinon le donut affiche un total supérieur à openCount.
+  if (periodMode) {
+    for (const e of resolvedEpisodes) {
+      causeCounts[e.causeProposee] = (causeCounts[e.causeProposee] || 0) + 1;
+    }
   }
 
   return {
