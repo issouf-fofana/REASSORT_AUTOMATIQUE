@@ -22,6 +22,15 @@
          indéfinis, cascade d'erreurs JS). Copie exacte de cdn.jsdelivr.net/npm/iconify-icon@1/
          dist/iconify-icon.min.js (node_modules/iconify-icon/dist, même version pinnée). -->
     <script src="/assets/vendor/iconify-icon/iconify-icon.min.js"></script>
+    <!-- CORRIGÉ le 25/10/2026 (bug signalé : "sur les pc sur le reseau qui on pas access a
+         internet il ya des logi qui ne charge pas chez eux... comme les icone") — vendoriser le
+         SCRIPT ci-dessus ne suffisait pas : sans collection pré-enregistrée, chaque
+         <iconify-icon icon="solar:..."> continuait d'appeler l'API publique Iconify
+         (api.iconify.design) pour récupérer le SVG de l'icône, invisible en local mais bloquant
+         sans sortie internet. Enregistre maintenant les ~150 icônes "solar:*" réellement utilisées
+         dans l'app, extraites localement de @iconify-json/solar — plus aucun appel réseau pour
+         ces icônes. DOIT rester juste après le script ci-dessus (lit window.Iconify). -->
+    <script src="/assets/vendor/iconify-icon/solar-icons-register.js"></script>
     <!-- Notification toast (window.reassortToast), requis par les pages migrées qui l'utilisent
          (ex: UserGuide.tsx) — oublié à la création initiale du shell, ajouté le 12/10/2026 lors du
          portage du vrai contenu de la première page migrée. -->
