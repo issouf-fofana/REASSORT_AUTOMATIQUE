@@ -328,6 +328,12 @@ function SalesBackfillCard({ shops }: { shops: ReturnType<typeof useShopsFlat>['
 
   const [backfillStatus, setBackfillStatus] = useState<BackfillStatus | null>(null);
   const [batchFailures, setBatchFailures] = useState<BatchFailure[]>([]);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — le tableau "échecs de synchro" n'avait
+  // aucun tri (le tableau "tranches" plus bas reste volontairement non trié : c'est une timeline de
+  // progression séquentielle, trier casserait sa lecture).
+  const [failureSortKey, setFailureSortKey] = useState<'shopLabel' | 'periodStart' | 'message' | null>(null);
+  const [failureSortDir, setFailureSortDir] = useState<'asc' | 'desc'>('desc');
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchCancelling, setBatchCancelling] = useState(false);
   const [runCancelling, setRunCancelling] = useState(false);
@@ -805,14 +811,43 @@ function SalesBackfillCard({ shops }: { shops: ReturnType<typeof useShopsFlat>['
                 <table className="table table-sm align-middle mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Magasin</th>
-                      <th>Période tentée</th>
-                      <th>Erreur</th>
+                      {(() => {
+                        function toggleFailureSort(k: NonNullable<typeof failureSortKey>) {
+                          if (failureSortKey === k) setFailureSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+                          else { setFailureSortKey(k); setFailureSortDir('desc'); }
+                        }
+                        function Th({ k, children }: { k: NonNullable<typeof failureSortKey>; children: React.ReactNode }) {
+                          const active = failureSortKey === k;
+                          return (
+                            <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleFailureSort(k)}>
+                              {children} {active ? (failureSortDir === 'desc' ? '▼' : '▲') : ''}
+                            </th>
+                          );
+                        }
+                        return (
+                          <>
+                            <Th k="shopLabel">Magasin</Th>
+                            <Th k="periodStart">Période tentée</Th>
+                            <Th k="message">Erreur</Th>
+                          </>
+                        );
+                      })()}
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {batchFailures.map((f) => (
+                    {(!failureSortKey ? batchFailures : [...batchFailures].sort((a, b) => {
+                      const dir = failureSortDir === 'desc' ? 1 : -1;
+                      const getValue = (f: BatchFailure): number | string => {
+                        if (failureSortKey === 'periodStart') return new Date(f.periodStart).getTime();
+                        if (failureSortKey === 'message') return f.message.toLowerCase();
+                        return f.shopLabel.toLowerCase();
+                      };
+                      const av = getValue(a);
+                      const bv = getValue(b);
+                      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+                      return dir * ((bv as number) - (av as number));
+                    })).map((f) => (
                       <tr key={f.shopId}>
                         <td>{f.shopLabel}</td>
                         <td>

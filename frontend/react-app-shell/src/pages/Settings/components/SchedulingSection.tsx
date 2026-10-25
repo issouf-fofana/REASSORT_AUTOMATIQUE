@@ -45,6 +45,23 @@ function fmtDate(iso?: string): string {
 function JobsHealthPanel() {
   const [jobs, setJobs] = useState<JobHealth[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
+  type SortKey = 'jobName' | 'status' | 'lastRunAt' | 'consecutiveFailures' | 'lastError';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
 
   async function load() {
     try {
@@ -86,15 +103,28 @@ function JobsHealthPanel() {
             <table className="table table-sm align-middle mb-0">
               <thead>
                 <tr>
-                  <th>Tâche</th>
-                  <th>Statut</th>
-                  <th>Dernière exécution</th>
-                  <th>Échecs consécutifs</th>
-                  <th>Dernière erreur</th>
+                  <SortTh k="jobName">Tâche</SortTh>
+                  <SortTh k="status">Statut</SortTh>
+                  <SortTh k="lastRunAt">Dernière exécution</SortTh>
+                  <SortTh k="consecutiveFailures">Échecs consécutifs</SortTh>
+                  <SortTh k="lastError">Dernière erreur</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((j) => {
+                {(!sortKey ? jobs : [...jobs].sort((a, b) => {
+                  const dir = sortDir === 'desc' ? 1 : -1;
+                  const getValue = (j: JobHealth): number | string => {
+                    if (sortKey === 'jobName') return (JOB_LABELS[j.jobName] || j.jobName).toLowerCase();
+                    if (sortKey === 'status') return j.status;
+                    if (sortKey === 'lastRunAt') return j.lastRunAt ? new Date(j.lastRunAt).getTime() : -Infinity;
+                    if (sortKey === 'lastError') return (j.lastError || '').toLowerCase();
+                    return j.consecutiveFailures || 0;
+                  };
+                  const av = getValue(a);
+                  const bv = getValue(b);
+                  if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+                  return dir * ((bv as number) - (av as number));
+                })).map((j) => {
                   const meta = STATUS_META[j.status] || STATUS_META.ok;
                   return (
                     <tr key={j.jobName}>
