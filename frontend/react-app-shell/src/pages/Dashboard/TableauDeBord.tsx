@@ -50,6 +50,11 @@ export function TableauDeBord() {
   const [overstock, setOverstock] = useState<{ text: string; detail: string }>({ text: '—', detail: 'Quantités au-delà du besoin' });
   const [orders, setOrders] = useState<SupplierOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — "Dernières commandes fournisseur" n'avait
+  // aucun tri.
+  const [ordersSortKey, setOrdersSortKey] = useState<'reference' | 'external_reference' | 'date' | 'status_display' | null>(null);
+  const [ordersSortDir, setOrdersSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Filtre de période (demande explicite du 23/10/2026 : "ajouter les filtre sur des periode...
   // par defaut tu peux mettre sur le jour") — ne s'applique qu'aux cartes représentant un
@@ -491,10 +496,28 @@ export function TableauDeBord() {
                 <table className="table align-middle mb-0 table-hover table-centered">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Référence</th>
-                      <th>Libellé</th>
-                      <th>Date commande</th>
-                      <th>Statut</th>
+                      {(() => {
+                        function toggleOrdersSort(k: NonNullable<typeof ordersSortKey>) {
+                          if (ordersSortKey === k) setOrdersSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+                          else { setOrdersSortKey(k); setOrdersSortDir('desc'); }
+                        }
+                        function Th({ k, children }: { k: NonNullable<typeof ordersSortKey>; children: React.ReactNode }) {
+                          const active = ordersSortKey === k;
+                          return (
+                            <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleOrdersSort(k)}>
+                              {children} {active ? (ordersSortDir === 'desc' ? '▼' : '▲') : ''}
+                            </th>
+                          );
+                        }
+                        return (
+                          <>
+                            <Th k="reference">Référence</Th>
+                            <Th k="external_reference">Libellé</Th>
+                            <Th k="date">Date commande</Th>
+                            <Th k="status_display">Statut</Th>
+                          </>
+                        );
+                      })()}
                     </tr>
                   </thead>
                   <tbody>
@@ -517,7 +540,19 @@ export function TableauDeBord() {
                         </td>
                       </tr>
                     ) : (
-                      orders.map((o) => (
+                      (!ordersSortKey ? orders : [...orders].sort((a, b) => {
+                        const dir = ordersSortDir === 'desc' ? 1 : -1;
+                        const getValue = (o: SupplierOrder): number | string => {
+                          if (ordersSortKey === 'date') return new Date(o.date).getTime();
+                          if (ordersSortKey === 'external_reference') return (o.external_reference || '').toLowerCase();
+                          if (ordersSortKey === 'status_display') return o.status_display.toLowerCase();
+                          return o.reference.toLowerCase();
+                        };
+                        const av = getValue(a);
+                        const bv = getValue(b);
+                        if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+                        return dir * ((bv as number) - (av as number));
+                      })).map((o) => (
                         <tr key={o.reference}>
                           <td>
                             <strong>{o.reference}</strong>

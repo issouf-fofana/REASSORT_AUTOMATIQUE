@@ -92,8 +92,40 @@ export function AllShopsView() {
   const sortedPerShop: PerShopRow[] = data
     ? [...data.perShop].sort((a, b) => (b.pendingProposals + b.validatedProposals) - (a.pendingProposals + a.validatedProposals))
     : [];
-  const pageCount = Math.max(1, Math.ceil(sortedPerShop.length / PAGE_SIZE));
-  const pagedPerShop = sortedPerShop.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — sans clic sur un en-tête, l'ordre reste
+  // celui par défaut ci-dessus (activité récente en premier) ; un clic bascule explicitement sur un
+  // tri par colonne.
+  type ShopSortKey = 'shop' | 'server' | 'pendingProposals' | 'validatedProposals' | 'conformityRate' | 'rejectionRate' | 'stockoutRate' | 'overstockRate' | 'forecastMAE' | 'lastValidatedAt';
+  const [sortKey, setSortKey] = useState<ShopSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: ShopSortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children, className }: { k: ShopSortKey; children: React.ReactNode; className?: string }) {
+    const active = sortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const displayedPerShop = !sortKey ? sortedPerShop : [...sortedPerShop].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (s: PerShopRow): number | string => {
+      if (sortKey === 'shop') return `${s.rposShopReference || ''} ${s.rposShopName || ''}`.toLowerCase();
+      if (sortKey === 'server') return (s.rposPosId || '').toLowerCase();
+      if (sortKey === 'lastValidatedAt') return s.lastValidatedAt ? new Date(s.lastValidatedAt).getTime() : -Infinity;
+      return s[sortKey] ?? -Infinity;
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
+  const pageCount = Math.max(1, Math.ceil(displayedPerShop.length / PAGE_SIZE));
+  const pagedPerShop = displayedPerShop.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div>
@@ -250,16 +282,16 @@ export function AllShopsView() {
                 <table className="table align-middle mb-0 table-hover table-centered">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Magasin</th>
-                      <th>Serveur</th>
-                      <th className="text-end">En attente</th>
-                      <th className="text-end">Validées</th>
-                      <th className="text-end">Conformité</th>
-                      <th className="text-end">Rejet</th>
-                      <th className="text-end">Rupture</th>
-                      <th className="text-end">Surstock</th>
-                      <th className="text-end">Erreur moy.</th>
-                      <th>Dernière validation</th>
+                      <SortTh k="shop">Magasin</SortTh>
+                      <SortTh k="server">Serveur</SortTh>
+                      <SortTh k="pendingProposals" className="text-end">En attente</SortTh>
+                      <SortTh k="validatedProposals" className="text-end">Validées</SortTh>
+                      <SortTh k="conformityRate" className="text-end">Conformité</SortTh>
+                      <SortTh k="rejectionRate" className="text-end">Rejet</SortTh>
+                      <SortTh k="stockoutRate" className="text-end">Rupture</SortTh>
+                      <SortTh k="overstockRate" className="text-end">Surstock</SortTh>
+                      <SortTh k="forecastMAE" className="text-end">Erreur moy.</SortTh>
+                      <SortTh k="lastValidatedAt">Dernière validation</SortTh>
                     </tr>
                   </thead>
                   <tbody>
