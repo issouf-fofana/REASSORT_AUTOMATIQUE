@@ -66,10 +66,39 @@ function paFormatBucketLabel(dateStr: string, granularity: string): string {
   return d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 }
 
+// Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+// explicite : "les ajouté fait un audit de tout tab") — ni StockMovesSection ni ProposalHistoryTab
+// n'avaient de tri.
 function StockMovesSection({ stockMoves }: { stockMoves: StockMoves | null }) {
+  const [sortKey, setSortKey] = useState<'typeLabel' | 'count' | 'totalQuantity' | 'lastDate' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   if (!stockMoves || !stockMoves.totalMoves) return null;
   const notable = (stockMoves.byType || []).filter((t) => t.typeLabel !== 'Vente' && t.typeLabel !== 'Arrivage');
   if (!notable.length) return null;
+  function toggleSort(k: typeof sortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children, className }: { k: NonNullable<typeof sortKey>; children: React.ReactNode; className?: string }) {
+    const active = sortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedNotable = !sortKey ? notable : [...notable].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (t: StockMoveType): number | string => {
+      if (sortKey === 'typeLabel') return t.typeLabel.toLowerCase();
+      if (sortKey === 'lastDate') return new Date(t.lastDate).getTime();
+      return t[sortKey];
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
 
   return (
     <div className="border rounded p-3 mt-3 bg-light-subtle">
@@ -84,14 +113,14 @@ function StockMovesSection({ stockMoves }: { stockMoves: StockMoves | null }) {
         <table className="table table-sm mb-0">
           <thead>
             <tr>
-              <th>Type</th>
-              <th className="text-center">Nb</th>
-              <th className="text-end">Quantité cumulée</th>
-              <th>Dernier mouvement</th>
+              <SortTh k="typeLabel">Type</SortTh>
+              <SortTh k="count" className="text-center">Nb</SortTh>
+              <SortTh k="totalQuantity" className="text-end">Quantité cumulée</SortTh>
+              <SortTh k="lastDate">Dernier mouvement</SortTh>
             </tr>
           </thead>
           <tbody>
-            {notable.map((t) => (
+            {sortedNotable.map((t) => (
               <tr key={t.typeLabel}>
                 <td>
                   {t.typeLabel}
@@ -374,20 +403,54 @@ function ProposalHistoryTab({ ean, productId, shopQueryParam }: { ean: string; p
   if (!entries) return <p className="text-muted text-center py-4">Chargement...</p>;
   if (!entries.length) return <p className="text-muted text-center py-4">Aucune génération n'a encore inclus cet article.</p>;
 
+  return <ProposalHistoryTable entries={entries} />;
+}
+
+function ProposalHistoryTable({ entries }: { entries: ProposalHistoryEntry[] }) {
+  type SortKey = 'generatedAt' | 'status' | 'quantitySuggested' | 'quantityValidated' | 'quantitySoldSincePrevious';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+  function SortTh({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) {
+    const active = sortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sorted = !sortKey ? entries : [...entries].sort((a, b) => {
+    const dir = sortDir === 'desc' ? 1 : -1;
+    const getValue = (it: ProposalHistoryEntry): number | string => {
+      if (sortKey === 'generatedAt') return new Date(it.generatedAt).getTime();
+      if (sortKey === 'status') return it.status;
+      if (sortKey === 'quantitySuggested') return it.quantitySuggested;
+      if (sortKey === 'quantityValidated') return it.quantityValidated ?? -Infinity;
+      return it.quantitySoldSincePrevious ?? -Infinity;
+    };
+    const av = getValue(a);
+    const bv = getValue(b);
+    if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+    return dir * ((bv as number) - (av as number));
+  });
+
   return (
     <div className="table-responsive">
       <table className="table table-sm table-hover">
         <thead>
           <tr>
-            <th>Date / heure</th>
-            <th>Statut</th>
-            <th className="text-end">Qté proposée</th>
-            <th className="text-end">Qté validée</th>
-            <th className="text-end">Vendu depuis la génération précédente</th>
+            <SortTh k="generatedAt">Date / heure</SortTh>
+            <SortTh k="status">Statut</SortTh>
+            <SortTh k="quantitySuggested" className="text-end">Qté proposée</SortTh>
+            <SortTh k="quantityValidated" className="text-end">Qté validée</SortTh>
+            <SortTh k="quantitySoldSincePrevious" className="text-end">Vendu depuis la génération précédente</SortTh>
           </tr>
         </thead>
         <tbody>
-          {entries.map((it, i) => (
+          {sorted.map((it, i) => (
             <tr key={i}>
               <td>
                 {new Date(it.generatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
