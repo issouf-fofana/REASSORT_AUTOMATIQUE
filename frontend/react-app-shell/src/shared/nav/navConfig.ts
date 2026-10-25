@@ -64,6 +64,11 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Pilotage',
     entries: [
       { id: 'dashboard', label: 'Tableau de bord', href: '/', icon: LayoutDashboard },
+      // Ramené ici le 25/10/2026 (demande explicite : "le bouton Assistant IA sur la sidebare tu
+      // peux metre juste en bas de Tableau de bord") — était dans le groupe "IA" depuis la
+      // réorganisation par thème du 21/10/2026 (cf. commentaire plus haut), mais l'usage le plus
+      // fréquent de cette page justifie un accès direct depuis le tout premier groupe.
+      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-guide', label: 'Mon accès', href: '/ai-guide', icon: Info },
       { id: 'project-guide', label: 'Guide du projet', href: '/project-guide', icon: BookOpen },
       { id: 'user-guide', label: "Guide d'utilisation", href: '/user-guide', icon: BookMarked },
@@ -90,7 +95,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'IA',
     entries: [
-      { id: 'ai-assistant', label: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
       { id: 'ai-predictions', label: 'IA & Prédictions', href: '/ai-predictions', icon: Sparkles },
       { id: 'ai-quality', label: 'Qualité & IA', href: '/ai-quality', icon: Zap, adminOnly: true },
       { id: 'ai-mastery', label: 'Mémoire du modèle', href: '/ai-mastery', icon: BrainCircuit, adminOnly: true },

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { ChevronDown } from 'lucide-react';
 import { NAV_GROUPS, activeEntryId } from '../nav/navConfig';
 import { useAuth } from '../auth/AuthProvider';
 import { useAppVersion } from '../hooks/useAppVersion';
@@ -103,11 +104,25 @@ export function Sidebar() {
               <li key={group.label} style={{ listStyle: 'none' }}>
                 <ul className="nav flex-column" style={{ padding: 0 }}>
                   <li
-                    className={`sidebar-heading${collapseKey ? ' sidebar-heading-collapsible' : ''}${collapsed ? ' collapsed' : ''}`}
+                    className={`sidebar-heading${collapseKey ? ' sidebar-heading-collapsible' : ''}${collapsed ? ' collapsed' : ''} d-flex align-items-center justify-content-between`}
                     onClick={collapseKey ? () => toggleGroup(collapseKey) : undefined}
                     style={collapseKey ? { cursor: 'pointer' } : undefined}
                   >
                     {group.label}
+                    {/* Flèche ouvert/fermé ajoutée le 25/10/2026 (demande explicite : "il faut
+                        metre fleche si les option son fermer ou pas... on ne sans pas si c'est
+                        fermé") — seuls les groupes repliables (Réassort/Administration, cf.
+                        COLLAPSIBLE_GROUPS) en ont une ; les autres restent toujours dépliés sans
+                        affordance trompeuse. Pointe vers le bas replié (plus à découvrir), vers le
+                        haut déplié — même sens que ChevronDown déjà utilisé dans NotchNav.tsx. */}
+                    {collapseKey && (
+                      <ChevronDown
+                        className="icon icon-xs"
+                        width={16}
+                        height={16}
+                        style={{ transition: 'transform .15s', transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}
+                      />
+                    )}
                   </li>
                   {(!collapseKey || !collapsed) &&
                     visibleEntries.map((entry) => {
