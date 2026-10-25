@@ -2576,11 +2576,24 @@ async function getShopUsers(rposShopId) {
  * sans-commande/avec-commande-non-livrée, durée moyenne, ratio de rupture) et
  * getDashboardSummaryByDepartment (rayon le plus touché), en plus de la liste détaillée par
  * article (inchangée).
+ *
+ * CORRIGÉ le 25/10/2026 (capture : chatbot répondait 273, page Ruptures affichait 285 pour le même
+ * magasin) : la page Ruptures passe TOUJOURS une fenêtre de 30 jours glissante par défaut (cf.
+ * StockoutShopDetail.tsx, periodStart = aujourd'hui - 30j) à getDashboardSummary, ce qui bascule la
+ * fonction en "mode période" (épisodes actifs À UN MOMENT de ces 30 jours, ouverts OU résolus dans
+ * la fenêtre). Le chatbot appelait getDashboardSummary SANS start/end, donc en "mode courant" (SEUL
+ * ement les épisodes encore ouverts MAINTENANT) — deux définitions différentes du même compte,
+ * comme le bug équivalent déjà corrigé sur le surstock (getOverstockByShop vs getOverstockOverPeriod).
+ * Applique désormais EXACTEMENT la même fenêtre de 30 jours que le frontend par défaut.
  */
+const STOCKOUT_CHATBOT_PERIOD_DAYS = 30;
+
 async function getStockoutEpisodes(rposShopId, { department } = {}) {
+  const end = new Date();
+  const start = new Date(end.getTime() - STOCKOUT_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
   const [summary, byDepartment] = await Promise.all([
-    stockoutEpisodeService.getDashboardSummary(rposShopId),
-    stockoutEpisodeService.getDashboardSummaryByDepartment(rposShopId),
+    stockoutEpisodeService.getDashboardSummary(rposShopId, { start: start.toISOString(), end: end.toISOString() }),
+    stockoutEpisodeService.getDashboardSummaryByDepartment(rposShopId, { start: start.toISOString(), end: end.toISOString() }),
   ]);
 
   const allEpisodes = summary.openEpisodes || [];
