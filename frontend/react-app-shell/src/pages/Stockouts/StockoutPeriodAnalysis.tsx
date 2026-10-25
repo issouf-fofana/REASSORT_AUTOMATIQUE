@@ -204,7 +204,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
             <div className="row g-3 mb-3">
               <div className="col-6 col-md-3">
                 <div className="text-muted small">
-                  CA perdu (rupture)
+                  CA perdu (rupture, HT)
                   <FormulaInfoButton
                     title="Comment le CA perdu sur la période est calculé"
                     steps={[
@@ -231,9 +231,12 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
                     c'est quel periode il faut ajoute ca dessu") — ce chiffre suit déjà la même
                     période que le reste de ce bloc (summary.period, piloté par le sélecteur unique
                     en haut de page), mais ne l'affichait jamais, contrairement à "CA perdu (rupture)"
-                    au-dessus qui précise sa formule via FormulaInfoButton. */}
+                    au-dessus qui précise sa formule via FormulaInfoButton. "(HT)" précisé le même
+                    jour (demande explicite : "affiche SI c'est TTC ou HT") — ce chiffre vient de
+                    SalesLine.revenueExclTax, Hors Taxes, cohérent avec "CA perdu (rupture)" juste à
+                    gauche (lui aussi calculé en HT via estimateLoss). */}
                 <div className="text-muted small">
-                  CA réalisé (magasin) ({new Date(summary.period.startDate).toLocaleDateString('fr-FR')} → {new Date(summary.period.endDate).toLocaleDateString('fr-FR')})
+                  CA réalisé (magasin, HT) ({new Date(summary.period.startDate).toLocaleDateString('fr-FR')} → {new Date(summary.period.endDate).toLocaleDateString('fr-FR')})
                 </div>
                 <div className="fs-5 fw-semibold">{summary.shopRevenueExclTax.toLocaleString('fr-FR')} CFA</div>
               </div>

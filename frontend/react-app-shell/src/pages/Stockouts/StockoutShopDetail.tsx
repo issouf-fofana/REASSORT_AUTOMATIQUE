@@ -767,7 +767,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       perdu porte à nouveau sur les ruptures EN COURS maintenant, pas la période
                       choisie en haut de page (qui ne pilote plus que le graphe/l'analyse des pertes
                       ci-dessous). */}
-                  <div className="label">CA perdu (ruptures en cours)</div>
+                  <div className="label">CA perdu (ruptures en cours, HT)</div>
                   <div className="value">{Math.round(displayedTotalCaPerdu).toLocaleString('fr-FR')} CFA</div>
                 </div>
               </div>
@@ -786,7 +786,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <span className="icon bg-secondary-subtle"><iconify-icon icon="solar:box-minimalistic-bold-duotone" className="text-secondary"></iconify-icon></span>
                 <div>
                   <div className="label">
-                    CA perdu sans commande
+                    CA perdu sans commande (HT)
                     <FormulaInfoButton
                       title="CA perdu sans commande"
                       steps={[
@@ -803,7 +803,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 <span className="icon bg-warning-subtle"><iconify-icon icon="solar:delivery-bold-duotone" className="text-warning"></iconify-icon></span>
                 <div>
                   <div className="label">
-                    CA perdu non livré
+                    CA perdu non livré (HT)
                     <FormulaInfoButton
                       title="CA perdu non livré"
                       steps={[

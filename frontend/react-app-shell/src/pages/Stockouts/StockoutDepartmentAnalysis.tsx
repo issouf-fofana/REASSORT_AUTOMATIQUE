@@ -163,6 +163,11 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
               {new Date(startDate).toLocaleDateString('fr-FR')} → {new Date(endDate).toLocaleDateString('fr-FR')}
             </span>
           </h6>
+          {/* Précision HT ajoutée le 25/10/2026 (demande explicite : "affiche SI c'est TTC ou HT") —
+              tous les montants "CA perdu" de ce tableau viennent de estimateLoss (SalesLine.revenueExclTax),
+              Hors Taxes. Un seul marqueur ici plutôt que répété sur chaque colonne, plus lisible dans
+              un tableau déjà dense. */}
+          <span className="text-muted" style={{ fontSize: '.72rem' }}>Montants en HT (hors taxes)</span>
         </div>
 
         {error ? (
