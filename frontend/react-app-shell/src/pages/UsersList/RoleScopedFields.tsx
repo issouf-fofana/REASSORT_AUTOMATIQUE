@@ -92,7 +92,30 @@ export function RoleScopedFields({ idPrefix, role, shops, state, onChange, initi
     onChange({ ...state, aiPermCustom: { ...state.aiPermCustom, [key]: checked } });
   }
 
+  // Demande du 25/10/2026 ("donne la possibilité de coché ou decoché tout... dans Département
+  // assigné et permisson aussi") — même raccourci "Tout cocher/décocher" déjà en place pour
+  // "Magasins supervisés" (selectAllSupervised/clearAllSupervised ci-dessus), étendu à ces deux
+  // listes qui pouvaient aussi compter plusieurs dizaines d'entrées (rayons d'un gros magasin,
+  // capacités IA) à cocher une par une.
+  function selectAllDepartments() {
+    if (rayons) onChange({ ...state, departments: [...rayons] });
+  }
+  function clearAllDepartments() {
+    onChange({ ...state, departments: [] });
+  }
+
   const defaults = AI_ROLE_DEFAULTS[role] || AI_ROLE_DEFAULTS.DIRECTOR;
+
+  function selectAllAiPerms() {
+    const next: Record<string, boolean> = { ...state.aiPermCustom };
+    for (const cap of AI_CAPABILITIES) next[cap.key] = true;
+    onChange({ ...state, aiPermCustom: next });
+  }
+  function clearAllAiPerms() {
+    const next: Record<string, boolean> = { ...state.aiPermCustom };
+    for (const cap of AI_CAPABILITIES) next[cap.key] = false;
+    onChange({ ...state, aiPermCustom: next });
+  }
 
   return (
     <>
@@ -124,8 +147,20 @@ export function RoleScopedFields({ idPrefix, role, shops, state, onChange, initi
 
       {DEPARTMENT_SCOPED_ROLES.has(role) && (
         <div className="mb-3">
-          <label className="form-label">{role === 'SHELF_STOCKER' ? 'Rayon(s) assigné(s)' : 'Département assigné'}</label>
-          <div className="border rounded p-2 small" style={{ maxHeight: 220, overflowY: 'auto' }}>
+          <div className="d-flex justify-content-between align-items-center">
+            <label className="form-label mb-0">{role === 'SHELF_STOCKER' ? 'Rayon(s) assigné(s)' : 'Département assigné'}</label>
+            {!!rayons?.length && (
+              <div>
+                <button type="button" className="btn btn-link btn-sm p-0 me-2" onClick={selectAllDepartments}>
+                  Tout cocher
+                </button>
+                <button type="button" className="btn btn-link btn-sm p-0" onClick={clearAllDepartments}>
+                  Tout décocher
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="border rounded p-2 small mt-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
             {!state.shopId && <div className="text-muted small">Sélectionnez un magasin pour charger ses rayons...</div>}
             {state.shopId && rayons === null && <div className="text-muted small">Chargement des rayons...</div>}
             {state.shopId && rayons !== null && rayons.length === 0 && (
@@ -189,8 +224,18 @@ export function RoleScopedFields({ idPrefix, role, shops, state, onChange, initi
 
       {role !== 'ADMIN' && (
         <div className="mb-3">
-          <label className="form-label">Permissions Assistant IA</label>
-          <div className="border rounded p-2 small">
+          <div className="d-flex justify-content-between align-items-center">
+            <label className="form-label mb-0">Permissions Assistant IA</label>
+            <div>
+              <button type="button" className="btn btn-link btn-sm p-0 me-2" onClick={selectAllAiPerms}>
+                Tout cocher
+              </button>
+              <button type="button" className="btn btn-link btn-sm p-0" onClick={clearAllAiPerms}>
+                Tout décocher
+              </button>
+            </div>
+          </div>
+          <div className="border rounded p-2 small mt-1">
             {AI_CAPABILITIES.map((cap) => {
               const checked = state.aiPermCustom[cap.key] ?? defaults[cap.key];
               return (
