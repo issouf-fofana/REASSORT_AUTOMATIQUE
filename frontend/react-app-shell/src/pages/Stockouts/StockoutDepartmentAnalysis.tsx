@@ -153,8 +153,16 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
         .stockout-rayon-table .stockout-total-row td.stockout-total-col { background: #DCE6F8; }
       `}</style>
       <div className="card-body py-3">
+        {/* Période affichée en gras à côté du titre (demande explicite du 25/10/2026 : "ajout la
+            periode en gras en haut") — avant, elle n'apparaissait que dans le sous-label "Rayon le
+            plus coûteux", peu visible et facile à manquer au premier coup d'œil. */}
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-          <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Analyse par rayon</h6>
+          <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>
+            Analyse par rayon
+            <span className="ms-2" style={{ fontWeight: 700, color: '#2F5FD6' }}>
+              {new Date(startDate).toLocaleDateString('fr-FR')} → {new Date(endDate).toLocaleDateString('fr-FR')}
+            </span>
+          </h6>
         </div>
 
         {error ? (
@@ -171,13 +179,7 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                 <span className="val">{rows[0]?.group || '—'} · {rows[0]?.openCount || 0}</span>
               </div>
               <div className="stockout-rayon-stat">
-                {/* Libellé corrigé le 21/10/2026 (demande explicite : "je veux un filtre dinamique...
-                    faut pas je vais faire le filtre du 10/10/2026 au 20/10/2026 et sur la vue il va
-                    me donner les donner de 1an 30j quelque part") — la DONNÉE suivait déjà bien la
-                    période choisie (startDate/endDate passés en props), mais ce libellé affichait
-                    "(30j)" en dur, laissant croire à tort qu'une fenêtre fixe de 30 jours était
-                    utilisée ici alors que le filtre actif en haut de page s'applique partout. */}
-                <span className="lbl">Rayon le plus coûteux ({new Date(startDate).toLocaleDateString('fr-FR')} → {new Date(endDate).toLocaleDateString('fr-FR')})</span>
+                <span className="lbl">Rayon le plus coûteux</span>
                 <span className="val">{topCaRow?.group || '—'} · {topCaPerdu.toLocaleString('fr-FR')} CFA</span>
               </div>
               <div className="stockout-rayon-stat">
