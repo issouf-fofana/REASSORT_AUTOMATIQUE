@@ -77,9 +77,12 @@ const KEYS = {
   // besoin d'être aussi fraîche que qtyPerdueEstimee/caPerdueEstime (recalculés toutes les heures).
   STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON: 'STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON',
   // Précalcul du rapport Surstock (demande explicite du 21/10/2026 : "il charge trop... il fait les
-  // calcule quand j'actualise ?") — toutes les heures : la donnée source (dernière proposition par
-  // magasin) ne change qu'une fois par nuit, mais un intervalle plus court limite l'écart entre une
-  // proposition fraîchement régénérée manuellement et le snapshot affiché.
+  // calcule quand j'actualise ?") — ramené à toutes les 15 minutes le 25/10/2026 (demande
+  // explicite : "oui au moins tout les 15min" — un écart de 151 vs 143 constaté entre le chatbot
+  // (calcul live) et la page (snapshot horaire) après une resynchro manuelle de stock, l'ancien
+  // intervalle d'1h laissant trop longtemps un snapshot périmé affiché. Protégé par
+  // overstockReportSnapshotLock (cronManager.js) : si un passage précédent tourne encore au
+  // déclenchement du suivant, celui-ci est simplement ignoré, jamais de double exécution.
   OVERSTOCK_REPORT_SNAPSHOT_CRON: 'OVERSTOCK_REPORT_SNAPSHOT_CRON',
   // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
   // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
@@ -351,7 +354,7 @@ const ENV_FALLBACK = {
   [KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON || '30 * * * *',
   [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
-  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '0 * * * *',
+  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '*/15 * * * *',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',
