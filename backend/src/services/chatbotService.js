@@ -1735,7 +1735,17 @@ async function buildChatbotPrompt({ shopReference, shopName, department, subDepa
     const negativeStockNote = hasNegativeStockField
       ? '\n\nIMPORTANT : un champ "stock" négatif est une vraie donnée valide, PAS une donnée manquante ni une erreur — ne dis JAMAIS que le stock "n\'est pas renseigné" ou "non disponible" dans ce cas. Un stock négatif signifie que l\'article est en rupture avec un écart réel (des ventes ont été enregistrées au-delà du stock théorique disponible) : annonce la valeur telle quelle (ex: "le stock est de -50, l\'article est en rupture avec un écart de 50 unités").'
       : '';
-    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${ordersNote}${validatedOrdersNote}${posOnlyOrdersNote}${negativeStockNote}`;
+    // Compteur à zéro ≠ donnée indisponible (bug constaté le 25/10/2026 : getOverstockScrapAndDlv
+    // avait countWithScrapOnly:0 — aucun article en surstock n'a eu de casse récente, une réponse
+    // négative complète et vraie — mais le modèle a répondu "je ne dispose pas des données
+    // relatives à la casse... nécessite une question séparée", comme si la donnée n'avait jamais
+    // été cherchée. Même principe que negativeStockNote ci-dessus : un champ numérique à 0, ou un
+    // tableau vide associé, DANS une réponse found:true, est une vraie mesure (zéro occurrence),
+    // jamais une absence de recherche.
+    const zeroCountNote = toolName === 'getOverstockScrapAndDlv' && toolResult.found
+      ? '\n\nIMPORTANT : countWithScrapOnly/countWithDlvOnly/countWithBoth à 0 signifie "aucun article en surstock n\'a eu ce signal", une réponse négative complète et vraie — ne dis JAMAIS que cette donnée "n\'est pas disponible" ou "nécessite une question séparée". Annonce le chiffre 0 explicitement (ex: "aucun des 151 articles en surstock n\'a eu de casse sur les 90 derniers jours").'
+      : '';
+    dataSection = `Données réelles récupérées pour répondre (outil "${toolName}", résultat JSON — utilise UNIQUEMENT ces données, ne complète jamais avec une supposition) :\n${JSON.stringify(toolResult, null, 2)}${freshnessNote}${paretoNote}${eanNote}${searchByNameNote}${pendingProposalsNote}${proposalBreakdownNote}${ordersNote}${validatedOrdersNote}${posOnlyOrdersNote}${negativeStockNote}${zeroCountNote}`;
     // Ajouté le 28/09/2026 (demande explicite : "si il n'a pas la donnée, qu'il le dise clairement,
     // sinon qu'il dise qu'il est en cours de développement et qu'il prend note, l'admin sera alerté
     // une fois disponible") — un outil qui a matché la question mais répond found:false (article
