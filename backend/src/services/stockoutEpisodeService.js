@@ -861,6 +861,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     try {
       const product = await rpos.getProductByEan(e.rposPosId, rposShopId, e.ean);
       if (!product) return;
+      const history = await rpos.getPurchaseHistoryForProduct(e.rposPosId, rposShopId, product.id, e.startedAt.toISOString(), now.toISOString());
       // Trié décroissant et on prend le premier (= le plus récent) qualifiant — même correctif que
       // le matching local ci-dessus (25/10/2026) : plusieurs commandes RPOS peuvent exister depuis
       // le début de la rupture, seule la plus récente reflète la situation actuelle.
