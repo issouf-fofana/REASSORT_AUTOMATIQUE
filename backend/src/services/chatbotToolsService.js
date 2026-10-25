@@ -2569,15 +2569,62 @@ async function getShopUsers(rposShopId) {
  * (risque de rupture FUTURE, calculé depuis la dernière proposition) : ceci porte sur des ruptures
  * RÉELLEMENT constatées aujourd'hui (StockoutEpisode), avec durée, cause, CA perdu, statut
  * commande/livraison déjà calculés par le module.
+ *
+ * ÉTENDU le 25/10/2026 (capture : le chatbot ne pouvait répondre à AUCUNE question agrégée — "j'ai
+ * perdu combien", "quel rayon le plus touché", "le magasin a réagi ?" — car il ne recevait qu'une
+ * simple liste d'épisodes sans les agrégats déjà calculés par le module Ruptures) : délègue
+ * désormais à getDashboardSummary (mêmes KPI que la page Ruptures : CA perdu total, ventilé
+ * sans-commande/avec-commande-non-livrée, durée moyenne, ratio de rupture) et
+ * getDashboardSummaryByDepartment (rayon le plus touché), en plus de la liste détaillée par
+ * article (inchangée).
  */
 async function getStockoutEpisodes(rposShopId, { department } = {}) {
-  const summary = await stockoutEpisodeService.getOpenEpisodes(rposShopId);
-  const filtered = department ? summary.filter((e) => (e.department || 'Sans rayon') === department) : summary;
-  if (!filtered.length) return { found: true, count: 0, episodes: [], message: 'Aucune rupture de stock en cours actuellement.' };
+  const [summary, byDepartment] = await Promise.all([
+    stockoutEpisodeService.getDashboardSummary(rposShopId),
+    stockoutEpisodeService.getDashboardSummaryByDepartment(rposShopId),
+  ]);
+
+  const allEpisodes = summary.openEpisodes || [];
+  const filtered = department ? allEpisodes.filter((e) => (e.department || 'Sans rayon') === department) : allEpisodes;
+  if (!filtered.length) {
+    return {
+      found: true,
+      count: 0,
+      episodes: [],
+      message: 'Aucune rupture de stock en cours actuellement.',
+      totalCaPerduEstime: 0,
+      caPerdueSansCommande: 0,
+      caPerdueNonLivree: 0,
+    };
+  }
+
+  const topByRevenue = [...filtered].sort((a, b) => (b.caPerdueEstime || 0) - (a.caPerdueEstime || 0));
 
   return {
     found: true,
     count: filtered.length,
+    avgDurationHours: summary.avgDurationHours,
+    totalCaPerduEstime: summary.totalCaPerduEstime,
+    caPerdueSansCommande: summary.caPerdueSansCommande,
+    caPerdueNonLivree: summary.caPerdueNonLivree,
+    ruptureRatioPct: summary.ruptureRatioPct,
+    causeCounts: summary.causeCounts,
+    departmentsMostAffected: (byDepartment.groups || [])
+      .slice(0, 10)
+      .map((g) => ({
+        department: g.group,
+        openCount: g.openCount,
+        avgDurationHours: g.avgDurationHours,
+        noOrderCount: g.noOrderCount,
+        totalCaPerduEstime: g.totalCaPerduEstime,
+        caPerduSansCommande: g.caPerduSansCommande,
+        caPerduAvecCommandeNonLivree: g.caPerduAvecCommandeNonLivree,
+      })),
+    episodesSortedByRevenueLost: topByRevenue.slice(0, 10).map((e) => ({
+      ean: e.ean,
+      label: e.label,
+      caPerdueEstime: e.caPerdueEstime,
+    })),
     episodes: filtered.slice(0, 50).map((e) => ({
       ean: e.ean,
       label: e.label,

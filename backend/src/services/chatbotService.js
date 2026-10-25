@@ -26,7 +26,7 @@ const VALID_INTENT_TOOLS = new Set([
   'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
-  'getStockoutEpisodes',
+  'getStockoutEpisodes', 'getStockoutPeriodSummary',
 ]);
 
 // Cache mémoire court (60s) des règles chargées depuis la config : un rechargement complet à
@@ -722,7 +722,8 @@ const TOOL_CATALOG = [
   { name: 'getCurrentProposal', description: 'Proposition de réassort du jour (quoi commander), du magasin ou d\'un rayon.', params: { department: 'rayon, optionnel' } },
   { name: 'explainProposalQuantity', description: 'Raisonnement IA en direct expliquant POURQUOI une quantité précise est suggérée pour UN article de la proposition en attente (pas juste "quelle quantité", une vraie explication). Nécessite un article identifié (EAN explicite ou dernier article mentionné dans la conversation).', params: { ean: 'code EAN article, OBLIGATOIRE' } },
   { name: 'getStockoutRisks', description: 'Articles en risque de rupture de stock prochainement (risque FUTUR, calculé depuis la dernière proposition — jamais une rupture déjà constatée).', params: { department: 'rayon, optionnel' } },
-  { name: 'getStockoutEpisodes', description: 'Ruptures de stock EN COURS, RÉELLEMENT constatées aujourd\'hui (module Ruptures de stock) — pour chaque article : depuis quand il est en rupture, durée, rayon, cause probable, statut de commande/livraison, CA perdu déjà estimé. Utiliser pour "quels articles sont en rupture en ce moment", "depuis combien de temps tel article est en rupture", "combien de temps dure cette rupture", "quelle est la perte liée aux ruptures" — jamais getStockoutRisks qui porte sur un risque futur, pas une rupture déjà là.', params: { department: 'rayon, optionnel' } },
+  { name: 'getStockoutEpisodes', description: 'Ruptures de stock EN COURS, RÉELLEMENT constatées aujourd\'hui (module Ruptures de stock) — pour chaque article : depuis quand il est en rupture, durée, rayon, cause probable, statut de commande/livraison, CA perdu déjà estimé. Donne aussi les AGRÉGATS du moment : CA perdu total (ventilé sans-commande / avec commande pas encore livrée), durée moyenne, ratio de rupture, rayons les plus touchés, articles où la perte est la plus élevée. Utiliser pour "quels articles sont en rupture en ce moment", "depuis combien de temps tel article est en rupture", "combien de temps dure cette rupture", "combien j\'ai perdu (en ce moment)", "le magasin a-t-il réagi (commande passée ou pas)", "quel rayon est le plus touché", "quel article en rupture fait le plus de CA" — jamais getStockoutRisks qui porte sur un risque futur, pas une rupture déjà là. Pour une perte chiffrée sur une PÉRIODE PASSÉE précise (hier, le mois dernier, du X au Y), utiliser getStockoutPeriodSummary à la place.', params: { department: 'rayon, optionnel' } },
+  { name: 'getStockoutPeriodSummary', description: 'Perte liée aux ruptures de stock sur une PÉRIODE PASSÉE précise (ex: "combien j\'ai perdu le mois dernier", "la semaine dernière", "entre le 1er et le 15"), pas l\'état courant. Donne le CA perdu total sur la période, comparé au CA réellement réalisé (ratio perte/CA), et la ventilation par rayon — jamais getStockoutEpisodes qui porte sur l\'état EN COURS, pas une période passée.', params: { dateRangeStart: 'date ISO de début, optionnel (défaut: 30 derniers jours)', dateRangeEnd: 'date ISO de fin, optionnel (défaut: aujourd\'hui)' } },
   { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
@@ -1011,7 +1012,7 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // getPredictionAccuracy/getTopGisements ajoutés le 12/10/2026 (chantier identifié en passation,
   // même extension que getSalesHistory ci-dessus — aucun bug réel signalé dessus pour l'instant,
   // mais le même piège se serait reproduit sur toute question avec une plage explicite).
-  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders']);
+  const DATE_SENSITIVE_TOOLS = new Set(['getRevenue', 'getRevenueAllShops', 'getStockMoveHistory', 'getStockMoveHistoryAllShops', 'getSalesHistory', 'getPredictionAccuracy', 'getTopGisements', 'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'getStockoutPeriodSummary']);
 
   let explicitDateRange = extractDateRange(question);
   // Signal textuel de plage ("entre X et Y", "du X au Y") qu'extractDateRange (purement numérique,
@@ -1271,6 +1272,14 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         }
         return { toolName, toolResult: await tools.getStockoutEpisodes(rposShopId, { department }) };
       }
+      case 'getStockoutPeriodSummary':
+        return {
+          toolName,
+          toolResult: await tools.getStockoutPeriodSummary(rposShopId, {
+            startDate: effectiveDateRange?.start || null,
+            endDate: effectiveDateRange?.end || null,
+          }),
+        };
       case 'getOverstockArticles':
         return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
       case 'getPredictionAccuracy':
