@@ -689,10 +689,10 @@ export function ValidationFlow({
                           const lcGroups = groupingPreview.orders.filter((o) => o.deliveryType === 'LC');
                           const ldGroups = groupingPreview.orders.filter((o) => o.deliveryType === 'LD');
                           if (!lcGroups.length || !ldGroups.length) return null;
-                          function groupKeyOf(o: typeof groupingPreview.orders[number]) {
+                          function groupKeyOf(o: typeof lcGroups[number]) {
                             return `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
                           }
-                          function toggleType(groups: typeof groupingPreview.orders, allExcluded: boolean) {
+                          function toggleType(groups: typeof lcGroups, allExcluded: boolean) {
                             setExcludedSupplierGroups((prev) => {
                               const next = new Set(prev);
                               for (const o of groups) {
