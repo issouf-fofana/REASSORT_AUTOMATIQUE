@@ -335,7 +335,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const activeExtraFilterCount = activeRangeFilterCount + (causeFilter ? 1 : 0) + (reactionFilter ? 1 : 0) + (deliveryFilter ? 1 : 0) + (articleSearch.trim() ? 1 : 0);
   // Tri croissant/décroissant du tableau "Détail par article" (demande explicite du 21/10/2026 :
   // "sur tout les tableau il faut ajouter la possibilité de filtrer par croissant ou decroissant").
-  const [articleSortField, setArticleSortField] = useState<'label' | 'startedAt' | 'duration' | 'sellingPrice' | 'qtyPerdueEstimee' | 'caPerdueEstime' | null>(null);
+  // Étendu le 25/10/2026 (audit complet des tableaux du site, demande explicite : "les ajouté fait
+  // un audit de tout tab") — Réaction/Livraison/Reçue (estimée) le/Cause probable n'étaient pas
+  // triables, seules les colonnes numériques/date évidentes l'étaient.
+  const [articleSortField, setArticleSortField] = useState<'label' | 'startedAt' | 'duration' | 'sellingPrice' | 'qtyPerdueEstimee' | 'caPerdueEstime' | 'reactionStatus' | 'deliveryStatus' | 'actualReceptionDate' | 'causeProposee' | null>(null);
   const [articleSortDir, setArticleSortDir] = useState<'asc' | 'desc'>('desc');
   function toggleArticleSort(field: typeof articleSortField) {
     if (articleSortField === field) setArticleSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -525,6 +528,10 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
         case 'sellingPrice': return e.sellingPrice ?? -Infinity;
         case 'qtyPerdueEstimee': return e.qtyPerdueEstimee ?? -Infinity;
         case 'caPerdueEstime': return e.caPerdueEstime ?? -Infinity;
+        case 'reactionStatus': return (REACTION_LIGHT_META[e.reactionStatus]?.label || e.reactionStatus).toLowerCase();
+        case 'deliveryStatus': return (DELIVERY_STATUS_META[e.deliveryStatus]?.label || e.deliveryStatus).toLowerCase();
+        case 'actualReceptionDate': return e.actualReceptionDate ? new Date(e.actualReceptionDate).getTime() : -Infinity;
+        case 'causeProposee': return (CAUSE_LABELS[e.causeProposee] || e.causeProposee).toLowerCase();
       }
     };
     return [...articlesInDepartment].sort((a, b) => {
@@ -1037,13 +1044,13 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('label')}>Article{articleSortIcon('label')}</th>
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('startedAt')}>Depuis{articleSortIcon('startedAt')}</th>
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('duration')}>Durée{articleSortIcon('duration')}</th>
-                      <th>Réaction</th>
-                      <th>Livraison</th>
-                      <th>Reçue (estimée) le</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('reactionStatus')}>Réaction{articleSortIcon('reactionStatus')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('deliveryStatus')}>Livraison{articleSortIcon('deliveryStatus')}</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('actualReceptionDate')}>Reçue (estimée) le{articleSortIcon('actualReceptionDate')}</th>
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('sellingPrice')}>Prix{articleSortIcon('sellingPrice')}</th>
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('qtyPerdueEstimee')}>Qté perdue{articleSortIcon('qtyPerdueEstimee')}</th>
                       <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('caPerdueEstime')}>Valorisation (CA perdu){articleSortIcon('caPerdueEstime')}</th>
-                      <th>Cause probable</th>
+                      <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleArticleSort('causeProposee')}>Cause probable{articleSortIcon('causeProposee')}</th>
                     </tr>
                   </thead>
                   <tbody>

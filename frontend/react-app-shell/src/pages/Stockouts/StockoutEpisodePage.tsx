@@ -458,6 +458,20 @@ export function StockoutEpisodePage() {
     return () => clearInterval(interval);
   }, [detail?.status, detail?.id]);
 
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — "Mouvements de stock récents" n'avait
+  // aucun tri, seulement l'ordre renvoyé par le serveur (chronologique).
+  const [moveSortField, setMoveSortField] = useState<'date' | 'typeLabel' | 'quantity' | null>(null);
+  const [moveSortDir, setMoveSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleMoveSort(field: typeof moveSortField) {
+    if (moveSortField === field) setMoveSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setMoveSortField(field); setMoveSortDir('desc'); }
+  }
+  function moveSortIcon(field: typeof moveSortField) {
+    if (moveSortField !== field) return null;
+    return <iconify-icon icon={moveSortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>;
+  }
+
   const reactionMeta = detail ? REACTION_STATUS_META[detail.reactionStatus] : null;
 
   // Avant commande : du début de la rupture jusqu'à la commande (si elle existe) ou jusqu'à
@@ -1080,16 +1094,22 @@ export function StockoutEpisodePage() {
               <table className="table align-middle mb-0 table-hover table-centered">
                 <thead className="bg-light-subtle">
                   <tr>
-                    <th>Date / heure</th>
-                    <th>Type</th>
-                    <th className="text-end">Quantité</th>
+                    <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleMoveSort('date')}>Date / heure{moveSortIcon('date')}</th>
+                    <th className="osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleMoveSort('typeLabel')}>Type{moveSortIcon('typeLabel')}</th>
+                    <th className="text-end osr-sortable-th" style={{ cursor: 'pointer' }} onClick={() => toggleMoveSort('quantity')}>Quantité{moveSortIcon('quantity')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detail.stockMoves.length === 0 ? (
                     <tr><td colSpan={3} className="text-center text-muted py-4">Aucun mouvement enregistré sur la période.</td></tr>
                   ) : (
-                    detail.stockMoves.slice(0, 40).map((m, i) => (
+                    [...detail.stockMoves].sort((a, b) => {
+                      if (!moveSortField) return 0;
+                      const dir = moveSortDir === 'desc' ? 1 : -1;
+                      if (moveSortField === 'date') return dir * (new Date(b.date).getTime() - new Date(a.date).getTime());
+                      if (moveSortField === 'quantity') return dir * (b.quantity - a.quantity);
+                      return dir * b.typeLabel.localeCompare(a.typeLabel, 'fr-FR');
+                    }).slice(0, 40).map((m, i) => (
                       <tr key={i}>
                         <td style={{ fontFamily: 'monospace', fontSize: '.8rem' }}>{formatDateTime(m.date)}</td>
                         <td>{m.typeLabel}{m.isScrap ? ' (casse)' : ''}</td>
