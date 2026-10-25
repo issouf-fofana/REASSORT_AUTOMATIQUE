@@ -186,8 +186,42 @@ async function detectStockoutEpisodes(rposShopId) {
     distinct: ['ean'],
   });
 
+  // AJOUTÉ le 25/10/2026 (demande explicite : "dans les rupture tu fais les Generique dedans ? ca
+  // rique de faucé le total final" — confirmé en production : 5 articles génériques représentaient
+  // 487 222 CFA sur 11 984 913 CFA de CA perdu total pour un seul magasin, soit ~4%) — un article
+  // "générique" (prix de vente RPOS < 2 CFA, typiquement un agrégat de rayon vendu au poids comme
+  // "FRUITS & LEGUMES", label souvent null) n'est pas un vrai produit vendable individuellement :
+  // son stock/sa quantité vendue en base n'a aucune signification unitaire exploitable, et le
+  // calcul de perte (estimateLoss, basé sur un prix/une quantité moyenne par jour) produit des
+  // montants arbitrairement gonflés ou faussés. Même seuil que proposalService.js/
+  // overstockReportService.js/chatbotToolsService.js (excludeGenericArticlesBelowPrice, défaut 2
+  // CFA), pour ne jamais diverger entre les modules sur ce qu'est un "vrai" article.
+  const GENERIC_ARTICLE_PRICE_THRESHOLD = 2;
+  const priceByEan = new Map(
+    (await prisma.productCache.findMany({
+      where: { rposShopId, ean: { in: latestSnapshots.map((s) => s.ean) } },
+      select: { ean: true, sellingPrice: true },
+    })).map((p) => [p.ean, p.sellingPrice])
+  );
+  function isGenericArticle(ean) {
+    const price = priceByEan.get(ean);
+    return price !== undefined && price !== null && price < GENERIC_ARTICLE_PRICE_THRESHOLD;
+  }
+
   for (const snap of latestSnapshots) {
     const open = openByEan.get(snap.ean);
+
+    // Un épisode déjà ouvert pour un article identifié comme générique (détecté AVANT ce correctif,
+    // ou prix RPOS mis à jour depuis) est résolu immédiatement plutôt que laissé courir — jamais
+    // supprimé (garde la trace historique), juste sorti du compte "en cours" et du CA perdu actif.
+    if (isGenericArticle(snap.ean) && open) {
+      await prisma.stockoutEpisode.update({
+        where: { id: open.id },
+        data: { status: 'RESOLUE', endedAt: now, causeProposee: 'INDETERMINEE', niveauConfiance: 'INDETERMINEE' },
+      });
+      continue;
+    }
+    if (isGenericArticle(snap.ean)) continue;
 
     if (snap.stock <= 0 && !open) {
       const diagnosis = await diagnoseCause(rposShopId, snap.ean, snap.rposPosId);
