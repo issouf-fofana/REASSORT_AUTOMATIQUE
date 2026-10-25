@@ -152,6 +152,16 @@ const KEYS = {
   // terminer, sur CHAQUE magasin, et relance une récupération ciblée en cas d'écart. Distinct de la
   // synchro incrémentale (SALES_SYNC_CRON, toutes les 15 min, fenêtre glissante de 48h seulement).
   SALES_DAILY_RECAP_CRON: 'SALES_DAILY_RECAP_CRON',
+  // Nombre de jours passés revérifiés à chaque passage (ajouté le 25/10/2026, bug réel constaté en
+  // production : un petit écart résiduel de quelques dizaines à centaines de lignes persistait sur
+  // presque CHAQUE jour, même après ce récap — car il ne vérifiait QUE "la journée qui vient de se
+  // terminer", jamais plus tard. Une vente RPOS ajoutée/corrigée en retard côté caisse (synchro
+  // différée, panne ponctuelle) après le passage du récap sur ce jour précis restait donc
+  // définitivement manquante, aucun mécanisme ne revérifiant jamais un jour déjà passé). Une fenêtre
+  // glissante plus large (défaut 7 jours) permet de rattraper ces écarts tardifs sans recoûter cher
+  // (countExpectedForDay/countActualForDay restent des comptages légers, pas un réimport systématique
+  // — seuls les jours réellement en écart déclenchent une vraie récupération ciblée).
+  SALES_DAILY_RECAP_LOOKBACK_DAYS: 'SALES_DAILY_RECAP_LOOKBACK_DAYS',
   // Signature/logo ajoutés en pied de page de CHAQUE email envoyé par outlookMailService.sendMail()
   // (demande du 25/09/2026, Paramètres > Comptes mail) — texte simple multi-lignes (jamais de HTML
   // brut accepté, pour ne jamais risquer de casser l'affichage du mail avec une balise mal fermée).
@@ -380,6 +390,7 @@ const ENV_FALLBACK = {
   // lendemain — pas de raison technique de repousser plus tard, RPOS a déjà toutes les ventes de la
   // journée à cette heure (un magasin ferme toujours avant 23:59).
   [KEYS.SALES_DAILY_RECAP_CRON]: () => process.env.SALES_DAILY_RECAP_CRON || '59 23 * * *',
+  [KEYS.SALES_DAILY_RECAP_LOOKBACK_DAYS]: () => process.env.SALES_DAILY_RECAP_LOOKBACK_DAYS || '7',
   // 1 unité/jour par défaut : en dessous de ce rythme habituel, un silence récent des ventes
   // n'est pas signalé comme rupture invisible (cf. ANOMALY_MIN_DAILY_SALES ci-dessus).
   [KEYS.ANOMALY_MIN_DAILY_SALES]: () => '1',
