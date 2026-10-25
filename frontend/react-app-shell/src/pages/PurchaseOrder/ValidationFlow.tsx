@@ -585,6 +585,21 @@ export function ValidationFlow({
         .reassort-step-spin { display: inline-block; animation: reassort-step-spin 1s linear infinite; }
         @keyframes reassort-step-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
         .reassort-step-pop { display: inline-block; animation: reassort-step-pop 0.35s ease-out; }
+        /* Raccourcis "Tout LC"/"Tout LD" (25/10/2026) — deux teintes distinctes pour repérer le
+           type de livraison au premier coup d'œil, cohérentes avec le reste du design system
+           (marine/ambre) sans reprendre les couleurs sémantiques vert/rouge déjà utilisées pour
+           les cases à cocher individuelles juste en dessous. */
+        .pq-type-toggle-row { display: flex; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+        .pq-type-toggle-btn {
+          display: inline-flex; align-items: center; gap: 6px;
+          border: 1px solid rgba(27,42,74,.16); border-radius: 999px;
+          background: #fff; font-size: .78rem; font-weight: 600;
+          padding: 5px 12px; cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+        }
+        .pq-type-toggle-lc { color: #1B2A4A; }
+        .pq-type-toggle-lc:hover { background: #EEF2FB; border-color: #1B2A4A; }
+        .pq-type-toggle-ld { color: #8A5A00; }
+        .pq-type-toggle-ld:hover { background: #FDF1DD; border-color: #8A5A00; }
       `}</style>
       <div className="d-flex flex-column align-items-end gap-1">
         <button className="btn btn-sm btn-success" disabled={sending} onClick={openConfirm}>
@@ -662,6 +677,46 @@ export function ValidationFlow({
                             rien. Décocher un groupe exclut SES articles de la commande ENVOYÉE (pas
                             de la proposition elle-même, qui reste inchangée pour une validation
                             ultérieure) — les autres groupes restent inclus normalement. */}
+                        {/* Raccourci de sélection par type de livraison ajouté le 25/10/2026
+                            (demande explicite : "si le prend sur le LC il coche auto tout ce qui
+                            est LC... si j'ai 10 LD que je veux pas je décoche les LD en haut à un
+                            clic") — coche/décoche en un clic TOUS les groupes d'un même
+                            deliveryType (LC ou LD), sans toucher aux groupes de l'autre type ni
+                            exiger de cliquer fournisseur par fournisseur. Affiché seulement si les
+                            deux types coexistent dans cette commande (sinon aucun raccourci utile
+                            à proposer). */}
+                        {(() => {
+                          const lcGroups = groupingPreview.orders.filter((o) => o.deliveryType === 'LC');
+                          const ldGroups = groupingPreview.orders.filter((o) => o.deliveryType === 'LD');
+                          if (!lcGroups.length || !ldGroups.length) return null;
+                          function groupKeyOf(o: typeof groupingPreview.orders[number]) {
+                            return `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
+                          }
+                          function toggleType(groups: typeof groupingPreview.orders, allExcluded: boolean) {
+                            setExcludedSupplierGroups((prev) => {
+                              const next = new Set(prev);
+                              for (const o of groups) {
+                                const key = groupKeyOf(o);
+                                if (allExcluded) next.delete(key); else next.add(key);
+                              }
+                              return next;
+                            });
+                          }
+                          const lcAllExcluded = lcGroups.every((o) => excludedSupplierGroups.has(groupKeyOf(o)));
+                          const ldAllExcluded = ldGroups.every((o) => excludedSupplierGroups.has(groupKeyOf(o)));
+                          return (
+                            <div className="pq-type-toggle-row">
+                              <button type="button" className="pq-type-toggle-btn pq-type-toggle-lc" onClick={() => toggleType(lcGroups, lcAllExcluded)}>
+                                <iconify-icon icon={lcAllExcluded ? 'solar:check-square-linear' : 'solar:check-square-bold'}></iconify-icon>
+                                {lcAllExcluded ? 'Cocher' : 'Décocher'} tout LC ({lcGroups.length})
+                              </button>
+                              <button type="button" className="pq-type-toggle-btn pq-type-toggle-ld" onClick={() => toggleType(ldGroups, ldAllExcluded)}>
+                                <iconify-icon icon={ldAllExcluded ? 'solar:check-square-linear' : 'solar:check-square-bold'}></iconify-icon>
+                                {ldAllExcluded ? 'Cocher' : 'Décocher'} tout LD ({ldGroups.length})
+                              </button>
+                            </div>
+                          );
+                        })()}
                         <div className="mt-2 d-flex flex-column gap-1">
                           {groupingPreview.orders.map((o) => {
                             const groupKey = `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
