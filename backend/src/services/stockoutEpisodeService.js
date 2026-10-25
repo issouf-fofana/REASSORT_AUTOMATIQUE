@@ -162,6 +162,7 @@ async function getLossLookbackConfig() {
  * Appelée après chaque capture de snapshot (cf. stockSnapshotJob.js).
  */
 async function detectStockoutEpisodes(rposShopId) {
+  const now = new Date();
   const openEpisodes = await prisma.stockoutEpisode.findMany({
     where: { rposShopId, status: 'EN_COURS' },
   });
@@ -232,6 +233,46 @@ async function detectStockoutEpisodes(rposShopId) {
           } : {}),
         },
       });
+    } else if (snap.stock <= 0 && open) {
+      // AJOUTÉ le 25/10/2026 (demande explicite : "si apres tout ca ya pas de arrivage on peux dire
+      // quoi il on ete livré physiquement mais on na pas d'arrivgae sur le system") — un article
+      // reste normalement en rupture tant que son stock SYSTÈME n'est pas redevenu positif (cf. les
+      // deux branches ci-dessus). Mais si une commande a été passée, qu'AUCUN arrivage n'a jamais été
+      // enregistré au-delà du délai de livraison (deliveryStatus déjà calculé à LIVRAISON_DOUTEUSE
+      // par computeAndPersistOpenEpisodeStatuses ci-dessus) ET que des VENTES ont quand même eu lieu
+      // sur l'article depuis la commande (stock système négatif ne permettrait aucune vente si le
+      // rayon était réellement vide) — c'est la preuve qu'il y a du stock PHYSIQUE réel en rayon,
+      // simplement jamais remonté en "Arrivage" côté système (réception faite directement au rayon,
+      // hors du flux normal d'intégration de facture). Résout l'épisode avec la cause déjà prévue
+      // pour ce cas (ECART_STOCK_RAYON, cf. DELIVERY_STATUS_TO_CAUSE) plutôt que de laisser
+      // l'épisode courir indéfiniment alors que l'article se vend bel et bien. Si le stock système
+      // redevient réellement négatif sans ventes par la suite, un nouvel épisode sera rouvert
+      // normalement par la branche snap.stock <= 0 && !open ci-dessus, au prochain passage.
+      const fresh = freshStatusByEan.get(open.ean);
+      if (fresh?.deliveryStatus === 'LIVRAISON_DOUTEUSE' && fresh.orderCreatedAt) {
+        const salesSinceOrder = await prisma.salesLine.count({
+          where: { rposShopId, ean: open.ean, date: { gte: fresh.orderCreatedAt } },
+        });
+        if (salesSinceOrder > 0) {
+          const estimation = await estimateLoss(rposShopId, open.ean, open.startedAt, now);
+          await prisma.stockoutEpisode.update({
+            where: { id: open.id },
+            data: {
+              status: 'RESOLUE',
+              endedAt: now,
+              causeProposee: 'ECART_STOCK_RAYON',
+              niveauConfiance: 'PROBABLE',
+              qtyPerdueEstimee: estimation.qtyPerdue,
+              caPerdueEstime: estimation.caPerdue,
+              hasOrder: fresh.hasOrder,
+              reactionStatus: fresh.reactionStatus,
+              deliveryStatus: fresh.deliveryStatus,
+              orderCreatedAt: fresh.orderCreatedAt,
+              actualReceptionDateStatus: fresh.actualReceptionDate,
+            },
+          });
+        }
+      }
     }
   }
 }
