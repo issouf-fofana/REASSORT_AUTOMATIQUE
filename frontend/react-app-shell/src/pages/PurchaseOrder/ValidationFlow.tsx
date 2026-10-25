@@ -611,7 +611,11 @@ export function ValidationFlow({
       {confirmData && (
         <>
           <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
-            <div className="modal-dialog modal-dialog-centered" role="document">
+            {/* Élargie (modal-lg) le 25/10/2026 (demande explicite : "le cardre affiché un petit et
+                long... tu peux agrandir un peu") — le bloc "Ceci va créer N commandes" (fournisseurs
+                + raccourcis LC/LD) tenait à l'étroit dans la largeur par défaut de Bootstrap, obligé
+                de s'étirer verticalement sans respirer. */}
+            <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title d-flex align-items-center gap-2">
@@ -663,7 +667,7 @@ export function ValidationFlow({
                       </div>
                     )}
                     {!loadingGroupingPreview && groupingPreview && groupingPreview.orderCount > 0 && (
-                      <div className={`alert ${groupingPreview.orderCount > 1 ? 'alert-warning' : 'alert-info'} small mt-2 mb-0`}>
+                      <div className={`alert ${groupingPreview.orderCount > 1 ? 'alert-warning' : 'alert-info'} small mt-2 mb-0`} style={{ padding: '16px 18px' }}>
                         <iconify-icon icon="solar:bill-list-bold-duotone"></iconify-icon>{' '}
                         <strong>
                           Ceci va créer {groupingPreview.orderCount - excludedSupplierGroups.size} commande
@@ -717,7 +721,7 @@ export function ValidationFlow({
                             </div>
                           );
                         })()}
-                        <div className="mt-2 d-flex flex-column gap-1">
+                        <div className="mt-2 d-flex flex-column gap-2">
                           {groupingPreview.orders.map((o) => {
                             const groupKey = `${o.deliveryType || 'none'}::${o.supplierId || 'none'}`;
                             const isExcluded = excludedSupplierGroups.has(groupKey);
