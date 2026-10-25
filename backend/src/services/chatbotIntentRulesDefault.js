@@ -80,6 +80,11 @@ const FALLBACK_INTENT_RULES = [
   // plus spécifiques ci-dessus retombe sur l'état RÉEL constaté (getStockoutEpisodes), pas le risque
   // futur — c'est la question la plus fréquente et la plus souvent mal formulée.
   { keywords: ['rupture', 'ruptures', 'plus de stock', 'articles en manque', 'article en manque', 'articles manquants', 'article manquant', 'stock a zero', 'stock à zéro', 'stock a 0', 'en manque en rayon'], tool: 'getStockoutEpisodes' },
+  // Croisement surstock + casse/DLV (demande explicite du 25/10/2026 : "sur les surstok il ya des
+  // casse et des dlv sur ses surstok ?") — DOIT rester AVANT la règle générique getOverstockArticles
+  // juste en dessous, qui matcherait sinon TOUJOURS en premier sur "surstock" et empêcherait jamais
+  // d'atteindre cette règle plus précise.
+  { keywords: ['surstock il y a de la casse', 'surstock il ya de la casse', 'surstok il ya de la casse', 'surstock il y a des dlv', 'surstock il ya des dlv', 'surstok il ya des dlv', 'surstocks ont de la casse', 'surstocks ont des dlv', 'les surstock ont ils de la casse', 'les surstock ont ils des dlv', 'casse sur les surstock', 'dlv sur les surstock', 'casse sur ses surstock', 'dlv sur ses surstock', 'casse et des dlv', 'casse et dlv sur', 'surstok il ya des casse', 'surstock il y a des casse', 'surstock il ya des casse'], tool: 'getOverstockScrapAndDlv' },
   { keywords: ['surstock', 'trop de stock', 'sur-stock', 'excès de stock', 'exces de stock', 'trop stocké', 'trop stocke', 'articles en trop'], tool: 'getOverstockArticles' },
   { keywords: ['précision', 'fiabilité', 'accuracy', 'erreur de prévision', 'la prévision est bonne', 'fiable', 'lia se trompe', 'l\'ia se trompe', 'taux de reussite', 'taux de réussite'], tool: 'getPredictionAccuracy' },
   // Le mot-clé générique 'commande' seul a été retiré (bug trouvé le 21/09/2026, campagne de

@@ -23,7 +23,7 @@ const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 const VALID_INTENT_TOOLS = new Set([
   'getPriceChangeHistory', 'getStockMoveHistory', 'getArticleDetails', 'searchArticlesByName', 'getPromotionalProducts', 'getArticlesByGisement', 'getTopGisements', 'getParetoArticles',
   'getRevenue', 'getRevenueAllShops', 'getStockoutRisks', 'getOverstockArticles', 'getPredictionAccuracy',
-  'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus',
+  'getOrders', 'getValidatedOrders', 'getPosOnlyValidatedOrders', 'explainProposalQuantity', 'getCurrentProposal', 'getSalesHistory', 'getLastSoldArticle', 'getArticleStock', 'getArticleStockAllShops', 'getStockMoveHistoryAllShops', 'getDlvArticles', 'getArticleDlvStatus', 'getOverstockScrapAndDlv',
   'getOrderAnomalies', 'getStockoutRisksAllShops', 'getOverstockArticlesAllShops', 'getPendingProposalsAllShops', 'getOrderAnomaliesAllShops',
   'getPredictionAccuracyAllShops', 'getRevenueTrendAllShops', 'getSilentShops', 'getShopUsers', 'getDataAvailability',
   'getStockoutEpisodes', 'getStockoutPeriodSummary',
@@ -725,6 +725,7 @@ const TOOL_CATALOG = [
   { name: 'getStockoutEpisodes', description: 'Ruptures de stock EN COURS, RÉELLEMENT constatées aujourd\'hui (module Ruptures de stock) — pour chaque article : depuis quand il est en rupture, durée, rayon, cause probable, statut de commande/livraison, CA perdu déjà estimé. Donne aussi les AGRÉGATS du moment : CA perdu total (ventilé sans-commande / avec commande pas encore livrée), durée moyenne, ratio de rupture, rayons les plus touchés, articles où la perte est la plus élevée. Utiliser pour "quels articles sont en rupture en ce moment", "depuis combien de temps tel article est en rupture", "combien de temps dure cette rupture", "combien j\'ai perdu (en ce moment)", "le magasin a-t-il réagi (commande passée ou pas)", "quel rayon est le plus touché", "quel article en rupture fait le plus de CA" — jamais getStockoutRisks qui porte sur un risque futur, pas une rupture déjà là. Pour une perte chiffrée sur une PÉRIODE PASSÉE précise (hier, le mois dernier, du X au Y), utiliser getStockoutPeriodSummary à la place.', params: { department: 'rayon, optionnel' } },
   { name: 'getStockoutPeriodSummary', description: 'Perte liée aux ruptures de stock sur une PÉRIODE PASSÉE précise (ex: "combien j\'ai perdu le mois dernier", "la semaine dernière", "entre le 1er et le 15"), pas l\'état courant. Donne le CA perdu total sur la période, comparé au CA réellement réalisé (ratio perte/CA), et la ventilation par rayon — jamais getStockoutEpisodes qui porte sur l\'état EN COURS, pas une période passée.', params: { dateRangeStart: 'date ISO de début, optionnel (défaut: 30 derniers jours)', dateRangeEnd: 'date ISO de fin, optionnel (défaut: aujourd\'hui)' } },
   { name: 'getOverstockArticles', description: 'Articles en surstock (trop de stock par rapport aux ventes).', params: { department: 'rayon, optionnel' } },
+  { name: 'getOverstockScrapAndDlv', description: 'Parmi les articles ACTUELLEMENT en surstock, combien ont aussi eu de la casse récente et/ou ont du stock en DLV (Date Limite de Vente courte) actif — croise les 3 données surstock/casse/DLV en une seule réponse. Utiliser pour "parmi les articles en surstock, il y a de la casse/des DLV ?", "les surstocks ont-ils de la casse ?", jamais getOverstockArticles seul qui ne donne pas ce croisement.', params: {} },
   { name: 'getParetoArticles', description: 'Articles Pareto : ceux qui réalisent le plus gros pourcentage du chiffre d\'affaires (loi des 80/20).', params: { thresholdPct: 'seuil en pourcentage 1-100, optionnel (défaut 80)', department: 'rayon, optionnel' } },
   { name: 'getPredictionAccuracy', description: 'Fiabilité/précision des prévisions de l\'IA (taux de réussite, erreur de prévision).', params: {} },
   { name: 'getOrders', description: 'Commandes récentes passées par le magasin (vue interne basique : rayon, référence, date, statut de réception).', params: {} },
@@ -1288,6 +1289,8 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
         };
       case 'getOverstockArticles':
         return { toolName, toolResult: await tools.getOverstockArticles(rposShopId, { department }) };
+      case 'getOverstockScrapAndDlv':
+        return { toolName, toolResult: await tools.getOverstockScrapAndDlv(rposShopId, {}) };
       case 'getPredictionAccuracy':
         // Même bug que getSalesHistory (days ignoré) : "la fiabilité de l'IA ce mois-ci" retombait
         // silencieusement sur le défaut de l'outil (90 jours) sans jamais utiliser daysQuery.

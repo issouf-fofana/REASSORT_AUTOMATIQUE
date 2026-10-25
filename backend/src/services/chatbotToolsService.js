@@ -1025,6 +1025,58 @@ async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstock
 }
 
 /**
+ * getOverstockScrapAndDlv() — parmi les articles ACTUELLEMENT en surstock, combien ont eu de la
+ * casse récente et/ou ont du stock en DLV actif — demande explicite du 25/10/2026 ("sur les
+ * surstok il ya des casse et des dlv sur ses surstok ?"), jusqu'ici impossible à répondre car
+ * chaque outil (surstock/casse/DLV) ne portait que sur un seul angle à la fois, jamais croisé.
+ * Un article en surstock avec de la casse récente OU une fiche DLV active est un signal fort :
+ * le surstock n'est pas qu'un problème de rotation lente, une partie est en train d'être
+ * physiquement perdue ou bradée — distinct d'un simple excès de stock encore vendable au prix
+ * plein.
+ */
+async function getOverstockScrapAndDlv(rposShopId, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE, scrapLookbackDays = 90 } = {}) {
+  const scrapReportService = require('./scrapReportService');
+
+  const end = new Date();
+  const start = new Date(end.getTime() - OVERSTOCK_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+  const [overstockReport, scrapOverview, dlvResult] = await Promise.all([
+    overstockReportService.getOverstockOverPeriod([rposShopId], { minWeeksOfCoverage, start: start.toISOString(), end: end.toISOString() }),
+    scrapReportService.getScrapOverview([rposShopId], { lookbackDays: scrapLookbackDays }),
+    getDlvArticles(rposShopId, { limit: 500 }),
+  ]);
+
+  if (!overstockReport.found) return { found: false, message: overstockReport.message || 'Aucune donnée de surstock pour ce magasin.' };
+
+  const overstockEans = new Set((overstockReport.todayArticles || []).map((a) => a.ean));
+  const scrapByEan = new Map((scrapOverview.articles || []).map((a) => [a.ean, a]));
+  const dlvByEan = new Map((dlvResult.articles || []).map((a) => [a.originEan, a]));
+
+  const withScrap = [];
+  const withDlv = [];
+  const withBoth = [];
+  for (const ean of overstockEans) {
+    const scrap = scrapByEan.get(ean);
+    const dlv = dlvByEan.get(ean);
+    if (scrap && dlv) withBoth.push({ ean, label: scrap.label || dlv.label, scrapQuantity: scrap.quantity, scrapEstimatedLoss: scrap.estimatedLoss, dlvStock: dlv.dlvStock });
+    else if (scrap) withScrap.push({ ean, label: scrap.label, scrapQuantity: scrap.quantity, scrapEstimatedLoss: scrap.estimatedLoss });
+    else if (dlv) withDlv.push({ ean, label: dlv.label, dlvStock: dlv.dlvStock });
+  }
+
+  return {
+    found: true,
+    totalOverstockArticles: overstockEans.size,
+    scrapLookbackDays,
+    countWithScrapOnly: withScrap.length,
+    countWithDlvOnly: withDlv.length,
+    countWithBoth: withBoth.length,
+    countWithNeither: overstockEans.size - withScrap.length - withDlv.length - withBoth.length,
+    articlesWithScrap: withScrap.sort((a, b) => (b.scrapQuantity || 0) - (a.scrapQuantity || 0)).slice(0, 15),
+    articlesWithDlv: withDlv.sort((a, b) => (b.dlvStock || 0) - (a.dlvStock || 0)).slice(0, 15),
+    articlesWithBoth: withBoth.slice(0, 15),
+  };
+}
+
+/**
  * getParetoArticles() — articles représentant la part de CA demandée (§7 du cahier des charges,
  * "les articles représentant les 80% du CA"), recalculé directement depuis TOUTES les ventes
  * réelles du magasin sur la période (SalesLine), PAS depuis ProposalLine : celle-ci ne contient que
@@ -2740,6 +2792,7 @@ module.exports = {
   explainProposalQuantity,
   getStockoutRisks,
   getOverstockArticles,
+  getOverstockScrapAndDlv,
   getParetoArticles,
   getPredictionAccuracy,
   getOrders,

@@ -57,6 +57,7 @@ const TOOL_CAPABILITY = {
   // getStockoutEpisodes (porte sur la même donnée, juste une fenêtre de dates différente).
   getStockoutPeriodSummary: 'stock',
   getOverstockArticles: 'stock',
+  getOverstockScrapAndDlv: 'stock',
   getStockoutRisksAllShops: 'stock', // même capacité que la version single-shop, restriction ADMIN/SUPERVISOR appliquée dans chatbotService.js
   getOverstockArticlesAllShops: 'stock',
   // Bug trouvé le 27/09/2026 lors d'une campagne de test dynamique : cet outil (stock d'un article
