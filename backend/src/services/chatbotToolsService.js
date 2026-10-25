@@ -2670,7 +2670,11 @@ async function getStockoutEpisodeDetail(rposShopId, ean) {
     orderBy: { startedAt: 'desc' },
     select: { id: true },
   });
-  if (!episode) return { found: false, message: 'Aucune rupture en cours trouvée pour cet article sur ce magasin.' };
+  // isNormalNegative (bug constaté le 25/10/2026 : "aucune rupture trouvée" faisait répondre au
+  // chatbot "cette donnée n'est pas encore disponible, le système est en développement" — un article
+  // sans rupture en cours est une réponse négative normale et complète, jamais une lacune
+  // fonctionnelle à transmettre à l'équipe).
+  if (!episode) return { found: false, message: 'Aucune rupture en cours trouvée pour cet article sur ce magasin.', isNormalNegative: true };
   return stockoutEpisodeService.getEpisodeDetail(episode.id);
 }
 

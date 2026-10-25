@@ -988,7 +988,13 @@ async function runSingleTool(rposShopId, question, { department, conversationHis
   // magasin entier sans EAN, exactement comme getRevenue/getArticleStock).
   const REFERS_TO_ARTICLE_REGEX = /\b(cet|cette|ce|l')\s*(article|produit)\b/i;
   let ean = extractEan(question) || (llmParams && ARTICLE_SCOPED_TOOLS.has(toolName) ? llmParams.ean : null) || null;
-  const AMBIGUOUS_SCOPE_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getSalesHistory']);
+  // getStockoutEpisodes ajouté le 25/10/2026 (bug réel observé en prod : "combien d'articles en
+  // rupture aujourd'hui ?", posée après avoir consulté un article précis (100661060), répondait
+  // "aucune rupture trouvée pour cet article" au lieu du total du magasin) — même classe de bug que
+  // getRevenue/getArticleStock/getSalesHistory : cet outil sert AUSSI de vue magasin entier sans
+  // EAN (cf. son dispatch dans runToolForQuestion, qui bascule sur getStockoutEpisodeDetail UNIQUEMENT
+  // si un EAN est résolu), donc tout aussi ambigu qu'eux et manquant ici par oubli.
+  const AMBIGUOUS_SCOPE_TOOLS = new Set(['getRevenue', 'getArticleStock', 'getSalesHistory', 'getStockoutEpisodes']);
   const canReuseEanForTool = !AMBIGUOUS_SCOPE_TOOLS.has(toolName) || REFERS_TO_ARTICLE_REGEX.test(question);
   if (!ean && ARTICLE_SCOPED_TOOLS.has(toolName) && canReuseEanForTool && conversationHistory && conversationHistory.length) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
