@@ -779,12 +779,26 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   // cette commande, pourtant bien une vraie réaction à la rupture, était ignorée car sa ligne
   // d'origine ratait ce premier filtre. Seule la date de la COMMANDE elle-même compte pour juger
   // si le magasin a réagi, jamais la date de la proposition qui l'a précédée.
+  // BUG CORRIGÉ le 25/10/2026 (même cause que celui déjà corrigé dans getEpisodeDetail : "il y a
+  // plus 1 commande sur l'article... le système n'a pas pris ça") — ce matching s'arrêtait
+  // (`break`) à la PREMIÈRE commande qualifiante rencontrée, dans un ordre qui favorise toujours la
+  // plus ANCIENNE (lines triées par date de proposition croissante, orders par date croissante dans
+  // ordersByKey). Un article resté en rupture plusieurs jours peut recevoir PLUSIEURS commandes
+  // successives (la première restée sans livraison, une nouvelle commande passée ensuite) : seule la
+  // plus RÉCENTE reflète la vraie situation actuelle (deliveryStatus notamment, qui doit juger si LA
+  // dernière commande a été livrée, pas une commande antérieure déjà périmée). Parcourt désormais
+  // toutes les lignes/commandes candidates et retient celle dont createdAt est le plus grand.
   const localMatchByEpisode = episodes.map((e) => {
     let orderCreatedAt = null;
     let matchedOrder = null;
     for (const line of linesByEan.get(e.ean) || []) {
-      const candidate = (ordersByKey.get(line.proposalId) || []).find((o) => o.createdAt >= e.startedAt);
-      if (candidate) { orderCreatedAt = candidate.createdAt; matchedOrder = candidate; break; }
+      const candidates = (ordersByKey.get(line.proposalId) || []).filter((o) => o.createdAt >= e.startedAt);
+      for (const candidate of candidates) {
+        if (!matchedOrder || candidate.createdAt > matchedOrder.createdAt) {
+          orderCreatedAt = candidate.createdAt;
+          matchedOrder = candidate;
+        }
+      }
     }
     return { episode: e, orderCreatedAt, matchedOrder };
   });
@@ -806,8 +820,10 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     try {
       const product = await rpos.getProductByEan(e.rposPosId, rposShopId, e.ean);
       if (!product) return;
-      const history = await rpos.getPurchaseHistoryForProduct(e.rposPosId, rposShopId, product.id, e.startedAt.toISOString(), now.toISOString());
-      const sorted = [...history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      // Trié décroissant et on prend le premier (= le plus récent) qualifiant — même correctif que
+      // le matching local ci-dessus (25/10/2026) : plusieurs commandes RPOS peuvent exister depuis
+      // le début de la rupture, seule la plus récente reflète la situation actuelle.
+      const sorted = [...history].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       const candidate = sorted.find((o) => o.date && new Date(o.date) >= e.startedAt);
       if (candidate) m.orderCreatedAt = new Date(candidate.date);
       // matchedOrder reste null : getPurchaseHistoryForProduct ne renvoie pas de date de réception,
@@ -1435,18 +1451,27 @@ async function getEpisodeDetail(episodeId) {
   // nul (cas courant : plusieurs rayons d'une même proposition peuvent partager une commande), le
   // filtre élimine silencieusement cette commande pourtant réelle. Filtré uniquement par proposalId
   // désormais, comme getOpenEpisodes.
+  //
+  // BUG CORRIGÉ le 25/10/2026 (signalé : "il y a plus 1 commande sur l'article... le système n'a
+  // pas pris ça") — la boucle s'arrêtait (`break`) à la PREMIÈRE commande trouvée en parcourant les
+  // lignes dans l'ordre croissant de génération, donc toujours la commande la PLUS ANCIENNE après le
+  // début de la rupture. Un article resté en rupture plusieurs jours peut recevoir PLUSIEURS
+  // commandes successives (la première ayant échoué/pas livrée, cf. le cas réel constaté : commande
+  // du 17/10 jamais réceptionnée, nouvelle commande du 20/10 ensuite ignorée) — on parcourt
+  // désormais TOUTES les commandes candidates et on retient la plus RÉCENTE (createdAt le plus
+  // grand), seule pertinente pour juger si le magasin a effectivement réagi face à la situation
+  // actuelle de l'épisode.
   let order = null;
   let matchedLine = null;
   let receptionEvents = [];
   for (const line of candidateLines) {
     const candidateOrder = await prisma.proposalOrder.findFirst({
       where: { proposalId: line.proposalId, createdAt: { gte: episode.startedAt } },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
-    if (candidateOrder) {
+    if (candidateOrder && (!order || candidateOrder.createdAt > order.createdAt)) {
       order = candidateOrder;
       matchedLine = line;
-      break;
     }
   }
   // Qui a créé/validé la commande, et sa date de validation réelle (demande explicite du
