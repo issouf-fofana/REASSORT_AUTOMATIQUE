@@ -159,6 +159,21 @@ model ProductCache {
   stock        Float
   departmentId String? @map("department_id")
 
+  // BUG CORRIGÉ le 25/10/2026 (signalé en production : "tout les article son non commandable" —
+  // 693/693 lignes d'une proposition fraîchement générée avaient currentSuppliers="aucun",
+  // supplierResolutionOrigin="NONE", sur TOUS les rayons d'un magasin) — product.suppliers (liste
+  // des fournisseurs RPOS de l'article, utilisée par proposalService.js pour déterminer le
+  // rattachement central/la cascade de résolution) n'était JAMAIS stocké sur ce cache produit.
+  // getProductByEanCached() reconstruit un objet "product" à partir des colonnes ci-dessus dès que
+  // l'article est en cache (TTL 15 min) — ce chemin omettait silencieusement .suppliers, qui
+  // n'existait tout simplement pas ici, faisant lire `undefined` (traité comme tableau vide) pour
+  // TOUT article déjà en cache. Avec un TTL court (15 min) et un magasin à fort catalogue (700+
+  // articles vus en pratique), la quasi-totalité des articles d'une génération retombait sur ce
+  // chemin cache-hit, expliquant un taux de 100% "non rattaché" au lieu d'un taux réaliste.
+  // Tableau brut RPOS (chaque élément : {id, code, name, delivery_time_days, ...}), jamais
+  // retravaillé ici — seule proposalService.js sait quels champs elle utilise (id/code/name).
+  suppliersJson String? @map("suppliers_json")
+
   syncedAt DateTime @default(now()) @map("synced_at")
 
   @@unique([rposShopId, ean])

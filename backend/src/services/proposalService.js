@@ -146,6 +146,11 @@ async function cacheProduct(shopId, posId, ean, product) {
     orderingUnit: Number(product.ordering_unit || 1),
     stock: Number(product.stock || 0),
     departmentId: product.department?.id || null,
+    // BUG CORRIGÉ le 25/10/2026 (cf. commentaire sur ProductCache.suppliersJson, schema.prisma) :
+    // product.suppliers n'était jamais persisté ici, perdu dès qu'un article repassait par le
+    // chemin cache-hit de getProductByEanCached ci-dessous — causait un taux de "non commandable"
+    // de 100% sur une proposition entière. Stocké tel quel (jamais retravaillé), même si vide.
+    suppliersJson: JSON.stringify(product.suppliers || []),
   };
   // BUG CORRIGÉ le 24/10/2026 (découvert en investiguant un cas Surstock, cf. même correctif dans
   // stockoutProductCacheRefreshJob.js/overstockProductCacheRefreshJob.js) : syncedAt a
@@ -168,15 +173,34 @@ async function cacheProduct(shopId, posId, ean, product) {
 async function getProductByEanCached(posId, shopId, ean, ignoreRposStock) {
   const cached = await prisma.productCache.findUnique({ where: { rposShopId_ean: { rposShopId: shopId, ean } } });
   if (cached && (ignoreRposStock || Date.now() - cached.syncedAt.getTime() < PRODUCT_CACHE_TTL_MS)) {
-    return {
-      id: cached.productId,
-      orderable: cached.orderable,
-      selling_price: cached.sellingPrice,
-      buying_price: cached.buyingPrice,
-      ordering_unit: cached.orderingUnit,
-      stock: cached.stock,
-      department: cached.departmentId ? { id: cached.departmentId } : null,
-    };
+    // suppliers restauré depuis suppliersJson (cf. commentaire sur ProductCache.suppliersJson,
+    // schema.prisma) — BUG CORRIGÉ le 25/10/2026 : ce chemin cache-hit omettait auparavant
+    // .suppliers entièrement, le rendant `undefined` (traité comme tableau vide par
+    // proposalService.js) pour tout article déjà en cache, causant un taux de "non commandable"
+    // de 100% sur une proposition entière. null (jamais []) pour un article mis en cache AVANT ce
+    // correctif, où suppliersJson n'a pas encore été rempli — retombe alors sur un nouvel appel
+    // RPOS ci-dessous plutôt que de prendre à tort un tableau vide pour une vraie absence de
+    // fournisseur.
+    let suppliers = null;
+    if (cached.suppliersJson !== null && cached.suppliersJson !== undefined) {
+      try {
+        suppliers = JSON.parse(cached.suppliersJson);
+      } catch {
+        suppliers = null;
+      }
+    }
+    if (suppliers !== null) {
+      return {
+        id: cached.productId,
+        orderable: cached.orderable,
+        selling_price: cached.sellingPrice,
+        buying_price: cached.buyingPrice,
+        ordering_unit: cached.orderingUnit,
+        stock: cached.stock,
+        department: cached.departmentId ? { id: cached.departmentId } : null,
+        suppliers,
+      };
+    }
   }
 
   if (ignoreRposStock) return null; // jamais vu en cache et pas de réseau à disposition : exclu proprement (pas de prix/colisage connus)
