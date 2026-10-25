@@ -975,12 +975,11 @@ async function getStockoutRisks(rposShopId, { maxDays = 3, department } = {}) {
     // ailleurs (roundWeeklySales) : c'est un total divisé par un nombre de semaines d'historique,
     // jamais un entier exact.
     select: { ean: true, label: true, department: true, stockAtGeneration: true, daysUntilStockout: true, quantitySuggested: true, avgWeeklySales: true },
-    take: 50,
   });
 
   const linesWithAvg = lines.map((l) => ({ ...l, avgWeeklySales: roundWeeklySales(l.avgWeeklySales) }));
 
-  return { found: true, maxDays, count: linesWithAvg.length, lines: linesWithAvg };
+  return { found: true, maxDays, count: linesWithAvg.length, lines: linesWithAvg.slice(0, 50) };
 }
 
 /**
