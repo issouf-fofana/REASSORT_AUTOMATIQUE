@@ -1,6 +1,41 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
+
+// Tri croissant/décroissant générique ajouté le 25/10/2026 (audit complet des tableaux du site,
+// demande explicite : "les ajouté fait un audit de tout tab") — ce fichier contient 5 tableaux
+// (ventes par magasin, ventes par jour, casse par magasin, casse par jour, DLV par ligne) sans
+// aucun tri auparavant, en plus des 2 listes déjà paginées (ventes, casse). Un seul hook générique
+// plutôt que de dupliquer 5 fois la même logique sortKey/sortDir/comparateur.
+function useSortableRows<T, K extends string>(rows: T[] | undefined, getValue: (row: T, key: K) => string | number) {
+  const [sortKey, setSortKey] = useState<K | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(key: K) {
+    if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  }
+  const sorted = useMemo(() => {
+    if (!rows) return rows;
+    if (!sortKey) return rows;
+    const dir = sortDir === 'desc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = getValue(a, sortKey);
+      const bv = getValue(b, sortKey);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, sortKey, sortDir]);
+  function SortTh({ k, children, className }: { k: K; children: React.ReactNode; className?: string }) {
+    const active = sortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(k)}>
+        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  return { sorted, SortTh };
+}
 
 // Page détail d'un article en surstock (demande explicite du 21/10/2026 : "quand je clique sur
 // l'article je peux avoir ca... tout les casse les quantité, la date et autre", ÉTENDUE le
@@ -345,6 +380,23 @@ export function OverstockScrapDetail() {
     return () => { cancelled = true; };
   }, [ean]);
 
+  const salesByShopSort = useSortableRows<SalesByShop, 'shopName' | 'totalQuantity' | 'saleCount'>(salesData?.byShop, (r, k) =>
+    k === 'shopName' ? (r.shopName || '').toLowerCase() : r[k]);
+  const salesByDaySort = useSortableRows<SalesByDay, 'date' | 'quantity' | 'saleCount'>(salesData?.byDay, (r, k) =>
+    k === 'date' ? new Date(r.date).getTime() : r[k]);
+  const salesListSort = useSortableRows<SalesLine, 'date' | 'shopName' | 'quantity' | 'revenueExclTax'>(salesData?.sales, (r, k) =>
+    k === 'date' ? new Date(r.date).getTime() : k === 'shopName' ? (r.shopName || '').toLowerCase() : r[k]);
+
+  const scrapByShopSort = useSortableRows<ScrapByShop, 'shopName' | 'totalQuantity' | 'moveCount'>(data?.byShop, (r, k) =>
+    k === 'shopName' ? (r.shopName || '').toLowerCase() : r[k]);
+  const scrapByDaySort = useSortableRows<ScrapByDay, 'date' | 'quantity' | 'moveCount'>(data?.byDay, (r, k) =>
+    k === 'date' ? new Date(r.date).getTime() : r[k]);
+  const scrapListSort = useSortableRows<ScrapMove, 'date' | 'shopName' | 'quantity' | 'typeLabel'>(data?.moves, (r, k) =>
+    k === 'date' ? new Date(r.date).getTime() : k === 'typeLabel' ? (r.typeLabel || '').toLowerCase() : k === 'shopName' ? (r.shopName || '').toLowerCase() : r[k]);
+
+  const dlvListSort = useSortableRows<EndOfLifeLine, 'shopName' | 'dlvEan' | 'dlvStock' | 'sellingPrice' | 'syncedAt'>(dlvData?.lines, (r, k) =>
+    k === 'shopName' ? (r.shopName || '').toLowerCase() : k === 'syncedAt' ? new Date(r.syncedAt).getTime() : k === 'sellingPrice' ? (r.sellingPrice ?? -Infinity) : r[k]);
+
   function exportCsv() {
     if (!data?.moves) return;
     downloadCsv(
@@ -471,13 +523,13 @@ export function OverstockScrapDetail() {
                   <table className="table align-middle table-sm mb-0">
                     <thead className="bg-light-subtle">
                       <tr>
-                        <th>Magasin</th>
-                        <th>Quantité vendue</th>
-                        <th>Nombre de ventes</th>
+                        <salesByShopSort.SortTh k="shopName">Magasin</salesByShopSort.SortTh>
+                        <salesByShopSort.SortTh k="totalQuantity">Quantité vendue</salesByShopSort.SortTh>
+                        <salesByShopSort.SortTh k="saleCount">Nombre de ventes</salesByShopSort.SortTh>
                       </tr>
                     </thead>
                     <tbody>
-                      {salesData.byShop.map((s) => (
+                      {(salesByShopSort.sorted || []).map((s) => (
                         <tr key={s.rposShopId}>
                           <td>{s.shopName} ({s.shopReference})</td>
                           <td className="fw-semibold" style={{ color: '#1B2A4A' }}>{s.totalQuantity.toLocaleString('fr-FR')}</td>
@@ -498,13 +550,13 @@ export function OverstockScrapDetail() {
                     <table className="table align-middle table-sm mb-0">
                       <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
                         <tr>
-                          <th>Jour</th>
-                          <th>Quantité vendue</th>
-                          <th>Nombre de ventes</th>
+                          <salesByDaySort.SortTh k="date">Jour</salesByDaySort.SortTh>
+                          <salesByDaySort.SortTh k="quantity">Quantité vendue</salesByDaySort.SortTh>
+                          <salesByDaySort.SortTh k="saleCount">Nombre de ventes</salesByDaySort.SortTh>
                         </tr>
                       </thead>
                       <tbody>
-                        {salesData.byDay.map((d) => (
+                        {(salesByDaySort.sorted || []).map((d) => (
                           <tr key={d.date}>
                             <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
                             <td className="fw-semibold" style={{ color: '#1B2A4A' }}>{d.quantity.toLocaleString('fr-FR')}</td>
@@ -532,17 +584,17 @@ export function OverstockScrapDetail() {
                 <table className="table align-middle table-hover mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Date</th>
-                      <th>Magasin</th>
-                      <th>Quantité</th>
-                      <th>CA HT</th>
+                      <salesListSort.SortTh k="date">Date</salesListSort.SortTh>
+                      <salesListSort.SortTh k="shopName">Magasin</salesListSort.SortTh>
+                      <salesListSort.SortTh k="quantity">Quantité</salesListSort.SortTh>
+                      <salesListSort.SortTh k="revenueExclTax">CA HT</salesListSort.SortTh>
                     </tr>
                   </thead>
                   <tbody>
-                    {!salesData.sales || salesData.sales.length === 0 ? (
+                    {!salesListSort.sorted || salesListSort.sorted.length === 0 ? (
                       <tr><td colSpan={4} className="text-center text-muted py-4">Aucune vente enregistrée sur cette période.</td></tr>
                     ) : (
-                      paginate(salesData.sales, salesPage).map((s, i) => (
+                      paginate(salesListSort.sorted, salesPage).map((s, i) => (
                         <tr key={i}>
                           <td>{new Date(s.date).toLocaleString('fr-FR')}</td>
                           <td>{s.shopName} ({s.shopReference})</td>
@@ -594,13 +646,13 @@ export function OverstockScrapDetail() {
                   <table className="table align-middle table-sm mb-0">
                     <thead className="bg-light-subtle">
                       <tr>
-                        <th>Magasin</th>
-                        <th>Quantité perdue</th>
-                        <th>Nombre de mouvements</th>
+                        <scrapByShopSort.SortTh k="shopName">Magasin</scrapByShopSort.SortTh>
+                        <scrapByShopSort.SortTh k="totalQuantity">Quantité perdue</scrapByShopSort.SortTh>
+                        <scrapByShopSort.SortTh k="moveCount">Nombre de mouvements</scrapByShopSort.SortTh>
                       </tr>
                     </thead>
                     <tbody>
-                      {data.byShop.map((s) => (
+                      {(scrapByShopSort.sorted || []).map((s) => (
                         <tr key={s.rposShopId}>
                           <td>{s.shopName} ({s.shopReference})</td>
                           <td className="osd-scrap-qty">−{s.totalQuantity.toLocaleString('fr-FR')}</td>
@@ -621,13 +673,13 @@ export function OverstockScrapDetail() {
                   <table className="table align-middle table-sm mb-0">
                     <thead className="bg-light-subtle" style={{ position: 'sticky', top: 0 }}>
                       <tr>
-                        <th>Jour</th>
-                        <th>Quantité perdue</th>
-                        <th>Nombre de mouvements</th>
+                        <scrapByDaySort.SortTh k="date">Jour</scrapByDaySort.SortTh>
+                        <scrapByDaySort.SortTh k="quantity">Quantité perdue</scrapByDaySort.SortTh>
+                        <scrapByDaySort.SortTh k="moveCount">Nombre de mouvements</scrapByDaySort.SortTh>
                       </tr>
                     </thead>
                     <tbody>
-                      {data.byDay.map((d) => (
+                      {(scrapByDaySort.sorted || []).map((d) => (
                         <tr key={d.date}>
                           <td>{new Date(d.date).toLocaleDateString('fr-FR')}</td>
                           <td className="osd-scrap-qty">−{d.quantity.toLocaleString('fr-FR')}</td>
@@ -655,17 +707,17 @@ export function OverstockScrapDetail() {
                 <table className="table align-middle table-hover mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Date</th>
-                      <th>Magasin</th>
-                      <th>Quantité</th>
-                      <th>Type de mouvement</th>
+                      <scrapListSort.SortTh k="date">Date</scrapListSort.SortTh>
+                      <scrapListSort.SortTh k="shopName">Magasin</scrapListSort.SortTh>
+                      <scrapListSort.SortTh k="quantity">Quantité</scrapListSort.SortTh>
+                      <scrapListSort.SortTh k="typeLabel">Type de mouvement</scrapListSort.SortTh>
                     </tr>
                   </thead>
                   <tbody>
-                    {!data.moves || data.moves.length === 0 ? (
+                    {!scrapListSort.sorted || scrapListSort.sorted.length === 0 ? (
                       <tr><td colSpan={4} className="text-center text-muted py-4">Aucune casse enregistrée sur cette période.</td></tr>
                     ) : (
-                      paginate(data.moves, scrapPage).map((m, i) => (
+                      paginate(scrapListSort.sorted, scrapPage).map((m, i) => (
                         <tr key={i}>
                           <td>{new Date(m.date).toLocaleString('fr-FR')}</td>
                           <td>{m.shopName} ({m.shopReference})</td>
@@ -706,18 +758,18 @@ export function OverstockScrapDetail() {
                 <table className="table align-middle table-hover mb-0">
                   <thead className="bg-light-subtle">
                     <tr>
-                      <th>Magasin</th>
-                      <th>EAN DLV</th>
-                      <th>Stock DLV</th>
-                      <th>Prix de vente DLV</th>
-                      <th>Synchronisé le</th>
+                      <dlvListSort.SortTh k="shopName">Magasin</dlvListSort.SortTh>
+                      <dlvListSort.SortTh k="dlvEan">EAN DLV</dlvListSort.SortTh>
+                      <dlvListSort.SortTh k="dlvStock">Stock DLV</dlvListSort.SortTh>
+                      <dlvListSort.SortTh k="sellingPrice">Prix de vente DLV</dlvListSort.SortTh>
+                      <dlvListSort.SortTh k="syncedAt">Synchronisé le</dlvListSort.SortTh>
                     </tr>
                   </thead>
                   <tbody>
-                    {!dlvData.lines || dlvData.lines.length === 0 ? (
+                    {!dlvListSort.sorted || dlvListSort.sorted.length === 0 ? (
                       <tr><td colSpan={5} className="text-center text-muted py-4">Aucune fiche DLV pour cet article.</td></tr>
                     ) : (
-                      paginate(dlvData.lines, dlvPage).map((l, i) => (
+                      paginate(dlvListSort.sorted, dlvPage).map((l, i) => (
                         <tr key={i}>
                           <td>{l.shopName} ({l.shopReference})</td>
                           <td>{l.dlvEan}</td>
