@@ -38,7 +38,11 @@ type DepartmentRow = {
 
 type ByFieldSummary = { found: boolean; groupCount: number; groups: DepartmentRow[]; message?: string };
 
-type SortKey = 'openCount' | 'avgDurationHours' | 'totalCaPerduEstime' | 'longEpisodesCount';
+// Étendu le 25/10/2026 (demande explicite : "le system de filtre croissant decroissant doit etre
+// sur tous les tabeau du site" — ici : sur TOUTES les colonnes, pas seulement les 3 d'origine) —
+// 'group' ajouté pour trier alphabétiquement par nom de rayon, en plus des colonnes numériques déjà
+// triables.
+type SortKey = 'group' | 'openCount' | 'avgDurationHours' | 'noOrderCount' | 'totalCaPerduEstime' | 'caPerduSansCommande' | 'caPerduEnAttenteLivraison' | 'caPerduLivraisonDouteuse' | 'longEpisodesCount';
 
 function formatDuration(hours: number): string {
   if (hours < 24) return `${Math.round(hours)} h`;
@@ -89,7 +93,10 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
   const rows = useMemo(() => {
     const list = data?.groups || [];
     const dir = sortDir === 'desc' ? 1 : -1;
-    return [...list].sort((a, b) => dir * (b[sortKey] - a[sortKey]));
+    return [...list].sort((a, b) => {
+      if (sortKey === 'group') return dir * b.group.localeCompare(a.group, 'fr-FR');
+      return dir * (b[sortKey] - a[sortKey]);
+    });
   }, [data, sortKey, sortDir]);
 
   const priorityCount = rows.filter((r) => priorityLevel(r).label === 'Prioritaire').length;
@@ -97,20 +104,34 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
   const topCaRow = rows.find((r) => r.totalCaPerduEstime === topCaPerdu && topCaPerdu > 0);
   const visibleRows = showAll ? rows : rows.slice(0, 5);
 
-  function SortButton({ k, label }: { k: SortKey; label: string }) {
+  // Ligne de total général ajoutée le 25/10/2026 (demande explicite : "il doit affiche le total ce
+  // tout c'est a dire le total general tu vois somme de tous les rayon") — calculée sur TOUS les
+  // rayons (`rows`), jamais sur `visibleRows` (limité à 5 tant que "Voir les X autres" n'a pas été
+  // cliqué), sinon le total afficherait une somme partielle trompeuse.
+  const totals = useMemo(() => rows.reduce((acc, r) => ({
+    openCount: acc.openCount + r.openCount,
+    noOrderCount: acc.noOrderCount + r.noOrderCount,
+    caPerduSansCommande: acc.caPerduSansCommande + r.caPerduSansCommande,
+    caPerduEnAttenteLivraison: acc.caPerduEnAttenteLivraison + r.caPerduEnAttenteLivraison,
+    caPerduLivraisonDouteuse: acc.caPerduLivraisonDouteuse + r.caPerduLivraisonDouteuse,
+  }), { openCount: 0, noOrderCount: 0, caPerduSansCommande: 0, caPerduEnAttenteLivraison: 0, caPerduLivraisonDouteuse: 0 }), [rows]);
+  const totalCaPerduGeneral = totals.caPerduSansCommande + totals.caPerduEnAttenteLivraison + totals.caPerduLivraisonDouteuse;
+
+  // Remplace les 3 anciens boutons de tri (pills au-dessus du tableau, limités à 3 colonnes) par des
+  // en-têtes de colonne cliquables couvrant TOUTES les colonnes (demande explicite du 25/10/2026).
+  function SortableHeader({ k, label }: { k: SortKey; label: string }) {
     const active = sortKey === k;
     return (
-      <button
-        type="button"
-        className={`btn btn-sm ${active ? 'btn-primary' : 'btn-outline-secondary'}`}
+      <th
+        role="button"
         onClick={() => {
           if (active) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
           else { setSortKey(k); setSortDir('desc'); }
         }}
+        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
       >
-        {label}
-        {active && <iconify-icon icon={sortDir === 'desc' ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-up-linear'} style={{ fontSize: '11px', marginLeft: 4 }}></iconify-icon>}
-      </button>
+        {label} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
     );
   }
 
@@ -125,11 +146,6 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
       <div className="card-body py-3">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
           <h6 className="mb-0" style={{ color: '#1B2A4A', fontWeight: 700 }}>Analyse par rayon</h6>
-          <div className="d-flex gap-1">
-            <SortButton k="openCount" label="Ruptures" />
-            <SortButton k="avgDurationHours" label="Durée" />
-            <SortButton k="totalCaPerduEstime" label="CA perdu" />
-          </div>
         </div>
 
         {error ? (
@@ -165,14 +181,14 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
               <table className="table align-middle mb-0 stockout-rayon-table">
                 <thead className="bg-light-subtle">
                   <tr>
-                    <th>Rayon</th>
-                    <th>En cours</th>
-                    <th>Durée moy.</th>
-                    <th>Sans commande</th>
-                    <th>CA perdu total</th>
-                    <th>CA perdu avant commande</th>
-                    <th>CA perdu, commandé (&lt;48h)</th>
-                    <th>CA perdu, livraison douteuse (&gt;48h)</th>
+                    <SortableHeader k="group" label="Rayon" />
+                    <SortableHeader k="openCount" label="En cours" />
+                    <SortableHeader k="avgDurationHours" label="Durée moy." />
+                    <SortableHeader k="noOrderCount" label="Sans commande" />
+                    <SortableHeader k="totalCaPerduEstime" label="CA perdu total" />
+                    <SortableHeader k="caPerduSansCommande" label="CA perdu avant commande" />
+                    <SortableHeader k="caPerduEnAttenteLivraison" label="CA perdu, commandé (<48h)" />
+                    <SortableHeader k="caPerduLivraisonDouteuse" label="CA perdu, livraison douteuse (>48h)" />
                     <th>Priorité</th>
                   </tr>
                 </thead>
@@ -194,6 +210,19 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="fw-semibold" style={{ borderTop: '2px solid rgba(27,42,74,.12)' }}>
+                    <td>Total ({rows.length} rayon{rows.length > 1 ? 's' : ''})</td>
+                    <td>{totals.openCount}</td>
+                    <td>—</td>
+                    <td>{totals.noOrderCount}</td>
+                    <td>{totalCaPerduGeneral.toLocaleString('fr-FR')} CFA</td>
+                    <td>{totals.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
+                    <td>{totals.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
+                    <td>{totals.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
 
