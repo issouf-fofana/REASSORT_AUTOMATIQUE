@@ -382,20 +382,22 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     }
     prevShopQueryParamRef.current = shopQueryParam;
     mountRef.current = true;
-    // start/end ajoutés le 20/10/2026 (demande explicite : "quand je fait un filtre il doit etre
-    // appliqué sur tout") — avant ce correctif, ce KPI restait figé sur l'état courant peu importe
-    // la période choisie en haut de page, incohérent avec le graphe de tendance et l'analyse des
-    // pertes qui, eux, suivaient déjà periodStart/periodEnd. Même format ISO que
-    // StockoutTrendChart/StockoutPeriodAnalysis (fin de journée incluse via T23:59:59).
-    const periodParams = `start=${encodeURIComponent(new Date(periodStart).toISOString())}&end=${encodeURIComponent(new Date(periodEnd + 'T23:59:59').toISOString())}`;
-    apiFetch<StockoutSummary>(`/reassort/stockout-episodes?${periodParams}&${shopQueryParam}`)
+    // start/end RETIRÉS le 25/10/2026 (demande explicite : "je veux les article en rupture A MEME
+    // aujourd'hui pas 30j... s'il y a 30j j'avais 300 ruptures mais aujourd'hui j'ai combien ?") —
+    // ce KPI ("SITUATION ACTUELLE") avait été lié le 20/10/2026 au filtre de période en haut de
+    // page pour rester cohérent avec le graphe de tendance, mais ce mode "période" mélange les
+    // ruptures déjà résolues dans la fenêtre avec l'état réel du jour, faussant le total pour un
+    // usage "coup d'oeil du DG". Redevient l'état COURANT (EN_COURS uniquement), indépendant du
+    // filtre de période ci-dessous — qui continue de piloter le graphe de tendance et l'analyse des
+    // pertes, restés volontairement historiques.
+    apiFetch<StockoutSummary>(`/reassort/stockout-episodes?${shopQueryParam}`)
       .then((data) => { if (!cancelled && mountRef.current) setSummary(data); })
       .catch((err) => { if (!cancelled && mountRef.current) setError(err instanceof Error ? err.message : String(err)); });
     return () => {
       cancelled = true;
       mountRef.current = false;
     };
-  }, [shopQueryParam, periodStart, periodEnd]);
+  }, [shopQueryParam]);
 
   // Niveau Secteurs : chargé une fois par magasin, et rechargé à chaque changement de période
   // (même correctif que ci-dessus — demande explicite du 20/10/2026).
@@ -729,17 +731,19 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               <div className="stockout-mini-kpi">
                 <span className="icon bg-warning-subtle"><iconify-icon icon="solar:alert-bold-duotone" className="text-warning"></iconify-icon></span>
                 <div>
-                  {/* "En cours" reste le libellé affiché, mais depuis le filtre de période appliqué
-                      partout (20/10/2026), ce chiffre compte les ruptures ACTIVES À UN MOMENT de la
-                      période choisie (pas seulement celles encore ouvertes maintenant) — cohérent
-                      avec le graphe de tendance, qui fait déjà ce calcul. */}
+                  {/* RE-CORRIGÉ le 25/10/2026 (demande explicite : "je veux les article en rupture A
+                      MEME aujourd'hui pas 30j") — ce KPI avait été lié au filtre de période le
+                      20/10/2026 (comptait alors les ruptures actives À UN MOMENT de la période,
+                      résolues incluses), ce qui pouvait gonfler artificiellement le chiffre affiché
+                      "au premier coup d'oeil" avec des ruptures déjà réapprovisionnées. Redevenu
+                      l'état COURANT : uniquement les ruptures encore EN_COURS maintenant, cf.
+                      l'appel sans start/end plus haut dans ce fichier. */}
                   <div className="label">
-                    Articles touchés (période)
+                    Articles en rupture (maintenant)
                     <FormulaInfoButton
-                      title="Articles touchés sur la période"
+                      title="Articles en rupture maintenant"
                       steps={[
-                        { label: 'Calcul', detail: "Nombre d'articles distincts ayant eu une rupture active à N'IMPORTE QUEL moment de la période sélectionnée — pas seulement ceux encore en rupture aujourd'hui." },
-                        { label: 'Différent du graphe', detail: 'Le dernier point du graphe "Ruptures en cours" ci-dessus montre, lui, uniquement les ruptures actives le DERNIER jour de la période — un chiffre presque toujours plus petit que ce total cumulé.' },
+                        { label: 'Calcul', detail: "Nombre d'articles distincts encore EN rupture à l'instant présent (stock pas encore réapprovisionné) — indépendant du filtre de période ci-dessus, qui ne pilote que le graphe de tendance et l'analyse des pertes." },
                       ]}
                     />
                   </div>
@@ -759,12 +763,12 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               <div className="stockout-mini-kpi">
                 <span className="icon bg-danger-subtle"><iconify-icon icon="solar:dollar-bold-duotone" className="text-danger"></iconify-icon></span>
                 <div>
-                  {/* Libellé rendu dynamique le 20/10/2026 (ex-"CA perdu (30j)" fixe, désormais
-                      trompeur depuis que ce KPI suit le sélecteur de période unique de la page —
-                      demande explicite : "quand je fait un filtre il doit etre appliqué sur tout"). */}
-                  <div className="label">CA perdu</div>
+                  {/* RE-CORRIGÉ le 25/10/2026 (même changement que la tuile précédente) — ce CA
+                      perdu porte à nouveau sur les ruptures EN COURS maintenant, pas la période
+                      choisie en haut de page (qui ne pilote plus que le graphe/l'analyse des pertes
+                      ci-dessous). */}
+                  <div className="label">CA perdu (ruptures en cours)</div>
                   <div className="value">{Math.round(displayedTotalCaPerdu).toLocaleString('fr-FR')} CFA</div>
-                  <div className="sub">{new Date(periodStart).toLocaleDateString('fr-FR')} → {new Date(periodEnd).toLocaleDateString('fr-FR')}</div>
                 </div>
               </div>
             </div>

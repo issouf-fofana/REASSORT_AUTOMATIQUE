@@ -57,10 +57,16 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
   // Filtre de période (demande explicite du 20/10/2026 : "il ya pas de filtre ajoute tout les
   // filtre possible sur ca") — même préréglages 7j/30j/90j + dates libres que l'onglet "Ce
   // magasin" (StockoutShopDetail.tsx), qui pilote déjà ce même calcul côté backend pour un seul
-  // magasin (getDashboardSummary periodMode). Par défaut 30 derniers jours, cohérent avec l'ancien
-  // comportement non filtré (lookback 30j implicite côté backend).
-  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  // magasin (getDashboardSummary periodMode).
+  //
+  // RE-CORRIGÉ le 25/10/2026 (même demande explicite que StockoutShopDetail.tsx : "je veux les
+  // article en rupture A MEME aujourd'hui pas 30j") — null par défaut (aucune période choisie) au
+  // lieu de "30 derniers jours" pré-rempli : sans période active, le backend retombe sur l'état
+  // COURANT (ruptures encore EN_COURS maintenant), pas un mélange avec des ruptures déjà résolues
+  // dans une fenêtre glissante. L'utilisateur peut toujours activer un préréglage (7j/30j/90j) ou
+  // des dates libres pour une analyse historique explicite.
+  const [periodStart, setPeriodStart] = useState<string | null>(null);
+  const [periodEnd, setPeriodEnd] = useState<string | null>(null);
 
   // Recherche + filtres avancés + tri : appliqués côté client sur la liste déjà reçue (une ligne
   // par magasin accessible, jamais plus de quelques dizaines) — pas besoin d'un aller-retour
@@ -75,8 +81,10 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
     let cancelled = false;
     setSummary(null);
     setError(null);
-    const periodParams = `start=${encodeURIComponent(new Date(periodStart).toISOString())}&end=${encodeURIComponent(new Date(periodEnd + 'T23:59:59').toISOString())}`;
-    apiFetch<AllShopsSummary>(`/reassort/stockout-episodes/all-shops?${periodParams}`)
+    const periodParams = (periodStart && periodEnd)
+      ? `?start=${encodeURIComponent(new Date(periodStart).toISOString())}&end=${encodeURIComponent(new Date(periodEnd + 'T23:59:59').toISOString())}`
+      : '';
+    apiFetch<AllShopsSummary>(`/reassort/stockout-episodes/all-shops${periodParams}`)
       .then((data) => { if (!cancelled) setSummary(data); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
@@ -128,6 +136,7 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
   // sur le jour plutôt que l'horodatage exact, periodEnd/periodStart étant des dates (pas des
   // datetimes) ici.
   const activePresetDays = (() => {
+    if (!periodStart || !periodEnd) return null;
     const start = new Date(periodStart).getTime();
     const end = new Date(periodEnd).getTime();
     const diffDays = Math.round((end - start) / (24 * 60 * 60 * 1000));
@@ -179,9 +188,19 @@ export function StockoutsAllShopsView({ onSelectShop }: { onSelectShop: (shop: {
                 {preset.label}
               </button>
             ))}
-            <input type="date" className="aso-input" style={{ width: 142 }} value={periodStart} max={periodEnd} onChange={(e) => setPeriodStart(e.target.value)} />
+            <input type="date" className="aso-input" style={{ width: 142 }} value={periodStart || ''} max={periodEnd || undefined} onChange={(e) => setPeriodStart(e.target.value)} />
             <span className="text-muted small">au</span>
-            <input type="date" className="aso-input" style={{ width: 142 }} value={periodEnd} min={periodStart} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+            <input type="date" className="aso-input" style={{ width: 142 }} value={periodEnd || ''} min={periodStart || undefined} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setPeriodEnd(e.target.value)} />
+            {(periodStart || periodEnd) && (
+              <button
+                type="button"
+                className="aso-preset"
+                title="Revenir à l'état courant (ruptures encore en cours maintenant)"
+                onClick={() => { setPeriodStart(null); setPeriodEnd(null); }}
+              >
+                Maintenant
+              </button>
+            )}
           </div>
 
           <div className="ms-auto d-flex align-items-center gap-2 flex-wrap">
