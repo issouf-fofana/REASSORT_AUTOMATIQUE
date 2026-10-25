@@ -38,6 +38,12 @@ const FALLBACK_INTENT_RULES = [
   // detectIntent) mais celui-ci ne couvre que le motif "X% du CA", jamais "quel rayon vend le mieux"
   // qui ne passe que par cette liste générique.
   { keywords: ['pareto', '80%', '80 %', 'part du ca', 'part de ca', 'représentent le plus de ca', 'font le plus de ca', 'articles principaux', 'gros vendeurs', 'meilleures ventes', 'top articles', 'top vente', 'quel rayon vend le mieux', 'quel rayon vend le plus', 'meilleur rayon', 'rayon qui vend le plus', 'rayon qui vend le mieux', 'classement des rayons', 'comparer les rayons', 'comparaison des rayons'], tool: 'getParetoArticles' },
+  // "rayon le plus touché par les ruptures" DOIT rester AVANT la règle générique getArticleDetails
+  // ci-dessous (bug réel constaté le 25/10/2026 : "quel rayon est le plus touché par les ruptures
+  // ?" répondait la fiche article d'un code EAN, preuve qu'il matchait getArticleDetails via le
+  // simple mot-clé "quel rayon") — même pattern de priorité spécifique-avant-générique que
+  // getParetoArticles ci-dessus pour "quel rayon vend le mieux".
+  { keywords: ['rayon le plus touché', 'rayon le plus touche', 'quel rayon est le plus touché', 'quel rayon est le plus touche', 'quel rayon a le plus de rupture', 'quel rayon a le plus de ruptures', 'quel rayon le plus touché par les rupture', 'quel rayon le plus touche par les rupture'], tool: 'getStockoutEpisodes' },
   // "le prix de" (sans "vente"/"actuel") ajouté le 05/10/2026 (bug trouvé en testant la recherche
   // par nom : "quel est le prix de l'article codys ?" ne matchait aucun mot-clé existant — seuls
   // "prix de vente"/"prix actuel"/"quel prix" l'étaient — donc tombait sur le filet LLM générique au
@@ -69,7 +75,7 @@ const FALLBACK_INTENT_RULES = [
   // 25/10/2026 avec capture : "50" ici contre 285 sur la page). "rupture"/"stock critique" seuls
   // sont désormais couverts par getStockoutEpisodes (règle générique ci-dessous), plus pertinente
   // pour la question la plus fréquente ("qu'est-ce qui ne va pas MAINTENANT").
-  { keywords: ['risque de rupture', 'risque de ruptures', 'va manquer', 'vont manquer', 'va bientôt manquer', 'va bientot manquer', 'bientôt en rupture', 'bientot en rupture', 'quoi va manquer', 'quels articles vont manquer', 'quel article va manquer', 'articles qui risquent de manquer', 'article qui risque de manquer', 'qui va bientôt être en rupture', 'qui va bientot etre en rupture', 'stock critique', 'stock bientôt a zero', 'stock bientot a zero'], tool: 'getStockoutRisks' },
+  { keywords: ['risque de rupture', 'risque de ruptures', 'va manquer', 'vont manquer', 'va bientôt manquer', 'va bientot manquer', 'bientôt en rupture', 'bientot en rupture', 'quoi va manquer', 'quels articles vont manquer', 'quel article va manquer', 'articles qui risquent de manquer', 'article qui risque de manquer', 'qui va bientôt être en rupture', 'qui va bientot etre en rupture', 'stock critique', 'stock bientôt a zero', 'stock bientot a zero', 'risquent une rupture', 'risque une rupture', 'risquent de tomber en rupture', 'risque de tomber en rupture', 'rupture prochainement', 'rupture bientot', 'rupture bientôt', 'quels articles risquent', 'quel article risque'], tool: 'getStockoutRisks' },
   // Filet générique : toute mention de "rupture"/"articles en manque" non capturée par les règles
   // plus spécifiques ci-dessus retombe sur l'état RÉEL constaté (getStockoutEpisodes), pas le risque
   // futur — c'est la question la plus fréquente et la plus souvent mal formulée.
