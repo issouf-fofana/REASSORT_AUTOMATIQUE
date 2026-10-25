@@ -87,6 +87,105 @@ export function WeeklyPlanHistoryModal({ weeklyPlanId, onClose }: { weeklyPlanId
     : '';
   const articlesWithChange = history ? history.articles.filter((a) => a.variation !== 0) : [];
 
+  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
+  // explicite : "les ajouté fait un audit de tout tab") — les 3 tableaux de cette modale n'avaient
+  // aucun tri (ni Révisions, ni Évolution par article, ni Fiabilité des prédictions).
+  type RevisionSortKey = 'revisionNumber' | 'generatedAt' | 'status' | 'articleCount';
+  const [revisionSortKey, setRevisionSortKey] = useState<RevisionSortKey | null>(null);
+  const [revisionSortDir, setRevisionSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleRevisionSort(k: RevisionSortKey) {
+    if (revisionSortKey === k) setRevisionSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setRevisionSortKey(k); setRevisionSortDir('desc'); }
+  }
+  function RevisionTh({ k, children, className }: { k: RevisionSortKey; children: React.ReactNode; className?: string }) {
+    const active = revisionSortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleRevisionSort(k)}>
+        {children} {active ? (revisionSortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedRevisions = (() => {
+    if (!history || !revisionSortKey) return history?.revisions;
+    const dir = revisionSortDir === 'desc' ? 1 : -1;
+    const getValue = (r: Revision): number | string => {
+      if (revisionSortKey === 'generatedAt') return new Date(r.generatedAt).getTime();
+      if (revisionSortKey === 'status') return r.status;
+      return r[revisionSortKey];
+    };
+    return [...history.revisions].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+  })();
+
+  type ArticleSortKey = 'ean' | 'label' | 'variation';
+  const [articleSortKey, setArticleSortKey] = useState<ArticleSortKey | null>(null);
+  const [articleSortDir, setArticleSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleArticleSort(k: ArticleSortKey) {
+    if (articleSortKey === k) setArticleSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setArticleSortKey(k); setArticleSortDir('desc'); }
+  }
+  function ArticleTh({ k, children, className }: { k: ArticleSortKey; children: React.ReactNode; className?: string }) {
+    const active = articleSortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleArticleSort(k)}>
+        {children} {active ? (articleSortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedArticlesWithChange = (() => {
+    if (!articleSortKey) return articlesWithChange;
+    const dir = articleSortDir === 'desc' ? 1 : -1;
+    const getValue = (a: ArticleHistory): number | string => {
+      if (articleSortKey === 'ean') return a.ean;
+      if (articleSortKey === 'label') return (a.label || '').toLowerCase();
+      return a.variation;
+    };
+    return [...articlesWithChange].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+  })();
+
+  type OutcomeSortKey = 'ean' | 'label' | 'predictedWeeklyDemand' | 'actualSales' | 'forecastError' | 'percentageError';
+  const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey | null>(null);
+  const [outcomeSortDir, setOutcomeSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleOutcomeSort(k: OutcomeSortKey) {
+    if (outcomeSortKey === k) setOutcomeSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setOutcomeSortKey(k); setOutcomeSortDir('desc'); }
+  }
+  function OutcomeTh({ k, children, className }: { k: OutcomeSortKey; children: React.ReactNode; className?: string }) {
+    const active = outcomeSortKey === k;
+    return (
+      <th className={className} role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleOutcomeSort(k)}>
+        {children} {active ? (outcomeSortDir === 'desc' ? '▼' : '▲') : ''}
+      </th>
+    );
+  }
+  const sortedOutcomes = (() => {
+    if (!outcomes || !outcomeSortKey) return outcomes;
+    const dir = outcomeSortDir === 'desc' ? 1 : -1;
+    const getValue = (p: PredictionOutcome): number | string => {
+      if (outcomeSortKey === 'ean') return p.ean;
+      if (outcomeSortKey === 'label') return (p.label || '').toLowerCase();
+      if (outcomeSortKey === 'predictedWeeklyDemand') return p.predictedWeeklyDemand;
+      if (outcomeSortKey === 'actualSales') return p.outcome?.actualSales ?? -Infinity;
+      if (outcomeSortKey === 'forecastError') return p.outcome?.forecastError ?? -Infinity;
+      return p.outcome?.percentageError ?? -Infinity;
+    };
+    return [...outcomes].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
+      return dir * ((bv as number) - (av as number));
+    });
+  })();
+
   return (
     <>
       <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} role="dialog">
@@ -109,14 +208,14 @@ export function WeeklyPlanHistoryModal({ weeklyPlanId, onClose }: { weeklyPlanId
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>#</th>
-                          <th>Générée le</th>
-                          <th>Statut</th>
-                          <th className="text-end">Articles</th>
+                          <RevisionTh k="revisionNumber">#</RevisionTh>
+                          <RevisionTh k="generatedAt">Générée le</RevisionTh>
+                          <RevisionTh k="status">Statut</RevisionTh>
+                          <RevisionTh k="articleCount" className="text-end">Articles</RevisionTh>
                         </tr>
                       </thead>
                       <tbody>
-                        {history.revisions.map((r) => (
+                        {(sortedRevisions || []).map((r) => (
                           <tr key={r.id}>
                             <td>{r.revisionNumber}</td>
                             <td>{new Date(r.generatedAt).toLocaleString('fr-FR')}</td>
@@ -141,14 +240,14 @@ export function WeeklyPlanHistoryModal({ weeklyPlanId, onClose }: { weeklyPlanId
                         <table className="table table-sm table-hover">
                           <thead>
                             <tr>
-                              <th>EAN</th>
-                              <th>Article</th>
+                              <ArticleTh k="ean">EAN</ArticleTh>
+                              <ArticleTh k="label">Article</ArticleTh>
                               <th className="text-end">Historique (qté — date/heure)</th>
-                              <th className="text-end">Variation</th>
+                              <ArticleTh k="variation" className="text-end">Variation</ArticleTh>
                             </tr>
                           </thead>
                           <tbody>
-                            {articlesWithChange.map((a) => (
+                            {sortedArticlesWithChange.map((a) => (
                               <tr key={a.ean}>
                                 <td>{a.ean}</td>
                                 <td>{a.label || '—'}</td>
@@ -194,16 +293,16 @@ export function WeeklyPlanHistoryModal({ weeklyPlanId, onClose }: { weeklyPlanId
                         <table className="table table-sm table-hover">
                           <thead>
                             <tr>
-                              <th>EAN</th>
-                              <th>Article</th>
-                              <th className="text-end">Prévu/sem.</th>
-                              <th className="text-end">Réel</th>
-                              <th className="text-end">Écart</th>
-                              <th className="text-end">Erreur %</th>
+                              <OutcomeTh k="ean">EAN</OutcomeTh>
+                              <OutcomeTh k="label">Article</OutcomeTh>
+                              <OutcomeTh k="predictedWeeklyDemand" className="text-end">Prévu/sem.</OutcomeTh>
+                              <OutcomeTh k="actualSales" className="text-end">Réel</OutcomeTh>
+                              <OutcomeTh k="forecastError" className="text-end">Écart</OutcomeTh>
+                              <OutcomeTh k="percentageError" className="text-end">Erreur %</OutcomeTh>
                             </tr>
                           </thead>
                           <tbody>
-                            {outcomes.map((p) => {
+                            {(sortedOutcomes || []).map((p) => {
                               const o = p.outcome!;
                               const pct = o.percentageError === null ? '—' : Math.round(o.percentageError * 100) + '%';
                               const errSign = o.forecastError > 0 ? '+' : '';
