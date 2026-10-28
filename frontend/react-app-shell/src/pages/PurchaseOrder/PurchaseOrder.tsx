@@ -104,9 +104,22 @@ export function PurchaseOrder() {
 
   const selectedShop = isSingleShop ? null : shops.find((s) => s.id === selectedShopId) || null;
 
+  // CORRIGÉ le 28/10/2026 (signalé : un rayon cliqué juste après l'arrivée sur la page générait un
+  // lien sans `pos`, menant ensuite à "Erreur: Aucun magasin assigné à ce compte" sur Valider) —
+  // au tout premier rendu, `shops` (chargé par GET /shops, asynchrone) et le magasin actif de la
+  // topbar (reassortGetActiveShop, posé quasi immédiatement par un effet séparé) arrivent en
+  // parallèle sans dépendre l'un de l'autre. Si l'utilisateur clique sur une tuile de rayon dans
+  // cette fenêtre très courte — selectedShopId déjà posé mais shops pas encore arrivé —,
+  // `shops.find(...)` ci-dessus renvoie undefined et selectedShop?.posId était alors vide, sans
+  // jamais se corriger ensuite (l'URL déjà générée, poussée via history.pushState, ne se
+  // régénère pas toute seule une fois shops chargé). Repli explicite sur le magasin actif de la
+  // topbar (qui porte déjà son posId, indépendamment de `shops`) tant que selectedShop n'a pas
+  // encore été résolu depuis la liste complète.
   function selectedPosId(): string {
     if (isSingleShop) return user?.rposPosId || '';
-    return selectedShop?.posId || '';
+    if (selectedShop?.posId) return selectedShop.posId;
+    const activeShop = window.reassortGetActiveShop?.();
+    return activeShop && activeShop.id === selectedShopId ? activeShop.posId || '' : '';
   }
 
   function shopQueryParam(): string {
