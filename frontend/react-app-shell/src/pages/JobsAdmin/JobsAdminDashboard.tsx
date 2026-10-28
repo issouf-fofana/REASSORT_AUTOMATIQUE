@@ -300,14 +300,29 @@ export function JobsAdminDashboard() {
                       <td className="small text-muted py-2">{fmtDate(j.nextRunAt)}</td>
                       <td className="py-2"><span className="jadm-cron-chip">{j.cronExpression}</span></td>
                       <td className="text-end py-2 pe-3">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary"
-                          disabled={runningJob === j.jobName || j.healthStatus === 'running'}
-                          onClick={() => runNow(j.jobName, j.label)}
-                        >
-                          {runningJob === j.jobName ? '...' : 'Exécuter'}
-                        </button>
+                        {/* 2 boutons distincts (demande explicite du 28/10/2026 : "il faut mettre
+                            voir") — "Exécuter" lance toujours une NOUVELLE exécution (désactivé si
+                            une tourne déjà) ; "Voir" ouvre la même modale en lecture seule, sans
+                            rien déclencher, pour consulter les logs d'une exécution déjà en cours
+                            sans avoir à deviner que cliquer sur le nom de la tâche fait la même
+                            chose. */}
+                        <div className="btn-group">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => setSelectedJob({ jobName: j.jobName, label: j.label })}
+                          >
+                            Voir
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            disabled={runningJob === j.jobName || j.healthStatus === 'running'}
+                            onClick={() => runNow(j.jobName, j.label)}
+                          >
+                            {runningJob === j.jobName ? '...' : 'Exécuter'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
