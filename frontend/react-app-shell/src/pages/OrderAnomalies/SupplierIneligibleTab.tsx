@@ -20,7 +20,7 @@ interface SupplierIneligibleItem {
   // valide, bloqué" (origin NONE). Ne pas confondre avec "non rattaché au central" (le critère
   // d'inclusion dans cette liste), une simple classification.
   resolvedSupplierName: string | null;
-  supplierResolutionOrigin: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | null;
+  supplierResolutionOrigin: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | 'MANUAL_OVERRIDE' | null;
   deliveryType: 'LC' | 'LD' | null;
   isCommandable: boolean;
   proposalId: string;

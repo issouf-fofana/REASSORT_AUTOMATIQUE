@@ -34,24 +34,36 @@ function DeptTile({
   href,
   onNavigate,
   order,
+  orderCoverage,
 }: {
   name: string;
   d: GroupData;
   href: string;
   onNavigate: (href: string) => void;
-  // ProposalOrder déjà créée pour ce rayon (demande du 26/09/2026, validation indépendante par
-  // rayon) — undefined au niveau secteur (n'a pas de sens), null si ce rayon n'est pas encore validé.
+  // ProposalOrder déjà créée pour ce rayon via /validate-department (demande du 26/09/2026,
+  // validation indépendante par rayon) — undefined au niveau secteur (n'a pas de sens), null si
+  // aucune commande dont le `department` matche EXACTEMENT ce rayon n'existe. Depuis la validation
+  // globale par fournisseur (28/10/2026, department="Multi-rayons (...)"), ce seul indicateur ne
+  // suffit plus à savoir si ce rayon est déjà couvert — cf. orderCoverage ci-dessous, seule source
+  // fiable pour l'état "déjà commandé" affiché ; `order` reste utilisé uniquement pour le lien vers
+  // la référence RPOS d'une commande par-rayon classique quand elle existe.
   order?: ProposalOrder | null;
+  // Couverture réelle de ce rayon, calculée ligne par ligne via ProposalLine.proposalOrderId
+  // (fiable quelle que soit la voie de validation empruntée — par rayon ou par fournisseur) :
+  // undefined au niveau secteur, sinon { commanded, total }.
+  orderCoverage?: { commanded: number; total: number };
 }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
   const { icon } = sectorMeta(name);
-  const statusMeta = !order
-    ? null
-    : order.status === 'DONE'
-      ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Validé' }
-      : order.status === 'FAILED'
-        ? { cls: 'status-failed', icon: 'solar:close-circle-bold', label: 'Échec' }
-        : { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'En attente' };
+  const statusMeta = order && order.status === 'FAILED'
+    ? { cls: 'status-failed', icon: 'solar:close-circle-bold', label: 'Échec' }
+    : orderCoverage && orderCoverage.total > 0 && orderCoverage.commanded === orderCoverage.total
+      ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Commandé' }
+      : orderCoverage && orderCoverage.commanded > 0
+        ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'Partiellement commandé' }
+        : order
+          ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'En attente' }
+          : null;
   return (
     <a
       href={href}
@@ -309,7 +321,28 @@ export function DepartmentListView({
 
   // ProposalOrder par nom de rayon (demande du 26/09/2026) : uniquement pertinent au niveau rayon,
   // jamais au niveau secteur (un secteur n'a pas de commande RPOS propre, seuls ses rayons en ont).
+  // Conservé pour le statut "Échec" et la référence RPOS d'une commande par-rayon classique — ne
+  // couvre plus, à lui seul, une commande créée via la validation globale fournisseur.
   const orderByDepartment = new Map((proposal?.orders || []).map((o) => [o.department, o]));
+
+  // Couverture réelle par rayon (28/10/2026) : une ligne est "commandée" dès que
+  // ProposalLine.proposalOrderId est renseigné, peu importe la voie (rayon ou fournisseur) qui l'a
+  // prise en charge — seule source fiable depuis que department peut valoir "Multi-rayons (...)".
+  // Ignore les lignes à quantitySuggested=0 (rien à commander, jamais couvertes par aucune commande,
+  // ne doivent jamais faire paraître un rayon "partiellement commandé" à tort).
+  const coverageByDepartment = new Map<string, { commanded: number; total: number }>();
+  if (!isSectorLevel) {
+    lines
+      .filter((l) => (l.sector || l.department || 'Sans secteur') === selectedSector)
+      .forEach((l) => {
+        if (!(l.quantitySuggested > 0)) return;
+        const dept = l.department || 'Sans rayon';
+        const c = coverageByDepartment.get(dept) || { commanded: 0, total: 0 };
+        c.total += 1;
+        if (l.proposalOrderId) c.commanded += 1;
+        coverageByDepartment.set(dept, c);
+      });
+  }
 
   return (
     <div>
@@ -322,6 +355,7 @@ export function DepartmentListView({
             href={href}
             onNavigate={onNavigate}
             order={isSectorLevel ? undefined : orderByDepartment.get(name) || null}
+            orderCoverage={isSectorLevel ? undefined : coverageByDepartment.get(name)}
             key={name}
           />
         ))}

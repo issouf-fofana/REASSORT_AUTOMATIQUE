@@ -5,9 +5,15 @@ import type { LineState, Proposal, ProposalLine } from './types';
 export interface ProposalTableHandle {
   getDecisions: () => { lineId: string; quantity: number; excluded: boolean; price: number }[];
   getDecisionsForDepartment: (department: string) => { lineId: string; quantity: number; excluded: boolean; price: number; ean: string }[];
+  // Décisions de TOUTES les lignes d'UN SEUL fournisseur résolu, tous rayons confondus (28/10/2026,
+  // mission "Séparation CC/CD et gestion par fournisseur") — même contrat que
+  // getDecisionsForDepartment, filtré par resolvedSupplierId au lieu de department. Utilisé par
+  // SupplierValidationFlow pour /validate-supplier.
+  getDecisionsForSupplier: (supplierId: string) => { lineId: string; quantity: number; excluded: boolean; price: number; ean: string }[];
   selectAllToggle: () => void;
   exportCsv: (shopReference: string) => void;
   unblockLine: (l: ProposalLine, quantity: number) => void;
+  refreshSupplierCell: (l: ProposalLine) => void;
 }
 
 // Ordre/largeur des colonnes choisi par l'utilisateur (demande du 30/09/2026) : préférence
@@ -185,7 +191,7 @@ function supplierEligibilityCellRenderer(params: any) {
   // non) — le type de commande (LC/LD) est affiché dans sa propre colonne, jamais ici.
   const title = l.supplierIneligible
     ? (() => {
-        const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? 'historique du magasin' : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : null;
+        const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? 'historique du magasin' : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : l.supplierResolutionOrigin === 'MANUAL_OVERRIDE' ? 'choix manuel' : null;
         const resolvedNote = originLabel ? ` — résolu via ${originLabel} : ${l.resolvedSupplierName || ''}` : '';
         return `Non rattaché au fournisseur central${resolvedNote}. Fournisseur(s) : ${l.currentSuppliers}`;
       })()
@@ -214,7 +220,7 @@ function deliveryTypeCellRenderer(params: any) {
     return wrap;
   }
   const supplierName = l.resolvedSupplierName || l.currentSuppliers || '';
-  const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? "historique du magasin" : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : '';
+  const originLabel = l.supplierResolutionOrigin === 'HISTORY' ? "historique du magasin" : l.supplierResolutionOrigin === 'FALLBACK' ? 'délai de livraison le plus court' : l.supplierResolutionOrigin === 'MANUAL_OVERRIDE' ? 'choix manuel' : '';
   wrap.innerHTML = `
     <span class="badge reassort-mini-badge bg-warning-subtle text-warning-emphasis" title="Livraison Directe — résolu via ${originLabel} : ${supplierName}">LD</span>
     <span class="small text-muted ms-1" title="${supplierName}">${supplierName}</span>
@@ -307,6 +313,17 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     const rowNode = gridApiRef.current?.getRowNode(l.id);
     if (rowNode) gridApiRef.current?.refreshCells({ rowNodes: [rowNode], force: true });
     updateOrderTotal();
+  }
+
+  // Réaffectation ponctuelle du fournisseur d'un article (mission "Séparation CC/CD et gestion par
+  // fournisseur", 28/10/2026, objectif 5) : appelé depuis ArticleDetailModal une fois PUT
+  // /proposal-line/:lineId/supplier réussi côté serveur — `l` est déjà la référence mutée par le
+  // modal (mêmes champs resolvedSupplierId/resolvedSupplierName/deliveryType/supplierResolutionOrigin
+  // que l'objet tenu par la grille, cf. getRowId basé sur l.id), il ne reste qu'à forcer le
+  // réaffichage de la colonne "Type / Fournisseur" pour CETTE ligne — même pattern que unblockLine.
+  function refreshSupplierCell(l: ProposalLine) {
+    const rowNode = gridApiRef.current?.getRowNode(l.id);
+    if (rowNode) gridApiRef.current?.refreshCells({ rowNodes: [rowNode], columns: ['deliveryType'], force: true });
   }
 
   function qtyCellRenderer(params: any) {
@@ -856,6 +873,15 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0, ean: l.ean };
         });
     },
+    getDecisionsForSupplier(supplierId: string) {
+      const allLines = proposal ? proposal.lines : lines;
+      return allLines
+        .filter((l) => l.resolvedSupplierId === supplierId)
+        .map((l) => {
+          const st = getLineState(l);
+          return { lineId: l.id, quantity: st.quantity, excluded: st.excluded, price: l.sellingPrice || 0, ean: l.ean };
+        });
+    },
     selectAllToggle() {
       const allExcluded = lines.every((l) => getLineState(l).excluded);
       lines.forEach((l) => {
@@ -871,6 +897,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
       });
     },
     unblockLine,
+    refreshSupplierCell,
   }));
 
   useEffect(() => {

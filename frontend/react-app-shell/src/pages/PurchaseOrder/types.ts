@@ -67,8 +67,12 @@ export interface ProposalLine {
   // valide trouvé (article réellement non commandable) OU proposition générée avant ce champ.
   resolvedSupplierId?: string | null;
   resolvedSupplierName?: string | null;
-  supplierResolutionOrigin?: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | null;
+  // MANUAL_OVERRIDE (28/10/2026) : l'utilisateur a réaffecté ponctuellement le fournisseur de cette
+  // ligne via PUT /proposal-line/:lineId/supplier — ne remplace jamais CENTRAL/HISTORY/FALLBACK/NONE
+  // dans le référentiel, uniquement un choix pour cette génération précise.
+  supplierResolutionOrigin?: 'CENTRAL' | 'HISTORY' | 'FALLBACK' | 'NONE' | 'MANUAL_OVERRIDE' | null;
   deliveryType?: 'LC' | 'LD' | null;
+  proposalOrderId?: string | null;
   // Déjà persistés côté backend depuis longtemps, jamais exposés au frontend avant le 28/09/2026
   // (spec "informations détaillées dans une proposition de commande", §2) :
   // - currentOrderedQuantity : quantité déjà commandée/en transit au moment du calcul (RPOS + cette

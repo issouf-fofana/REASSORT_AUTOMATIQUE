@@ -1,5 +1,110 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '../../shared/api/client';
 import type { ProposalLine } from './types';
+
+interface AvailableSupplier {
+  supplierId: string;
+  supplierName: string;
+  deliveryType: 'LC' | 'LD' | null;
+  isCurrent: boolean;
+  isDefault: boolean;
+}
+
+// Section "Fournisseur" (mission "Séparation CC/CD et gestion par fournisseur", 28/10/2026,
+// objectif 5 : "consulter le fournisseur actuellement associé à l'article, consulter les autres
+// fournisseurs disponibles, sélectionner le fournisseur souhaité"). Charge la liste à l'ouverture de
+// la modale (pas avant, pour ne pas multiplier les appels sur un tableau de centaines de lignes) ;
+// si l'article n'a aucune alternative connue dans ArticleSupplier, n'affiche qu'un rappel discret du
+// fournisseur actuel plutôt qu'un sélecteur vide ou désactivé.
+function SupplierSection({
+  line,
+  readOnly,
+  onChanged,
+}: {
+  line: ProposalLine;
+  readOnly: boolean;
+  onChanged: (updates: Pick<ProposalLine, 'resolvedSupplierId' | 'resolvedSupplierName' | 'deliveryType' | 'supplierResolutionOrigin'>) => void;
+}) {
+  const [suppliers, setSuppliers] = useState<AvailableSupplier[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [changing, setChanging] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch<{ ean: string; suppliers: AvailableSupplier[] }>(`/reassort/proposal-line/${line.id}/available-suppliers`)
+      .then((data) => {
+        if (!cancelled) setSuppliers(data.suppliers);
+      })
+      .catch(() => {
+        if (!cancelled) setSuppliers(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [line.id]);
+
+  // Déjà commandé (proposalOrderId renseigné) : le backend refuse PUT .../supplier avec un 409 —
+  // autant ne jamais proposer le choix plutôt que de laisser cliquer pour échouer.
+  const locked = !!line.proposalOrderId;
+
+  async function handleChange(supplierId: string) {
+    if (supplierId === line.resolvedSupplierId) return;
+    setChanging(true);
+    try {
+      const updated = await apiFetch<{ lineId: string; resolvedSupplierId: string; resolvedSupplierName: string | null; deliveryType: 'LC' | 'LD' | null }>(
+        `/reassort/proposal-line/${line.id}/supplier`,
+        { method: 'PUT', body: JSON.stringify({ supplierId }) },
+      );
+      onChanged({
+        resolvedSupplierId: updated.resolvedSupplierId,
+        resolvedSupplierName: updated.resolvedSupplierName,
+        deliveryType: updated.deliveryType,
+        supplierResolutionOrigin: updated.resolvedSupplierId === line.resolvedSupplierId ? line.supplierResolutionOrigin : 'MANUAL_OVERRIDE',
+      });
+      window.reassortToast(`Fournisseur changé pour ${updated.resolvedSupplierName || '—'}.`, 'success');
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      setChanging(false);
+    }
+  }
+
+  const hasAlternatives = (suppliers?.length || 0) > 1;
+
+  return (
+    <div className="mb-3">
+      <div className="aidm-section-label">Fournisseur</div>
+      <InfoCard icon="solar:shop-bold-duotone" tone="info">
+        {line.deliveryType === 'LC' ? 'Fournisseur central (LC)' : line.resolvedSupplierName ? `${line.resolvedSupplierName} (LD)` : 'Aucun fournisseur résolu'}
+        {line.supplierResolutionOrigin === 'MANUAL_OVERRIDE' && <span className="text-muted"> — choix manuel</span>}
+        {locked && <span className="text-muted"> — déjà commandé, non modifiable.</span>}
+        {!locked && !loading && hasAlternatives && !readOnly && (
+          <div className="mt-2 d-flex align-items-center gap-2">
+            <select
+              className="form-select form-select-sm"
+              style={{ maxWidth: 280 }}
+              disabled={changing}
+              value={line.resolvedSupplierId || ''}
+              onChange={(e) => handleChange(e.target.value)}
+            >
+              {suppliers!.map((s) => (
+                <option key={s.supplierId} value={s.supplierId}>
+                  {s.supplierName}
+                  {s.isCurrent ? ' (actuel)' : ''}
+                </option>
+              ))}
+            </select>
+            {changing && <span className="spinner-border spinner-border-sm text-secondary" role="status" aria-hidden="true"></span>}
+          </div>
+        )}
+      </InfoCard>
+    </div>
+  );
+}
 
 // Carte d'information avec icône colorée, remplace les anciens `alert alert-light border` plats
 // (demande du 01/10/2026, "fait un style plus jolie") — cohérent avec les badges déjà introduits
@@ -35,12 +140,14 @@ export function ArticleDetailModal({
   onClose,
   onUnblock,
   onOpenAnalytics,
+  onSupplierChanged,
 }: {
   line: ProposalLine;
   readOnly: boolean;
   onClose: () => void;
   onUnblock: (l: ProposalLine, quantity: number) => void;
   onOpenAnalytics: (article: { ean: string; productId: string; label: string }) => void;
+  onSupplierChanged: (l: ProposalLine, updates: Pick<ProposalLine, 'resolvedSupplierId' | 'resolvedSupplierName' | 'deliveryType' | 'supplierResolutionOrigin'>) => void;
 }) {
   const [unblocked, setUnblocked] = useState(false);
 
@@ -75,6 +182,8 @@ export function ArticleDetailModal({
                 .aidm-info-text { font-size: .86rem; color: #33415C; line-height: 1.5; }
               `}</style>
               <div className="text-muted small mb-3">EAN {line.ean}</div>
+
+              <SupplierSection line={line} readOnly={readOnly} onChanged={(updates) => onSupplierChanged(line, updates)} />
 
               {(line.excludedAsAlreadyOrdered || line.excludedAsAlreadyOrderedRpos || line.orderSufficiencyReasoning) && (
                 <div className="mb-3">

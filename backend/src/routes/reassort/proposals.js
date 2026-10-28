@@ -14,6 +14,7 @@ const {
   getPendingProposal,
   startProposalValidation,
   validateProposalDepartment,
+  validateProposalSupplier,
   previewDepartmentSupplierGrouping,
   getProposalStatus,
   attachOrderAnomaliesToLines,
@@ -850,6 +851,223 @@ router.post('/proposal/:id/validate-department', async (req, res) => {
     })();
   } catch (error) {
     console.error('Department validation start error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/proposal/:id/validate-supplier - valide TOUTES les propositions éligibles d'UN
+// SEUL fournisseur pour la proposition entière, tous rayons confondus (mission "Séparation CC/CD et
+// gestion par fournisseur", 28/10/2026, §7 : "Valider toutes les propositions" à la racine d'un
+// fournisseur — "je veux que si par ex 10 article du liquide, 3 du frais et 3 du sec, quand je crée
+// la commande pour SATOCI il va créer UN SEUL commande avec tout ses article dedans"). Même pattern
+// asynchrone (202 + ProposalGenerationRun + polling /status) que /validate-department ci-dessus —
+// un fournisseur peut couvrir plus d'articles qu'un seul rayon, donc la même justification
+// (ne pas faire attendre le frontend sur tout l'appel HTTP synchrone) s'applique au moins autant.
+router.post('/proposal/:id/validate-supplier', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    const posId = resolvePosId(req);
+    const { supplierId, deliveryType, orderDate, deliveryDate, externalReference, comment, decisions, validateAfterCreate } = req.body;
+
+    if (!shopId || !posId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    if (!supplierId || !Array.isArray(decisions)) {
+      return res.status(400).json({ success: false, message: 'supplierId et decisions sont requis' });
+    }
+
+    // Même contrôle de périmètre que /validate-department : un compte restreint à certains rayons ne
+    // doit jamais pouvoir valider globalement un fournisseur dont des articles sortent de son
+    // périmètre — vérifié sur l'ENSEMBLE des rayons couverts par ce fournisseur dans la proposition,
+    // pas seulement un rayon précis (contrairement à /validate-department qui n'en a qu'un à checker).
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (currentUser && DEPARTMENT_SCOPED_ROLES.has(currentUser.role)) {
+      const scopedProposal = await prisma.proposal.findUnique({
+        where: { id: req.params.id },
+        select: { lines: { select: { id: true, department: true, resolvedSupplierId: true } } },
+      });
+      const allLines = scopedProposal?.lines || [];
+      const supplierLines = allLines.filter((l) => l.resolvedSupplierId === supplierId);
+      const allowedLines = filterProposalLinesForUser(allLines, currentUser);
+      const allowedIds = new Set(allowedLines.map((l) => l.id));
+      const outOfScope = supplierLines.some((l) => !allowedIds.has(l.id));
+      if (outOfScope) {
+        return res.status(403).json({ success: false, message: 'Certains articles de ce fournisseur ne sont pas dans votre périmètre.' });
+      }
+    }
+
+    const run = await prisma.proposalGenerationRun.create({
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'CREATE_ORDER', runType: 'VALIDATE' },
+    });
+
+    res.status(202).json({ success: true, data: { runId: run.id } });
+
+    (async () => {
+      try {
+        const onProgress = async (p) => {
+          await prisma.proposalGenerationRun.update({
+            where: { id: run.id },
+            data: {
+              step: p.step,
+              ...(p.groupsTotal !== undefined ? { articlesTotal: p.groupsTotal } : {}),
+              ...(p.groupsProcessed !== undefined ? { articlesProcessed: p.groupsProcessed } : {}),
+              ...(p.currentSupplierName !== undefined ? { lastArticleLabel: `${p.currentDeliveryType || ''} ${p.currentSupplierName || ''}`.trim() } : {}),
+            },
+          }).catch(() => {});
+        };
+
+        const result = await validateProposalSupplier({
+          proposalId: req.params.id,
+          posId,
+          shopId,
+          userEmail: req.user.email,
+          supplierId,
+          deliveryType,
+          decisions,
+          orderHeader: { supplierId, orderDate, deliveryDate, externalReference, comment },
+          validateAfterCreate: !!validateAfterCreate,
+          onProgress,
+        });
+
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', proposalId: req.params.id, completedAt: new Date(), validateDepartmentResultJson: JSON.stringify(result) },
+        });
+      } catch (error) {
+        console.error('Supplier validation error:', error);
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
+  } catch (error) {
+    console.error('Supplier validation start error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/proposal-line/:lineId/available-suppliers - fournisseurs alternatifs connus pour
+// l'article de cette ligne (mission "Séparation CC/CD et gestion par fournisseur", 28/10/2026,
+// objectif 5 : "consulter le fournisseur actuellement associé à l'article, consulter les autres
+// fournisseurs disponibles pour cet article"). Lit uniquement ArticleSupplier (déclarations
+// manuelles, migration du 28/10/2026) — RPOS n'expose aucun catalogue fournisseurs-par-article (cf.
+// rposClient.js, vérifié en Phase 1), donc aucune autre source possible ici. Le fournisseur
+// actuellement résolu (resolvedSupplierId/resolvedSupplierName) est toujours inclus en tête de
+// liste même s'il n'a pas de ligne ArticleSupplier correspondante, pour que l'UI puisse toujours
+// afficher "fournisseur actuel" avant les alternatives.
+router.get('/proposal-line/:lineId/available-suppliers', async (req, res) => {
+  try {
+    const line = await prisma.proposalLine.findUnique({
+      where: { id: req.params.lineId },
+      select: {
+        id: true, ean: true, department: true,
+        resolvedSupplierId: true, resolvedSupplierName: true, deliveryType: true,
+        proposal: { select: { rposShopId: true } },
+      },
+    });
+    if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans une proposition' });
+
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (filterProposalLinesForUser([line], currentUser).length === 0) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+    }
+
+    const alternatives = await prisma.articleSupplier.findMany({
+      where: { rposShopId: line.proposal.rposShopId, ean: line.ean },
+      orderBy: [{ isDefault: 'desc' }, { rposSupplierName: 'asc' }],
+    });
+
+    const suppliers = [];
+    const seenIds = new Set();
+    if (line.resolvedSupplierId) {
+      suppliers.push({
+        supplierId: line.resolvedSupplierId, supplierName: line.resolvedSupplierName,
+        deliveryType: line.deliveryType, isCurrent: true, isDefault: false,
+      });
+      seenIds.add(line.resolvedSupplierId);
+    }
+    for (const alt of alternatives) {
+      if (seenIds.has(alt.rposSupplierId)) continue;
+      seenIds.add(alt.rposSupplierId);
+      suppliers.push({
+        supplierId: alt.rposSupplierId, supplierName: alt.rposSupplierName,
+        deliveryType: null, isCurrent: false, isDefault: alt.isDefault,
+      });
+    }
+
+    res.json({ success: true, data: { ean: line.ean, suppliers } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/proposal-line/:lineId/supplier - réaffecte PONCTUELLEMENT le fournisseur d'une
+// ligne pour la génération en cours (objectif 5 §"règles de gestion" : "le changement de fournisseur
+// effectué pour une commande ne doit pas modifier automatiquement le fournisseur principal de
+// l'article dans le référentiel permanent" — donc écrit uniquement sur ProposalLine, jamais sur
+// ArticleSupplier). Le fournisseur visé doit être réellement autorisé pour l'article (déjà présent
+// dans ArticleSupplier pour ce magasin+article, ou être le fournisseur déjà résolu actuellement —
+// pas de réaffectation arbitraire vers un fournisseur jamais déclaré). Une fois réaffectée, la ligne
+// est intégrée à la commande du NOUVEAU fournisseur lors d'une validation (department ou supplier) :
+// aucun changement nécessaire côté validateProposalDepartment/validateProposalSupplier, qui lisent
+// déjà resolvedSupplierId/deliveryType à l'instant de la validation, jamais figés à la génération.
+router.put('/proposal-line/:lineId/supplier', async (req, res) => {
+  try {
+    const { supplierId } = req.body;
+    if (!supplierId) return res.status(400).json({ success: false, message: 'supplierId est requis' });
+
+    const line = await prisma.proposalLine.findUnique({
+      where: { id: req.params.lineId },
+      include: { proposal: { select: { id: true, rposShopId: true, status: true } } },
+    });
+    if (!line) return res.status(404).json({ success: false, message: 'Article introuvable dans une proposition' });
+    if (line.proposal.status !== 'GENERATED') {
+      return res.status(409).json({ success: false, message: 'Cette proposition n\'est plus modifiable (déjà validée ou remplacée)' });
+    }
+    if (line.proposalOrderId) {
+      return res.status(409).json({ success: false, message: 'Cet article a déjà été commandé, son fournisseur ne peut plus être changé.' });
+    }
+
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (filterProposalLinesForUser([line], currentUser).length === 0) {
+      return res.status(403).json({ success: false, message: 'Cet article n\'est pas dans votre périmètre.' });
+    }
+
+    let targetName = null;
+    let targetDeliveryType = null;
+    if (supplierId === line.resolvedSupplierId) {
+      // Réaffectation vers le fournisseur déjà en place (ex: annuler un choix précédent) : toujours
+      // autorisée, rien à vérifier dans ArticleSupplier.
+      targetName = line.resolvedSupplierName;
+      targetDeliveryType = line.deliveryType;
+    } else {
+      const declared = await prisma.articleSupplier.findUnique({
+        where: { rposShopId_ean_rposSupplierId: { rposShopId: line.proposal.rposShopId, ean: line.ean, rposSupplierId: supplierId } },
+      });
+      if (!declared) {
+        return res.status(400).json({ success: false, message: 'Ce fournisseur n\'est pas autorisé pour cet article (voir /available-suppliers).' });
+      }
+      targetName = declared.rposSupplierName;
+      // Un fournisseur déclaré via ArticleSupplier est par construction un autre fournisseur que le
+      // central (sinon il serait déjà le resolvedSupplierId via la résolution automatique) — LD,
+      // même convention que supplierResolutionOrigin HISTORY/FALLBACK ailleurs dans ce fichier.
+      targetDeliveryType = 'LD';
+    }
+
+    const updated = await prisma.proposalLine.update({
+      where: { id: line.id },
+      data: {
+        resolvedSupplierId: supplierId, resolvedSupplierName: targetName, deliveryType: targetDeliveryType,
+        supplierResolutionOrigin: 'MANUAL_OVERRIDE',
+      },
+    });
+
+    res.json({
+      success: true,
+      data: { lineId: updated.id, resolvedSupplierId: updated.resolvedSupplierId, resolvedSupplierName: updated.resolvedSupplierName, deliveryType: updated.deliveryType },
+    });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });

@@ -830,6 +830,7 @@ model ProposalOrder {
   createdAt DateTime @default(now()) @map("created_at")
 
   receptionEvents ReceptionEvent[]
+  lines           ProposalLine[]
 
   // Fournisseur regroupant cette commande (mission "Logique de gestion des fournisseurs et des
   // commandes", 07/10/2026) — remplace le regroupement par seul rayon : une commande rassemble
@@ -1124,7 +1125,53 @@ model ProposalLine {
   // progressif à mesure que le volume grossit. L'index composite (proposalId, ean) couvre aussi les
   // recherches sur proposalId seul (Postgres utilise la colonne de tête d'un index composite).
   @@index([proposalId, ean])
+
+  // Lien direct vers la commande RPOS qui a effectivement embarqué cette ligne (mission "Séparation
+  // CC/CD et gestion par fournisseur", 28/10/2026) — jusqu'ici, "cette ligne est-elle déjà
+  // commandée ?" ne se déduisait qu'indirectement en comparant ProposalOrder.department au rayon de
+  // la ligne, ce qui suppose UNE commande par rayon exact. Avec la validation globale par
+  // fournisseur (une seule ProposalOrder regroupant des articles de plusieurs rayons, department y
+  // devient un texte libre type "Multi-rayons (...)"), ce matching par nom ne suffit plus : une
+  // ligne sait maintenant directement si et par quelle commande elle a été prise en charge, quelle
+  // que soit la voie de validation (par rayon ou par fournisseur). Null tant que la ligne n'a pas
+  // encore été incluse dans une commande envoyée à RPOS.
+  proposalOrderId String?        @map("proposal_order_id")
+  proposalOrder   ProposalOrder? @relation(fields: [proposalOrderId], references: [id], onDelete: SetNull)
+
   @@map("proposal_lines")
+}
+
+// Fournisseurs alternatifs explicitement autorisés pour un article (mission "Séparation CC/CD et
+// gestion par fournisseur", 28/10/2026, objectif 5 : "permettre de modifier le fournisseur d'un
+// article lorsqu'il est disponible chez plusieurs fournisseurs"). RPOS n'expose aucun catalogue
+// "fournisseurs possibles par article" (vérifié dans rposClient.js : un fournisseur n'y est connu
+// que via une COMMANDE déjà passée, jamais via un référentiel article↔fournisseurs) — cette table
+// comble ce vide, alimentée manuellement (saisie utilisateur) plutôt que synchronisée depuis RPOS.
+// Un article sans aucune ligne ici n'a tout simplement aucune alternative connue : le choix du
+// fournisseur reste alors celui résolu automatiquement par resolveSupplierForArticle
+// (proposalService.js), inchangé.
+model ArticleSupplier {
+  id  String @id @default(cuid())
+  ean String
+
+  rposSupplierId   String @map("rpos_supplier_id") // UUID RPOS du fournisseur, propre à ce magasin
+  rposSupplierName String @map("rpos_supplier_name")
+
+  // Magasin propriétaire de cette association (un même EAN peut avoir des fournisseurs autorisés
+  // différents d'un magasin à l'autre, comme pour resolvedSupplierId ailleurs dans ce schéma).
+  rposShopId String @map("rpos_shop_id")
+
+  // true si ce fournisseur est celui proposé par défaut pour cet article dans ce magasin, en plus
+  // de la résolution automatique existante — purement indicatif côté UI pour le moment, ne remplace
+  // pas resolveSupplierForArticle.
+  isDefault Boolean @default(false) @map("is_default")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String?  @map("created_by") // email de l'utilisateur ayant déclaré cette association
+
+  @@unique([rposShopId, ean, rposSupplierId])
+  @@index([rposShopId, ean])
+  @@map("article_suppliers")
 }
 
 // =============================================

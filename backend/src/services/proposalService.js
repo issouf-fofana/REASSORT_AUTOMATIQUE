@@ -2041,6 +2041,223 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
 }
 
 /**
+ * Valide TOUTES les propositions d'UN SEUL fournisseur pour la proposition entière, tous rayons
+ * confondus (mission "Séparation CC/CD et gestion par fournisseur", 28/10/2026, objectif 7/8 : "je
+ * veux que si par ex 10 article du liquide, 3 du frais et 3 du sec, quand je crée la commande pour
+ * SATOCI il va créer UN SEUL commande avec tout ses article dedans, au lieu de créer plusieurs
+ * commandes"). Contrairement à validateProposalDepartment (scopée à un seul `department`, laissée
+ * intacte — zéro régression sur le flux rayon par rayon existant, LC compris), cette fonction filtre
+ * les lignes candidates par (resolvedSupplierId, deliveryType) sur TOUTE la proposition, y compris
+ * les rayons repliés/non ouverts côté UI (la portée vient uniquement de la base, jamais de l'état
+ * d'affichage — spec §7 : "elle doit récupérer toutes les propositions éligibles du fournisseur
+ * concerné, y compris les articles situés dans les niveaux qui ne sont pas ouverts visuellement").
+ *
+ * Réutilise groupLinesByResolvedSupplier et createOrderForLines telles quelles : un seul groupe est
+ * attendu ici (toutes les lignes candidates partagent déjà le même supplierId+deliveryType filtré en
+ * amont), mais la fonction de regroupement reste appelée pour ne pas dupliquer sa logique de
+ * résolution/filtrage des lignes NONE (unresolved).
+ *
+ * Anti-doublon : contrairement à validateProposalDepartment qui vérifie "ce department a-t-il déjà
+ * une ProposalOrder ?", cette fonction exclut simplement toute ligne dont `proposalOrderId` est déjà
+ * renseigné (ProposalLine.proposalOrderId, migration du 28/10/2026) — fiable quelle que soit la voie
+ * de validation déjà empruntée par une ligne donnée (rayon ou fournisseur), et compatible avec un
+ * double-clic sur le bouton de validation globale (la deuxième validation ne retrouve alors aucune
+ * ligne restante pour ce fournisseur et échoue proprement avec un message explicite plutôt que de
+ * recréer une commande vide ou dupliquée).
+ */
+async function validateProposalSupplier({ proposalId, posId, shopId, userEmail, supplierId, deliveryType, decisions, orderHeader, validateAfterCreate, onProgress }) {
+  const reportProgress = onProgress || (() => {});
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
+  if (!proposal) throw new Error('Proposition introuvable');
+  if (proposal.status === 'VALIDATION_FAILED' || proposal.status === 'REJECTED') {
+    throw new Error('Cette proposition a été rejetée ou a échoué, elle ne peut plus être validée.');
+  }
+  if (!supplierId) throw new Error('supplierId est requis.');
+
+  // Lignes de CE fournisseur (tous rayons), jamais encore embarquées dans une commande — quelle que
+  // soit la voie (rayon ou fournisseur) qui les aurait déjà prises en charge.
+  const supplierLines = proposal.lines.filter(
+    (l) => l.resolvedSupplierId === supplierId && !l.proposalOrderId,
+  );
+  if (!supplierLines.length) {
+    throw new Error(`Aucun article restant à commander pour ce fournisseur (déjà commandé, ou aucun article rattaché).`);
+  }
+
+  const departmentsCovered = [...new Set(supplierLines.map((l) => l.department || 'Sans rayon'))];
+  // Texte libre, lisible dans l'historique/les emails (cf. ProposalOrder.department) — ne sert plus
+  // de clé de matching exact "un rayon = une commande" pour cette voie de validation : c'est
+  // désormais ProposalLine.proposalOrderId qui joue ce rôle, partout où "déjà commandé ?" doit être
+  // vérifié de façon fiable (vue par rayon incluse, cf. DepartmentListView.tsx à adapter en phase 3).
+  const department = `Multi-rayons (${departmentsCovered.join(', ')})`;
+
+  const decisionByLineId = new Map((decisions || []).map((d) => [d.lineId, d]));
+  const supplierName = supplierLines[0].resolvedSupplierName;
+  const resolvedDeliveryType = deliveryType || supplierLines[0].deliveryType;
+
+  const candidateLines = [];
+  for (const line of supplierLines) {
+    const decision = decisionByLineId.get(line.id);
+    const excluded = decision ? !!decision.excluded : false;
+    const outOfScope = excluded && decision ? !!decision.outOfScope : false;
+    const quantity = decision && decision.quantity != null ? decision.quantity : line.quantitySuggested;
+
+    await prisma.proposalLine.update({
+      where: { id: line.id },
+      data: { quantityValidated: excluded ? null : quantity, wasExcluded: excluded, excludedOutOfScope: outOfScope },
+    });
+
+    if (!excluded && quantity > 0) {
+      candidateLines.push({
+        lineId: line.id, productId: line.productId, quantity, orderingUnit: line.orderingUnit,
+        department: line.department || 'Sans rayon', ean: line.ean, label: line.label,
+        resolvedSupplierId: line.resolvedSupplierId, resolvedSupplierName: line.resolvedSupplierName, deliveryType: line.deliveryType,
+      });
+    }
+  }
+
+  if (candidateLines.length === 0) {
+    throw new Error(`Aucun article sélectionné pour le fournisseur "${supplierName}".`);
+  }
+
+  const config = await getConfig(shopId);
+  const expectedReceptionDate = computeExpectedReceptionDate(new Date(), config.weekendDeliveryDay || 'LUNDI');
+
+  reportProgress({ step: 'CREATE_ORDER', groupsTotal: 1, groupsProcessed: 0, currentSupplierName: supplierName, currentDeliveryType: resolvedDeliveryType });
+
+  const proposalOrder = await prisma.proposalOrder.create({
+    data: {
+      proposalId, department, linesTotal: candidateLines.length, status: 'PENDING', expectedReceptionDate,
+      supplierId, supplierName, deliveryType: resolvedDeliveryType,
+    },
+  });
+
+  let processed = 0;
+  let failed = 0;
+  let failedLines = [];
+  let rposOrderValidated = null;
+  let order = null;
+  let anyFailedGroup = false;
+
+  try {
+    const result = await createOrderForLines(
+      posId, shopId, userEmail, department,
+      candidateLines.map((l) => ({ ...l, department })),
+      orderHeader, validateAfterCreate,
+      { id: supplierId, name: supplierName, deliveryType: resolvedDeliveryType },
+    );
+    ({ order, processed, failed, failedLines, rposOrderValidated } = result);
+
+    const receptionStatus = rposOrderValidated ? 'EN_ATTENTE_RECEPTION' : 'COMMANDEE';
+    const failedLinesSummary = failedLines.length
+      ? `${failedLines.length} article(s) refusé(s) par RPOS : ${failedLines.map((f) => `${f.label || f.ean} (${f.reason})`).join(' ; ')}`.slice(0, 500)
+      : null;
+    const failedEanSet = new Set(failedLines.map((f) => f.ean));
+
+    await prisma.proposalOrder.update({
+      where: { id: proposalOrder.id },
+      data: {
+        rposOrderId: order.id, rposOrderReference: order.reference, rposOrderValidated,
+        linesFailed: failed, status: failed === candidateLines.length ? 'FAILED' : 'DONE',
+        receptionStatus, lastRposStatus: rposOrderValidated ? 2 : 1, lastSyncedAt: new Date(),
+        errorMessage: failedLinesSummary,
+      },
+    });
+
+    // Lien ligne -> commande (migration du 28/10/2026) : uniquement les lignes réellement embarquées
+    // avec succès — une ligne refusée par RPOS (failedEanSet) reste proposalOrderId=null, donc
+    // toujours considérée "non commandée" et récupérable lors d'une prochaine tentative.
+    const successfulLineIds = candidateLines.filter((l) => !failedEanSet.has(l.ean)).map((l) => l.lineId);
+    if (successfulLineIds.length) {
+      await prisma.proposalLine.updateMany({
+        where: { id: { in: successfulLineIds } },
+        data: { proposalOrderId: proposalOrder.id },
+      });
+    }
+
+    if (failed === candidateLines.length) anyFailedGroup = true;
+  } catch (err) {
+    const detail = err.body ? (typeof err.body === 'string' ? err.body : JSON.stringify(err.body)) : err.message;
+    await prisma.proposalOrder.update({
+      where: { id: proposalOrder.id },
+      data: { status: 'FAILED', linesFailed: candidateLines.length, errorMessage: detail.slice(0, 500) },
+    });
+    console.error(`[validateProposalSupplier] Commande ${resolvedDeliveryType} (${supplierName}) échouée pour la proposition ${proposalId}:`, err.message);
+    failed = candidateLines.length;
+    anyFailedGroup = true;
+  }
+
+  reportProgress({ step: 'CREATE_ORDER', groupsTotal: 1, groupsProcessed: 1, currentSupplierName: supplierName, currentDeliveryType: resolvedDeliveryType });
+
+  if (order?.id) {
+    reportProgress({ step: 'SEND_EMAIL', groupsTotal: 1, groupsProcessed: 1 });
+    try {
+      const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
+      if (shop) {
+        const { notifyShopUsersOfOrderCreated } = require('./proposalNotificationService');
+        await notifyShopUsersOfOrderCreated(
+          shop, { id: proposalId },
+          [{
+            rposOrderId: order.id, rposOrderReference: order.reference, department,
+            linesTotal: processed + failed, linesFailed: failed, supplierName, deliveryType: resolvedDeliveryType,
+            rposOrderValidated,
+          }],
+          { isAutoMode: false },
+        );
+      }
+    } catch (mailError) {
+      console.error(`[validateProposalSupplier] Alerte email de commande créée échouée pour le fournisseur ${supplierName} (proposition ${proposalId}):`, mailError.message);
+    }
+  }
+
+  // Même logique de bascule VALIDATED que validateProposalDepartment, mais basée sur
+  // ProposalLine.proposalOrderId (fiable quelle que soit la voie de validation déjà empruntée par
+  // chaque ligne) plutôt que sur la comparaison par nom de department — nécessaire ici puisque
+  // department vaut "Multi-rayons (...)" et ne peut plus matcher un seul rayon exact.
+  const stillPending = await prisma.proposalLine.count({
+    where: { proposalId, proposalOrderId: null, quantitySuggested: { gt: 0 } },
+  });
+  if (stillPending === 0) {
+    const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
+    const totalProcessedAll = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailedAll = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    const firstOrderWithId = allOrders.find((o) => o.rposOrderId);
+    const anyValidated = allOrders.some((o) => o.rposOrderValidated === false) ? false : allOrders.some((o) => o.rposOrderValidated === true);
+
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: {
+        status: 'VALIDATED', validatedAt: new Date(), validatedBy: userEmail,
+        linesProcessed: totalProcessedAll, linesFailed: totalFailedAll,
+        rposOrderId: firstOrderWithId?.rposOrderId, rposOrderReference: firstOrderWithId?.rposOrderReference,
+        rposOrderValidated: anyValidated,
+      },
+    });
+  } else {
+    const allOrders = await prisma.proposalOrder.findMany({ where: { proposalId } });
+    const totalProcessedAll = allOrders.reduce((sum, o) => sum + (o.linesTotal - o.linesFailed), 0);
+    const totalFailedAll = allOrders.reduce((sum, o) => sum + o.linesFailed, 0);
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: { linesProcessed: totalProcessedAll, linesFailed: totalFailedAll },
+    });
+  }
+
+  if (order?.id) {
+    const { computeAndPersistOpenEpisodeStatuses } = require('./stockoutEpisodeService');
+    computeAndPersistOpenEpisodeStatuses(shopId).catch((err) =>
+      console.error('[validateProposalSupplier] Recalcul du statut des ruptures en arrière-plan : échec non bloquant —', err.message)
+    );
+  }
+
+  return {
+    supplierId, supplierName, deliveryType: resolvedDeliveryType, department,
+    order, processed, failed, failedLines, anyFailedGroup,
+    allDepartmentsDone: stillPending === 0,
+    totalRequested: candidateLines.length,
+  };
+}
+
+/**
  * Crée une commande fournisseur RPOS pour un groupe de lignes (un rayon, ou toutes les lignes si
  * la séparation par rayon est désactivée), et y ajoute chaque ligne. Retourne un résumé pour le
  * suivi de progression et l'historisation (ProposalOrder).
@@ -3296,6 +3513,7 @@ module.exports = {
   getPendingProposal,
   startProposalValidation,
   validateProposalDepartment,
+  validateProposalSupplier,
   runAutoOrder,
   getProposalStatus,
   getConformityRate,

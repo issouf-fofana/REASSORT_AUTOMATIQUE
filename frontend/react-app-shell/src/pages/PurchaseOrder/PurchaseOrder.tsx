@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 import { CompactDropdown } from '../../shared/components/CompactDropdown';
+import { SupplierSearchDropdown } from './SupplierSearchDropdown';
 import { DepartmentListView } from './DepartmentListView';
 import { ProposalHeader } from './ProposalHeader';
 import { GenerationFlow } from './GenerationFlow';
@@ -8,6 +9,7 @@ import { ProductAnalyticsModal } from './ProductAnalyticsModal';
 import { ProposalTable, type ProposalTableHandle } from './ProposalTable';
 import { ArticleDetailModal } from './ArticleDetailModal';
 import { ValidationFlow } from './ValidationFlow';
+import { SupplierValidationFlow } from './SupplierValidationFlow';
 import { WeeklyPlanHistoryModal } from './WeeklyPlanHistoryModal';
 import type { Proposal, ProposalHistoryItem, ProposalLine, Shop } from './types';
 
@@ -37,6 +39,18 @@ export function PurchaseOrder() {
   const urlParams = new URLSearchParams(window.location.search);
   const [selectedSector, setSelectedSector] = useState<string | null>(urlParams.get('sector'));
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(urlParams.get('dept'));
+
+  // Filtre CC/CD (mission "Séparation CC/CD et gestion par fournisseur", 28/10/2026, §3) — CC =
+  // commande centrale (deliveryType LC), CD = commande directe (deliveryType LD). 'ALL' = aucun
+  // filtre, comportement identique à avant cette mission. Appliqué à la SOURCE (sur `proposal.lines`
+  // avant tout regroupement secteur/rayon/fournisseur, cf. `visibleLines` ci-dessous) — jamais un
+  // simple filtre d'affichage, pour que les decisions envoyées à la validation reflètent elles aussi
+  // le filtre actif.
+  const [ccCdFilter, setCcCdFilter] = useState<'ALL' | 'CC' | 'CD'>('ALL');
+  // Fournisseur sélectionné pour la navigation "par fournisseur" (§2 : tous les articles de ce
+  // fournisseur, tous rayons confondus, hiérarchie secteur/département/rayon conservée pour la
+  // consultation). null = navigation classique par rayon (DepartmentListView), inchangée.
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [status, setStatus] = useState('');
@@ -220,8 +234,9 @@ export function PurchaseOrder() {
   //   VALIDATED ne doit JAMAIS rendre les AUTRES rayons non traités inaccessibles en lecture seule
   //   (bug du 27/09/2026 : "les autres rayons disparaissent" — en réalité le bouton Valider
   //   disparaissait pour tous les rayons dès que le statut global changeait, alors qu'il restait des
-  //   rayons sans ProposalOrder). Le vrai signal de "lecture seule" reste `currentDepartmentOrder`
-  //   (ce rayon précis a-t-il déjà sa commande ?), pas le statut global de la proposition.
+  //   rayons sans ProposalOrder). Le vrai signal de "lecture seule" reste `departmentFullyOrdered`
+  //   (28/10/2026 : ce rayon précis a-t-il TOUTES ses lignes commandées, par rayon ou par
+  //   fournisseur ?), pas le statut global de la proposition.
   async function loadProposalById(id: string, isExplicitHistoryPick = false) {
     setStatus('Chargement...');
     try {
@@ -315,6 +330,50 @@ export function PurchaseOrder() {
   const sortedPosIds = Object.keys(byPos).sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
 
   const showListView = !selectedSector || !selectedDepartment;
+
+  // Lignes filtrées par CC/CD (28/10/2026, §3) — SOURCE commune à toute la page (vue par rayon ET
+  // vue par fournisseur), jamais un simple filtre d'affichage : un article filtré ici n'apparaît
+  // dans aucun regroupement secteur/rayon/fournisseur, et n'est inclus dans aucune decision envoyée
+  // à une validation tant que le filtre reste actif. 'ALL' = identique à proposal.lines (zéro
+  // changement de comportement par défaut).
+  const visibleLines = useMemo(() => {
+    if (!proposal) return [];
+    if (ccCdFilter === 'ALL') return proposal.lines;
+    const wanted = ccCdFilter === 'CC' ? 'LC' : 'LD';
+    return proposal.lines.filter((l) => l.deliveryType === wanted);
+  }, [proposal, ccCdFilter]);
+
+  // Fournisseurs distincts présents dans les lignes visibles (dédupliqués par resolvedSupplierId),
+  // pour peupler le sélecteur "par fournisseur" — recalculé à chaque changement de filtre CC/CD pour
+  // ne jamais proposer un fournisseur dont tous les articles viennent d'être filtrés.
+  const availableSuppliers = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string | null; deliveryType: 'LC' | 'LD' | null }>();
+    visibleLines.forEach((l) => {
+      if (!l.resolvedSupplierId || byId.has(l.resolvedSupplierId)) return;
+      byId.set(l.resolvedSupplierId, { id: l.resolvedSupplierId, name: l.resolvedSupplierName || l.resolvedSupplierId, deliveryType: l.deliveryType || null });
+    });
+    return [...byId.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [visibleLines]);
+
+  // Lignes du fournisseur sélectionné, tous rayons confondus (§2/§6) — hiérarchie secteur>département
+  // >rayon reconstruite côté affichage uniquement (ProposalTable groupe déjà par department, réutilisé
+  // tel quel), jamais une commande par rayon : la validation globale (SupplierValidationFlow) porte
+  // sur CES lignes en bloc.
+  const supplierLines = useMemo(
+    () => (selectedSupplierId ? visibleLines.filter((l) => l.resolvedSupplierId === selectedSupplierId) : []),
+    [visibleLines, selectedSupplierId],
+  );
+  const selectedSupplierMeta = availableSuppliers.find((s) => s.id === selectedSupplierId) || null;
+
+  // Même objet `proposal`, lignes remplacées par `visibleLines` (filtrées CC/CD) — évite de changer
+  // la signature de DepartmentListView/ProposalHeader pour leur passer le filtre séparément.
+  // Référence stable tant que `proposal`/`visibleLines` ne changent pas (même règle que detailLines
+  // ci-dessus, pour ne pas redéclencher inutilement les effets qui en dépendent).
+  const filteredProposal = useMemo(
+    () => (proposal ? { ...proposal, lines: visibleLines } : null),
+    [proposal, visibleLines],
+  );
+
   // useMemo (pas un simple .filter() à chaque rendu) : ProposalTable détruit et recrée
   // ENTIÈREMENT la grille AG Grid quand sa prop `lines` change de référence (useEffect([lines])) —
   // sans ceci, une nouvelle référence de tableau était produite à CHAQUE rendu de ce composant (y
@@ -323,17 +382,29 @@ export function PurchaseOrder() {
   // barre d'outils Colonnes/Filtres (reassortAgGridToolbar réinjectée dans le même conteneur sans
   // avoir été nettoyée) — bug constaté le 24/09/2026.
   const detailLines = useMemo(
-    () => (proposal ? proposal.lines.filter((l) => (l.department || 'Sans rayon') === selectedDepartment) : []),
-    [proposal, selectedDepartment],
+    () => visibleLines.filter((l) => (l.department || 'Sans rayon') === selectedDepartment),
+    [visibleLines, selectedDepartment],
   );
 
-  // ProposalOrder déjà créée pour le rayon actuellement affiché (demande du 26/09/2026, validation
-  // indépendante par rayon) — présente dès que ce rayon précis a été validé, quel que soit l'état
-  // des autres rayons de la même proposition.
+  // ProposalOrder déjà créée pour le rayon actuellement affiché via /validate-department (demande
+  // du 26/09/2026, validation indépendante par rayon) — conservée pour l'affichage du statut/de la
+  // référence RPOS d'une commande par-rayon classique.
   const currentDepartmentOrder = useMemo(
     () => (proposal && selectedDepartment ? (proposal.orders || []).find((o) => o.department === selectedDepartment) || null : null),
     [proposal, selectedDepartment],
   );
+
+  // Couverture réelle du rayon affiché (28/10/2026) : ce rayon est "déjà commandé" si TOUTES ses
+  // lignes à commander (quantitySuggested > 0, non exclues) ont un proposalOrderId — fiable même si
+  // la commande vient de la validation globale fournisseur (department="Multi-rayons (...)", ne
+  // matche plus jamais `selectedDepartment` dans currentDepartmentOrder ci-dessus). Remplace
+  // currentDepartmentOrder comme condition d'affichage du bouton "Valider ce rayon" (ValidationFlow
+  // ci-dessous) pour ne jamais permettre une double-commande d'un rayon déjà entièrement couvert par
+  // la voie fournisseur.
+  const departmentFullyOrdered = useMemo(() => {
+    const active = detailLines.filter((l) => !l.wasExcluded && l.quantitySuggested > 0);
+    return active.length > 0 && active.every((l) => !!l.proposalOrderId);
+  }, [detailLines]);
 
   // Synthèse commandable/non commandable du rayon affiché (spec du 28/09/2026, §3) : calculée
   // localement depuis ProposalLine.supplierIneligible (déjà chargé avec la proposition), jamais un
@@ -882,7 +953,129 @@ export function PurchaseOrder() {
             </div>
           )}
 
-          <DepartmentListView proposal={proposal} loading={refreshing} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
+          {/* Filtre CC/CD + sélecteur fournisseur (mission "Séparation CC/CD et gestion par
+              fournisseur", 28/10/2026, §3-§4) — CC = commande centrale (LC), CD = commande directe
+              (LD). Choisir un fournisseur bascule la vue vers "tous ses articles, tous rayons" à la
+              place de la navigation Secteurs/Rayons classique (cf. rendu conditionnel ci-dessous) ;
+              revenir à "Tous les fournisseurs" restaure la navigation par rayon sans perdre le
+              filtre CC/CD actif. Style aligné sur la palette marine/ambre déjà utilisée dans
+              ProposalHeader/les badges du tableau (#1B2A4A, #F5A623, #D6DEEA) plutôt que les
+              boutons Bootstrap gris par défaut — demande du 28/10/2026 ("fait un jolie style pour
+              les filtre"). */}
+          <style>{`
+            .rf-bar {
+              display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap;
+              background: #ffffff; border: 1px solid #D6DEEA; border-radius: 12px;
+              padding: .6rem .9rem; margin-bottom: 1rem;
+              box-shadow: 0 1px 2px rgba(27,42,74,.06);
+            }
+            .rf-group { display: flex; align-items: center; gap: .6rem; }
+            .rf-label {
+              font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+              color: #8a93a8;
+            }
+            /* Segmented control (pas un btn-group Bootstrap) : un seul contour englobant plutôt que
+               trois boutons avec leurs propres bords, l'option active se détache par un fond plein
+               marine — même logique visuelle que .ph-status (pilule pleine) ailleurs dans l'écran. */
+            .rf-segmented {
+              display: inline-flex; background: #F5F7FA; border: 1px solid #D6DEEA; border-radius: 999px;
+              padding: 3px; gap: 2px;
+            }
+            .rf-segmented button {
+              border: none; background: transparent; cursor: pointer;
+              font-size: .78rem; font-weight: 600; color: #5B6B85;
+              padding: .32rem .85rem; border-radius: 999px; line-height: 1.2;
+              transition: background-color .15s ease, color .15s ease;
+            }
+            .rf-segmented button:hover:not(.active) { background: #EDF1F7; color: #1B2A4A; }
+            .rf-segmented button.active { background: #1B2A4A; color: #ffffff; }
+            .rf-segmented button.active.rf-cd { background: #F5A623; color: #1B2A4A; }
+          `}</style>
+          <div className="rf-bar">
+            <div className="rf-group">
+              <span className="rf-label">Type</span>
+              <div className="rf-segmented" role="group" aria-label="Filtre type de commande">
+                <button type="button" className={ccCdFilter === 'ALL' ? 'active' : ''} onClick={() => setCcCdFilter('ALL')}>
+                  Tout
+                </button>
+                <button
+                  type="button"
+                  className={ccCdFilter === 'CC' ? 'active' : ''}
+                  title="Commande Centrale (Livraison Centrale)"
+                  onClick={() => setCcCdFilter('CC')}
+                >
+                  CC
+                </button>
+                <button
+                  type="button"
+                  className={`rf-cd ${ccCdFilter === 'CD' ? 'active' : ''}`}
+                  title="Commande Directe (Livraison Directe)"
+                  onClick={() => setCcCdFilter('CD')}
+                >
+                  CD
+                </button>
+              </div>
+            </div>
+            {availableSuppliers.length > 0 && (
+              <div className="rf-group">
+                <span className="rf-label">Fournisseur</span>
+                <SupplierSearchDropdown
+                  value={selectedSupplierId || ''}
+                  onChange={(v) => setSelectedSupplierId(v || null)}
+                  options={availableSuppliers.map((s) => ({
+                    value: s.id,
+                    label: `${s.deliveryType ? `${s.deliveryType} — ` : ''}${s.name}`,
+                  }))}
+                />
+              </div>
+            )}
+          </div>
+
+          {selectedSupplierId && selectedSupplierMeta ? (
+            // Vue "racine fournisseur" (§2/§6/§7) : tous les articles de ce fournisseur, tous rayons
+            // confondus, réutilise ProposalTable telle quelle (même composant/état d'édition de
+            // quantité que la vue par rayon, jamais une copie) — seule `lines` change de source
+            // (supplierLines au lieu de detailLines). Le tri/groupement par secteur>département>
+            // rayon reste géré par les colonnes déjà triables d'AG Grid dans ProposalTable, la
+            // hiérarchie n'est donc jamais perdue même si l'affichage n'est plus en tuiles.
+            <div className="card">
+              <div className="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <h5 className="mb-0">
+                    {selectedSupplierMeta.deliveryType ? `${selectedSupplierMeta.deliveryType} — ` : ''}
+                    {selectedSupplierMeta.name}
+                  </h5>
+                  <div className="text-muted small">{supplierLines.length} article(s), tous rayons confondus</div>
+                </div>
+                {!viewingPastGeneration && (
+                  <SupplierValidationFlow
+                    proposalId={proposal!.id}
+                    decisionsProvider={() => proposalTableRef.current?.getDecisionsForSupplier(selectedSupplierId) || []}
+                    supplierId={selectedSupplierId}
+                    supplierName={selectedSupplierMeta.name}
+                    deliveryType={selectedSupplierMeta.deliveryType}
+                    shopQueryParam={shopQueryParam()}
+                    onValidated={() => loadProposalById(proposal!.id)}
+                  />
+                )}
+              </div>
+              <div className="card-body">
+                <ProposalTable
+                  ref={proposalTableRef}
+                  proposal={proposal}
+                  lines={supplierLines}
+                  shopId={isSingleShop ? user?.rposShopId || '' : selectedShopId}
+                  shopQueryParam={shopQueryParam()}
+                  readOnly={viewingPastGeneration}
+                  onOpenAnalytics={setAnalyticsArticle}
+                  onTotalChange={() => {}}
+                  onOpenArticleDetail={setArticleDetail}
+                />
+              </div>
+            </div>
+          ) : (
+            <DepartmentListView proposal={filteredProposal} loading={refreshing} selectedSector={selectedSector} buildNavUrl={buildNavUrl} onNavigate={navigateTo} onOpenExcluded={handleOpenExcluded} />
+          )}
         </div>
       ) : (
         <div className="row reassort-view-transition" key={`detail-${selectedSector || ''}-${selectedDepartment || ''}`}>
@@ -923,10 +1116,13 @@ export function PurchaseOrder() {
                       valide 1, il doit être marqué validé, et je peux toujours aller dans les
                       autres") — le bouton n'apparaît que sur la vue détail d'un rayon précis
                       (selectedDepartment défini), jamais depuis la vue Secteurs globale qui n'a
-                      plus de sens comme "tout valider en bloc". Masqué si ce rayon a déjà sa
-                      propre commande RPOS (currentDepartmentOrder), remplacé par un badge de
-                      statut à la place (cf. plus bas dans le rendu). */}
-                  {!viewingPastGeneration && proposal && selectedDepartment && !currentDepartmentOrder && (
+                      plus de sens comme "tout valider en bloc". Masqué dès que ce rayon est
+                      ENTIÈREMENT couvert (departmentFullyOrdered, basé sur proposalOrderId par
+                      ligne depuis le 28/10/2026 — fiable même si la couverture vient de la
+                      validation globale fournisseur, pas seulement d'une commande par-rayon
+                      classique), remplacé par un badge de statut à la place (cf. plus bas dans le
+                      rendu). */}
+                  {!viewingPastGeneration && proposal && selectedDepartment && !departmentFullyOrdered && (
                     <ValidationFlow
                       proposalId={proposal.id}
                       decisionsProvider={() => proposalTableRef.current?.getDecisionsForDepartment(selectedDepartment) || []}
@@ -963,6 +1159,17 @@ export function PurchaseOrder() {
                       <iconify-icon icon="solar:check-circle-bold-duotone" className="align-middle"></iconify-icon>{' '}
                       Rayon validé — commande {currentDepartmentOrder.rposOrderReference || currentDepartmentOrder.rposOrderId || '—'}
                       {currentDepartmentOrder.linesFailed > 0 && ` (${currentDepartmentOrder.linesFailed} article(s) refusé(s))`}
+                    </span>
+                  )}
+                  {/* Rayon entièrement couvert par une validation globale fournisseur (28/10/2026) :
+                      aucun ProposalOrder dont `department` matche ce rayon exact (currentDepartmentOrder
+                      ci-dessus reste null, department="Multi-rayons (...)" pour cette commande), mais
+                      toutes ses lignes ont bien un proposalOrderId — badge de repli pour ne jamais
+                      laisser croire que ce rayon n'est pas traité. */}
+                  {!currentDepartmentOrder && departmentFullyOrdered && (
+                    <span className="badge bg-success" title="Toutes les lignes de ce rayon ont été commandées via la validation globale d'un fournisseur.">
+                      <iconify-icon icon="solar:check-circle-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      Rayon commandé — via fournisseur
                     </span>
                   )}
                 </div>
@@ -1162,6 +1369,13 @@ export function PurchaseOrder() {
           onClose={() => setArticleDetail(null)}
           onUnblock={(l, quantity) => proposalTableRef.current?.unblockLine(l, quantity)}
           onOpenAnalytics={setAnalyticsArticle}
+          onSupplierChanged={(l, updates) => {
+            // Même pattern que onUnblock : `l` est la référence vivante tenue par la grille
+            // (getRowId basé sur l.id) — on la mute en place puis on force le réaffichage de la
+            // seule cellule concernée, sans recharger toute la proposition.
+            Object.assign(l, updates);
+            proposalTableRef.current?.refreshSupplierCell(l);
+          }}
         />
       )}
 
