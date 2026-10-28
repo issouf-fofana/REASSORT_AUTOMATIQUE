@@ -1163,8 +1163,44 @@ model JobRun {
 
   triggeredBy String @default("cron") @map("triggered_by") // 'cron' | 'startup' | 'manual'
 
+  shopResults JobRunShopResult[]
+
   @@index([jobName, startedAt])
   @@map("job_runs")
+}
+
+// Détail par magasin d'une exécution de job multi-magasins (ajouté le 28/10/2026, demande explicite
+// : "je pourrai voir quel magasin il y a eu erreur lors de l'exécution de la tâche") — avant cette
+// table, un job qui parcourt tous les magasins (synchronisation des ventes, du stock...) ne
+// rapportait son résultat par magasin nulle part de façon structurée : seulement des console.log
+// serveur non persistés, ou au mieux une ligne de texte libre dans JobRun.logs, impossible à filtrer
+// ou à interroger ("quels magasins ont échoué sur cette exécution ?"). Une ligne par magasin traité,
+// créée au moment où le job termine ce magasin précis (jamais en bloc à la fin, pour rester visible
+// même si l'exécution plante avant la fin).
+model JobRunShopResult {
+  id String @id @default(cuid())
+
+  jobRunId String @map("job_run_id")
+  jobRun   JobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
+
+  rposShopId String  @map("rpos_shop_id")
+  shopLabel  String? @map("shop_label") // référence + nom au moment de l'exécution (ex: "414 — CASH IVOIRE U PORT-BOUËT"), dénormalisé pour rester correct même si le magasin est renommé après coup
+
+  status String @default("success") @map("status") // 'success' | 'error' | 'skipped'
+
+  // Métrique libre courte (ex: "128 ventes", "12 mouvements"), affichée telle quelle dans le tableau
+  // détail — chaque job choisit son propre libellé pertinent plutôt qu'un schéma rigide commun à
+  // tous les jobs, dont le sens varie trop d'un job à l'autre (ventes/mouvements/DLV/commandes...).
+  detail String? @db.Text
+
+  errorMessage String? @db.Text @map("error_message")
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([jobRunId])
+  @@index([jobRunId, status])
+  @@map("job_run_shop_results")
 }
 
 // =============================================

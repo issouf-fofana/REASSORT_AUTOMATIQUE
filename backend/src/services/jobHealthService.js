@@ -42,6 +42,28 @@ async function startJobRun(jobName, triggeredBy = 'cron') {
         .update({ where: { id: run.id }, data: { logs: lines.join('\n') } })
         .catch(() => {});
     },
+    // shopResult (ajouté le 28/10/2026, demande explicite : "je pourrai voir quel magasin il y a eu
+    // erreur lors de l'exécution de la tâche") — un job multi-magasins appelle ceci UNE FOIS PAR
+    // MAGASIN dès qu'il a fini de le traiter (jamais en bloc à la fin de toute l'exécution), pour que
+    // le détail reste visible même si le job plante en cours de route sur un magasin suivant.
+    // Best-effort comme log() ci-dessus : un échec d'écriture du détail ne doit jamais faire échouer
+    // le job lui-même.
+    shopResult({ rposShopId, shopLabel, status = 'success', detail, errorMessage: shopError, startedAt, finishedAt }) {
+      prisma.jobRunShopResult
+        .create({
+          data: {
+            jobRunId: run.id,
+            rposShopId: String(rposShopId),
+            shopLabel: shopLabel || null,
+            status,
+            detail: detail || null,
+            errorMessage: shopError || null,
+            startedAt: startedAt || new Date(),
+            finishedAt: finishedAt || new Date(),
+          },
+        })
+        .catch(() => {});
+    },
   };
 
   return { runId: run.id, logger };

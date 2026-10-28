@@ -98,9 +98,15 @@ async function getJobDetail(jobName, { page = 1, pageSize = 20 } = {}) {
   };
 }
 
-/** Une exécution précise, avec ses logs complets. */
+/** Une exécution précise, avec ses logs complets et le détail par magasin (ajouté le 28/10/2026,
+ * demande explicite : "je pourrai voir quel magasin il y a eu erreur lors de l'exécution de la
+ * tâche") — shopResults vide pour un job qui ne rapporte pas encore ce détail (jobs non équipés,
+ * cf. logger.shopResult dans jobHealthService.js), jamais une erreur. */
 async function getRunDetail(runId) {
-  return prisma.jobRun.findUnique({ where: { id: runId } });
+  return prisma.jobRun.findUnique({
+    where: { id: runId },
+    include: { shopResults: { orderBy: { startedAt: 'asc' } } },
+  });
 }
 
 module.exports = { listJobsOverview, getJobDetail, getRunDetail, computeNextRun };

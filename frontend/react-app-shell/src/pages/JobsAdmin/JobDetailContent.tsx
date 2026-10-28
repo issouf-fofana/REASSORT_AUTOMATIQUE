@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../shared/api/client';
 
+export interface JobRunShopResult {
+  id: string;
+  rposShopId: string;
+  shopLabel: string | null;
+  status: 'success' | 'error' | 'skipped';
+  detail: string | null;
+  errorMessage: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 export interface JobRun {
   id: string;
   jobName: string;
@@ -11,6 +22,7 @@ export interface JobRun {
   errorMessage: string | null;
   logs: string | null;
   triggeredBy: 'cron' | 'startup' | 'manual';
+  shopResults?: JobRunShopResult[];
 }
 
 export interface JobDetail {
@@ -27,6 +39,17 @@ const STATUS_BADGE: Record<JobRun['status'], string> = {
   running: 'bg-info-subtle text-info',
   success: 'bg-success-subtle text-success',
   error: 'bg-danger-subtle text-danger',
+};
+
+const SHOP_STATUS_BADGE: Record<JobRunShopResult['status'], string> = {
+  success: 'bg-success-subtle text-success',
+  error: 'bg-danger-subtle text-danger',
+  skipped: 'bg-secondary-subtle text-secondary',
+};
+const SHOP_STATUS_LABEL: Record<JobRunShopResult['status'], string> = {
+  success: 'OK',
+  error: 'Erreur',
+  skipped: 'Ignoré',
 };
 
 const TRIGGER_LABEL: Record<JobRun['triggeredBy'], string> = {
@@ -129,6 +152,69 @@ function RunLogsPanel({ runId, onFinished }: { runId: string; onFinished: () => 
         >
           {run.logs || 'Aucun log de progression pour cette exécution.'}
         </pre>
+        {run.shopResults && run.shopResults.length > 0 && (
+          <ShopResultsTable results={run.shopResults} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Détail par magasin d'une exécution (ajouté le 28/10/2026, demande explicite : "je pourrai voir
+ * quel magasin il y a eu erreur lors de l'exécution de la tâche") — seuls les jobs équipés de
+ * logger.shopResult() côté backend remplissent cette liste ; un job non équipé n'affiche
+ * simplement rien ici (shopResults vide), sans message d'erreur ni placeholder. */
+function ShopResultsTable({ results }: { results: JobRunShopResult[] }) {
+  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+  const errorCount = results.filter((r) => r.status === 'error').length;
+  const visible = showErrorsOnly ? results.filter((r) => r.status === 'error') : results;
+
+  return (
+    <div className="mt-3">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="mb-0">Détail par magasin ({results.length})</h6>
+        {errorCount > 0 && (
+          <div className="form-check form-switch mb-0">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              role="switch"
+              id="shop-results-errors-only"
+              checked={showErrorsOnly}
+              onChange={(e) => setShowErrorsOnly(e.target.checked)}
+            />
+            <label className="form-check-label small" htmlFor="shop-results-errors-only">
+              Erreurs uniquement ({errorCount})
+            </label>
+          </div>
+        )}
+      </div>
+      <div className="table-responsive" style={{ maxHeight: 300, overflowY: 'auto' }}>
+        <table className="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Magasin</th>
+              <th>Statut</th>
+              <th>Détail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <tr key={r.id}>
+                <td className="small">{r.shopLabel || r.rposShopId}</td>
+                <td>
+                  <span className={`badge ${SHOP_STATUS_BADGE[r.status]}`}>{SHOP_STATUS_LABEL[r.status]}</span>
+                </td>
+                <td className="small text-muted">{r.status === 'error' ? (r.errorMessage || '—') : (r.detail || '—')}</td>
+              </tr>
+            ))}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={3} className="text-center text-muted py-2 small">Aucun magasin en erreur.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

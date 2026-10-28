@@ -89,8 +89,10 @@ async function windowNeedsReconciliation(posId, shopId, start, now) {
   return rposPage.count !== localCount;
 }
 
-async function syncShop(posId, shop) {
+async function syncShop(posId, shop, logger) {
   const shopId = shop.id;
+  const shopLabel = `${shop.reference || shopId}${shop.name ? ' — ' + shop.name : ''}`;
+  const shopStartedAt = new Date();
   const state = await prisma.stockMoveSyncState.findUnique({ where: { rposShopId: shopId } });
   const now = new Date();
 
@@ -135,12 +137,22 @@ async function syncShop(posId, shop) {
     });
 
     console.log(`[stockMoveSyncJob] ${shop.reference || shopId} (${posId}) : ${rows.length} mouvement(s) synchronisé(s) (${start.toISOString()} -> ${now.toISOString()})`);
+    logger?.shopResult({
+      rposShopId: shopId, shopLabel, status: 'success',
+      detail: `${rows.length} mouvement(s) synchronisé(s)`,
+      startedAt: shopStartedAt, finishedAt: new Date(),
+    });
   } catch (err) {
     console.error(`[stockMoveSyncJob] Échec pour ${shop.reference || shopId} (${posId}):`, err.message);
     await prisma.stockMoveSyncState.upsert({
       where: { rposShopId: shopId },
       update: { lastSyncStatus: 'error', lastSyncError: err.message },
       create: { rposPosId: posId, rposShopId: shopId, lastSyncStatus: 'error', lastSyncError: err.message },
+    });
+    logger?.shopResult({
+      rposShopId: shopId, shopLabel, status: 'error',
+      errorMessage: err.message,
+      startedAt: shopStartedAt, finishedAt: new Date(),
     });
   }
 }
@@ -159,11 +171,12 @@ const SHOP_CONCURRENCY_PER_SERVER = 4;
 // une page que l'utilisateur attend activement.
 const SERVER_CONCURRENCY = 3;
 
-async function runStockMoveSync() {
+async function runStockMoveSync(logger) {
   const servers = await rposServers.listServers();
   const activeServers = servers.filter((s) => s.isActive && s.rposUser && s.rposPassword);
 
   console.log(`[stockMoveSyncJob] Synchronisation démarrée sur ${activeServers.length} serveur(s)...`);
+  logger?.log(`Synchronisation démarrée sur ${activeServers.length} serveur(s).`);
 
   await mapWithConcurrency(activeServers, SERVER_CONCURRENCY, async (server) => {
     let shops;
@@ -171,12 +184,14 @@ async function runStockMoveSync() {
       shops = await rpos.getShops(server.posId);
     } catch (err) {
       console.error(`[stockMoveSyncJob] Impossible de lister les magasins de ${server.posId}:`, err.message);
+      logger?.shopResult({ rposShopId: server.posId, shopLabel: `Serveur ${server.posId}`, status: 'error', errorMessage: `Liste des magasins indisponible : ${err.message}` });
       return;
     }
-    await mapWithConcurrency(shops, SHOP_CONCURRENCY_PER_SERVER, (shop) => syncShop(server.posId, shop));
+    await mapWithConcurrency(shops, SHOP_CONCURRENCY_PER_SERVER, (shop) => syncShop(server.posId, shop, logger));
   });
 
   console.log('[stockMoveSyncJob] Synchronisation terminée.');
+  logger?.log('Synchronisation terminée.');
 }
 
 function toStockMoveRows(moves, posId, shopId) {
