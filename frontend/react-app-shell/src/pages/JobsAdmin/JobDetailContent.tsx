@@ -145,6 +145,19 @@ function RunLogsPanel({ runId, onFinished }: { runId: string; onFinished: () => 
             Le traitement déjà lancé côté serveur (ex: appels RPOS en cours) n'est pas interrompu et continue jusqu'à sa fin naturelle — utile pour nettoyer l'affichage d'une exécution bloquée, pas pour couper un envoi en cours.
           </div>
         )}
+        {/* Compteur de progression vivant (ajouté le 28/10/2026, signalé : "je ne vois pas les log
+            en temps réel") — pour un job qui traite des dizaines de magasins, le texte de logs
+            lui-même ne reçoit souvent qu'une ligne au début et une à la fin (pas une ligne par
+            magasin, trop coûteux en écritures DB à ce rythme), donnant l'impression à tort que rien
+            ne progresse pendant plusieurs minutes alors que le job avance réellement — visible
+            seulement sur le tableau "Détail par magasin" plus bas, qui se peuple au fil de l'eau.
+            Ce compteur rend cette progression immédiatement visible sans avoir à scroller. */}
+        {run.status === 'running' && run.shopResults && (
+          <div className="d-flex align-items-center gap-2 small text-muted mb-3">
+            <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+            {run.shopResults.length} magasin(s) traité(s) pour le moment...
+          </div>
+        )}
         {run.errorMessage && <div className="alert alert-danger small">{run.errorMessage}</div>}
         <pre
           className="small bg-dark text-light p-3 rounded mb-0"
