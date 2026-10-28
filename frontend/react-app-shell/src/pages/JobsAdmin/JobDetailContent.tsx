@@ -71,6 +71,108 @@ function fmtDuration(ms?: number | null): string {
   return `${m} min ${Math.round(s % 60)}s`;
 }
 
+// Palette du projet (marine/ambre), reprise ici pour rester cohérente avec JobsAdminDashboard.tsx
+// et le reste du site (cf. theme-override.css : --bs-primary #1B2A4A, accent #F5A623).
+const NAVY = '#1B2A4A';
+const GREEN = '#2E7D4F';
+const RED = '#B8302C';
+const AMBER = '#F5A623';
+
+/** Vrai graphique de l'évolution de la durée des exécutions d'une tâche (ajouté le 28/10/2026,
+ * demande explicite : "il faut le style de ça [Graph Ping de Centreon]... axes, zone remplie sous
+ * la courbe, légende" — à la place de la petite sparkline du tableau principal, trop petite pour
+ * être vraiment lisible). Tracé en SVG à la main (pas de dépendance graphique ajoutée) à partir des
+ * exécutions déjà chargées par JobDetailContent (detail.runs), donc aucun appel réseau
+ * supplémentaire. Plus ancien à gauche, plus récent à droite, point coloré selon le statut de
+ * l'exécution correspondante, axe Y gradué sur la durée max observée. */
+function DurationChart({ runs }: { runs: JobRun[] }) {
+  // runs arrive du plus récent au plus ancien (ordre d'affichage de l'historique) — inversé ici
+  // pour un tracé chronologique gauche->droite, et seules les exécutions terminées (durationMs
+  // connu) sont exploitables sur l'axe des durées.
+  const points = [...runs].filter((r) => r.durationMs !== null).reverse();
+  if (points.length < 2) {
+    return (
+      <div className="card mb-3">
+        <div className="card-header"><h4 className="card-title mb-0">Évolution de la durée</h4></div>
+        <div className="card-body text-center text-muted small py-4">
+          Pas encore assez d'exécutions terminées pour tracer un graphique.
+        </div>
+      </div>
+    );
+  }
+
+  const W = 760;
+  const H = 220;
+  const PAD_L = 56;
+  const PAD_R = 16;
+  const PAD_T = 16;
+  const PAD_B = 32;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+
+  const maxDuration = Math.max(...points.map((p) => p.durationMs as number), 1);
+  // Graduations Y "rondes" (0, 25%, 50%, 75%, 100% du max observé) — suffisant pour une échelle de
+  // lecture rapide sans viser une graduation "jolie" en secondes/minutes exactes.
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(maxDuration * f));
+
+  const stepX = points.length > 1 ? plotW / (points.length - 1) : 0;
+  const coords = points.map((p, i) => {
+    const x = PAD_L + i * stepX;
+    const y = PAD_T + plotH - ((p.durationMs as number) / maxDuration) * plotH;
+    return { x, y, run: p };
+  });
+
+  const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)} ${PAD_T + plotH} L ${coords[0].x.toFixed(1)} ${PAD_T + plotH} Z`;
+
+  const dotColor = (status: JobRun['status']) => (status === 'error' ? RED : status === 'running' ? AMBER : GREEN);
+
+  // Étiquettes X : au plus 6, réparties régulièrement, pour éviter un axe illisible avec beaucoup
+  // de points (jusqu'à pageSize=20 exécutions chargées par JobDetailContent).
+  const xLabelEvery = Math.max(1, Math.ceil(points.length / 6));
+
+  return (
+    <div className="card mb-3">
+      <div className="card-header d-flex align-items-center justify-content-between">
+        <h4 className="card-title mb-0">Évolution de la durée</h4>
+        <div className="d-flex align-items-center gap-3 small text-muted">
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, backgroundColor: GREEN }} className="me-1"></span>Succès</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, backgroundColor: RED }} className="me-1"></span>Erreur</span>
+        </div>
+      </div>
+      <div className="card-body">
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Durée des dernières exécutions">
+          {/* Grille + axe Y gradué */}
+          {yTicks.map((val, i) => {
+            const y = PAD_T + plotH - (i / (yTicks.length - 1)) * plotH;
+            return (
+              <g key={i}>
+                <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke={NAVY} strokeOpacity={0.08} strokeWidth={1} />
+                <text x={PAD_L - 8} y={y + 3} textAnchor="end" fontSize={10} fill="#8591A0">{fmtDuration(val)}</text>
+              </g>
+            );
+          })}
+          {/* Zone remplie sous la courbe (façon "Graph Ping" Centreon) */}
+          <path d={areaPath} fill={NAVY} fillOpacity={0.08} stroke="none" />
+          <path d={linePath} fill="none" stroke={NAVY} strokeWidth={1.6} />
+          {coords.map((c, i) => (
+            <g key={c.run.id}>
+              <circle cx={c.x} cy={c.y} r={3} fill={dotColor(c.run.status)} stroke="#fff" strokeWidth={1}>
+                <title>{`${fmtDuration(c.run.durationMs)} — ${fmtDate(c.run.startedAt)}${c.run.status === 'error' ? ' — Erreur' : ''}`}</title>
+              </circle>
+              {i % xLabelEvery === 0 && (
+                <text x={c.x} y={H - PAD_B + 16} textAnchor="middle" fontSize={9} fill="#8591A0">
+                  {new Date(c.run.startedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 /** Panneau logs d'une exécution précise — poll toutes les 2s tant que le statut est 'running' pour
  * un vrai suivi en temps réel, s'arrête dès que l'exécution se termine. */
 function RunLogsPanel({ runId, onFinished }: { runId: string; onFinished: () => void }) {
@@ -365,6 +467,8 @@ export function JobDetailContent({ jobName }: { jobName: string }) {
       </div>
 
       <ScheduleEditor jobName={detail.jobName} cronExpression={detail.cronExpression} enabled={detail.enabled} onSaved={load} />
+
+      <DurationChart runs={detail.runs} />
 
       {selectedRunId && (
         <div className="mb-3">
