@@ -185,13 +185,28 @@ export function SupplierValidationFlow({
                     Une seule commande RPOS sera créée pour <strong>{supplierName}</strong> ({deliveryType === 'LC' ? 'Livraison Centrale' : 'Livraison Directe'}),
                     regroupant tous les articles éligibles de ce fournisseur — quel que soit leur rayon d'origine.
                   </p>
+                  {/* Même choix que la validation par rayon (ValidationFlow.tsx), demandé explicitement
+                      le 28/10/2026 pour la validation globale fournisseur aussi ("il doit me donner
+                      l'autre possiblité soit de cree ou validé... comme ancien vue"). */}
+                  <div>
+                    <div className="fw-semibold">Choisir le niveau d'envoi</div>
+                    <div className="text-muted small">
+                      <strong>Créer uniquement</strong> : commande laissée "en préparation" sur RPOS, non prise en compte par l'entrepôt (phase de
+                      test, encore supprimable).
+                      <br />
+                      <strong>Créer et valider</strong> : la commande est en plus transmise à l'entrepôt.
+                    </div>
+                  </div>
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="btn btn-outline-secondary" onClick={() => setConfirmOpen(false)}>
                     Annuler
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={() => submit(false)}>
-                    Créer la commande
+                  <button type="button" className="btn btn-outline-primary" onClick={() => submit(false)}>
+                    Créer sur RPOS
+                  </button>
+                  <button type="button" className="btn btn-success" onClick={() => submit(true)}>
+                    Créer et valider sur RPOS
                   </button>
                 </div>
               </div>
