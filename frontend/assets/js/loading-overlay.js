@@ -25,14 +25,18 @@
        techniquement un rechargement complet de page (pas une vraie navigation SPA, cf.
        discussion du 08/10/2026 — solution légère retenue plutôt qu'un chantier de fusion des
        ~19 apps en une seule SPA). left:0 en dessous de 768px : la sidebar est masquée sur
-       mobile (cf. theme-override.css), donc rien à préserver, l'écran reprend toute la largeur. */
+       mobile (cf. theme-override.css), donc rien à préserver, l'écran reprend toute la largeur.
+       300px -> 18.75rem (28/10/2026) : doit toujours correspondre exactement au max-width de
+       .sidebar (theme-override.css), sinon cet écran de chargement masque trop ou pas assez de
+       sidebar dès que l'écran utilise un zoom/une mise à l'échelle différente de celle du poste
+       de référence. */
     #reassort-loading-overlay {
       position: fixed; inset: 0; background-color: #1B2A4A; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
       transition: opacity .25s ease;
     }
     @media (min-width: 768px) {
-      #reassort-loading-overlay { left: 300px; }
+      #reassort-loading-overlay { left: 18.75rem; }
     }
     #reassort-loading-overlay.hide { opacity: 0; pointer-events: none; }
     #reassort-loading-overlay img {

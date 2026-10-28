@@ -166,9 +166,15 @@ a:not(.sidebar *),
 .sidebar .nav {
      white-space: normal;
 }
+/* 300px -> 18.75rem (28/10/2026, signalé : "il doit être adapté à tout les écran pas un seul
+   écran figé") — une valeur en px est une taille PHYSIQUE identique quel que soit l'écran, donc le
+   nav paraissait surdimensionné sur un écran à résolution plus basse ou avec une mise à l'échelle
+   système différente de celle du poste de référence. rem suit le font-size racine (16px par
+   défaut), lui-même affecté par le zoom navigateur ET la mise à l'échelle du système — même valeur
+   visuelle (300px = 18.75rem à 16px/rem), mais qui redevient proportionnelle au lieu de figée. */
 @media (min-width: 768px) {
      .sidebar {
-          max-width: 300px !important;
+          max-width: 18.75rem !important;
      }
 }
 /* .content a une marge fixe de 260px (volt.css) pour laisser la place à la sidebar — sans l'ajuster
@@ -179,10 +185,12 @@ a:not(.sidebar *),
    règle plus bas) — un !important gagne toujours sur une règle normale quelle que soit sa
    spécificité, donc ce correctif plus bas ne pouvait jamais s'appliquer tant que celui-ci restait
    inconditionnel. Bug rapporté le 28/09/2026 : "toutes les pages restent à droite [...] non
-   centré" en mode notch, un vide à gauche large comme l'ancienne sidebar. */
+   centré" en mode notch, un vide à gauche large comme l'ancienne sidebar.
+   300px -> 18.75rem (28/10/2026) : doit toujours correspondre exactement au max-width de .sidebar
+   ci-dessus (même raisonnement, une seule valeur à faire évoluer en cas de changement futur). */
 @media (min-width: 992px) {
      body:not(.nav-collapsed) .content {
-          margin-left: 300px !important;
+          margin-left: 18.75rem !important;
      }
 }
 /* display:flex ajouté le 27/09/2026 : sidebar.html pose déjà d-flex align-items-center en dur sur
@@ -496,10 +504,13 @@ body {
    body.nav-collapsed EXCLU (bug trouvé le 08/10/2026) : en mode notch (barre compacte, sidebar
    classique jamais affichée dans ce mode, cf. règles plus bas), cette bande se retrouvait sans
    rien par-dessus pour la masquer — un bandeau marine orphelin plaqué sur le contenu, qui passait
-   même par-dessus le texte "À quoi ça sert" de la page Assistant IA. */
+   même par-dessus le texte "À quoi ça sert" de la page Assistant IA.
+   300px -> 18.75rem (28/10/2026) : doit toujours correspondre exactement au max-width de .sidebar
+   ci-dessus, sinon cette bande de pré-chargement redevient visible en trop ou pas assez large dès
+   que l'écran utilise un zoom/une mise à l'échelle différente de celle du poste de référence. */
 @media (min-width: 768px) {
      body:not(.nav-collapsed) {
-          background: linear-gradient(to right, #1B2A4A 0, #1B2A4A 300px, #f5f5f5 300px);
+          background: linear-gradient(to right, #1B2A4A 0, #1B2A4A 18.75rem, #f5f5f5 18.75rem);
      }
 }
 
