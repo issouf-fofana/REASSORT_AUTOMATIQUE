@@ -565,7 +565,10 @@ function SalesBackfillCard({ shops }: { shops: ReturnType<typeof useShopsFlat>['
     }
 
     setRunning(true);
-    setResultText('');
+    // Message explicite pendant le comptage RPOS synchrone (cf. commentaire sur le bouton
+    // "Démarrer" ci-dessus) : sans ça, l'écran paraissait figé pendant plusieurs secondes avant
+    // que la barre de progression n'apparaisse d'un coup.
+    setResultText('Vérification du volume à récupérer sur RPOS...');
     try {
       if (selectedIds.length === 1) {
         const shop = shops.find((s) => s.id === selectedIds[0])!;
@@ -574,6 +577,7 @@ function SalesBackfillCard({ shops }: { shops: ReturnType<typeof useShopsFlat>['
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ posId: shop.posId, shopId: shop.id, periodStart, periodEnd }),
         });
+        setResultText('');
         startBackfillPolling(data.runId);
       } else {
         const targets = selectedIds.map((id) => {
@@ -794,8 +798,15 @@ function SalesBackfillCard({ shops }: { shops: ReturnType<typeof useShopsFlat>['
                 </>
               )}
               <div className="col-md-3">
+                {/* BUG CORRIGÉ le 28/10/2026 (signalé : "je lance la récupération il me donne rien
+                    et après il affiche") — le clic sur "Démarrer" déclenche un comptage RPOS
+                    synchrone (countLinesInPeriod, salesBackfillService.js) côté serveur AVANT même
+                    de créer le run et de répondre, pour planifier les tranches selon le volume
+                    réel. Ce comptage peut prendre plusieurs secondes sur un magasin à fort volume ou
+                    une longue période, pendant lesquelles le bouton restait désactivé mais muet, sans
+                    rien indiquer à l'utilisateur qu'un traitement était en cours. */}
                 <button type="button" className="btn btn-warning w-100" disabled={running} onClick={handleRunBackfill}>
-                  Démarrer
+                  {running ? 'Démarrage...' : 'Démarrer'}
                 </button>
               </div>
             </div>
