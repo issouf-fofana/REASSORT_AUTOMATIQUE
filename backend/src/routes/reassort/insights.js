@@ -574,14 +574,26 @@ router.get('/overstock-report/end-of-life-detail', async (req, res) => {
   }
 });
 
-// GET /api/reassort/scrap-report?lookbackDays= - page Casse (demande explicite du 21/10/2026 :
-// "les casse des article on doit voir un bouton sur la sidebare") — TOUS les articles ayant eu de
-// la casse sur la période, qu'ils soient en surstock ou non (contrairement à la casse déjà présente
-// dans Surstock, limitée aux articles déjà identifiés en surstock). Même périmètre magasins que
-// /overstock-report (ADMIN/SUPERVISOR/mono-magasin), même raisonnement de resolveOverstockShopFilter.
+// GET /api/reassort/scrap-report?lookbackDays=&shops= - page Casse (demande explicite du
+// 21/10/2026 : "les casse des article on doit voir un bouton sur la sidebare") — TOUS les articles
+// ayant eu de la casse sur la période, qu'ils soient en surstock ou non (contrairement à la casse
+// déjà présente dans Surstock, limitée aux articles déjà identifiés en surstock). Même périmètre
+// magasins que /overstock-report (ADMIN/SUPERVISOR/mono-magasin), même raisonnement de
+// resolveOverstockShopFilter.
+// BUG CORRIGÉ le 28/10/2026 (signalé : "ca ne doit pas etre multi magasin... corrige comme les
+// autre") — shopIdFilter ignorait totalement un ?shops= envoyé par le frontend, contrairement à
+// resolveOverstockShopFilterAndCache utilisé par /overstock-report : un ADMIN/SUPERVISOR voyait
+// systématiquement TOUT le réseau (38 magasins) même avec un magasin précis sélectionné dans la
+// topbar, alors que Surstock/Ruptures filtrent déjà correctement sur le magasin actif depuis le
+// 23/10/2026. Même intersection shops/périmètre que resolveOverstockShopFilterAndCache : jamais une
+// extension au-delà de ce que le rôle autorise déjà, seulement une restriction.
 router.get('/scrap-report', async (req, res) => {
   try {
-    const shopIdFilter = await resolveOverstockShopFilter(req);
+    let shopIdFilter = await resolveOverstockShopFilter(req);
+    if (req.query.shops) {
+      const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
+      shopIdFilter = shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+    }
     const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
     // typeLabels optionnel (demande explicite du 21/10/2026 : "je veux qui tu affiche les type de
     // mouvement pour les casse et tu me donne... et quand c'est visible sur le UI on peux les
@@ -595,14 +607,20 @@ router.get('/scrap-report', async (req, res) => {
   }
 });
 
-// GET /api/reassort/scrap-report/movement-types?lookbackDays= - liste tous les types de mouvement
-// distincts vus sur la période pour le périmètre magasins accessible (demande explicite du
-// 21/10/2026 : "met un litre pour affiche ses donner du filtre") — peuple le sélecteur de types sur
-// la page Casse, jamais présélectionnée par mots-clés côté UI (isDefaultScrapType n'indique qu'une
-// suggestion visuelle, l'utilisateur garde la main complète sur la sélection).
+// GET /api/reassort/scrap-report/movement-types?lookbackDays=&shops= - liste tous les types de
+// mouvement distincts vus sur la période pour le périmètre magasins accessible (demande explicite
+// du 21/10/2026 : "met un litre pour affiche ses donner du filtre") — peuple le sélecteur de types
+// sur la page Casse, jamais présélectionnée par mots-clés côté UI (isDefaultScrapType n'indique
+// qu'une suggestion visuelle, l'utilisateur garde la main complète sur la sélection).
+// ?shops= appliqué comme sur /scrap-report ci-dessus (correctif du 28/10/2026) : sans lui, la liste
+// de types restait calculée sur tout le réseau même une fois le tableau filtré sur un magasin.
 router.get('/scrap-report/movement-types', async (req, res) => {
   try {
-    const shopIdFilter = await resolveOverstockShopFilter(req);
+    let shopIdFilter = await resolveOverstockShopFilter(req);
+    if (req.query.shops) {
+      const requested = String(req.query.shops).split(',').map((s) => s.trim()).filter(Boolean);
+      shopIdFilter = shopIdFilter === null ? requested : shopIdFilter.filter((id) => requested.includes(id));
+    }
     const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : undefined;
     const result = await getMovementTypes(shopIdFilter, { lookbackDays });
     res.json({ success: true, data: result });

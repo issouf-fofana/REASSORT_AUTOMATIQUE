@@ -8,6 +8,14 @@ import { apiFetch } from '../../shared/api/client';
 // articles déjà identifiés en surstock). Cliquer sur un article ouvre la même page de détail que
 // depuis Surstock (OverstockScrapDetail.tsx, liste de chaque mouvement individuel) — même route,
 // jamais un second composant de détail à maintenir.
+//
+// BUG CORRIGÉ le 28/10/2026 (signalé : "ca ne doit pas etre multi magasin... corrige comme les
+// autre") — la page chargeait systématiquement TOUT le réseau (38 magasins) et filtrait seulement
+// côté client via un <select> local, sans jamais suivre le sélecteur global de la topbar ni envoyer
+// de paramètre magasin au backend (qui l'ignorait de toute façon). Reconverti en mono-magasin avec
+// EXACTEMENT le même pattern que OverstockReport.tsx (Surstock, déjà corrigé le 23/10/2026) :
+// compte mono-magasin cantonné à son propre magasin, ADMIN/SUPERVISOR suit le sélecteur global
+// (window.reassortGetActiveShop/reassortOnActiveShopChange), ?shops= envoyé à chaque appel API.
 
 type ScrapArticleRow = {
   rposShopId: string;
@@ -156,54 +164,68 @@ export function ScrapReport() {
   const user = window.reassortGetUser ? window.reassortGetUser() : null;
   const isSingleShop = user ? window.reassortIsSingleShopRole(user.role) : false;
 
+  // Même pattern que OverstockReport.tsx (Surstock) : magasin propre pour un compte mono-magasin,
+  // sélecteur GLOBAL de la topbar pour ADMIN/SUPERVISOR — jamais une vue multi-magasins locale à
+  // cette page.
+  const [activeShop, setActiveShop] = useState<{ id: string; posId?: string } | null>(
+    isSingleShop && user?.rposShopId ? { id: user.rposShopId, posId: user.rposPosId ?? undefined } : null
+  );
+  useEffect(() => {
+    if (isSingleShop) return;
+    const active = window.reassortGetActiveShop ? window.reassortGetActiveShop() : null;
+    if (active) setActiveShop(active);
+    if (window.reassortOnActiveShopChange) {
+      window.reassortOnActiveShopChange((shop) => setActiveShop(shop ?? null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingleShop]);
+  function activeShopId(): string | null {
+    return isSingleShop ? (user?.rposShopId || null) : (activeShop?.id || null);
+  }
+
   const [data, setData] = useState<ScrapOverviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lookbackDays, setLookbackDays] = useState(90);
-  const [shopFilters, setShopFilters] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [movementTypes, setMovementTypes] = useState<MovementType[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const shopId = activeShopId();
+    if (!shopId) { setMovementTypes([]); return; }
     let cancelled = false;
-    apiFetch<MovementTypesData>(`/reassort/scrap-report/movement-types?lookbackDays=${lookbackDays}`)
+    apiFetch<MovementTypesData>(`/reassort/scrap-report/movement-types?lookbackDays=${lookbackDays}&shops=${encodeURIComponent(shopId)}`)
       .then((d) => { if (!cancelled && d.found) setMovementTypes(d.types); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [lookbackDays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookbackDays, activeShop?.id, isSingleShop]);
 
   useEffect(() => {
+    const shopId = activeShopId();
+    if (!shopId) { setData(null); setError(null); return; }
     let cancelled = false;
     setData(null);
     setError(null);
     const typeParam = selectedTypes.size > 0 ? `&typeLabels=${encodeURIComponent([...selectedTypes].join(','))}` : '';
-    apiFetch<ScrapOverviewData>(`/reassort/scrap-report?lookbackDays=${lookbackDays}${typeParam}`)
+    apiFetch<ScrapOverviewData>(`/reassort/scrap-report?lookbackDays=${lookbackDays}&shops=${encodeURIComponent(shopId)}${typeParam}`)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [lookbackDays, selectedTypes]);
-
-  const shopOptions = useMemo(() => {
-    if (!data) return [];
-    const seen = new Map<string, string>();
-    for (const a of data.articles) {
-      if (a.rposShopId && !seen.has(a.rposShopId)) seen.set(a.rposShopId, `${a.shopName} (${a.shopReference})`);
-    }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr-FR'));
-  }, [data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookbackDays, selectedTypes, activeShop?.id, isSingleShop]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.articles.filter((a) => {
-      if (shopFilters.size > 0 && !shopFilters.has(a.rposShopId)) return false;
       if (q && !(a.label || '').toLowerCase().includes(q) && !a.ean.includes(q)) return false;
       return true;
     });
-  }, [data, shopFilters, search]);
+  }, [data, search]);
 
-  useEffect(() => { setPage(1); }, [shopFilters, search, data]);
+  useEffect(() => { setPage(1); }, [search, data]);
 
   // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
   // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
@@ -250,7 +272,6 @@ export function ScrapReport() {
 
   const totalQuantity = filtered.reduce((s, a) => s + a.quantity, 0);
   const totalLoss = filtered.reduce((s, a) => s + (a.estimatedLoss || 0), 0);
-  const shopCount = new Set(filtered.map((a) => a.rposShopId)).size;
 
   function exportCsv() {
     downloadCsv(
@@ -295,6 +316,19 @@ export function ScrapReport() {
       <p className="text-muted small mb-3">
         Tous les articles ayant eu de la casse sur la période choisie, en surstock ou non. Cliquez sur un article pour voir le détail de chaque mouvement.
       </p>
+      {/* Contexte explicite du magasin consulté — même rappel que Stockouts.tsx/OverstockReport.tsx
+          (demande explicite du 18/10/2026 reprise ici : "je dois voir... je suis sur quel magasin"),
+          page désormais mono-magasin (cf. correctif du 28/10/2026 en tête de fichier). */}
+      <div className="mb-3">
+        <span className="badge reassort-badge-neutral py-1 px-2" style={{ backgroundColor: '#EDF1F7', color: '#1B2A4A' }}>
+          <iconify-icon icon="solar:shop-bold-duotone" className="align-middle me-1"></iconify-icon>
+          {isSingleShop
+            ? (user?.rposShopName || 'Votre magasin')
+            : activeShop
+              ? (window.reassortGetActiveShop?.()?.name || 'Magasin sélectionné')
+              : 'Aucun magasin sélectionné'}
+        </span>
+      </div>
 
       <div className="scr-settings-card">
         <span className="scr-icon"><iconify-icon icon="solar:trash-bin-trash-bold-duotone"></iconify-icon></span>
@@ -303,14 +337,6 @@ export function ScrapReport() {
             {p.label}
           </button>
         ))}
-        {!isSingleShop && (
-          <select className="scr-input" style={{ width: 220 }} value={shopFilters.size === 1 ? [...shopFilters][0] : ''} onChange={(e) => setShopFilters(e.target.value ? new Set([e.target.value]) : new Set())}>
-            <option value="">Tous les magasins</option>
-            {shopOptions.map(([id, label]) => (
-              <option key={id} value={id}>{label}</option>
-            ))}
-          </select>
-        )}
         <input
           type="search"
           className="scr-input"
@@ -329,17 +355,15 @@ export function ScrapReport() {
 
       {error && <div className="text-danger small mb-3">Erreur : {error}</div>}
 
-      {data === null && !error ? (
+      {!activeShopId() ? (
+        <div className="text-muted small py-4">Sélectionnez un magasin pour voir sa casse.</div>
+      ) : data === null && !error ? (
         <div className="text-muted small">Chargement...</div>
       ) : data && !data.found ? (
         <div className="text-muted small py-4">{data.message || 'Aucune donnée.'}</div>
       ) : data ? (
         <>
           <div className="scr-kpi-row">
-            <div className="scr-kpi-card">
-              <div className="scr-kpi-label">Magasins concernés</div>
-              <div className="scr-kpi-value">{shopCount}</div>
-            </div>
             <div className="scr-kpi-card">
               <div className="scr-kpi-label">Articles cassés</div>
               <div className="scr-kpi-value">{filtered.length}</div>
