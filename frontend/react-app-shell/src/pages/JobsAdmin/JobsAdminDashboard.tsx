@@ -12,6 +12,12 @@ interface LastRun {
   triggeredBy: 'cron' | 'startup' | 'manual';
 }
 
+interface SparklinePoint {
+  durationMs: number;
+  status: 'running' | 'success' | 'error';
+  startedAt: string;
+}
+
 interface JobOverview {
   jobName: string;
   label: string;
@@ -20,14 +26,25 @@ interface JobOverview {
   nextRunAt: string | null;
   healthStatus: 'ok' | 'error' | 'degraded' | 'running' | 'never_run';
   lastRun: LastRun | null;
+  durationSparkline: SparklinePoint[];
 }
 
-const STATUS_META: Record<JobOverview['healthStatus'], { label: string; badge: string; icon: string }> = {
-  ok: { label: 'OK', badge: 'bg-success-subtle text-success', icon: 'solar:check-circle-bold-duotone' },
-  running: { label: 'En cours', badge: 'bg-info-subtle text-info', icon: 'solar:refresh-bold-duotone' },
-  error: { label: 'Erreur', badge: 'bg-warning-subtle text-warning', icon: 'solar:danger-triangle-bold-duotone' },
-  degraded: { label: 'Dégradé', badge: 'bg-danger-subtle text-danger', icon: 'solar:danger-circle-bold-duotone' },
-  never_run: { label: 'Jamais exécuté', badge: 'bg-secondary-subtle text-secondary', icon: 'solar:question-circle-bold-duotone' },
+// Palette du projet (marine/ambre, cf. theme-override.css : --bs-primary #1B2A4A, accent #F5A623) —
+// réutilisée ici en dur plutôt que via les classes Bootstrap génériques bg-*-subtle pour obtenir le
+// style "vraie supervision" demandé le 28/10/2026 (pastilles de statut, densité façon dashboard pro,
+// graphiques temporels), sans introduire de couleurs étrangères à l'identité visuelle existante.
+const NAVY = '#1B2A4A';
+const AMBER = '#F5A623';
+const GREEN = '#2E7D4F';
+const RED = '#B8302C';
+const GREY = '#8591A0';
+
+const STATUS_META: Record<JobOverview['healthStatus'], { label: string; dot: string; text: string }> = {
+  ok: { label: 'OK', dot: GREEN, text: GREEN },
+  running: { label: 'En cours', dot: AMBER, text: AMBER },
+  error: { label: 'Erreur', dot: '#D08A2A', text: '#8A5A00' },
+  degraded: { label: 'Dégradé', dot: RED, text: RED },
+  never_run: { label: 'Jamais exécuté', dot: GREY, text: GREY },
 };
 
 function fmtDate(iso?: string | null): string {
@@ -44,9 +61,68 @@ function fmtDuration(ms?: number | null): string {
   return `${m} min ${rest}s`;
 }
 
+/** Pastille de statut compacte façon grille de supervision (Centreon et équivalents) — un petit
+ * carré coloré plutôt qu'un badge texte, pour une vue d'ensemble scannable d'un coup d'œil sur
+ * beaucoup de lignes à la fois. Le badge texte reste affiché à côté pour l'accessibilité et la
+ * clarté (jamais la couleur seule comme unique porteur de sens). */
+function StatusDot({ status, pulse = false }: { status: JobOverview['healthStatus']; pulse?: boolean }) {
+  const meta = STATUS_META[status];
+  return (
+    <span
+      title={meta.label}
+      style={{
+        display: 'inline-block',
+        width: 10,
+        height: 10,
+        borderRadius: 2,
+        backgroundColor: meta.dot,
+        boxShadow: pulse ? `0 0 0 3px ${meta.dot}33` : undefined,
+      }}
+    />
+  );
+}
+
+/** Sparkline SVG de la durée des dernières exécutions d'un job — axe temporel implicite (gauche =
+ * plus ancien, droite = plus récent), chaque point coloré selon le statut de cette exécution
+ * précise (vert=succès, rouge=erreur), pour repérer en un coup d'œil une dérive de durée ou une
+ * série d'échecs sans ouvrir le détail. Aucune bibliothèque de graphique : un job planifié affiche
+ * au plus SPARKLINE_RUNS points côté backend (12), un tracé SVG à la main suffit largement et évite
+ * une dépendance supplémentaire pour un graphique aussi simple. */
+function DurationSparkline({ points }: { points: SparklinePoint[] }) {
+  if (points.length < 2) {
+    return <span className="small text-muted">—</span>;
+  }
+  const W = 120;
+  const H = 28;
+  const PAD = 3;
+  const maxDuration = Math.max(...points.map((p) => p.durationMs), 1);
+  const stepX = (W - PAD * 2) / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = PAD + i * stepX;
+    const y = H - PAD - (p.durationMs / maxDuration) * (H - PAD * 2);
+    return { x, y, status: p.status, durationMs: p.durationMs, startedAt: p.startedAt };
+  });
+  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+  const dotColor = (s: SparklinePoint['status']) => (s === 'error' ? RED : s === 'running' ? AMBER : GREEN);
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Évolution de la durée des dernières exécutions">
+      <path d={path} fill="none" stroke={NAVY} strokeWidth={1.3} strokeOpacity={0.35} />
+      {coords.map((c, i) => (
+        <circle key={i} cx={c.x} cy={c.y} r={i === coords.length - 1 ? 2.2 : 1.4} fill={dotColor(c.status)}>
+          <title>{`${fmtDuration(c.durationMs)} — ${fmtDate(c.startedAt)}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+}
+
 /** Tableau de bord global de supervision des 26 jobs planifiés (cronManager.js) — demande explicite
  * du 26/10/2026 : "une interface d'administration centralisée" avec statut, logs, suivi temps réel,
- * historique, diagnostic d'erreur et prochaine exécution, toutes données réelles (pas simulées). */
+ * historique, diagnostic d'erreur et prochaine exécution, toutes données réelles (pas simulées).
+ * Relooké le 28/10/2026 (demande explicite : "un vrai style de supervision... grille de pastilles
+ * colorées, graphiques temporels, densité d'information") en gardant la palette marine/ambre déjà
+ * utilisée partout ailleurs dans le projet plutôt que celle d'un outil de référence externe. */
 export function JobsAdminDashboard() {
   const [jobs, setJobs] = useState<JobOverview[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +130,6 @@ export function JobsAdminDashboard() {
   const [search, setSearch] = useState('');
   const [runningJob, setRunningJob] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Détail affiché en modale (demande explicite du 28/10/2026 : "pour les detail fait une vue quand
-  // je clique je dois voir les detail sur une fenette") plutôt qu'une navigation vers
-  // /jobs-admin/:jobName — cette route reste disponible séparément pour un lien direct.
   const [selectedJob, setSelectedJob] = useState<{ jobName: string; label: string } | null>(null);
 
   async function load() {
@@ -71,8 +144,6 @@ export function JobsAdminDashboard() {
 
   useEffect(() => {
     load();
-    // Rafraîchissement automatique toutes les 10s pour refléter les exécutions en cours
-    // (statut 'running') sans que l'utilisateur ait à cliquer "Actualiser" en boucle.
     pollRef.current = setInterval(load, 10000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -109,6 +180,18 @@ export function JobsAdminDashboard() {
 
   return (
     <div>
+      <style>{`
+        .jadm-grid-row { border-bottom: 1px solid rgba(27,42,74,.06); transition: background .1s; }
+        .jadm-grid-row:hover { background: #F7F9FC; }
+        .jadm-grid-row:last-child { border-bottom: none; }
+        .jadm-name-btn { color: ${NAVY}; }
+        .jadm-name-btn:hover { text-decoration: underline !important; }
+        .jadm-filter-btn.active { background-color: ${NAVY}; border-color: ${NAVY}; color: #fff; }
+        .jadm-filter-btn.active .jadm-count { background: rgba(255,255,255,.22); color: #fff; }
+        .jadm-count { background: #EDF1F7; color: ${NAVY}; border-radius: 10px; font-size: .7rem; padding: 1px 6px; font-weight: 700; }
+        .jadm-cron-chip { background: #EDF1F7; color: ${NAVY}; border-radius: 5px; padding: 2px 6px; font-size: .74rem; font-family: ui-monospace, monospace; }
+      `}</style>
+
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
         <div>
           <h1 className="h3 mb-1">Supervision des tâches planifiées</h1>
@@ -123,17 +206,38 @@ export function JobsAdminDashboard() {
 
       {error && <div className="alert alert-danger">{error}</div>}
 
+      {/* Grille de pastilles d'ensemble (demande explicite : "grille de statuts en pastilles
+          colorées... vue d'ensemble d'un coup d'œil") — une pastille par tâche, regroupées par
+          statut, avant même le tableau détaillé, pour voir immédiatement la répartition globale. */}
+      {jobs && (
+        <div className="d-flex flex-wrap gap-1 mb-3 p-2" style={{ background: '#fff', border: '1px solid rgba(27,42,74,.06)', borderRadius: 10 }}>
+          {jobs.map((j) => (
+            <span
+              key={j.jobName}
+              role="button"
+              onClick={() => setSelectedJob({ jobName: j.jobName, label: j.label })}
+              title={`${j.label} — ${STATUS_META[j.healthStatus].label}`}
+              style={{
+                width: 14, height: 14, borderRadius: 3, cursor: 'pointer',
+                backgroundColor: STATUS_META[j.healthStatus].dot,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="d-flex gap-2 flex-wrap mb-3">
         {(['all', 'ok', 'running', 'degraded', 'error', 'never_run'] as const).map((key) => {
-          const meta = key === 'all' ? { label: 'Toutes', badge: 'bg-light text-dark' } : STATUS_META[key];
+          const meta = key === 'all' ? { label: 'Toutes' } : STATUS_META[key];
           return (
             <button
               key={key}
               type="button"
-              className={`btn btn-sm ${statusFilter === key ? 'btn-primary' : 'btn-outline-secondary'}`}
+              className={`btn btn-sm jadm-filter-btn ${statusFilter === key ? 'active' : 'btn-outline-secondary'}`}
               onClick={() => setStatusFilter(key)}
             >
-              {meta.label} <span className="badge bg-white text-dark ms-1">{counts[key]}</span>
+              {key !== 'all' && <StatusDot status={key} />} <span className="ms-1">{meta.label}</span>{' '}
+              <span className="jadm-count">{counts[key]}</span>
             </button>
           );
         })}
@@ -150,64 +254,68 @@ export function JobsAdminDashboard() {
       {!jobs && !error && <div className="text-center text-muted py-4">Chargement...</div>}
 
       {jobs && (
-        <div className="table-responsive">
-          <table className="table table-sm align-middle">
-            <thead>
-              <tr>
-                <th>Tâche</th>
-                <th>Statut</th>
-                <th>Dernière exécution</th>
-                <th>Durée</th>
-                <th>Prochaine exécution</th>
-                <th>Fréquence</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((j) => {
-                const meta = STATUS_META[j.healthStatus];
-                return (
-                  <tr key={j.jobName}>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 fw-semibold text-decoration-none"
-                        onClick={() => setSelectedJob({ jobName: j.jobName, label: j.label })}
-                      >
-                        {j.label}
-                      </button>
-                      {!j.enabled && <span className="badge bg-secondary-subtle text-secondary ms-2">Désactivé</span>}
-                    </td>
-                    <td>
-                      <span className={`badge ${meta.badge}`}>
-                        <iconify-icon icon={meta.icon} className="align-middle me-1"></iconify-icon>
-                        {meta.label}
-                      </span>
-                    </td>
-                    <td className="small text-muted">{fmtDate(j.lastRun?.startedAt)}</td>
-                    <td className="small">{fmtDuration(j.lastRun?.durationMs)}</td>
-                    <td className="small text-muted">{fmtDate(j.nextRunAt)}</td>
-                    <td className="small"><code>{j.cronExpression}</code></td>
-                    <td className="text-end">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        disabled={runningJob === j.jobName || j.healthStatus === 'running'}
-                        onClick={() => runNow(j.jobName)}
-                      >
-                        {runningJob === j.jobName ? '...' : 'Exécuter'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="text-center text-muted py-3">Aucune tâche ne correspond à ce filtre.</td>
+        <div style={{ background: '#fff', border: '1px solid rgba(27,42,74,.06)', borderRadius: 10, overflow: 'hidden' }}>
+          <div className="table-responsive">
+            <table className="table table-sm align-middle mb-0" style={{ fontSize: '.84rem' }}>
+              <thead>
+                <tr style={{ background: '#F7F9FC' }}>
+                  <th className="ps-3">Tâche</th>
+                  <th>Statut</th>
+                  <th>Dernière exécution</th>
+                  <th>Durée</th>
+                  <th>Tendance</th>
+                  <th>Prochaine exécution</th>
+                  <th>Fréquence</th>
+                  <th></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map((j) => {
+                  const meta = STATUS_META[j.healthStatus];
+                  return (
+                    <tr key={j.jobName} className="jadm-grid-row">
+                      <td className="ps-3 py-2">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 fw-semibold text-decoration-none jadm-name-btn"
+                          onClick={() => setSelectedJob({ jobName: j.jobName, label: j.label })}
+                        >
+                          {j.label}
+                        </button>
+                        {!j.enabled && <span className="badge bg-secondary-subtle text-secondary ms-2">Désactivé</span>}
+                      </td>
+                      <td className="py-2">
+                        <StatusDot status={j.healthStatus} pulse={j.healthStatus === 'running'} />
+                        <span className="ms-2 fw-semibold" style={{ color: meta.text, fontSize: '.78rem' }}>{meta.label}</span>
+                      </td>
+                      <td className="small text-muted py-2">{fmtDate(j.lastRun?.startedAt)}</td>
+                      <td className="small py-2" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtDuration(j.lastRun?.durationMs)}</td>
+                      <td className="py-2">
+                        <DurationSparkline points={j.durationSparkline} />
+                      </td>
+                      <td className="small text-muted py-2">{fmtDate(j.nextRunAt)}</td>
+                      <td className="py-2"><span className="jadm-cron-chip">{j.cronExpression}</span></td>
+                      <td className="text-end py-2 pe-3">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          disabled={runningJob === j.jobName || j.healthStatus === 'running'}
+                          onClick={() => runNow(j.jobName)}
+                        >
+                          {runningJob === j.jobName ? '...' : 'Exécuter'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="text-center text-muted py-3">Aucune tâche ne correspond à ce filtre.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
