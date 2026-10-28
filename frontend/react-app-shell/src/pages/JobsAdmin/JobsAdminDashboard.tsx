@@ -150,11 +150,15 @@ export function JobsAdminDashboard() {
     };
   }, []);
 
-  async function runNow(jobName: string) {
+  // Ouvre directement la modale sur les logs en direct dès le lancement (demande explicite du
+  // 28/10/2026 : "quand c'est lancé je dois ouvrir le modal et voir les logs en temps réel") — avant
+  // ce correctif, "Exécuter" ne faisait que lancer le job en arrière-plan, sans jamais afficher la
+  // progression tant que l'utilisateur ne cliquait pas une seconde fois sur le nom de la tâche.
+  async function runNow(jobName: string, label: string) {
     setRunningJob(jobName);
     try {
       await apiFetch(`/reassort/jobs-admin/${jobName}/run`, { method: 'POST' });
-      window.reassortToast('Exécution lancée.', 'success');
+      setSelectedJob({ jobName, label });
       await load();
     } catch (err) {
       window.reassortToast('Erreur : ' + (err as Error).message, 'error');
@@ -300,7 +304,7 @@ export function JobsAdminDashboard() {
                           type="button"
                           className="btn btn-sm btn-outline-secondary"
                           disabled={runningJob === j.jobName || j.healthStatus === 'running'}
-                          onClick={() => runNow(j.jobName)}
+                          onClick={() => runNow(j.jobName, j.label)}
                         >
                           {runningJob === j.jobName ? '...' : 'Exécuter'}
                         </button>
