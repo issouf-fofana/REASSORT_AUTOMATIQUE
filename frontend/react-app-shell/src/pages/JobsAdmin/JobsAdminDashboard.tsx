@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
+import { JobDetailModal } from './JobDetailModal';
 
 interface LastRun {
   id: string;
@@ -54,6 +54,10 @@ export function JobsAdminDashboard() {
   const [search, setSearch] = useState('');
   const [runningJob, setRunningJob] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Détail affiché en modale (demande explicite du 28/10/2026 : "pour les detail fait une vue quand
+  // je clique je dois voir les detail sur une fenette") plutôt qu'une navigation vers
+  // /jobs-admin/:jobName — cette route reste disponible séparément pour un lien direct.
+  const [selectedJob, setSelectedJob] = useState<{ jobName: string; label: string } | null>(null);
 
   async function load() {
     try {
@@ -165,9 +169,13 @@ export function JobsAdminDashboard() {
                 return (
                   <tr key={j.jobName}>
                     <td>
-                      <Link to={`/jobs-admin/${j.jobName}`} className="fw-semibold text-decoration-none">
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 fw-semibold text-decoration-none"
+                        onClick={() => setSelectedJob({ jobName: j.jobName, label: j.label })}
+                      >
                         {j.label}
-                      </Link>
+                      </button>
                       {!j.enabled && <span className="badge bg-secondary-subtle text-secondary ms-2">Désactivé</span>}
                     </td>
                     <td>
@@ -201,6 +209,14 @@ export function JobsAdminDashboard() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {selectedJob && (
+        <JobDetailModal
+          jobName={selectedJob.jobName}
+          label={selectedJob.label}
+          onClose={() => { setSelectedJob(null); load(); }}
+        />
       )}
     </div>
   );
