@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
+import { StockoutDeliveryTypeChart } from './StockoutDeliveryTypeChart';
 import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
 import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
 import { FormulaInfoButton } from './StockoutEpisodePage';
@@ -37,6 +38,10 @@ type StockoutEpisode = {
   // Prisma le renvoie déjà sur chaque épisode (pas de `select` restrictif côté serveur), simplement
   // jamais exposé dans ce type avant.
   status: 'EN_COURS' | 'RESOLUE';
+  // Type de commande résolu (mission "Ventilation LC/LD du CA perdu", 28/10/2026) — LC (type réel
+  // de la commande matchée) ou LD, null si l'article n'a jamais été vu dans une proposition. Utilisé
+  // par le recalcul client-side ci-dessous (displayedCaPerdueLC/LD) quand un filtre global est actif.
+  resolvedDeliveryType: 'LC' | 'LD' | null;
 };
 
 type StockoutSummary = {
@@ -47,6 +52,13 @@ type StockoutSummary = {
   // serveur sur le même ensemble d'épisodes que totalCaPerduEstime (cf. getDashboardSummary).
   caPerdueSansCommande: number;
   caPerdueNonLivree: number;
+  // Ventilation LC (Livraison Centrale) / LD (Livraison Directe) (mission "Ventilation LC/LD du CA
+  // perdu", 28/10/2026) — même ensemble d'épisodes que totalCaPerduEstime, reventilé par
+  // resolvedDeliveryType. caPerdueTypeInconnu : articles jamais vus dans une proposition, la somme
+  // des 3 vaut toujours totalCaPerduEstime.
+  caPerdueLC: number;
+  caPerdueLD: number;
+  caPerdueTypeInconnu: number;
   causeCounts: Record<string, number>;
   openEpisodes: StockoutEpisode[];
   totalOrderableArticles: number;
@@ -464,6 +476,16 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const displayedCaPerdueNonLivree = activeGlobalFilterCount > 0
     ? globallyFilteredEpisodes.filter((e) => ['EN_ATTENTE_LIVRAISON', 'EN_RETARD', 'LIVRAISON_DOUTEUSE'].includes(e.deliveryStatus)).reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
     : (summary?.caPerdueNonLivree ?? 0);
+  // Ventilation LC/LD (mission "Ventilation LC/LD du CA perdu", 28/10/2026) — même principe que les
+  // deux recalculs ci-dessus : identique au calcul serveur (getDashboardSummary), juste exécuté
+  // côté client sur globallyFilteredEpisodes quand un filtre global est actif, pour ne jamais
+  // diverger silencieusement de l'ensemble réellement affiché.
+  const displayedCaPerdueLC = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.filter((e) => e.resolvedDeliveryType === 'LC').reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+    : (summary?.caPerdueLC ?? 0);
+  const displayedCaPerdueLD = activeGlobalFilterCount > 0
+    ? globallyFilteredEpisodes.filter((e) => e.resolvedDeliveryType === 'LD').reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+    : (summary?.caPerdueLD ?? 0);
   const displayedCauseCounts = activeGlobalFilterCount > 0
     ? globallyFilteredEpisodes.reduce((acc: Record<string, number>, e) => {
         const cause = e.status === 'RESOLUE' ? e.causeProposee : (DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE');
@@ -822,6 +844,40 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
                 </div>
               </div>
             </div>
+            <div className="col">
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-primary-subtle"><iconify-icon icon="solar:shop-bold-duotone" className="text-primary"></iconify-icon></span>
+                <div>
+                  <div className="label">
+                    CA perdu — LC
+                    <FormulaInfoButton
+                      title="CA perdu — Livraison Centrale"
+                      steps={[
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) dont l\'article est rattaché au fournisseur central (LC) — pour une rupture sans commande, type ATTENDU déduit du dernier fournisseur résolu connu pour cet article, pas une commande réelle.' },
+                      ]}
+                    />
+                  </div>
+                  <div className="value">{Math.round(displayedCaPerdueLC).toLocaleString('fr-FR')} CFA</div>
+                </div>
+              </div>
+            </div>
+            <div className="col">
+              <div className="stockout-mini-kpi">
+                <span className="icon bg-danger-subtle"><iconify-icon icon="solar:delivery-bold-duotone" className="text-danger"></iconify-icon></span>
+                <div>
+                  <div className="label">
+                    CA perdu — LD
+                    <FormulaInfoButton
+                      title="CA perdu — Livraison Directe"
+                      steps={[
+                        { label: 'Calcul', detail: 'Part du CA perdu (ci-dessus) dont l\'article est rattaché à un fournisseur direct (LD, hors central) — pour une rupture sans commande, type ATTENDU déduit du dernier fournisseur résolu connu pour cet article, pas une commande réelle.' },
+                      ]}
+                    />
+                  </div>
+                  <div className="value">{Math.round(displayedCaPerdueLD).toLocaleString('fr-FR')} CFA</div>
+                </div>
+              </div>
+            </div>
             <div className="col d-flex align-items-center justify-content-end justify-content-md-start">
               <button type="button" className="stockout-toggle-charts" onClick={() => setShowCharts((v) => !v)}>
                 <iconify-icon icon={showCharts ? 'solar:alt-arrow-up-linear' : 'solar:chart-2-bold'}></iconify-icon>
@@ -831,12 +887,23 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
           </div>
 
           {showCharts && (
-            <div className="row row-cols-1 row-cols-md-2 g-3 mb-3">
+            <div className="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3 mb-3">
               <div className="col">
                 <StockoutTrendChart shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} />
               </div>
               <div className="col">
                 <StockoutCauseChart causeCounts={displayedCauseCounts} />
+              </div>
+              <div className="col">
+                <StockoutDeliveryTypeChart
+                  caPerdueLC={displayedCaPerdueLC}
+                  caPerdueLD={displayedCaPerdueLD}
+                  caPerdueTypeInconnu={activeGlobalFilterCount > 0
+                    ? globallyFilteredEpisodes
+                        .filter((e) => e.resolvedDeliveryType !== 'LC' && e.resolvedDeliveryType !== 'LD')
+                        .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0)
+                    : (summary?.caPerdueTypeInconnu ?? 0)}
+                />
               </div>
             </div>
           )}

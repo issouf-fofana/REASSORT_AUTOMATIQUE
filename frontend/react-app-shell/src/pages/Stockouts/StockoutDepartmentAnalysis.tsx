@@ -34,6 +34,12 @@ type DepartmentRow = {
   // sans aucun arrivage détecté (LIVRAISON_DOUTEUSE, >48h, cas anormal à surveiller en priorité).
   caPerduEnAttenteLivraison: number;
   caPerduLivraisonDouteuse: number;
+  // Ventilation LC (Livraison Centrale) / LD (Livraison Directe) ajoutée le 28/10/2026 (mission
+  // "Ventilation LC/LD du CA perdu — module Ruptures") — même ensemble d'épisodes que
+  // totalCaPerduEstime, reventilé par StockoutEpisode.resolvedDeliveryType plutôt que par situation
+  // de commande (deux axes de lecture distincts et complémentaires du même CA perdu total).
+  caPerduLC: number;
+  caPerduLD: number;
 };
 
 type ByFieldSummary = { found: boolean; groupCount: number; groups: DepartmentRow[]; message?: string };
@@ -42,7 +48,7 @@ type ByFieldSummary = { found: boolean; groupCount: number; groups: DepartmentRo
 // sur tous les tabeau du site" — ici : sur TOUTES les colonnes, pas seulement les 3 d'origine) —
 // 'group' ajouté pour trier alphabétiquement par nom de rayon, en plus des colonnes numériques déjà
 // triables.
-type SortKey = 'group' | 'openCount' | 'avgDurationHours' | 'noOrderCount' | 'totalCaPerduEstime' | 'caPerduSansCommande' | 'caPerduEnAttenteLivraison' | 'caPerduLivraisonDouteuse' | 'longEpisodesCount';
+type SortKey = 'group' | 'openCount' | 'avgDurationHours' | 'noOrderCount' | 'totalCaPerduEstime' | 'caPerduSansCommande' | 'caPerduEnAttenteLivraison' | 'caPerduLivraisonDouteuse' | 'longEpisodesCount' | 'caPerduLC' | 'caPerduLD';
 
 function formatDuration(hours: number): string {
   if (hours < 24) return `${Math.round(hours)} h`;
@@ -114,7 +120,9 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
     caPerduSansCommande: acc.caPerduSansCommande + r.caPerduSansCommande,
     caPerduEnAttenteLivraison: acc.caPerduEnAttenteLivraison + r.caPerduEnAttenteLivraison,
     caPerduLivraisonDouteuse: acc.caPerduLivraisonDouteuse + r.caPerduLivraisonDouteuse,
-  }), { openCount: 0, noOrderCount: 0, caPerduSansCommande: 0, caPerduEnAttenteLivraison: 0, caPerduLivraisonDouteuse: 0 }), [rows]);
+    caPerduLC: acc.caPerduLC + r.caPerduLC,
+    caPerduLD: acc.caPerduLD + r.caPerduLD,
+  }), { openCount: 0, noOrderCount: 0, caPerduSansCommande: 0, caPerduEnAttenteLivraison: 0, caPerduLivraisonDouteuse: 0, caPerduLC: 0, caPerduLD: 0 }), [rows]);
   const totalCaPerduGeneral = totals.caPerduSansCommande + totals.caPerduEnAttenteLivraison + totals.caPerduLivraisonDouteuse;
 
   // Remplace les 3 anciens boutons de tri (pills au-dessus du tableau, limités à 3 colonnes) par des
@@ -205,6 +213,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                     <SortableHeader k="caPerduSansCommande" label="CA perdu avant commande" />
                     <SortableHeader k="caPerduEnAttenteLivraison" label="CA perdu, commandé (<48h)" />
                     <SortableHeader k="caPerduLivraisonDouteuse" label="CA perdu, livraison douteuse (>48h)" />
+                    <SortableHeader k="caPerduLC" label="CA perdu LC" />
+                    <SortableHeader k="caPerduLD" label="CA perdu LD" />
                     <th>Priorité</th>
                   </tr>
                 </thead>
@@ -221,6 +231,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                         <td>{r.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
                         <td>{r.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduLC.toLocaleString('fr-FR')} CFA</td>
+                        <td>{r.caPerduLD.toLocaleString('fr-FR')} CFA</td>
                         <td><span className={`badge ${priority.badge} py-1 px-2`}>{priority.label}</span></td>
                       </tr>
                     );
@@ -236,6 +248,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
                     <td>{totals.caPerduSansCommande.toLocaleString('fr-FR')} CFA</td>
                     <td>{totals.caPerduEnAttenteLivraison.toLocaleString('fr-FR')} CFA</td>
                     <td>{totals.caPerduLivraisonDouteuse.toLocaleString('fr-FR')} CFA</td>
+                    <td>{totals.caPerduLC.toLocaleString('fr-FR')} CFA</td>
+                    <td>{totals.caPerduLD.toLocaleString('fr-FR')} CFA</td>
                     <td></td>
                   </tr>
                 </tfoot>

@@ -2267,6 +2267,15 @@ model StockoutEpisode {
   hasOrder                  Boolean?  @map("has_order")
   reactionStatus            String?   @map("reaction_status") // 'REAGI' | 'EN_ATTENTE' | 'RETARD' | 'MAGASIN_NA_PAS_REAGI'
   deliveryStatus            String?   @map("delivery_status") // 'SANS_COMMANDE' | 'EN_ATTENTE_LIVRAISON' | 'LIVREE' | 'LIVRAISON_DOUTEUSE'
+  // Type de commande résolu pour ventiler le CA perdu LC/LD (mission "Ventilation LC/LD du CA perdu
+  // — module Ruptures", 28/10/2026). Si hasOrder=true : copié du ProposalOrder réellement matché
+  // (matchedOrder, computeAndPersistOpenEpisodeStatuses), donc le type RÉEL de cette commande. Si
+  // hasOrder=false (SANS_COMMANDE) : déduit du deliveryType de la ProposalLine la plus récente pour
+  // cet EAN dans ce magasin (même requête déjà faite par cette fonction pour le matching, aucun
+  // appel DB supplémentaire) — un type ATTENDU, pas une commande réelle, puisqu'aucune n'existe.
+  // null si aucune ProposalLine ni ProposalOrder n'a jamais fourni cette info pour cet article
+  // (jamais recalculé rétroactivement sur les épisodes déjà fermés avant ce champ).
+  resolvedDeliveryType      String?   @map("resolved_delivery_type") // 'LC' | 'LD'
   orderCreatedAt            DateTime? @map("order_created_at")
   actualReceptionDateStatus DateTime? @map("actual_reception_date_status") // copie de ProposalOrder.actualReceptionDate au moment du calcul — jamais une preuve de réception réelle (cf. commentaire sur ce champ ailleurs dans ce fichier)
   statusComputedAt          DateTime? @map("status_computed_at") // horodatage du dernier recalcul de ces colonnes — permet de savoir si une valeur est périmée

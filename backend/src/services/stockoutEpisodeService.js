@@ -777,17 +777,42 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   // commandé/validé que plus tard, en réaction à la rupture actuelle). Seule la date de la commande
   // compte pour juger d'une réaction, jamais celle de la proposition qui l'a précédée — retiré ce
   // filtre ici, qui ne sert plus qu'à borner par magasin/EAN.
+  // deliveryType ajouté aux deux select (mission "Ventilation LC/LD du CA perdu", 28/10/2026) :
+  // aucune requête supplémentaire, ces lignes/commandes sont déjà chargées pour le matching
+  // hasOrder/deliveryStatus ci-dessous, seul le champ sélectionné change.
   const lines = await prisma.proposalLine.findMany({
     where: { ean: { in: eans }, proposal: { rposShopId } },
-    select: { ean: true, department: true, proposalId: true, proposal: { select: { generatedAt: true } } },
+    select: { ean: true, department: true, proposalId: true, deliveryType: true, proposal: { select: { generatedAt: true } } },
   });
   const proposalIds = [...new Set(lines.map((l) => l.proposalId))];
   const orders = proposalIds.length
     ? await prisma.proposalOrder.findMany({
         where: { proposalId: { in: proposalIds }, createdAt: { gte: earliestStart } },
-        select: { proposalId: true, department: true, createdAt: true, receptionStatus: true, actualReceptionDate: true },
+        select: { proposalId: true, department: true, createdAt: true, receptionStatus: true, actualReceptionDate: true, deliveryType: true, rposOrderId: true },
       })
     : [];
+
+  // BUG CORRIGÉ le 28/10/2026 (signalé : "quand une commande est supprimée sur le POS, il met en
+  // attente" — une rupture dont la commande RPOS associée a été supprimée directement sur RPOS
+  // restait affichée "avec commande" / deliveryStatus EN_ATTENTE_LIVRAISON indéfiniment) — ce
+  // matching se basait uniquement sur ProposalOrder (notre copie locale, créée une fois à la
+  // validation), jamais revérifié ensuite contre l'état RÉEL de RPOS. Une commande supprimée côté
+  // RPOS reste donc visible ici pour toujours, sans qu'aucun événement ne nous prévienne. Réutilise
+  // le même mécanisme déjà en place pour la page "Commandes" (routes/reassort/shops.js,
+  // SupplierOrderCache, rafraîchi périodiquement par supplierOrdersSyncJob.js) : une commande dont
+  // le rposOrderId n'apparaît plus dans ce cache est traitée comme inexistante pour ce calcul —
+  // l'épisode repasse alors SANS_COMMANDE au prochain passage de ce job (5-10 min, cf.
+  // stockoutStatusRecalcJob.js), jamais figé. LIMITE connue : SupplierOrderCache ne couvre que les
+  // 50 commandes les plus récentes par magasin (cf. shops.js) — une commande plus ancienne que ça
+  // et supprimée ne serait pas détectée, cas jugé marginal pour une rupture encore EN_COURS (donc
+  // récente par construction).
+  const currentRposOrderIds = new Set(
+    (await prisma.supplierOrderCache.findMany({
+      where: { rposShopId },
+      select: { rposOrderId: true },
+    })).map((o) => o.rposOrderId)
+  );
+  const liveOrders = orders.filter((o) => !o.rposOrderId || currentRposOrderIds.has(o.rposOrderId));
 
   // Prix de vente pour la colonne "Prix" du tableau d'articles (demande explicite du 18/10/2026 :
   // "je veux ici le prix de l'article aficcher dans le colonne") — en masse pour tout le magasin,
@@ -813,7 +838,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   // Indexé uniquement par proposalId ici, même principe (le filtre département n'apporte rien de
   // plus : une proposition ne génère qu'une poignée de commandes, déjà peu nombreuses par proposalId).
   const ordersByKey = new Map();
-  for (const o of orders) {
+  for (const o of liveOrders) {
     if (!ordersByKey.has(o.proposalId)) ordersByKey.set(o.proposalId, []);
     ordersByKey.get(o.proposalId).push(o);
   }
@@ -875,7 +900,14 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
         }
       }
     }
-    return { episode: e, orderCreatedAt, matchedOrder };
+    // Fournisseur résolu le plus récent pour cet EAN (mission "Ventilation LC/LD du CA perdu",
+    // 28/10/2026) — linesByEan est déjà trié par date de proposition croissante (ligne 827), le
+    // dernier élément est donc la ProposalLine la plus récente, utilisée comme repli quand aucune
+    // commande n'existe (SANS_COMMANDE) : on ne connaît alors pas le type RÉEL d'une commande (il
+    // n'y en a pas), seulement celui qu'aurait eu l'article s'il avait été commandé normalement.
+    const eanLines = linesByEan.get(e.ean) || [];
+    const latestLineDeliveryType = eanLines.length ? eanLines[eanLines.length - 1].deliveryType : null;
+    return { episode: e, orderCreatedAt, matchedOrder, latestLineDeliveryType };
   });
 
   // BUG CORRIGÉ le 23/10/2026 (signalé en production : filtrer "Ruptures résolues" affichait 99%
@@ -914,7 +946,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   const computed = episodes.map((e) => {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
-    const { orderCreatedAt, matchedOrder } = localMatchByEpisodeId.get(e.id);
+    const { orderCreatedAt, matchedOrder, latestLineDeliveryType } = localMatchByEpisodeId.get(e.id);
 
     const hasOrder = orderCreatedAt !== null;
     let reactionStatus;
@@ -961,6 +993,13 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     // PAS persisté (dépend de "maintenant", recalculé à chaque lecture côté getOpenEpisodes à
     // partir de startedAt, coût négligeable — un simple Date.now() - startedAt, rien à voir avec le
     // recalcul coûteux de hasOrder/deliveryStatus qui, lui, est maintenant précalculé).
+    // LC si rattaché au central, LD sinon — même convention que ProposalOrder.deliveryType /
+    // ProposalLine.deliveryType partout ailleurs dans le projet. hasOrder=true : type RÉEL de la
+    // commande matchée. hasOrder=false : type ATTENDU déduit du dernier fournisseur résolu connu
+    // pour cet EAN (latestLineDeliveryType) — null si l'article n'a jamais été vu dans une
+    // proposition (aucune info disponible, jamais inventé).
+    const resolvedDeliveryType = hasOrder ? (matchedOrder?.deliveryType ?? null) : latestLineDeliveryType;
+
     return {
       ...e,
       durationHours,
@@ -968,6 +1007,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
       reactionStatus,
       orderCreatedAt,
       deliveryStatus,
+      resolvedDeliveryType,
       actualReceptionDate: matchedOrder?.actualReceptionDate ?? null,
       sellingPrice: priceByEan.get(e.ean) ?? null,
     };
@@ -981,6 +1021,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
         reactionStatus: e.reactionStatus,
         deliveryStatus: e.deliveryStatus,
         orderCreatedAt: e.orderCreatedAt,
+        resolvedDeliveryType: e.resolvedDeliveryType,
         actualReceptionDateStatus: e.actualReceptionDate,
         statusComputedAt: now,
       },
@@ -1138,6 +1179,23 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
     .filter((e) => ['EN_ATTENTE_LIVRAISON', 'EN_RETARD', 'LIVRAISON_DOUTEUSE'].includes(e.deliveryStatus))
     .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
 
+  // Ventilation LC (Livraison Centrale) / LD (Livraison Directe) du CA perdu (mission "Ventilation
+  // LC/LD du CA perdu — module Ruptures", 28/10/2026) — même ensemble d'épisodes (episodesForLoss)
+  // que les deux totaux ci-dessus, reventilé par StockoutEpisode.resolvedDeliveryType : type RÉEL de
+  // la commande pour les épisodes avec commande, type ATTENDU (dernier fournisseur résolu connu
+  // pour l'EAN) pour les épisodes SANS_COMMANDE. null (article jamais vu dans une proposition, ou
+  // épisode antérieur à ce champ) compté à part dans caPerdueTypeInconnu plutôt que d'être exclu en
+  // silence — la somme des 3 doit toujours égaler totalCaPerdu, jamais une perte invisible.
+  const caPerdueLC = episodesForLoss
+    .filter((e) => e.resolvedDeliveryType === 'LC')
+    .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  const caPerdueLD = episodesForLoss
+    .filter((e) => e.resolvedDeliveryType === 'LD')
+    .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+  const caPerdueTypeInconnu = episodesForLoss
+    .filter((e) => e.resolvedDeliveryType !== 'LC' && e.resolvedDeliveryType !== 'LD')
+    .reduce((sum, e) => sum + (e.caPerdueEstime || 0), 0);
+
   // CORRIGÉ le 19/10/2026 (bug signalé avec capture : donut "99% sans commande" au global, alors
   // que le détail par rayon montrait clairement de nombreux articles "Avec commande") — causeProposee
   // est un champ STOCKÉ en base, calculé UNE SEULE FOIS par diagnoseCause() au moment de la
@@ -1173,6 +1231,9 @@ async function getDashboardSummary(rposShopId, { resolvedLookbackDays = 30, star
     totalCaPerduEstime: Math.round(totalCaPerdu),
     caPerdueSansCommande: Math.round(caPerdueSansCommande),
     caPerdueNonLivree: Math.round(caPerdueNonLivree),
+    caPerdueLC: Math.round(caPerdueLC),
+    caPerdueLD: Math.round(caPerdueLD),
+    caPerdueTypeInconnu: Math.round(caPerdueTypeInconnu),
     causeCounts,
     openEpisodes: episodesForStats,
     totalOrderableArticles,
@@ -1454,6 +1515,23 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
         .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
     );
 
+    // Ventilation LC/LD par groupe (mission "Ventilation LC/LD du CA perdu — module Ruptures",
+    // 28/10/2026) — même principe que getDashboardSummary : StockoutEpisode.resolvedDeliveryType
+    // porte le type réel (avec commande) ou attendu (sans commande, dernier fournisseur résolu
+    // connu pour l'EAN) ; null compté à part (caPerduGroupTypeInconnu) pour ne jamais perdre une
+    // partie du total en silence.
+    const caPerduGroupLC = Math.round(
+      bucket.openEpisodes.filter((e) => e.resolvedDeliveryType === 'LC').reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+    const caPerduGroupLD = Math.round(
+      bucket.openEpisodes.filter((e) => e.resolvedDeliveryType === 'LD').reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+    const caPerduGroupTypeInconnu = Math.round(
+      bucket.openEpisodes
+        .filter((e) => e.resolvedDeliveryType !== 'LC' && e.resolvedDeliveryType !== 'LD')
+        .reduce((s, e) => s + (e.caPerdueEstime || 0), 0)
+    );
+
     // Priorité au CA perdu précis borné à la période (snapshot journalier), repli sur le total
     // global stocké si le snapshot n'a encore rien calculé pour ce groupe (ex: tout juste après le
     // premier déploiement, avant que le job ait fini son backfill initial de 95 jours).
@@ -1473,6 +1551,9 @@ async function getDashboardSummaryByField(rposShopId, field, { resolvedLookbackD
       caPerduAvecCommandeNonLivree,
       caPerduEnAttenteLivraison,
       caPerduLivraisonDouteuse,
+      caPerduLC: caPerduGroupLC,
+      caPerduLD: caPerduGroupLD,
+      caPerduTypeInconnu: caPerduGroupTypeInconnu,
     };
   });
 
