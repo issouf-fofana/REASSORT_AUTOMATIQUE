@@ -1553,25 +1553,16 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
   // 18/09/2026) — une ligne par article dont orderAnomaly a été posé plus haut (detectOrderAnomaly).
   // Jamais bloquant : un échec d'écriture ici ne doit jamais remettre en cause la proposition déjà
   // sauvegardée juste avant.
+  //
+  // BUG CORRIGÉ le 28/10/2026 (signalé : le même article apparaissait dans "À vérifier" quasiment
+  // tous les jours, parfois 2 fois le même jour, sans jamais se résorber) — createMany() recréait
+  // inconditionnellement une nouvelle ligne à CHAQUE génération (nocturne ET manuelle), même pour un
+  // article déjà signalé la veille et jamais traité. recordAnomalies (orderAnomalyService.js) met
+  // désormais à jour l'anomalie PENDING existante au lieu de la dupliquer.
   const orderAnomalyProposals = result.proposals.filter((p) => p.orderAnomaly);
   if (orderAnomalyProposals.length) {
     try {
-      await prisma.orderAnomaly.createMany({
-        data: orderAnomalyProposals.map((p) => ({
-          rposShopId: shopId,
-          ean: p.ean,
-          label: p.label,
-          proposalId: proposal.id,
-          newQuantity: p.orderAnomaly.newQuantity,
-          historicalMean: p.orderAnomaly.historicalMean,
-          historicalMin: p.orderAnomaly.historicalMin,
-          historicalMax: p.orderAnomaly.historicalMax,
-          sampleSize: p.orderAnomaly.sampleSize,
-          direction: p.orderAnomaly.direction,
-          trendContext: p.orderAnomaly.trendContext || null,
-          historyDetail: p.orderAnomaly.historyDetail ? JSON.stringify(p.orderAnomaly.historyDetail) : null,
-        })),
-      });
+      await orderAnomalyService.recordAnomalies(shopId, proposal.id, orderAnomalyProposals);
     } catch (err) {
       console.error(`[proposalService] Échec de persistance des anomalies de commande pour la proposition ${proposal.id} : ${err.message}`);
     }

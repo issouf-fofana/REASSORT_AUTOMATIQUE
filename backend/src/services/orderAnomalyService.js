@@ -122,6 +122,51 @@ async function recordAnomaly(rposShopId, ean, label, proposalId, result) {
 }
 
 /**
+ * Persiste un lot d'anomalies détectées à une génération de proposition, avec DÉDUPLICATION par
+ * (rposShopId, ean) sur les anomalies encore PENDING — ajouté le 28/10/2026 (signalé : le même
+ * article apparaissait dans la liste "À vérifier" quasiment tous les jours, parfois 2 fois le même
+ * jour, sans jamais se résorber, noyant les vraies nouvelles anomalies). Avant ce correctif,
+ * proposalService.js appelait prisma.orderAnomaly.createMany() directement à chaque génération,
+ * sans la moindre vérification — recrédant une ligne pour le même article à chaque cycle (nocturne
+ * ET manuel) tant que personne n'avait traité la précédente.
+ *
+ * Comportement choisi explicitement (pas juste ignorer) : si une anomalie PENDING existe déjà pour
+ * ce (magasin, article), elle est MISE À JOUR avec les nouvelles valeurs (quantité, moyenne
+ * historique, contexte de tendance, date de détection) plutôt que dupliquée — l'utilisateur voit
+ * toujours une seule ligne par article/magasin tant qu'il ne l'a pas traitée (ACKNOWLEDGED/
+ * DISMISSED), avec l'information la plus récente. Une anomalie déjà ACKNOWLEDGED/DISMISSED ne
+ * bloque PAS une nouvelle détection : si l'écart réapparaît après avoir été traité, une nouvelle
+ * ligne PENDING est recréée normalement (jamais caché par une décision humaine passée).
+ */
+async function recordAnomalies(rposShopId, proposalId, anomalies) {
+  for (const a of anomalies) {
+    const existing = await prisma.orderAnomaly.findFirst({
+      where: { rposShopId, ean: a.ean, status: 'PENDING' },
+      select: { id: true },
+    });
+    const data = {
+      rposShopId,
+      ean: a.ean,
+      label: a.label,
+      proposalId,
+      newQuantity: a.orderAnomaly.newQuantity,
+      historicalMean: a.orderAnomaly.historicalMean,
+      historicalMin: a.orderAnomaly.historicalMin,
+      historicalMax: a.orderAnomaly.historicalMax,
+      sampleSize: a.orderAnomaly.sampleSize,
+      direction: a.orderAnomaly.direction,
+      trendContext: a.orderAnomaly.trendContext || null,
+      historyDetail: a.orderAnomaly.historyDetail ? JSON.stringify(a.orderAnomaly.historyDetail) : null,
+    };
+    if (existing) {
+      await prisma.orderAnomaly.update({ where: { id: existing.id }, data: { ...data, detectedAt: new Date() } });
+    } else {
+      await prisma.orderAnomaly.create({ data });
+    }
+  }
+}
+
+/**
  * Contextualise une anomalie déjà détectée avec la tendance de vente de l'article (amelioration.md
  * §7, 05/10/2026) : "une différence n'est pas forcément une erreur" — si une commande HIGH coïncide
  * avec des ventes en forte hausse (ou une commande LOW avec des ventes en forte baisse), l'écart a
@@ -196,6 +241,6 @@ async function setAnomalyStatus(id, status, contextNote) {
 
 module.exports = {
   MIN_SAMPLE_SIZE, HISTORY_SAMPLE_SIZE, ANOMALY_THRESHOLD,
-  getValidatedQuantityHistory, detectOrderAnomaly, recordAnomaly, listAnomalies, setAnomalyStatus,
+  getValidatedQuantityHistory, detectOrderAnomaly, recordAnomaly, recordAnomalies, listAnomalies, setAnomalyStatus,
   buildTrendContext,
 };
