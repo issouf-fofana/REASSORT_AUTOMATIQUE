@@ -1077,6 +1077,7 @@ export function PurchaseOrder() {
                     supplierId={selectedSupplierId}
                     supplierName={selectedSupplierMeta.name}
                     deliveryType={selectedSupplierMeta.deliveryType}
+                    shopName={(isSingleShop ? user?.rposShopName : selectedShop?.name) || ''}
                     shopQueryParam={shopQueryParam()}
                     onValidated={() => loadProposalById(proposal!.id)}
                   />
