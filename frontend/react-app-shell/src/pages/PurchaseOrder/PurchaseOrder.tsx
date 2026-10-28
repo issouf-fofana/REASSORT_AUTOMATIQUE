@@ -401,10 +401,20 @@ export function PurchaseOrder() {
   // currentDepartmentOrder comme condition d'affichage du bouton "Valider ce rayon" (ValidationFlow
   // ci-dessous) pour ne jamais permettre une double-commande d'un rayon déjà entièrement couvert par
   // la voie fournisseur.
+  // CORRIGÉ le 28/10/2026 ("quand une commande est supprimé sur le pos il met en attente... il doit
+  // marque supprimé et me donner la possibilité") : proposalOrderId reste renseigné même si la
+  // commande RPOS qu'il pointe a été supprimée directement sur RPOS (ce lien n'est jamais
+  // désassocié automatiquement) — une ligne couverte par une ProposalOrder marquée
+  // deletedOnRpos=true (calculé côté backend, cf. markDeletedOnRpos) ne doit donc plus compter comme
+  // réellement couverte, sinon le bouton de validation reste masqué à tort indéfiniment.
+  const deletedOrderIds = useMemo(
+    () => new Set((proposal?.orders || []).filter((o) => o.deletedOnRpos).map((o) => o.id)),
+    [proposal],
+  );
   const departmentFullyOrdered = useMemo(() => {
     const active = detailLines.filter((l) => !l.wasExcluded && l.quantitySuggested > 0);
-    return active.length > 0 && active.every((l) => !!l.proposalOrderId);
-  }, [detailLines]);
+    return active.length > 0 && active.every((l) => !!l.proposalOrderId && !deletedOrderIds.has(l.proposalOrderId));
+  }, [detailLines, deletedOrderIds]);
 
   // Synthèse commandable/non commandable du rayon affiché (spec du 28/09/2026, §3) : calculée
   // localement depuis ProposalLine.supplierIneligible (déjà chargé avec la proposition), jamais un
@@ -1151,7 +1161,32 @@ export function PurchaseOrder() {
                       }}
                     />
                   )}
-                  {currentDepartmentOrder && (
+                  {/* Statut RPOS réel (28/10/2026, demande explicite : "si la commande et cree et
+                      non validé le statut... passe en preparation... si le status passe en
+                      entente de livraison... validé... si la commande est supprimé... marqué
+                      supprimé") — priorité : supprimée > validée sur RPOS (statut 2) > en
+                      préparation (statut 1, créée mais pas encore validée sur RPOS — l'action
+                      possible se fait alors directement sur RPOS, pas depuis cette page) > repli
+                      sur l'ancien badge (avant le premier passage de receptionSyncJob.js). */}
+                  {currentDepartmentOrder && currentDepartmentOrder.deletedOnRpos && (
+                    <span className="badge bg-danger" title="Cette commande a été supprimée directement sur RPOS — le rayon peut être revalidé.">
+                      <iconify-icon icon="solar:trash-bin-trash-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      Commande supprimée sur RPOS ({currentDepartmentOrder.rposOrderReference || currentDepartmentOrder.rposOrderId || '—'}) — rayon à nouveau commandable
+                    </span>
+                  )}
+                  {currentDepartmentOrder && !currentDepartmentOrder.deletedOnRpos && currentDepartmentOrder.lastRposStatus === 2 && (
+                    <span className="badge bg-success" title="Commande validée sur RPOS (statut 2, « en attente de livraison ») — transmise à l'entrepôt, plus aucune action possible depuis cette page.">
+                      <iconify-icon icon="solar:check-circle-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      Validé — commande {currentDepartmentOrder.rposOrderReference || currentDepartmentOrder.rposOrderId || '—'}
+                    </span>
+                  )}
+                  {currentDepartmentOrder && !currentDepartmentOrder.deletedOnRpos && currentDepartmentOrder.lastRposStatus === 1 && (
+                    <span className="badge bg-secondary" title="Commande créée sur RPOS (statut 1, « en préparation ») mais pas encore validée — la validation se fait directement sur RPOS.">
+                      <iconify-icon icon="solar:hourglass-bold-duotone" className="align-middle"></iconify-icon>{' '}
+                      En préparation — commande {currentDepartmentOrder.rposOrderReference || currentDepartmentOrder.rposOrderId || '—'}
+                    </span>
+                  )}
+                  {currentDepartmentOrder && !currentDepartmentOrder.deletedOnRpos && currentDepartmentOrder.lastRposStatus !== 1 && currentDepartmentOrder.lastRposStatus !== 2 && (
                     <span
                       className={`badge ${currentDepartmentOrder.status === 'DONE' ? 'bg-success' : currentDepartmentOrder.status === 'FAILED' ? 'bg-danger' : 'bg-secondary'}`}
                       title={currentDepartmentOrder.errorMessage || undefined}

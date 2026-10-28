@@ -107,6 +107,16 @@ export interface ProposalOrder {
   linesFailed: number;
   status: string; // PENDING | DONE | FAILED | CANCELLED
   errorMessage: string | null;
+  // true si rposOrderId n'existe plus dans SupplierOrderCache — commande supprimée directement sur
+  // RPOS après sa création (mission "Correction des commandes supprimées côté RPOS", 28/10/2026).
+  // Calculé côté backend à chaque lecture (markDeletedOnRpos, proposalService.js), jamais stocké.
+  deletedOnRpos?: boolean;
+  // Dernier statut RPOS numérique connu pour cette commande (receptionSyncJob.js, 28/10/2026 :
+  // "si la commande et cree et non validé le statut... passe en preparation... si le status passe
+  // en entente de livraison... validé"). 1 = en préparation (créée, pas encore validée sur RPOS),
+  // 2 = en attente de livraison (validée sur RPOS, transmise à l'entrepôt), 6 = annulée. null tant
+  // que ce job n'a pas encore fait son premier passage sur cette commande.
+  lastRposStatus: number | null;
 }
 
 export interface Proposal {

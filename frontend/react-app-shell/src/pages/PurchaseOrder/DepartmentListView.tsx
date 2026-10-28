@@ -55,15 +55,32 @@ function DeptTile({
 }) {
   const pctClamped = Math.max(0, Math.min(100, d.revenuePct));
   const { icon } = sectorMeta(name);
-  const statusMeta = order && order.status === 'FAILED'
-    ? { cls: 'status-failed', icon: 'solar:close-circle-bold', label: 'Échec' }
-    : orderCoverage && orderCoverage.total > 0 && orderCoverage.commanded === orderCoverage.total
-      ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Commandé' }
-      : orderCoverage && orderCoverage.commanded > 0
-        ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'Partiellement commandé' }
-        : order
-          ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'En attente' }
-          : null;
+  // Commande supprimée côté RPOS (28/10/2026, "quand une commande est supprimé sur le pos il met
+  // en attente... il doit marque supprimé et me donner la possibilité") — prioritaire sur les
+  // autres statuts : une ProposalOrder dont la commande RPOS associée n'existe plus doit être
+  // signalée clairement, jamais confondue avec "En attente" (qui laissait croire qu'elle était
+  // toujours en cours de traitement côté RPOS alors qu'elle a disparu).
+  // Statut RPOS réel (28/10/2026, demande explicite) — priorité : supprimée (RPOS 6, plus rien ne
+  // compte) > validée sur RPOS (RPOS 2, "en attente de livraison" côté RPOS = verrouillé, rien à
+  // faire depuis l'app) > en préparation (RPOS 1, créée mais pas encore validée sur RPOS — pas de
+  // revalidation possible depuis l'app dans ce cas, seule l'action RPOS directe fait avancer l'état)
+  // > repli sur l'ancienne logique (status interne PENDING/DONE/FAILED, pertinente avant le premier
+  // passage de receptionSyncJob.js sur cette commande, lastRposStatus encore null).
+  const statusMeta = order && order.deletedOnRpos
+    ? { cls: 'status-failed', icon: 'solar:trash-bin-trash-bold', label: 'Commande supprimée (RPOS)' }
+    : order && order.lastRposStatus === 2
+      ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Validé' }
+      : order && order.lastRposStatus === 1
+        ? { cls: 'status-pending', icon: 'solar:hourglass-bold', label: 'En préparation' }
+        : order && order.status === 'FAILED'
+          ? { cls: 'status-failed', icon: 'solar:close-circle-bold', label: 'Échec' }
+          : orderCoverage && orderCoverage.total > 0 && orderCoverage.commanded === orderCoverage.total
+            ? { cls: 'status-done', icon: 'solar:check-circle-bold', label: 'Commandé' }
+            : orderCoverage && orderCoverage.commanded > 0
+              ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'Partiellement commandé' }
+              : order
+                ? { cls: 'status-pending', icon: 'solar:clock-circle-bold', label: 'En attente' }
+                : null;
   return (
     <a
       href={href}

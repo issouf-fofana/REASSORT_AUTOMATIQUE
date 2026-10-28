@@ -40,7 +40,7 @@ async function runReceptionSync() {
       receptionStatus: { notIn: Array.from(TERMINAL_STATUSES) },
     },
     select: {
-      id: true, rposOrderId: true, receptionStatus: true, expectedReceptionDate: true,
+      id: true, rposOrderId: true, receptionStatus: true, expectedReceptionDate: true, lastRposStatus: true,
       proposal: { select: { rposPosId: true } },
     },
   });
@@ -55,8 +55,28 @@ async function runReceptionSync() {
     if (!posId) return;
 
     try {
-      // Seule vérification RPOS conservée : l'annulation, seul statut réellement fiable ici.
+      // Seule vérification RPOS conservée pour receptionStatus : l'annulation, seul statut
+      // réellement fiable ici.
       const rposStatus = await rpos.getSupplierOrderStatus(posId, order.rposOrderId);
+
+      // CORRIGÉ le 28/10/2026 (demande explicite : "si la commande et cree et non validé le statut
+      // sur la carte passe en preparation... si le status passe en entente de livraison sur la
+      // catre tu mets validé") — jusqu'ici lastRposStatus n'était écrit QUE dans les deux branches
+      // ci-dessous (annulée / reçue estimée), jamais pour le passage normal statut RPOS 1 ("en
+      // préparation") -> 2 ("en attente de livraison", cf. validateSupplierOrder) quand ce
+      // changement est fait DIRECTEMENT sur RPOS plutôt que via le bouton "Valider" de cette
+      // plateforme — le badge frontend restait alors figé sur l'état de création, sans jamais
+      // refléter la validation RPOS réelle. Toujours écrit, même quand rien d'autre ne change
+      // ci-dessous, pour que GET /proposal/:id (côté frontend) puisse dériver le bon badge
+      // (En préparation / Validé) depuis lastRposStatus à tout moment, pas seulement aux deux
+      // transitions terminales déjà gérées.
+      if (rposStatus !== null && rposStatus !== order.lastRposStatus) {
+        await prisma.proposalOrder.update({
+          where: { id: order.id },
+          data: { lastRposStatus: rposStatus, lastSyncedAt: now },
+        });
+      }
+
       if (rposStatus === 6) {
         await prisma.proposalOrder.update({
           where: { id: order.id },

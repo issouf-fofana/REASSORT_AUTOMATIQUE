@@ -1661,7 +1661,7 @@ async function getPendingProposal(shopId) {
     // sans attendre un polling de statut qui n'a de sens que pendant un envoi en cours.
     include: { lines: true, orderAnomalies: true, orders: true },
   });
-  return attachOrderAnomaliesToLines(proposal);
+  return markDeletedOnRpos(attachOrderAnomaliesToLines(proposal));
 }
 
 /**
@@ -1673,6 +1673,38 @@ function attachOrderAnomaliesToLines(proposal) {
   if (!proposal) return proposal;
   const anomalyByEan = new Map((proposal.orderAnomalies || []).map((a) => [a.ean, a]));
   proposal.lines = proposal.lines.map((line) => ({ ...line, orderAnomaly: anomalyByEan.get(line.ean) || null }));
+  return proposal;
+}
+
+/**
+ * Marque chaque ProposalOrder dont le rposOrderId n'existe plus côté RPOS (mission "Correction des
+ * commandes supprimées côté RPOS", 28/10/2026 — demande explicite : "quand une commande est
+ * supprimé sur le pos il met en attente... il doit marque supprimé et me donner la possibilité").
+ * Jusqu'ici, une ProposalOrder validée restait indéfiniment affichée comme "En attente" sur la
+ * tuile du rayon (badge calculé côté frontend sur la seule PRÉSENCE d'une ProposalOrder, cf.
+ * DepartmentListView.tsx) même si la commande RPOS associée avait été supprimée directement sur
+ * RPOS — aucune revalidation possible depuis l'app dans ce cas, alors que le rayon est en réalité à
+ * nouveau "rien de commandé". Réutilise SupplierOrderCache (déjà synchronisé périodiquement par
+ * supplierOrdersSyncJob.js pour la page Commandes, même mécanisme que le correctif équivalent dans
+ * stockoutEpisodeService.js) : une commande dont le rposOrderId n'y figure plus est marquée
+ * deletedOnRpos=true, à charge du frontend d'afficher "Supprimée" et de proposer une revalidation à
+ * la place du badge "En attente"/"Commandé" trompeur. LIMITE connue (même que pour les Ruptures) :
+ * SupplierOrderCache ne couvre que les 50 commandes les plus récentes par magasin.
+ */
+async function markDeletedOnRpos(proposal) {
+  if (!proposal || !proposal.orders || !proposal.orders.length) return proposal;
+  const rposOrderIds = proposal.orders.map((o) => o.rposOrderId).filter(Boolean);
+  if (!rposOrderIds.length) return proposal;
+  const currentOrderIds = new Set(
+    (await prisma.supplierOrderCache.findMany({
+      where: { rposShopId: proposal.rposShopId, rposOrderId: { in: rposOrderIds } },
+      select: { rposOrderId: true },
+    })).map((o) => o.rposOrderId)
+  );
+  proposal.orders = proposal.orders.map((o) => ({
+    ...o,
+    deletedOnRpos: !!o.rposOrderId && !currentOrderIds.has(o.rposOrderId),
+  }));
   return proposal;
 }
 
@@ -3527,6 +3559,7 @@ module.exports = {
   getAiDecisionLog,
   getProductByEanCached,
   attachOrderAnomaliesToLines,
+  markDeletedOnRpos,
   checkSupplierEligibility,
   resolveSupplierForArticle,
   previewDepartmentSupplierGrouping,

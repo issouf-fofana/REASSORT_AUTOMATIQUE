@@ -18,6 +18,7 @@ const {
   previewDepartmentSupplierGrouping,
   getProposalStatus,
   attachOrderAnomaliesToLines,
+  markDeletedOnRpos,
   checkSupplierEligibility,
 } = require('../../services/proposalService');
 const { saveSalesAnalysis, getSalesAnalysis, loadSalesAnalysisForGeneration } = require('../../services/salesAnalysisService');
@@ -590,6 +591,7 @@ router.get('/proposal/:id', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Cette proposition n\'appartient pas à votre magasin' });
     }
     attachOrderAnomaliesToLines(proposal);
+    await markDeletedOnRpos(proposal);
     // Même restriction par département/rayon que GET /proposal/pending (plan de rôles, étape 3).
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
     proposal.lines = filterProposalLinesForUser(proposal.lines, currentUser);
