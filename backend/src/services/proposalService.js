@@ -1107,6 +1107,13 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
         rposOrderCount: rposOrderedQty > 0 ? recentRposOrder.orderCount : null,
         rposOrderStatus: rposOrderedQty > 0 ? (recentRposOrder.mostRecentStatus ?? null) : null,
         rposOrders: rposOrderedQty > 0 ? recentRposOrder.orders : null,
+        // Valeurs brutes (toujours présentes, jamais conditionnées à rposOrderedQty > 0 comme les
+        // champs d'affichage ci-dessus) — nécessaires pour recalculer orderSufficiencyReasoning et
+        // coverageStatus après l'ajustement IA plus bas dans cette fonction, avec la quantité finale
+        // plutôt que la quantité classique intermédiaire (cf. correctif du 26/10/2026 ci-dessous).
+        rposOrderedQtyRaw: rposOrderedQty,
+        rposOrderCountRaw: recentRposOrder.orderCount || 1,
+        coverageDaysForStatus,
         quantityIfUnblocked,
         // Anomalie de commande (backend/amelioration.md, 18/09/2026) : présent uniquement si
         // quantityProposed s'écarte significativement de l'historique des quantités validées pour
@@ -1344,6 +1351,28 @@ async function generateAndSaveProposal({ posId, shopId, shopReference, shopName,
           p.aiReasoning = null;
           p.aiAction = null;
         }
+      }
+      // BUG CORRIGÉ le 26/10/2026 (signalé : "dans le graph il me dis ya 16 a commander or sur le
+      // tableau il ya 0 et il me dis suffisant") — orderSufficiencyReasoning/coverageStatus étaient
+      // calculés UNE SEULE FOIS avant ce bloc d'ajustement IA, sur l'ancienne p.quantityProposed
+      // (classique). Quand l'IA ramène ensuite quantityProposed à 0 (cas ci-dessus), ces deux champs
+      // restaient figés avec l'ancien message ("16 recommandé") alors que quantitySuggested=0 et
+      // coverageStatus="Partiellement suffisant" s'affichaient côte à côte dans l'UI sans rapport
+      // l'un avec l'autre. Recalculés ici avec la quantité FINALE (post-IA), comme documenté comme
+      // intention dès la première définition de ces deux champs plus haut dans cette fonction
+      // ("jamais un second calcul divergent").
+      for (const p of result.proposals) {
+        p.orderSufficiencyReasoning = buildOrderSufficiencyReasoning({
+          orderedQty: p.rposOrderedQtyRaw, avgWeeklySales: p.avgWeeklySales, stock: p.stock,
+          quantityProposed: p.quantityProposed, orderCount: p.rposOrderCountRaw,
+        });
+        const recomputed = computeCoverageStatus({
+          avgWeeklySales: p.avgWeeklySales, stock: p.stock,
+          orderedQty: Math.max(p.rposOrderedQtyRaw, p.quantityInTransit),
+          quantityProposed: p.quantityProposed, coverageDays: p.coverageDaysForStatus,
+        });
+        p.coverageStatus = recomputed.status;
+        p.coverageStatusReason = recomputed.reason;
       }
       // Le modal de progression affichait "Analyse IA des quantités ✓ Terminé" même quand l'IA
       // n'a en réalité analysé aucun article (ex: crédit API épuisé, chaque lot en échec) : rien
@@ -1759,7 +1788,13 @@ async function startProposalValidation({ proposalId, posId, shopId, userEmail, d
  * cf. schema.prisma) — chacune créée et envoyée indépendamment, jamais tout-ou-rien : l'échec
  * d'une commande fournisseur n'empêche jamais les autres d'être créées.
  */
-async function validateProposalDepartment({ proposalId, posId, shopId, userEmail, department, decisions, orderHeader, validateAfterCreate }) {
+async function validateProposalDepartment({ proposalId, posId, shopId, userEmail, department, decisions, orderHeader, validateAfterCreate, onProgress }) {
+  // onProgress optionnel (ajouté le 26/10/2026, demande explicite : "la commande existe déjà mais
+  // l'UI reste figée... on ne voit pas les étapes") — publie la progression réelle groupe fournisseur
+  // par groupe fournisseur pendant l'envoi vers RPOS, au lieu d'un texte statique côté frontend
+  // pendant tout l'appel HTTP synchrone. Un callback absent (compat ascendante : runAiForecast,
+  // tests, autres appelants) ne change rien au comportement existant.
+  const reportProgress = onProgress || (() => {});
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId }, include: { lines: true } });
   if (!proposal) throw new Error('Proposition introuvable');
   // GENERATED (rien encore validé) ou VALIDATING/VALIDATED avec au moins un rayon restant sont tous
@@ -1835,7 +1870,14 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
   let anyFailedGroup = false;
   const allFailedLines = [];
 
+  let groupIndex = 0;
   for (const group of groups) {
+    groupIndex += 1;
+    reportProgress({
+      step: 'CREATE_ORDER', groupsTotal: groups.length, groupsProcessed: groupIndex - 1,
+      currentSupplierName: group.supplierName, currentDeliveryType: group.deliveryType,
+    });
+
     const proposalOrder = await prisma.proposalOrder.create({
       data: {
         proposalId, department, linesTotal: group.lines.length, status: 'PENDING', expectedReceptionDate,
@@ -1886,6 +1928,11 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
     totalFailed += failed;
     allFailedLines.push(...failedLines);
     if (failed === group.lines.length) anyFailedGroup = true;
+
+    reportProgress({
+      step: 'CREATE_ORDER', groupsTotal: groups.length, groupsProcessed: groupIndex,
+      currentSupplierName: group.supplierName, currentDeliveryType: group.deliveryType,
+    });
   }
 
   // Alerte email avec bon(s) de commande PDF, dès CE rayon validé (demande du 08/10/2026 : l'ancien
@@ -1895,6 +1942,7 @@ async function validateProposalDepartment({ proposalId, posId, shopId, userEmail
   // uniquement les commandes RPOS de CE rayon.
   const ordersWithRposId = createdOrders.filter((o) => o.order?.id);
   if (ordersWithRposId.length) {
+    reportProgress({ step: 'SEND_EMAIL', groupsTotal: groups.length, groupsProcessed: groups.length });
     try {
       const shop = await prisma.shop.findUnique({ where: { rposShopId: shopId }, select: { rposShopId: true, rposPosId: true, reference: true, name: true } });
       if (shop) {

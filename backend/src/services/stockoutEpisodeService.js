@@ -1982,10 +1982,12 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     // episodeCount du snapshot est un compte de jours-épisode (un même épisode sur 3 jours compte 3
     // fois), pas pertinent ici — le vrai nombre d'articles distincts touchés vient des épisodes eux-
     // mêmes, même logique que getDashboardSummary (startedAt <= end ET (toujours ouvert OU résolu
-    // après start)).
+    // après start)). `department` récupéré en plus de `id` (bug corrigé le 26/10/2026 : la colonne
+    // "Ruptures d'article" du tableau par rayon affichait 0 partout — ce select ne gardait que `id`,
+    // donc aucune ventilation par rayon n'était possible malgré le total global correct).
     prisma.stockoutEpisode.findMany({
       where: { rposShopId, startedAt: { lte: end }, OR: [{ endedAt: null }, { endedAt: { gte: start } }] },
-      select: { id: true },
+      select: { id: true, department: true },
     }),
     prisma.salesLine.aggregate({
       where: { rposShopId, date: { gte: start, lte: end } },
@@ -2004,6 +2006,16 @@ async function getPeriodLossSummary(rposShopId, { startDate, endDate }) {
     bucket.qtyPerdue += row.qtyPerdue;
     totalCaPerdu += row.caPerdue;
     totalQtyPerdue += row.qtyPerdue;
+  }
+
+  // Ventilation du nombre d'épisodes par rayon — boucle séparée de dailyRows ci-dessus car
+  // episodeCounts vient d'une requête indépendante (cf. commentaire plus haut) ; crée le bucket au
+  // besoin pour couvrir un rayon qui aurait des épisodes sur cette période mais pas encore de ligne
+  // dans le snapshot journalier (rare, mais pas de raison de le perdre silencieusement).
+  for (const episode of episodeCounts) {
+    const dept = episode.department || 'Sans rayon';
+    if (!byDepartment.has(dept)) byDepartment.set(dept, { department: dept, caPerdue: 0, qtyPerdue: 0, episodeCount: 0 });
+    byDepartment.get(dept).episodeCount += 1;
   }
 
   const departmentBreakdown = Array.from(byDepartment.values()).sort((a, b) => b.caPerdue - a.caPerdue);

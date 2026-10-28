@@ -72,16 +72,31 @@ function SectionBlock({
   section,
   canEdit,
   onUpdated,
+  onDeleted,
 }: {
   section: GuideSection;
   canEdit: boolean;
   onUpdated: (next: GuideSection) => void;
+  onDeleted: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(section.content || '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingSection, setDeletingSection] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleDeleteSection() {
+    if (!window.confirm(`Supprimer définitivement la section "${section.title}" et toutes ses images ?`)) return;
+    setDeletingSection(true);
+    try {
+      await apiFetch(`/reassort/user-guide/${section.id}`, { method: 'DELETE' });
+      onDeleted(section.id);
+    } catch (err) {
+      window.reassortToast('Erreur : ' + (err instanceof Error ? err.message : String(err)), 'error');
+      setDeletingSection(false);
+    }
+  }
 
   async function saveContent() {
     setSaving(true);
@@ -131,6 +146,17 @@ function SectionBlock({
       <div className="ug-section-header">
         <iconify-icon icon="solar:book-2-bold-duotone"></iconify-icon>
         <h3 className="ug-section-title">{section.title}</h3>
+        {canEdit && (
+          <button
+            type="button"
+            className="ug-section-delete ug-edit-only"
+            title="Supprimer cette section"
+            disabled={deletingSection}
+            onClick={handleDeleteSection}
+          >
+            <iconify-icon icon="solar:trash-bin-trash-bold-duotone"></iconify-icon>
+          </button>
+        )}
       </div>
 
       {editing ? (
@@ -214,6 +240,10 @@ export function UserGuide() {
     setSections((prev) => (prev ? prev.map((s) => (s.id === next.id ? next : s)) : prev));
   }
 
+  function removeSection(id: string) {
+    setSections((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
+  }
+
   function slugify(title: string): string {
     return title
       .toLowerCase()
@@ -263,7 +293,13 @@ export function UserGuide() {
         }
         .ug-section-header { display: flex; align-items: center; gap: .6rem; margin-bottom: .75rem; padding-bottom: .6rem; border-bottom: 1px solid #e9ecf2; }
         .ug-section-header iconify-icon { font-size: 1.2rem; color: #1B2A4A; }
-        .ug-section-title { font-size: 1.05rem; font-weight: 700; margin: 0; color: #1B2A4A; }
+        .ug-section-title { font-size: 1.05rem; font-weight: 700; margin: 0; color: #1B2A4A; flex: 1; }
+        .ug-section-delete {
+          width: 28px; height: 28px; border-radius: 7px; border: 1px solid #f1c6c6; background: #FDF4F4;
+          color: #B23A3A; display: flex; align-items: center; justify-content: center; margin-left: auto;
+        }
+        .ug-section-delete:hover { background: #B23A3A; border-color: #B23A3A; color: #fff; }
+        .ug-section-delete:disabled { opacity: .5; }
         .ug-section-content { font-size: .9rem; color: #33415C; line-height: 1.6; white-space: pre-line; margin-bottom: .75rem; }
         .ug-section-empty { font-size: .85rem; color: #8a93a8; font-style: italic; margin-bottom: .75rem; }
         .ug-edit-box textarea { font-size: .88rem; margin-bottom: .6rem; }
@@ -336,7 +372,7 @@ export function UserGuide() {
       {error && <div className="alert alert-danger">Erreur : {error}</div>}
       {!sections && !error && <div className="text-center text-muted py-4">Chargement...</div>}
       {sections?.map((s) => (
-        <SectionBlock key={s.id} section={s} canEdit={isAdmin} onUpdated={updateSection} />
+        <SectionBlock key={s.id} section={s} canEdit={isAdmin} onUpdated={updateSection} onDeleted={removeSection} />
       ))}
     </div>
   );

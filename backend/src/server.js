@@ -207,6 +207,19 @@ async function start() {
       console.log(`⚠️  ${staleRuns.count} génération(s) de proposition interrompue(s) par le redémarrage, marquée(s) en erreur.`);
     }
 
+    // Même principe que staleRuns ci-dessus, pour les exécutions de jobs planifiés (JobRun,
+    // cf. jobHealthService.js) — bug constaté le 26/10/2026 en testant la page Supervision des
+    // tâches : un job interrompu par un redémarrage (nodemon, rebuild Docker) restait affiché
+    // "En cours" indéfiniment, sans jamais se terminer, laissant croire à tort qu'il tournait
+    // toujours des heures après.
+    const staleJobRuns = await prisma.jobRun.updateMany({
+      where: { status: 'running' },
+      data: { status: 'error', finishedAt: new Date(), errorMessage: 'Exécution interrompue par un redémarrage du serveur.' },
+    });
+    if (staleJobRuns.count > 0) {
+      console.log(`⚠️  ${staleJobRuns.count} exécution(s) de job interrompue(s) par le redémarrage, marquée(s) en erreur.`);
+    }
+
     // Contrairement aux propositions ci-dessus, un batch de récupération d'historique (bouton
     // "Tout cocher" du backfill) sait reprendre proprement là où il s'est arrêté (chunks/pages déjà
     // persistés, cf. salesBackfillService) : un redémarrage du serveur ne doit donc jamais

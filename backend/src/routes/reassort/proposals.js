@@ -330,6 +330,10 @@ router.get('/proposal/generate/:runId/status', async (req, res) => {
         aiArticlesAdjusted: run.aiArticlesAdjusted,
         aiErrorMessage: run.aiErrorMessage,
         proposal,
+        // runType=VALIDATE uniquement (26/10/2026) : résultat de validateProposalDepartment une
+        // fois DONE, pour que le frontend affiche le même récapitulatif qu'avant ce correctif, sans
+        // second appel réseau.
+        validateDepartmentResult: run.validateDepartmentResultJson ? JSON.parse(run.validateDepartmentResultJson) : null,
       },
     });
   } catch (error) {
@@ -795,21 +799,58 @@ router.post('/proposal/:id/validate-department', async (req, res) => {
       }
     }
 
-    const result = await validateProposalDepartment({
-      proposalId: req.params.id,
-      posId,
-      shopId,
-      userEmail: req.user.email,
-      department,
-      decisions,
-      orderHeader: { supplierId, orderDate, deliveryDate, externalReference, comment },
-      validateAfterCreate: !!validateAfterCreate,
+    // Asynchrone depuis le 26/10/2026 (demande explicite : "la commande existe déjà mais l'UI reste
+    // figée... on ne voit pas les étapes") — même pattern que POST /proposal/generate ci-dessus
+    // (réponse 202 immédiate + ProposalGenerationRun suivi par polling), à la place d'un appel
+    // synchrone qui faisait attendre le frontend pendant TOUTE la séquence RPOS (création commande,
+    // ajout des lignes, validation, PDF + email) sans aucune visibilité sur l'étape en cours.
+    const run = await prisma.proposalGenerationRun.create({
+      data: { rposShopId: shopId, status: 'RUNNING', step: 'CREATE_ORDER', runType: 'VALIDATE' },
     });
 
-    res.json({ success: true, data: result });
+    res.status(202).json({ success: true, data: { runId: run.id } });
+
+    (async () => {
+      try {
+        const onProgress = async (p) => {
+          await prisma.proposalGenerationRun.update({
+            where: { id: run.id },
+            data: {
+              step: p.step,
+              ...(p.groupsTotal !== undefined ? { articlesTotal: p.groupsTotal } : {}),
+              ...(p.groupsProcessed !== undefined ? { articlesProcessed: p.groupsProcessed } : {}),
+              ...(p.currentSupplierName !== undefined ? { lastArticleLabel: `${p.currentDeliveryType || ''} ${p.currentSupplierName || ''}`.trim() } : {}),
+            },
+          }).catch(() => {}); // une mise à jour de progression manquée ne doit jamais interrompre la validation elle-même
+        };
+
+        const result = await validateProposalDepartment({
+          proposalId: req.params.id,
+          posId,
+          shopId,
+          userEmail: req.user.email,
+          department,
+          decisions,
+          orderHeader: { supplierId, orderDate, deliveryDate, externalReference, comment },
+          validateAfterCreate: !!validateAfterCreate,
+          onProgress,
+        });
+
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', proposalId: req.params.id, completedAt: new Date(), validateDepartmentResultJson: JSON.stringify(result) },
+        });
+      } catch (error) {
+        console.error('Department validation error:', error);
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
   } catch (error) {
-    console.error('Department validation error:', error);
-    res.status(400).json({ success: false, message: error.message, details: error.body });
+    console.error('Department validation start error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

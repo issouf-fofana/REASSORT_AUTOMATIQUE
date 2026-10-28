@@ -27,6 +27,7 @@ router.use(requireAuth);
 router.use(requireSupervisedShop);
 
 router.use(require('./jobs'));
+router.use(require('./jobs-admin'));
 router.use(require('./backfill'));
 router.use(require('./sales'));
 router.use(require('./shops'));

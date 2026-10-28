@@ -417,7 +417,14 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
           field: '_check',
           width: 46,
           pinned: 'left',
-          sortable: false,
+          // Triable (25/10/2026, demande explicite : "je veux que quand je viens il affiche les la
+          // liste des article qui son coché... je dois scroller pour chercher") — permet de regrouper
+          // les articles cochés (à commander) en tête de liste, au lieu de devoir les chercher parmi
+          // les non cochés mélangés. Trié par défaut à l'ouverture (cf. sort ci-dessous).
+          sortable: true,
+          comparator: (a: string, b: string) => (a === b ? 0 : a === 'Oui' ? -1 : 1),
+          sort: 'asc',
+          sortIndex: 0,
           filter: false,
           resizable: false,
           cellRenderer: checkCellRenderer(getLineState, updateOrderTotal),
@@ -884,6 +891,12 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     if (filterModelToRestore && Object.keys(filterModelToRestore).length) {
       api.setFilterModel(filterModelToRestore);
     }
+    // Tri "cochés en premier" réappliqué explicitement ici (25/10/2026) : le `sort: 'asc'` déclaré
+    // dans columnDefs n'a d'effet qu'au tout premier rendu de la grille (créée avec rowData: []), pas
+    // une fois que les vraies lignes arrivent via setGridOption ci-dessus — sans ce rappel, la grille
+    // restait dans l'ordre naturel des données malgré la colonne configurée comme triée par défaut
+    // (bug constaté le 26/10/2026 : seule une ligne cochée au milieu du tableau, jamais en tête).
+    api.applyColumnState({ state: [{ colId: '_check', sort: 'asc', sortIndex: 0 }], defaultState: { sort: null } });
     // loadLastPurchasesAutomatically() N'EST PLUS appelée ici directement (corrigé le 08/10/2026) :
     // AG Grid peint les lignes de façon asynchrone, donc un appel immédiat après setGridOption ne
     // trouvait encore aucun span dans le DOM — gérée maintenant par onModelUpdated (voir

@@ -25,6 +25,7 @@ import {
   PackageX,
   PackageSearch,
   Trash2,
+  Activity,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -107,6 +108,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'users-list', label: 'Utilisateurs', href: '/users-list', icon: Users, adminOnly: true },
       { id: 'mail-recipients', label: 'Destinataires email', href: '/mail-recipients', icon: Mail, adminOnly: true },
       { id: 'token-usage', label: 'Consommation de tokens', href: '/token-usage', icon: Coins, adminOnly: true },
+      // Interface d'administration centralisée des 26 jobs planifiés (26/10/2026, demande
+      // explicite : "une interface d'administration centralisée... statut, logs, suivi temps réel,
+      // historique, diagnostic, prochaine exécution"). Remplace la supervision qu'offrait seulement
+      // JobsHealthPanel dans Paramètres > Planification (12 jobs sur 26, un seul statut sans
+      // historique ni logs) — SchedulingSection.tsx garde la configuration (cron/activation), cette
+      // page ajoute la supervision complète.
+      { id: 'jobs-admin', label: 'Supervision des tâches', href: '/jobs-admin', icon: Activity, adminOnly: true },
     ],
   },
   {

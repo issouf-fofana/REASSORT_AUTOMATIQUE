@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../utils/concurrency');
 const { runAiForecast } = require('../services/aiForecastService');
 const { MIN_DAYS_FOR_SMOOTHING } = require('../services/forecastService');
 const { getConfig } = require('../services/configService');
+const systemConfig = require('../services/systemConfigService');
 const { notifyShopUsersOfNewProposal, notifyAdminsOfNightlySummary } = require('../services/proposalNotificationService');
 
 
@@ -118,8 +119,15 @@ async function runNightlyProposalGeneration() {
         }
       }
 
+      // BUG CORRIGÉ le 28/10/2026 (signalé : "même si le réajustement IA est désactivé, du token
+      // est utilisé") — cet appel ignorait totalement AI_QUANTITY_ADJUSTMENT_ENABLED (Paramètres >
+      // IA), contrairement au chemin équivalent dans proposalService.js. Résultat : même avec le
+      // réglage désactivé, chaque génération nocturne lançait quand même une analyse IA complète
+      // sur toute la proposition (jusqu'à ~175k tokens/appel observés sur le contexte
+      // "ai-forecast-batch" de la page Consommation de tokens).
+      const aiQuantityAdjustmentEnabled = (await systemConfig.getValue(systemConfig.KEYS.AI_QUANTITY_ADJUSTMENT_ENABLED)) === 'true';
       const periodDays = (new Date(stats.periodEnd) - new Date(stats.periodStart)) / (24 * 60 * 60 * 1000);
-      if (periodDays >= MIN_DAYS_FOR_AI_FORECAST && stats.proposalsGenerated > 0) {
+      if (aiQuantityAdjustmentEnabled && periodDays >= MIN_DAYS_FOR_AI_FORECAST && stats.proposalsGenerated > 0) {
         try {
           await runAiForecast(proposal.id, 'nightlyProposalJob');
           console.log(`[nightlyProposalJob] ${shop.reference} : analyse IA automatique terminée.`);

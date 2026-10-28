@@ -401,22 +401,17 @@ export function ValidationFlow({
       setProgressText('Classement des articles par fournisseur (LC/LD)...');
       await sleep(300);
       setClassifyStepState('done');
-      // L'appel HTTP ci-dessous est SYNCHRONE côté serveur : il ne revient qu'une fois la commande
-      // créée, les articles envoyés, le(s) PDF récupéré(s) ET le mail parti (cf.
-      // validateProposalDepartment). "Création"/"Envoi des articles" doivent donc rester actifs
-      // pendant TOUTE cette attente réelle (souvent plusieurs secondes) — sans ça elles passaient
-      // directement à "done" à la réponse, et PDF/mail s'enchaînaient ensuite en accéléré juste
-      // après, donnant l'impression que le mail partait "pendant que ça charge encore" plutôt qu'en
-      // toute dernière étape (constaté le 08/10/2026).
+      // Asynchrone depuis le 26/10/2026 (demande explicite : "la commande existe déjà mais l'UI
+      // reste figée... on ne voit pas les étapes") — POST renvoie désormais immédiatement un runId
+      // (202), suivi par polling comme la génération (cf. GenerationFlow.tsx/watchRun), au lieu
+      // d'un seul appel HTTP synchrone qui ne revenait qu'une fois TOUT terminé côté serveur
+      // (commande créée, articles envoyés, PDF récupéré, mail parti) sans aucune progression réelle
+      // affichée entre-temps.
       setCreateStepState('active');
       setSendStepState('active');
       setProgressText(`Envoi des articles du rayon ${departmentValidation}...`);
       try {
-        // orders (pluriel, depuis le 08/10/2026 — mission "Logique de gestion des fournisseurs et
-        // des commandes") : un rayon peut maintenant produire PLUSIEURS commandes RPOS, une par
-        // fournisseur résolu (LC central + LD par fournisseur de repli) — remplace l'ancien `order`
-        // unique.
-        const data = await apiFetch<{
+        type ValidateDepartmentResult = {
           orders: { supplierId: string | null; supplierName: string | null; deliveryType: 'LC' | 'LD' | null; order: { id: string; reference: string | null }; processed: number; failed: number; failedLines: { ean: string; label: string | null; reason: string }[]; rposOrderValidated: boolean | null }[];
           processed: number;
           failed: number;
@@ -424,7 +419,22 @@ export function ValidationFlow({
           anyFailedGroup: boolean;
           skippedIneligible: { ean: string; label: string | null; reason: string }[];
           totalRequested: number;
-        }>(`/reassort/proposal/${proposalId}/validate-department?${shopQueryParam}`, {
+        };
+        interface ValidateRunStatus {
+          status: 'RUNNING' | 'DONE' | 'ERROR';
+          step: string;
+          articlesTotal: number;
+          articlesProcessed: number;
+          lastArticleLabel: string | null;
+          errorMessage: string | null;
+          validateDepartmentResult: ValidateDepartmentResult | null;
+        }
+
+        // orders (pluriel, depuis le 08/10/2026 — mission "Logique de gestion des fournisseurs et
+        // des commandes") : un rayon peut maintenant produire PLUSIEURS commandes RPOS, une par
+        // fournisseur résolu (LC central + LD par fournisseur de repli) — remplace l'ancien `order`
+        // unique.
+        const { runId } = await apiFetch<{ runId: string }>(`/reassort/proposal/${proposalId}/validate-department?${shopQueryParam}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -438,6 +448,34 @@ export function ValidationFlow({
             department: departmentValidation,
           }),
         });
+
+        const POLL_INTERVAL_MS = 700;
+        let data: ValidateDepartmentResult | null = null;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const s = await apiFetch<ValidateRunStatus>(`/reassort/proposal/generate/${encodeURIComponent(runId)}/status?${shopQueryParam}`);
+          // Progression réelle groupe fournisseur par groupe fournisseur (cf. reportProgress côté
+          // backend) : "en cours : LC — Fournisseur central (1/2)" plutôt qu'un texte figé.
+          if (s.step === 'CREATE_ORDER' && s.articlesTotal > 0) {
+            setProgressText(
+              s.articlesProcessed >= s.articlesTotal
+                ? `Commande(s) créée(s) sur RPOS (${s.articlesProcessed}/${s.articlesTotal})...`
+                : `Envoi en cours : ${s.lastArticleLabel || '...'} (${s.articlesProcessed}/${s.articlesTotal})...`,
+            );
+          } else if (s.step === 'SEND_EMAIL') {
+            setCreateStepState('done');
+            setSendStepState('done');
+            setProgressText("Envoi de l'email récapitulatif...");
+          }
+          if (s.status === 'ERROR') throw new Error(s.errorMessage || 'Échec de la validation');
+          if (s.status === 'DONE') {
+            data = s.validateDepartmentResult;
+            break;
+          }
+          await sleep(POLL_INTERVAL_MS);
+        }
+        if (!data) throw new Error('Réponse de validation vide');
+
         setCreateStepState('done');
         setSendStepState('done');
         const allValidated = data.orders.length > 0 && data.orders.every((o) => o.rposOrderValidated);

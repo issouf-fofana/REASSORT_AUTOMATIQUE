@@ -9,7 +9,6 @@ const { getConfig, upsertConfig } = require('../../services/configService');
 const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
 const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase, MANUAL_IMPORT_DIR } = require('../../services/salesFileService');
-const jobHealthService = require('../../services/jobHealthService');
 const { VALID_INTENT_TOOLS } = require('../../services/chatbotService');
 const prisma = require('../../utils/prisma');
 const cryptoService = require('../../services/cryptoService');
@@ -230,18 +229,6 @@ router.post('/system-config/:key/reset', requireAdmin, async (req, res) => {
   await systemConfig.resetToDefault(key);
   const value = await systemConfig.getValue(key);
   res.json({ success: true, data: { key, value } });
-});
-
-// GET /api/reassort/system-config/jobs-health - état des 4 jobs planifiés (dernier statut, nombre
-// d'échecs consécutifs) : les échecs de cron n'étaient auparavant visibles que dans les logs
-// serveur, sans aucun moyen de les consulter depuis l'UI.
-router.get('/system-config/jobs-health', requireAdmin, async (req, res) => {
-  try {
-    const jobsHealth = await jobHealthService.getJobsHealth();
-    res.json({ success: true, data: jobsHealth });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
 });
 
 // PUT /api/reassort/system-config - met à jour une clé de configuration globale (ADMIN uniquement)

@@ -1,147 +1,29 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../../../shared/api/client';
 import { saveSystemConfigKey } from '../api/systemConfig';
 
-// Libellés lisibles pour les 9 jobs suivis par jobHealthService (trackJobRun, cf. cronManager.js) —
-// noms techniques (nightlyProposal, salesSync...) traduits pour l'affichage, jamais montrés bruts.
-const JOB_LABELS: Record<string, string> = {
-  nightlyProposal: 'Génération nocturne des propositions',
-  receptionSync: 'Synchronisation des réceptions',
-  salesSync: 'Synchronisation des ventes',
-  salesDailyRecap: 'Récap quotidien de couverture des ventes',
-  productEolSync: 'Synchronisation des DLV',
-  shopsSync: 'Synchronisation des magasins',
-  dailyReplenishmentReview: 'Réajustement quotidien du réassort',
-  predictionOutcome: 'Évaluation des prédictions',
-  improvementWatchdog: "Chien de garde améliorations IA",
-  proposalReminder: 'Relance des propositions en attente',
-  endOfDayValidationRecap: 'Récap de fin de journée',
-  tokenUsageWatchdog: 'Chien de garde consommation de tokens',
-};
-
-interface JobHealth {
-  jobName: string;
-  status: 'ok' | 'error' | 'degraded';
-  lastRunAt?: string;
-  consecutiveFailures?: number;
-  lastError?: string;
-}
-
-const STATUS_META: Record<JobHealth['status'], { label: string; badge: string }> = {
-  ok: { label: 'OK', badge: 'bg-success-subtle text-success' },
-  error: { label: 'Erreur', badge: 'bg-warning-subtle text-warning' },
-  degraded: { label: 'Dégradé', badge: 'bg-danger-subtle text-danger' },
-};
-
-function fmtDate(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString('fr-FR') : '—';
-}
-
-/** Suivi de santé des tâches planifiées (demande du 25/09/2026, section "Automatisation" du Guide
- * du projet marquée "en cours") : jobHealthService trackait déjà les 9 jobs côté backend
- * (cronManager.js), mais rien ne l'affichait — un job en échec répété restait invisible sans aller
- * lire les logs serveur. */
+/** Bandeau de renvoi vers la supervision complète des jobs (Administration > Supervision des
+ * tâches) — remplace l'ancien JobsHealthPanel (25/09/2026, 12 jobs sur 26 suivis, un seul statut
+ * sans historique ni logs) suite à la demande explicite du 26/10/2026 d'une "interface
+ * d'administration centralisée" avec statut, logs, historique et suivi temps réel pour les 26 jobs
+ * planifiés — cette nouvelle page vit sous Administration plutôt que dans Paramètres, qui garde ici
+ * uniquement la configuration (cron/activation) de chaque job. */
 function JobsHealthPanel() {
-  const [jobs, setJobs] = useState<JobHealth[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Tri croissant/décroissant ajouté le 25/10/2026 (audit complet des tableaux du site, demande
-  // explicite : "les ajouté fait un audit de tout tab") — ce tableau n'avait aucun tri.
-  type SortKey = 'jobName' | 'status' | 'lastRunAt' | 'consecutiveFailures' | 'lastError';
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  function toggleSort(k: SortKey) {
-    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    else { setSortKey(k); setSortDir('desc'); }
-  }
-  function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
-    const active = sortKey === k;
-    return (
-      <th role="button" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
-        {children} {active ? (sortDir === 'desc' ? '▼' : '▲') : ''}
-      </th>
-    );
-  }
-
-  async function load() {
-    try {
-      const data = await apiFetch<JobHealth[]>('/reassort/system-config/jobs-health');
-      setJobs(data);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
-
   return (
     <div className="card">
-      <div className="card-header d-flex justify-content-between align-items-center">
-        <h4 className="card-title d-flex align-items-center gap-1 mb-0">
+      <div className="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div className="d-flex align-items-center gap-2">
           <iconify-icon icon="solar:heart-pulse-bold-duotone" className="text-primary fs-20" />
-          Santé des tâches planifiées
-        </h4>
-        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={load}>
-          <iconify-icon icon="solar:refresh-bold-duotone" className="align-middle"></iconify-icon> Actualiser
-        </button>
-      </div>
-      <div className="card-body">
-        <div className="alert alert-light border mb-3 small">
-          <strong>À quoi ça sert :</strong> chaque tâche automatique (synchronisation, génération nocturne, contrôles...) enregistre
-          son dernier statut ici. Un job "Dégradé" a échoué au moins 3 fois de suite — une vérification manuelle est recommandée
-          plutôt que d'attendre un signalement fortuit dans les logs serveur.
-        </div>
-        {error && <div className="alert alert-danger">{error}</div>}
-        {!jobs && !error && <div className="text-muted small">Chargement...</div>}
-        {jobs && jobs.length === 0 && (
-          <div className="text-muted small">Aucune tâche n'a encore été exécutée depuis le démarrage du serveur.</div>
-        )}
-        {jobs && jobs.length > 0 && (
-          <div className="table-responsive">
-            <table className="table table-sm align-middle mb-0">
-              <thead>
-                <tr>
-                  <SortTh k="jobName">Tâche</SortTh>
-                  <SortTh k="status">Statut</SortTh>
-                  <SortTh k="lastRunAt">Dernière exécution</SortTh>
-                  <SortTh k="consecutiveFailures">Échecs consécutifs</SortTh>
-                  <SortTh k="lastError">Dernière erreur</SortTh>
-                </tr>
-              </thead>
-              <tbody>
-                {(!sortKey ? jobs : [...jobs].sort((a, b) => {
-                  const dir = sortDir === 'desc' ? 1 : -1;
-                  const getValue = (j: JobHealth): number | string => {
-                    if (sortKey === 'jobName') return (JOB_LABELS[j.jobName] || j.jobName).toLowerCase();
-                    if (sortKey === 'status') return j.status;
-                    if (sortKey === 'lastRunAt') return j.lastRunAt ? new Date(j.lastRunAt).getTime() : -Infinity;
-                    if (sortKey === 'lastError') return (j.lastError || '').toLowerCase();
-                    return j.consecutiveFailures || 0;
-                  };
-                  const av = getValue(a);
-                  const bv = getValue(b);
-                  if (typeof av === 'string' || typeof bv === 'string') return dir * String(bv).localeCompare(String(av), 'fr-FR');
-                  return dir * ((bv as number) - (av as number));
-                })).map((j) => {
-                  const meta = STATUS_META[j.status] || STATUS_META.ok;
-                  return (
-                    <tr key={j.jobName}>
-                      <td>{JOB_LABELS[j.jobName] || j.jobName}</td>
-                      <td>
-                        <span className={`badge ${meta.badge}`}>{meta.label}</span>
-                      </td>
-                      <td className="small text-muted">{fmtDate(j.lastRunAt)}</td>
-                      <td className="small">{j.consecutiveFailures || 0}</td>
-                      <td className="small text-muted">{j.lastError || '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div>
+            <div className="fw-semibold">Supervision des tâches planifiées</div>
+            <div className="small text-muted">Statut, historique, logs en direct et prochaine exécution des 26 tâches — désormais dans Administration.</div>
           </div>
-        )}
+        </div>
+        <Link to="/jobs-admin" className="btn btn-sm btn-outline-primary">
+          Ouvrir la supervision
+        </Link>
       </div>
     </div>
   );

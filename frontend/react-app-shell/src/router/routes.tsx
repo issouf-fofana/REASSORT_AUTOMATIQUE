@@ -22,6 +22,8 @@ import { PurchaseOrderPage } from '../pages/PurchaseOrder/PurchaseOrderPage';
 import { Dashboard } from '../pages/Dashboard/Dashboard';
 import { Stockouts } from '../pages/Stockouts/Stockouts';
 import { StockoutEpisodePage } from '../pages/Stockouts/StockoutEpisodePage';
+import { JobsAdminDashboard } from '../pages/JobsAdmin/JobsAdminDashboard';
+import { JobDetailPage } from '../pages/JobsAdmin/JobDetailPage';
 import { OverstockReport } from '../pages/OverstockReport/OverstockReport';
 import { OverstockScrapDetail } from '../pages/OverstockReport/OverstockScrapDetail';
 import { ScrapReport } from '../pages/ScrapReport/ScrapReport';
@@ -74,6 +76,8 @@ export function AppRoutes() {
         <Route path="/purchase-list" element={<PurchaseList />} />
         <Route path="/order-anomalies" element={<AdminGuard><OrderAnomalies /></AdminGuard>} />
         <Route path="/stockouts" element={<Stockouts />} />
+        <Route path="/jobs-admin" element={<JobsAdminDashboard />} />
+        <Route path="/jobs-admin/:jobName" element={<JobDetailPage />} />
         <Route path="/stockouts/episode/:episodeId" element={<StockoutEpisodePage />} />
         {/* Pas d'AdminGuard (contrairement à /feature-requests) : le backend autorise ADMIN ET
             SUPERVISOR (requireAdminOrSupervisor, overstockReportService.js), même raisonnement que

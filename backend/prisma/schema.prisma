@@ -443,6 +443,14 @@ model ProposalGenerationRun {
   aiArticlesAdjusted Int?     @map("ai_articles_adjusted")
   aiErrorMessage     String?  @map("ai_error_message")
 
+  // Renseigné uniquement pour runType=VALIDATE (ajouté le 26/10/2026, suivi en temps réel de la
+  // validation d'un rayon/envoi RPOS — même modèle réutilisé plutôt qu'une nouvelle table, le cycle
+  // de vie RUNNING->DONE/ERROR et le polling sont identiques à une génération) : résultat complet de
+  // validateProposalDepartment (créées, échecs, etc.), lu par le frontend une fois status=DONE pour
+  // éviter un second aller-retour, même principe que ProposalLine.dailyHistory (JSON texte, pas de
+  // relation dédiée pour une donnée qui n'est jamais interrogée indépendamment du run).
+  validateDepartmentResultJson String? @map("validate_department_result_json") @db.Text
+
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
 
@@ -1131,6 +1139,32 @@ model SystemConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("system_config")
+}
+
+// Historique réel des exécutions de jobs planifiés (cronManager.js) — remplace jobHealthService.js
+// qui n'écrivait qu'un seul statut "dernière exécution" par job dans SystemConfig (pas d'historique,
+// pas de notion "en cours", pas de durée, pas de logs). Table dédiée demandée explicitement le
+// 26/10/2026 : "une interface d'administration centralisée" pour superviser statut, logs, historique,
+// temps réel et prochaine exécution de chaque job, avec des données réelles (pas simulées) et
+// persistées après redémarrage du serveur.
+model JobRun {
+  id String @id @default(cuid())
+
+  jobName String @map("job_name") // clé stable du job, ex: "nightlyProposal" (même identifiant que trackJobRun())
+
+  status String @default("running") @map("status") // 'running' | 'success' | 'error'
+
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  durationMs  Int?      @map("duration_ms")
+
+  errorMessage String? @db.Text @map("error_message")
+  logs         String? @db.Text // lignes de progression accumulées pendant l'exécution (jobLogger.log), affichées en direct puis conservées pour consultation après coup
+
+  triggeredBy String @default("cron") @map("triggered_by") // 'cron' | 'startup' | 'manual'
+
+  @@index([jobName, startedAt])
+  @@map("job_runs")
 }
 
 // =============================================
