@@ -997,15 +997,25 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     // partir de startedAt, coût négligeable — un simple Date.now() - startedAt, rien à voir avec le
     // recalcul coûteux de hasOrder/deliveryStatus qui, lui, est maintenant précalculé).
     // LC si rattaché au central, LD sinon — même convention que ProposalOrder.deliveryType /
-    // ProposalLine.deliveryType partout ailleurs dans le projet. hasOrder=true : type RÉEL de la
-    // commande matchée. hasOrder=false : type ATTENDU déduit du dernier fournisseur résolu connu
-    // pour cet EAN (latestLineDeliveryType) — null si l'article n'a jamais été vu dans une
+    // ProposalLine.deliveryType partout ailleurs dans le projet. matchedOrder présent : type RÉEL
+    // de cette commande. matchedOrder absent : type ATTENDU déduit du dernier fournisseur résolu
+    // connu pour cet EAN (latestLineDeliveryType) — null si l'article n'a jamais été vu dans une
     // proposition (aucune info disponible, jamais inventé).
-    const resolvedDeliveryType = hasOrder ? (matchedOrder?.deliveryType ?? null) : latestLineDeliveryType;
+    // BUG CORRIGÉ le 29/10/2026 (signalé : "Type inconnu" affiché pour un article pourtant bien
+    // rattaché à SATOCI/LD dans sa ProposalLine) — la condition se basait sur hasOrder plutôt que
+    // sur la présence réelle de matchedOrder. Or hasOrder peut valoir true SANS matchedOrder dans
+    // deux cas : (1) le fallback RPOS ci-dessus (needsRposFallback) trouve un historique d'achat
+    // RPOS mais ne fournit jamais de matchedOrder (cf. commentaire plus haut, "matchedOrder reste
+    // null") ; (2) le correctif "commande supprimée côté RPOS" du 28/10/2026 exclut la commande du
+    // matching local (liveOrders) MAIS le fallback RPOS retrouve quand même la trace de cet achat
+    // dans l'historique RPOS (qui garde la commande même après suppression), orderCreatedAt
+    // redevient non-null et hasOrder=true sans jamais repasser par matchedOrder. Dans ces deux cas,
+    // hasOrder=true ne garantit donc PAS que matchedOrder?.deliveryType soit exploitable — seule la
+    // présence réelle de matchedOrder doit trancher.
+    const resolvedDeliveryType = matchedOrder ? (matchedOrder.deliveryType ?? latestLineDeliveryType) : latestLineDeliveryType;
     // Même principe pour le nom du fournisseur (mission "Filtres Type/Fournisseur — module
-    // Ruptures", 29/10/2026) : nom RÉEL du fournisseur de la commande matchée si hasOrder=true,
-    // sinon dernier fournisseur résolu connu pour cet EAN.
-    const resolvedSupplierName = hasOrder ? (matchedOrder?.supplierName ?? null) : latestLineSupplierName;
+    // Ruptures", 29/10/2026).
+    const resolvedSupplierName = matchedOrder ? (matchedOrder.supplierName ?? latestLineSupplierName) : latestLineSupplierName;
 
     return {
       ...e,
