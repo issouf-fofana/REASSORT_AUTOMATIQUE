@@ -864,9 +864,16 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     // Décisions du RAYON PRÉCIS demandé uniquement (demande du 26/09/2026 : validation indépendante
     // par rayon) — contrairement à getDecisions() ci-dessus, jamais les autres rayons de la
     // proposition : l'API /validate-department attend explicitement les lignes d'UN SEUL rayon.
+    // BUG CORRIGÉ le 29/10/2026 (signalé : filtrer "CC" en haut de page puis valider un rayon
+    // envoyait quand même les articles LD de ce rayon à RPOS) — lisait proposal.lines (toutes les
+    // lignes, sans filtre) au lieu de `lines` (la prop reçue de PurchaseOrder.tsx, déjà filtrée par
+    // le CC/CD actif — cf. visibleLines/detailLines). getDecisions() ci-dessus garde volontairement
+    // proposal.lines (raison différente, documentée dans son propre commentaire : valider TOUTE la
+    // proposition doit couvrir tous les rayons même non affichés) — getDecisionsForDepartment/
+    // getDecisionsForSupplier ciblent au contraire un sous-ensemble précis, qui doit rester
+    // cohérent avec ce que l'utilisateur voit réellement à l'écran.
     getDecisionsForDepartment(department: string) {
-      const allLines = proposal ? proposal.lines : lines;
-      return allLines
+      return lines
         .filter((l) => (l.department || 'Sans rayon') === department)
         .map((l) => {
           const st = getLineState(l);
@@ -874,8 +881,7 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
         });
     },
     getDecisionsForSupplier(supplierId: string) {
-      const allLines = proposal ? proposal.lines : lines;
-      return allLines
+      return lines
         .filter((l) => l.resolvedSupplierId === supplierId)
         .map((l) => {
           const st = getLineState(l);
