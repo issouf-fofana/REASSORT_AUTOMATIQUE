@@ -779,16 +779,17 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   // filtre ici, qui ne sert plus qu'à borner par magasin/EAN.
   // deliveryType ajouté aux deux select (mission "Ventilation LC/LD du CA perdu", 28/10/2026) :
   // aucune requête supplémentaire, ces lignes/commandes sont déjà chargées pour le matching
-  // hasOrder/deliveryStatus ci-dessous, seul le champ sélectionné change.
+  // hasOrder/deliveryStatus ci-dessous, seul le champ sélectionné change. resolvedSupplierName
+  // ajouté le 29/10/2026 (mission "Filtres Type/Fournisseur — module Ruptures"), même principe.
   const lines = await prisma.proposalLine.findMany({
     where: { ean: { in: eans }, proposal: { rposShopId } },
-    select: { ean: true, department: true, proposalId: true, deliveryType: true, proposal: { select: { generatedAt: true } } },
+    select: { ean: true, department: true, proposalId: true, deliveryType: true, resolvedSupplierName: true, proposal: { select: { generatedAt: true } } },
   });
   const proposalIds = [...new Set(lines.map((l) => l.proposalId))];
   const orders = proposalIds.length
     ? await prisma.proposalOrder.findMany({
         where: { proposalId: { in: proposalIds }, createdAt: { gte: earliestStart } },
-        select: { proposalId: true, department: true, createdAt: true, receptionStatus: true, actualReceptionDate: true, deliveryType: true, rposOrderId: true },
+        select: { proposalId: true, department: true, createdAt: true, receptionStatus: true, actualReceptionDate: true, deliveryType: true, rposOrderId: true, supplierName: true },
       })
     : [];
 
@@ -906,8 +907,10 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     // commande n'existe (SANS_COMMANDE) : on ne connaît alors pas le type RÉEL d'une commande (il
     // n'y en a pas), seulement celui qu'aurait eu l'article s'il avait été commandé normalement.
     const eanLines = linesByEan.get(e.ean) || [];
-    const latestLineDeliveryType = eanLines.length ? eanLines[eanLines.length - 1].deliveryType : null;
-    return { episode: e, orderCreatedAt, matchedOrder, latestLineDeliveryType };
+    const latestLine = eanLines.length ? eanLines[eanLines.length - 1] : null;
+    const latestLineDeliveryType = latestLine?.deliveryType ?? null;
+    const latestLineSupplierName = latestLine?.resolvedSupplierName ?? null;
+    return { episode: e, orderCreatedAt, matchedOrder, latestLineDeliveryType, latestLineSupplierName };
   });
 
   // BUG CORRIGÉ le 23/10/2026 (signalé en production : filtrer "Ruptures résolues" affichait 99%
@@ -946,7 +949,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
   const computed = episodes.map((e) => {
     const durationHours = Math.round(((now.getTime() - e.startedAt.getTime()) / (60 * 60 * 1000)) * 10) / 10;
 
-    const { orderCreatedAt, matchedOrder, latestLineDeliveryType } = localMatchByEpisodeId.get(e.id);
+    const { orderCreatedAt, matchedOrder, latestLineDeliveryType, latestLineSupplierName } = localMatchByEpisodeId.get(e.id);
 
     const hasOrder = orderCreatedAt !== null;
     let reactionStatus;
@@ -999,6 +1002,10 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
     // pour cet EAN (latestLineDeliveryType) — null si l'article n'a jamais été vu dans une
     // proposition (aucune info disponible, jamais inventé).
     const resolvedDeliveryType = hasOrder ? (matchedOrder?.deliveryType ?? null) : latestLineDeliveryType;
+    // Même principe pour le nom du fournisseur (mission "Filtres Type/Fournisseur — module
+    // Ruptures", 29/10/2026) : nom RÉEL du fournisseur de la commande matchée si hasOrder=true,
+    // sinon dernier fournisseur résolu connu pour cet EAN.
+    const resolvedSupplierName = hasOrder ? (matchedOrder?.supplierName ?? null) : latestLineSupplierName;
 
     return {
       ...e,
@@ -1008,6 +1015,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
       orderCreatedAt,
       deliveryStatus,
       resolvedDeliveryType,
+      resolvedSupplierName,
       actualReceptionDate: matchedOrder?.actualReceptionDate ?? null,
       sellingPrice: priceByEan.get(e.ean) ?? null,
     };
@@ -1022,6 +1030,7 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
         deliveryStatus: e.deliveryStatus,
         orderCreatedAt: e.orderCreatedAt,
         resolvedDeliveryType: e.resolvedDeliveryType,
+        resolvedSupplierName: e.resolvedSupplierName,
         actualReceptionDateStatus: e.actualReceptionDate,
         statusComputedAt: now,
       },

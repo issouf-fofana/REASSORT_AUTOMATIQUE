@@ -13,7 +13,7 @@ import { apiFetch } from '../../shared/api/client';
 // de la page (claire). Remplacée par un bandeau de 3 chiffres + un tableau compact, même style que
 // le reste du module (cartes claires, badges `reassort-badge-*`), limité aux 5 premiers rayons avec
 // un bouton pour voir le reste.
-type DepartmentRow = {
+export type DepartmentRow = {
   group: string;
   openCount: number;
   totalEpisodesCount: number;
@@ -73,7 +73,13 @@ function priorityLevel(row: DepartmentRow): { label: string; badge: string } {
 // startDate/endDate ajoutés le 20/10/2026 (demande explicite : "quand je fait un filtre il doit
 // etre appliqué sur tout") — "Analyse par rayon" restait figée sur l'état courant peu importe la
 // période choisie en haut de page ; suit désormais le même sélecteur unique que le reste de la page.
-export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate }: { shopQueryParam: string; startDate: string; endDate: string }) {
+// groupsOverride ajouté le 29/10/2026 (demande explicite : "Analyse par rayon... doit etre sur les
+// article du founisseur" quand un filtre Type/Fournisseur est actif) — StockoutShopDetail.tsx
+// recalcule alors les rayons côté client depuis globallyFilteredEpisodes (déjà en mémoire, fidèle
+// au filtre) et les passe ici à la place du fetch réseau habituel (GET /stockout-episodes/by-
+// department, qui ne connaît pas ces filtres). undefined (comportement par défaut, aucun filtre
+// Type/Fournisseur actif) : fetch réseau inchangé, comme avant ce prop.
+export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate, groupsOverride }: { shopQueryParam: string; startDate: string; endDate: string; groupsOverride?: DepartmentRow[] }) {
   const [data, setData] = useState<ByFieldSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('openCount');
@@ -84,7 +90,8 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    if (!shopQueryParam) return;
+    // groupsOverride actif : aucun fetch réseau, les données viennent déjà filtrées du parent.
+    if (groupsOverride || !shopQueryParam) return;
     let cancelled = false;
     setData(null);
     setError(null);
@@ -94,10 +101,10 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
       .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [shopQueryParam, startDate, endDate]);
+  }, [shopQueryParam, startDate, endDate, groupsOverride]);
 
   const rows = useMemo(() => {
-    const list = data?.groups || [];
+    const list = groupsOverride || data?.groups || [];
     const dir = sortDir === 'desc' ? 1 : -1;
     return [...list].sort((a, b) => {
       if (sortKey === 'group') return dir * b.group.localeCompare(a.group, 'fr-FR');
@@ -178,12 +185,12 @@ export function StockoutDepartmentAnalysis({ shopQueryParam, startDate, endDate 
           <span className="text-muted" style={{ fontSize: '.72rem' }}>Montants en HT (hors taxes)</span>
         </div>
 
-        {error ? (
+        {error && !groupsOverride ? (
           <div className="text-danger small">Erreur : {error}</div>
-        ) : data === null ? (
+        ) : !groupsOverride && data === null ? (
           <div className="text-muted small">Chargement...</div>
         ) : rows.length === 0 ? (
-          <div className="text-muted small py-2">{data.message || 'Aucune rupture en cours.'}</div>
+          <div className="text-muted small py-2">{(!groupsOverride && data?.message) || 'Aucune rupture en cours.'}</div>
         ) : (
           <>
             <div className="d-flex flex-wrap gap-4 mb-3 pb-2" style={{ borderBottom: '1px solid rgba(27,42,74,.08)' }}>

@@ -2276,6 +2276,13 @@ model StockoutEpisode {
   // null si aucune ProposalLine ni ProposalOrder n'a jamais fourni cette info pour cet article
   // (jamais recalculé rétroactivement sur les épisodes déjà fermés avant ce champ).
   resolvedDeliveryType      String?   @map("resolved_delivery_type") // 'LC' | 'LD'
+  // Nom du fournisseur résolu (mission "Filtres Type/Fournisseur — module Ruptures", 29/10/2026 :
+  // "si je veux faire la recherche sur un fournisseur exactement") — même source que
+  // resolvedDeliveryType juste au-dessus (ProposalOrder matché si hasOrder, sinon dernière
+  // ProposalLine connue pour l'EAN), capturé en même temps, aucun calcul supplémentaire. Nom plutôt
+  // qu'un id RPOS : cohérent avec resolvedDeliveryType (texte simple), et le filtre n'a besoin que
+  // d'un libellé affichable/comparable, jamais d'une jointure vers le fournisseur lui-même.
+  resolvedSupplierName      String?   @map("resolved_supplier_name")
   orderCreatedAt            DateTime? @map("order_created_at")
   actualReceptionDateStatus DateTime? @map("actual_reception_date_status") // copie de ProposalOrder.actualReceptionDate au moment du calcul — jamais une preuve de réception réelle (cf. commentaire sur ce champ ailleurs dans ce fichier)
   statusComputedAt          DateTime? @map("status_computed_at") // horodatage du dernier recalcul de ces colonnes — permet de savoir si une valeur est périmée

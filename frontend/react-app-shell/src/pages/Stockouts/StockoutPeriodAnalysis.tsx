@@ -15,7 +15,7 @@ import { FormulaInfoButton } from './StockoutEpisodePage';
 // automatiquement dès l'arrivée sur la page, sans clic préalable ; seul le vrai appel IA (coût
 // réel) reste un clic explicite. L'analyse IA est aussi reformatée (gras/listes) au lieu d'un bloc
 // de texte brut.
-type PeriodSummary = {
+export type PeriodSummary = {
   found: boolean;
   period: { startDate: string; endDate: string };
   totalCaPerdu: number;
@@ -60,6 +60,15 @@ type DeptSortKey = 'department' | 'caPerdue' | 'qtyPerdue' | 'episodeCount';
 // (ici) affichaient deux montants différents pour la même période — deux requêtes serveur séparées
 // (getDashboardSummary.totalCaPerduEstime vs getPeriodLossSummary.totalCaPerdu), calculées à des
 // instants légèrement différents. Même correctif : le parent transmet sa valeur déjà affichée.
+// NOTE (29/10/2026) : le nouveau filtre global Type (LC/LD)/Fournisseur (StockoutShopDetail.tsx)
+// ne s'applique PAS à ce composant — summary.departmentBreakdown ci-dessous vient de
+// getPeriodLossSummary, qui lit un SNAPSHOT précalculé côté serveur sur la PÉRIODE choisie
+// (StockoutDailyLossByDepartment, indexé uniquement par rayon/jour, sans connaissance du
+// fournisseur résolu). Le filtre global, lui, est dérivé de summary.openEpisodes (état "aujourd'hui"
+// uniquement, cf. commentaire plus haut dans StockoutShopDetail.tsx sur ce choix volontaire) —
+// recalculer departmentBreakdown depuis cette source donnerait un résultat incohérent avec la
+// période réellement affichée ici. Exclu du scope pour l'instant (décision explicite) ; corriger
+// proprement demanderait une route backend dédiée qui filtre par fournisseur sur la vraie période.
 export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, episodeCountOverride, caPerdueOverride }: { shopQueryParam: string; startDate: string; endDate: string; episodeCountOverride?: number; caPerdueOverride?: number }) {
   const [summary, setSummary] = useState<PeriodSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -260,7 +269,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
               </div>
             </div>
 
-            {summary.departmentBreakdown.length > 0 && (
+            {sortedDepartmentBreakdown.length > 0 && (
               <div className="table-responsive mb-1">
                 <table className="table table-sm align-middle mb-0">
                   <thead className="bg-light-subtle">
@@ -284,7 +293,7 @@ export function StockoutPeriodAnalysis({ shopQueryParam, startDate, endDate, epi
                 </table>
               </div>
             )}
-            {summary.departmentBreakdown.length > 0 && (
+            {sortedDepartmentBreakdown.length > 0 && (
               <div className="text-muted mb-3" style={{ fontSize: '.76rem' }}>
                 <iconify-icon icon="solar:info-circle-linear" className="align-middle me-1"></iconify-icon>
                 Une « rupture d'article » = une période continue où un article a manqué en rayon. Un même article qui tombe en rupture plusieurs fois dans la période compte autant de fois.

@@ -4,7 +4,7 @@ import { apiFetch } from '../../shared/api/client';
 import { StockoutTrendChart } from './StockoutTrendChart';
 import { StockoutCauseChart } from './StockoutCauseChart';
 import { StockoutDeliveryTypeChart } from './StockoutDeliveryTypeChart';
-import { StockoutDepartmentAnalysis } from './StockoutDepartmentAnalysis';
+import { StockoutDepartmentAnalysis, type DepartmentRow } from './StockoutDepartmentAnalysis';
 import { StockoutPeriodAnalysis } from './StockoutPeriodAnalysis';
 import { FormulaInfoButton } from './StockoutEpisodePage';
 
@@ -42,6 +42,10 @@ type StockoutEpisode = {
   // de la commande matchée) ou LD, null si l'article n'a jamais été vu dans une proposition. Utilisé
   // par le recalcul client-side ci-dessous (displayedCaPerdueLC/LD) quand un filtre global est actif.
   resolvedDeliveryType: 'LC' | 'LD' | null;
+  // Nom du fournisseur résolu (mission "Filtres Type/Fournisseur — module Ruptures", 29/10/2026 :
+  // "si je veux faire la recherche sur un founisseur exatement je fait quoi") — même source que
+  // resolvedDeliveryType ci-dessus. Utilisé pour le nouveau filtre global Fournisseur.
+  resolvedSupplierName: string | null;
 };
 
 type StockoutSummary = {
@@ -151,6 +155,30 @@ const DELIVERY_STATUS_TO_CAUSE: Record<DeliveryStatus, string> = {
   LIVREE: 'ECART_STOCK_RAYON',
   LIVRAISON_DOUTEUSE: 'ECART_STOCK_RAYON',
 };
+
+// BUG CORRIGÉ le 29/10/2026 (signalé : "les filtre ne fonctionne pas" — filtrer sur "Livraison en
+// retard — fournisseur externe" renvoyait 0 résultat) — le filtre global Cause (ligne ~457 avant
+// correctif) ET le filtre Cause du tableau "Détail par article" (ligne ~525) comparaient directement
+// `e.causeProposee`, un champ STOCKÉ à la détection de la rupture et jamais réévalué — en base,
+// TOUS les épisodes EN_COURS valent `MAGASIN_REASSORT` quel que soit leur état réel actuel (vérifié
+// en base de test : 142/142). displayedCauseCounts (ligne ~489) calculait déjà la bonne valeur
+// dynamique mais seulement pour l'AFFICHAGE du donut, jamais réutilisée pour le FILTRE lui-même —
+// cette fonction centralise ce calcul pour que les deux soient enfin cohérents. Seul un épisode
+// RESOLUE garde son causeProposee figé (plus rien ne peut changer une fois résolu, cf. commentaire
+// plus haut sur displayedCauseCounts).
+function effectiveCause(e: { status: 'EN_COURS' | 'RESOLUE'; causeProposee: string; deliveryStatus: DeliveryStatus }): string {
+  return e.status === 'RESOLUE' ? e.causeProposee : (DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE');
+}
+
+// Causes RÉELLEMENT produites par effectiveCause ci-dessus (demande explicite du 29/10/2026 : "il
+// faut voir les cause qui ne son pas utilisé il faut les enlevé") — DELIVERY_STATUS_TO_CAUSE ne
+// mappe jamais vers MAGASIN_COMMANDE_NON_VALIDEE ni AMONT_FOURNISSEUR_CENTRAL/_EXTERNE (ceux-ci
+// n'existent que dans causeProposee, qui ne vaut jamais que MAGASIN_REASSORT en pratique pour un
+// épisode EN_COURS) : les lister dans le filtre promettait un résultat qu'aucun épisode EN_COURS ne
+// peut jamais avoir. Un épisode RESOLUE garde en théorie son causeProposee d'origine (ligne
+// ci-dessus), potentiellement une de ces valeurs figées historiques — ces options restent donc
+// disponibles mais seulement si le filtre Statut inclut "Résolue" (cf. CAUSE_FILTER_LABELS plus bas).
+const DYNAMIC_CAUSES = new Set(['MAGASIN_REASSORT', 'AMONT_A_PRECISER', 'ECART_STOCK_RAYON', 'INDETERMINEE']);
 
 // 'open' ajouté le 24/10/2026 (demande explicite : "je dois avoir les articles qui son en rupture
 // Aujoudhui... il ne faut pas affiché par defaut les autres en premier lieu" — l'onglet par défaut
@@ -305,15 +333,27 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const [globalDepartmentFilter, setGlobalDepartmentFilter] = useState<string[]>([]);
   const [globalOrderFilter, setGlobalOrderFilter] = useState<string[]>([]);
   const [globalCauseFilter, setGlobalCauseFilter] = useState<string[]>([]);
+  // Filtres Type (LC/LD) et Fournisseur ajoutés le 29/10/2026 (demande explicite : "le filtre sur
+  // les Livraison direct (LD...), Livraison Central(LC)... je vais plus loins pour faire un autre
+  // filtre avec le fournisseur... je dois avoir tout les article du founisseur") — même mécanisme
+  // que les filtres ci-dessus, basés sur StockoutEpisode.resolvedDeliveryType/resolvedSupplierName
+  // (calculés côté serveur par computeAndPersistOpenEpisodeStatuses). Le filtre Fournisseur se
+  // combine avec le filtre Type (choisir LD puis un fournisseur restreint aux fournisseurs LD, cf.
+  // allSuppliersForFilter plus bas) mais reste utilisable seul.
+  const [globalDeliveryTypeFilter, setGlobalDeliveryTypeFilter] = useState<string[]>([]);
+  const [globalSupplierFilter, setGlobalSupplierFilter] = useState<string[]>([]);
   const activeGlobalFilterCount =
     (globalStatusFilter.length ? 1 : 0) + (globalSectorFilter.length ? 1 : 0) + (globalDepartmentFilter.length ? 1 : 0) +
-    (globalOrderFilter.length ? 1 : 0) + (globalCauseFilter.length ? 1 : 0);
+    (globalOrderFilter.length ? 1 : 0) + (globalCauseFilter.length ? 1 : 0) +
+    (globalDeliveryTypeFilter.length ? 1 : 0) + (globalSupplierFilter.length ? 1 : 0);
   function clearGlobalFilters() {
     setGlobalStatusFilter([]);
     setGlobalSectorFilter([]);
     setGlobalDepartmentFilter([]);
     setGlobalOrderFilter([]);
     setGlobalCauseFilter([]);
+    setGlobalDeliveryTypeFilter([]);
+    setGlobalSupplierFilter([]);
   }
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('open');
   const [articleSearch, setArticleSearch] = useState('');
@@ -454,14 +494,25 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
       const orderKey = e.hasOrder ? 'with-order' : 'without-order';
       if (!globalOrderFilter.includes(orderKey)) return false;
     }
-    if (globalCauseFilter.length && !globalCauseFilter.includes(e.causeProposee)) return false;
+    if (globalCauseFilter.length && !globalCauseFilter.includes(effectiveCause(e))) return false;
+    if (globalDeliveryTypeFilter.length && !globalDeliveryTypeFilter.includes(e.resolvedDeliveryType || 'INCONNU')) return false;
+    if (globalSupplierFilter.length && !globalSupplierFilter.includes(e.resolvedSupplierName || 'Inconnu')) return false;
     return true;
   });
-  // Liste des rayons/secteurs distincts pour peupler les <select> des filtres globaux — dérivée de
-  // summary.openEpisodes (pas filtrée par globallyFilteredEpisodes elle-même, sinon un filtre actif
-  // ferait disparaître sa propre option de la liste déroulante).
+  // Liste des rayons/secteurs/fournisseurs distincts pour peupler les <select> des filtres globaux
+  // — dérivée de summary.openEpisodes (pas filtrée par globallyFilteredEpisodes elle-même, sinon un
+  // filtre actif ferait disparaître sa propre option de la liste déroulante). allSuppliersForFilter
+  // (29/10/2026) : restreint aux fournisseurs du TYPE déjà choisi quand globalDeliveryTypeFilter est
+  // actif (demande explicite : "si je faus le filtre sur LD je dois voir tout les article des LD...
+  // je vais plus loins pour faire un autre filtre avec le fournisseur" — choisir LD puis ouvrir le
+  // filtre Fournisseur ne doit proposer que des fournisseurs LD, pas LC).
   const allSectorsForFilter = Array.from(new Set((summary?.openEpisodes || []).map((e) => e.sector || 'Sans secteur'))).sort((a, b) => a.localeCompare(b, 'fr-FR'));
   const allDepartmentsForFilter = Array.from(new Set((summary?.openEpisodes || []).map((e) => e.department || 'Sans rayon'))).sort((a, b) => a.localeCompare(b, 'fr-FR'));
+  const allSuppliersForFilter = Array.from(new Set(
+    (summary?.openEpisodes || [])
+      .filter((e) => !globalDeliveryTypeFilter.length || globalDeliveryTypeFilter.includes(e.resolvedDeliveryType || 'INCONNU'))
+      .map((e) => e.resolvedSupplierName || 'Inconnu')
+  )).sort((a, b) => a.localeCompare(b, 'fr-FR'));
   // Recalcul des KPI "Situation actuelle" sur l'ensemble filtré quand au moins un filtre global est
   // actif — sinon on garde les valeurs déjà précalculées côté serveur (summary.openCount etc.),
   // identiques à celles qu'on obtiendrait en filtrant ici sans rien exclure, mais sans refaire le
@@ -488,7 +539,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     : (summary?.caPerdueLD ?? 0);
   const displayedCauseCounts = activeGlobalFilterCount > 0
     ? globallyFilteredEpisodes.reduce((acc: Record<string, number>, e) => {
-        const cause = e.status === 'RESOLUE' ? e.causeProposee : (DELIVERY_STATUS_TO_CAUSE[e.deliveryStatus] || 'INDETERMINEE');
+        const cause = effectiveCause(e);
         acc[cause] = (acc[cause] || 0) + 1;
         return acc;
       }, {})
@@ -522,7 +573,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
     if (orderFilter === 'with-order' && !e.hasOrder) return false;
     if (orderFilter === 'without-order' && e.hasOrder) return false;
     if (orderFilter === 'delivered' && e.deliveryStatus !== 'LIVREE') return false;
-    if (causeFilter && e.causeProposee !== causeFilter) return false;
+    if (causeFilter && effectiveCause(e) !== causeFilter) return false;
     if (reactionFilter && e.reactionStatus !== reactionFilter) return false;
     if (deliveryFilter && e.deliveryStatus !== deliveryFilter) return false;
     const q = articleSearch.trim().toLowerCase();
@@ -572,6 +623,50 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
   const pagedArticlesInDepartment = sortedArticlesInDepartment.slice((articleCurrentPage - 1) * ARTICLE_PAGE_SIZE, articleCurrentPage * ARTICLE_PAGE_SIZE);
 
   const showArticleList = !!selectedSector && !!selectedDepartment;
+
+  // "Analyse par rayon" recalculée côté client quand un filtre Type/Fournisseur est actif (29/10/2026,
+  // demande explicite : "Analyse par rayon... doit etre sur les article du founisseur") — par rayon
+  // confondu avec le secteur sélectionné comme partout ailleurs sur cette page n'a pas de sens ici
+  // (l'analyse par rayon couvre TOUT le magasin, pas un secteur précis) : regroupe directement
+  // globallyFilteredEpisodes par `department` sur l'ensemble des épisodes ouverts (hors statut
+  // RESOLUE, cohérent avec le calcul backend d'origine qui ne porte que sur EN_COURS). Reproduit
+  // exactement les mêmes champs que getDashboardSummaryByField (stockoutEpisodeService.js) pour que
+  // DepartmentRow reste valide côté StockoutDepartmentAnalysis sans rien changer à son rendu.
+  const hasDeliveryOrSupplierFilter = globalDeliveryTypeFilter.length > 0 || globalSupplierFilter.length > 0;
+  const departmentGroupsOverride: DepartmentRow[] | undefined = hasDeliveryOrSupplierFilter
+    ? (() => {
+        const byDept = new Map<string, typeof globallyFilteredEpisodes>();
+        for (const e of globallyFilteredEpisodes) {
+          if (e.status !== 'EN_COURS') continue;
+          const key = e.department || 'Sans rayon';
+          if (!byDept.has(key)) byDept.set(key, []);
+          byDept.get(key)!.push(e);
+        }
+        return Array.from(byDept.entries()).map(([group, episodes]): DepartmentRow => {
+          const durations = episodes.map((e) => liveDurationHours(e.startedAt));
+          const avgDurationHours = durations.length ? durations.reduce((s, d) => s + d, 0) / durations.length : 0;
+          const longEpisodesCount = durations.filter((d) => d >= 48).length;
+          const noOrderCount = episodes.filter((e) => !e.hasOrder).length;
+          const sum = (pred: (e: typeof episodes[number]) => boolean) =>
+            Math.round(episodes.filter(pred).reduce((s, e) => s + (e.caPerdueEstime || 0), 0));
+          return {
+            group,
+            openCount: episodes.length,
+            totalEpisodesCount: episodes.length,
+            avgDurationHours: Math.round(avgDurationHours * 10) / 10,
+            longEpisodesCount,
+            noOrderCount,
+            totalCaPerduEstime: sum(() => true),
+            caPerduSansCommande: sum((e) => !e.hasOrder),
+            caPerduAvecCommandeNonLivree: sum((e) => e.hasOrder && e.deliveryStatus !== 'LIVREE'),
+            caPerduEnAttenteLivraison: sum((e) => e.hasOrder && e.deliveryStatus === 'EN_ATTENTE_LIVRAISON'),
+            caPerduLivraisonDouteuse: sum((e) => e.hasOrder && e.deliveryStatus === 'LIVRAISON_DOUTEUSE'),
+            caPerduLC: sum((e) => e.resolvedDeliveryType === 'LC'),
+            caPerduLD: sum((e) => e.resolvedDeliveryType === 'LD'),
+          };
+        });
+      })()
+    : undefined;
 
   return (
     <div>
@@ -738,9 +833,38 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               <MultiSelectFilter
                 icon="solar:question-circle-bold-duotone"
                 placeholder="Toutes les causes"
-                options={Object.entries(CAUSE_FILTER_LABELS).map(([key, label]) => ({ value: key, label, title: CAUSE_LABELS[key] }))}
+                options={Object.entries(CAUSE_FILTER_LABELS)
+                  // N'affiche que les causes que effectiveCause() peut réellement produire
+                  // (29/10/2026, "il faut voir les cause qui ne son pas utilisé il faut les
+                  // enlevé") — sauf si le filtre Statut inclut "Résolue", où causeProposee figé
+                  // peut valoir n'importe laquelle des 7 causes historiques.
+                  .filter(([key]) => globalStatusFilter.includes('RESOLUE') || DYNAMIC_CAUSES.has(key))
+                  .map(([key, label]) => ({ value: key, label, title: CAUSE_LABELS[key] }))}
                 selected={globalCauseFilter}
                 onChange={setGlobalCauseFilter}
+              />
+              {/* Filtres Type (LC/LD) et Fournisseur ajoutés le 29/10/2026 (demande explicite : "le
+                  filtre sur les Livraison direct (LD...), Livraison Central(LC)... je dois avoir
+                  tout les article du founisseur") — mêmes KPI/donut/tableaux déjà branchés sur
+                  globallyFilteredEpisodes (ci-dessus) se mettent à jour automatiquement, aucun
+                  câblage supplémentaire nécessaire ailleurs sur la page. */}
+              <MultiSelectFilter
+                icon="solar:delivery-bold-duotone"
+                placeholder="Tous les types (LC/LD)"
+                options={[
+                  { value: 'LC', label: 'LC — Fournisseur central' },
+                  { value: 'LD', label: 'LD — Fournisseur direct' },
+                  { value: 'INCONNU', label: 'Type inconnu' },
+                ]}
+                selected={globalDeliveryTypeFilter}
+                onChange={setGlobalDeliveryTypeFilter}
+              />
+              <MultiSelectFilter
+                icon="solar:shop-2-bold-duotone"
+                placeholder="Tous les fournisseurs"
+                options={allSuppliersForFilter.map((s) => ({ value: s, label: s }))}
+                selected={globalSupplierFilter}
+                onChange={setGlobalSupplierFilter}
               />
               {activeGlobalFilterCount > 0 && (
                 <button type="button" className="sof-clear-btn" onClick={clearGlobalFilters}>
@@ -915,7 +1039,7 @@ export function StockoutShopDetail({ shopQueryParam }: { shopQueryParam: string 
               Articles juste en dessous, qui sert au drill-down vers les articles). */}
           <div className="stockout-section-title">Priorisation par rayon</div>
           <div className="mb-3">
-            <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} />
+            <StockoutDepartmentAnalysis shopQueryParam={shopQueryParam} startDate={periodStart} endDate={periodEnd} groupsOverride={departmentGroupsOverride} />
           </div>
 
           <div className="stockout-section-title">Détail par article</div>
