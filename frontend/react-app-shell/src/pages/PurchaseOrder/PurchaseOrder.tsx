@@ -425,10 +425,23 @@ export function PurchaseOrder() {
     () => new Set((proposal?.orders || []).filter((o) => o.deletedOnRpos).map((o) => o.id)),
     [proposal],
   );
+  // BUG CORRIGÉ le 29/10/2026 (signalé : "il me donne toujour valider le rayon" alors qu'une
+  // commande par-rayon classique existait déjà, badge "En préparation" affiché à côté) — le
+  // backend (validateProposalDepartment, proposalService.js) refuse déjà explicitement une 2e
+  // validation d'un rayon ayant une ProposalOrder (erreur claire "a déjà été validé"), donc aucun
+  // risque de double-commande réelle ; mais proposalOrderId n'était dans ce cas pas (ou plus)
+  // renseigné sur la ligne active du rayon — pour une raison encore non identifiée (hors scope de
+  // ce correctif ponctuel), departmentFullyOrdered basé UNIQUEMENT sur proposalOrderId par ligne
+  // restait donc à tort false, laissant le bouton "Valider le rayon" visible à côté du badge
+  // "En préparation" alors qu'un clic dessus aurait simplement échoué avec un message d'erreur.
+  // Ajout d'un repli : currentDepartmentOrder (ci-dessus, matche exactement ce rayon, fiable car
+  // c'est la même requête que le backend utilise pour refuser une 2e validation) non supprimée sur
+  // RPOS couvre aussi le rayon, indépendamment de l'état de proposalOrderId par ligne.
   const departmentFullyOrdered = useMemo(() => {
+    if (currentDepartmentOrder && !currentDepartmentOrder.deletedOnRpos) return true;
     const active = detailLines.filter((l) => !l.wasExcluded && l.quantitySuggested > 0);
     return active.length > 0 && active.every((l) => !!l.proposalOrderId && !deletedOrderIds.has(l.proposalOrderId));
-  }, [detailLines, deletedOrderIds]);
+  }, [detailLines, deletedOrderIds, currentDepartmentOrder]);
 
   // Synthèse commandable/non commandable du rayon affiché (spec du 28/09/2026, §3) : calculée
   // localement depuis ProposalLine.supplierIneligible (déjà chargé avec la proposition), jamais un
