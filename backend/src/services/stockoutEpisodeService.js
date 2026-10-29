@@ -944,6 +944,35 @@ async function computeAndPersistOpenEpisodeStatuses(rposShopId) {
       console.error(`[stockoutEpisodeService] Fallback RPOS hasOrder échoué pour ${e.ean} (${rposShopId}/${e.rposPosId}) : ${err.message}`);
     }
   });
+
+  // Fallback RPOS pour le TYPE/FOURNISSEUR (demande explicite du 29/10/2026 : "pour les article qui
+  // non pas ete proposé en commande, chercher leur founisseur et les lié" plutôt que d'afficher
+  // "Type inconnu") — déclenché pour les épisodes qui n'ont NI matchedOrder NI latestLineDeliveryType
+  // à ce stade (aucune ProposalLine n'a jamais résolu ce fournisseur pour cet article dans ce
+  // magasin). Réutilise resolveSupplierForArticle (proposalService.js), la même cascade
+  // CENTRAL/HISTORY/FALLBACK déjà utilisée à la génération d'une proposition — un article jamais
+  // proposé a quand même un fournisseur rattaché côté RPOS, ce n'est que la proposition qui n'a
+  // jamais eu lieu. require() tardif pour éviter un cycle d'import (proposalService.js requiert déjà
+  // ce fichier en tête pour computeAndPersistOpenEpisodeStatuses).
+  const needsSupplierFallback = localMatchByEpisode.filter((m) => !m.matchedOrder && !m.latestLineDeliveryType);
+  if (needsSupplierFallback.length) {
+    const { resolveSupplierForArticle } = require('./proposalService');
+    await mapWithConcurrency(needsSupplierFallback, 10, async (m) => {
+      const e = m.episode;
+      try {
+        const product = await rpos.getProductByEan(e.rposPosId, rposShopId, e.ean);
+        if (!product) return;
+        const { supplier, deliveryType } = await resolveSupplierForArticle(e.rposPosId, rposShopId, product, { useHistory: false });
+        if (deliveryType) {
+          m.latestLineDeliveryType = deliveryType;
+          m.latestLineSupplierName = supplier?.name ?? null;
+        }
+      } catch (err) {
+        console.error(`[stockoutEpisodeService] Fallback fournisseur RPOS échoué pour ${e.ean} (${rposShopId}/${e.rposPosId}) : ${err.message}`);
+      }
+    });
+  }
+
   const localMatchByEpisodeId = new Map(localMatchByEpisode.map((m) => [m.episode.id, m]));
 
   const computed = episodes.map((e) => {
