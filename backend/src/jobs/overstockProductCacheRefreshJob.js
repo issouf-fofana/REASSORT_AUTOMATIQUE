@@ -21,14 +21,17 @@ const prisma = require('../utils/prisma');
 const rpos = require('../services/rposClient');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { getCachedDefaultOverstockReport } = require('../services/overstockReportService');
-const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY } = require('./overstockReportSnapshotJob');
+const { buildCacheKeys } = require('./overstockReportSnapshotJob');
+const systemConfig = require('../services/systemConfigService');
 
 const SHOP_CONCURRENCY = 5; // même prudence que stockoutProductCacheRefreshJob.js
 
 async function runOverstockProductCacheRefreshJob() {
   console.log('[overstockProductCacheRefreshJob] Resynchronisation démarrée...');
 
-  const report = await getCachedDefaultOverstockReport(null, OVERSTOCK_REPORT_CACHE_KEY);
+  const minWeeksOfCoverage = parseFloat(await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE)) || 4;
+  const { cacheKey } = buildCacheKeys(minWeeksOfCoverage);
+  const report = await getCachedDefaultOverstockReport(null, cacheKey);
   if (!report || !report.found || !report.articlesByShop.length) {
     console.log('[overstockProductCacheRefreshJob] Aucun snapshot Surstock disponible ou aucun article en surstock, rien à resynchroniser.');
     return;

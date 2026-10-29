@@ -174,6 +174,7 @@ interface SystemConfigData {
   STOCKOUT_SECTOR_BACKFILL_CRON?: string;
   STOCKOUT_SECTOR_BACKFILL_ENABLED?: string;
   STOCKOUT_ALERT_ENABLED?: string;
+  OVERSTOCK_MIN_WEEKS_OF_COVERAGE?: string;
 }
 
 export function SchedulingSection() {
@@ -204,6 +205,12 @@ export function SchedulingSection() {
   const [stockoutLossMinComparableDaysAll, setStockoutLossMinComparableDaysAll] = useState('14');
   const [stockoutAlertCron, setStockoutAlertCron] = useState('0 8 * * *');
   const [stockoutSectorBackfillCron, setStockoutSectorBackfillCron] = useState('30 */6 * * *');
+  // Seuil de surstock (demande explicite du 29/10/2026 : "la condig est en dure ? je veux metre
+  // dans les configuration sur le UI dans les parametre... je dois pouvoir les modifier") — codé en
+  // dur à 2 semaines dans overstockReportService.js jusqu'ici, 4 par défaut (= 1 mois) désormais.
+  const [overstockMinWeeksOfCoverage, setOverstockMinWeeksOfCoverage] = useState('4');
+  const [overstockThresholdSaving, setOverstockThresholdSaving] = useState(false);
+  const [overstockThresholdSaved, setOverstockThresholdSaved] = useState(false);
 
   useEffect(() => {
     apiFetch<SystemConfigData>('/reassort/system-config')
@@ -226,6 +233,7 @@ export function SchedulingSection() {
         setStockoutLossMinComparableDaysAll(d.STOCKOUT_LOSS_MIN_COMPARABLE_DAYS_ALL || '14');
         setStockoutAlertCron(d.STOCKOUT_ALERT_CRON || '0 8 * * *');
         setStockoutSectorBackfillCron(d.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *');
+        setOverstockMinWeeksOfCoverage(d.OVERSTOCK_MIN_WEEKS_OF_COVERAGE || '4');
       })
       // Silencieux si non-admin (route protégée), même comportement que loadSystemConfig().
       .catch(() => {});
@@ -669,6 +677,64 @@ export function SchedulingSection() {
               {stockoutDeadlinesSaving ? 'Enregistrement…' : 'Enregistrer'}
             </button>
             {stockoutDeadlinesSaved && <span className="text-success small ms-2">Enregistré.</span>}
+          </div>
+        </div>
+
+        {/* Seuil de surstock (demande explicite du 29/10/2026 : "la condig est en dure ? je veux
+            metre dans les configuration sur le UI dans les parametre... je dois pouvoir les
+            modifier") — codé en dur à 2 semaines dans overstockReportService.js jusqu'ici, pas un
+            job planifié, carte simple comme les délais de ruptures ci-dessus. */}
+        <div className="card">
+          <div className="card-header">
+            <h4 className="card-title d-flex align-items-center gap-1">
+              <iconify-icon icon="solar:box-minimalistic-bold-duotone" className="text-primary fs-20" />
+              Seuil de surstock
+            </h4>
+          </div>
+          <div className="card-body">
+            <div
+              className="alert alert-light border small mb-3"
+              dangerouslySetInnerHTML={{
+                __html:
+                  "<strong>À quoi ça sert :</strong> détermine à partir de combien de semaines de couverture de stock (stock actuel ÷ vente moyenne hebdomadaire) un article est considéré « en surstock » sur la page Surstock et par l'assistant IA.",
+              }}
+            />
+            <div className="row g-3 align-items-end">
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">Seuil de surstock</label>
+                <div className="input-group" style={{ maxWidth: 220 }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min={0.5}
+                    step={0.5}
+                    value={overstockMinWeeksOfCoverage}
+                    onChange={(e) => setOverstockMinWeeksOfCoverage(e.target.value)}
+                  />
+                  <span className="input-group-text">semaines de couverture ou plus</span>
+                </div>
+                <div className="form-text">Ex : 4 semaines ≈ 1 mois de couverture.</div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-primary mt-3"
+              disabled={overstockThresholdSaving}
+              onClick={async () => {
+                setOverstockThresholdSaving(true);
+                setOverstockThresholdSaved(false);
+                try {
+                  await saveSystemConfigKey('OVERSTOCK_MIN_WEEKS_OF_COVERAGE', overstockMinWeeksOfCoverage);
+                  setOverstockThresholdSaved(true);
+                } finally {
+                  setOverstockThresholdSaving(false);
+                }
+              }}
+            >
+              {overstockThresholdSaving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+            {overstockThresholdSaved && <span className="text-success small ms-2">Enregistré.</span>}
           </div>
         </div>
 

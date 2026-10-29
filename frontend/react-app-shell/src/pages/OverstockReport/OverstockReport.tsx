@@ -413,7 +413,23 @@ export function OverstockReport() {
   // "Paramètres" de l'analyse (demande explicite : "rendre le surtok dans les parametre sur le
   // UI... le user puisse lancer lui meme") — valeurs en attente tant que l'utilisateur n'a pas
   // cliqué "Lancer l'analyse", pour ne jamais relancer un calcul coûteux à chaque frappe clavier.
-  const [minWeeksOfCoverage, setMinWeeksOfCoverage] = useState(2);
+  // 4 (= 1 mois) en repli immédiat le temps du chargement — remplacé juste en dessous par la vraie
+  // valeur réglée dans Paramètres (OVERSTOCK_MIN_WEEKS_OF_COVERAGE, demande explicite du
+  // 29/10/2026 : "je dois pouvoir les modifier", config déplacée hors du code).
+  const [minWeeksOfCoverage, setMinWeeksOfCoverage] = useState(4);
+  // Lit le seuil configuré une seule fois au montage, AVANT que runAnalysis() ci-dessous ne parte
+  // (celui-ci dépend de minWeeksOfCoverage dans son tableau de dépendances) — si l'admin a changé
+  // la valeur dans Paramètres, la page doit l'utiliser dès le premier chargement, pas seulement
+  // après un rechargement manuel du seuil par l'utilisateur.
+  useEffect(() => {
+    apiFetch<{ OVERSTOCK_MIN_WEEKS_OF_COVERAGE?: string }>('/reassort/system-config')
+      .then((d) => {
+        const configured = parseFloat(d.OVERSTOCK_MIN_WEEKS_OF_COVERAGE || '');
+        if (Number.isFinite(configured) && configured > 0) setMinWeeksOfCoverage(configured);
+      })
+      // Silencieux si non-admin (route protégée) : garde le repli 4 ci-dessus, comme SchedulingSection.
+      .catch(() => {});
+  }, []);
   // BUG CORRIGÉ le 24/10/2026 (signalé : "supprime les filtre [de période]... le surstok doit etre
   // au jour si il n'es plus en surstok on ne dois plus le voir") — la sélection de période (presets
   // 7j/30j/3mois/6mois + dates personnalisées, "Historique de la période") permettait de voir des

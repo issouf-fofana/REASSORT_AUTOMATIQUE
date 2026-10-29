@@ -9,11 +9,14 @@
  * la DERNIÈRE proposition générée pour chaque magasin (ProposalLine.stockAtGeneration /
  * ProposalLine.avgWeeklySales), pas d'un nouveau calcul distinct. Seuil par défaut choisi à 2
  * semaines (pas 6, le seuil du chatbot jugé trop élevé le 21/10/2026 : "6 semaine est trop") —
- * réglable par appelant, jamais codé en dur ailleurs qu'ici.
+ * réglable par appelant, jamais codé en dur ailleurs qu'ici. Passé à 4 semaines (= 1 mois) le
+ * 29/10/2026, demande explicite : "si par defaut je veux mettre sur 1mois au lieu de 2semaine" —
+ * seule constante à changer, utilisée aussi par le job de précalcul (overstockReportSnapshotJob.js),
+ * la vue par défaut de l'API (insights.js) et le chatbot (chatbotToolsService.js).
  */
 const prisma = require('../utils/prisma');
 
-const DEFAULT_MIN_WEEKS_OF_COVERAGE = 2;
+const DEFAULT_MIN_WEEKS_OF_COVERAGE = 4;
 const SCRAP_LOOKBACK_DAYS = 90; // "3 dernières mois", demande explicite
 // Seuil de persistance pour "toujours en surstock" sur une période — RÉÉCRIT le 23/10/2026 (bug
 // signalé : la carte affichait 0 malgré du vrai surstock visible, "Toujours en surstock" restait

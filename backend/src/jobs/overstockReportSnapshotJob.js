@@ -25,19 +25,30 @@
  * (même raisonnement que stockoutPeriodSummarySnapshotJob.js pour les dates personnalisées).
  */
 const prisma = require('../utils/prisma');
-const { getOverstockReport, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../services/overstockReportService');
+const { getOverstockReport } = require('../services/overstockReportService');
+const systemConfig = require('../services/systemConfigService');
 
-const CACHE_KEY = `default:${DEFAULT_MIN_WEEKS_OF_COVERAGE}`;
-const PERIOD_90D_CACHE_KEY = `period:90d:${DEFAULT_MIN_WEEKS_OF_COVERAGE}`;
+// Clé de cache construite à partir du seuil EFFECTIF à chaque exécution, pas d'une constante figée
+// au chargement du module — demande explicite du 29/10/2026 : seuil désormais réglable depuis
+// Paramètres (OVERSTOCK_MIN_WEEKS_OF_COVERAGE) sans redéploiement. insights.js compare le seuil
+// demandé par la requête à ce même seuil résolu dynamiquement pour savoir si ce snapshot s'applique.
+function buildCacheKeys(minWeeksOfCoverage) {
+  return {
+    cacheKey: `default:${minWeeksOfCoverage}`,
+    period90dCacheKey: `period:90d:${minWeeksOfCoverage}`,
+  };
+}
 const PERIOD_90D_DAYS = 90;
 
 async function runOverstockReportSnapshotJob() {
   console.log('[overstockReportSnapshotJob] Précalcul démarré...');
+  const minWeeksOfCoverage = parseFloat(await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE)) || 4;
+  const { cacheKey, period90dCacheKey } = buildCacheKeys(minWeeksOfCoverage);
   try {
-    const report = await getOverstockReport(null, { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE });
+    const report = await getOverstockReport(null, { minWeeksOfCoverage });
     await prisma.overstockReportSnapshot.upsert({
-      where: { cacheKey: CACHE_KEY },
-      create: { cacheKey: CACHE_KEY, reportJson: JSON.stringify(report) },
+      where: { cacheKey },
+      create: { cacheKey, reportJson: JSON.stringify(report) },
       update: { reportJson: JSON.stringify(report) },
     });
     console.log(`[overstockReportSnapshotJob] Précalcul terminé (default) : ${report.articleCount ?? 0} article(s) en surstock sur ${report.shopCount ?? 0} magasin(s).`);
@@ -49,13 +60,13 @@ async function runOverstockReportSnapshotJob() {
     const end = new Date();
     const start = new Date(end.getTime() - PERIOD_90D_DAYS * 24 * 60 * 60 * 1000);
     const periodReport = await getOverstockReport(null, {
-      minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE,
+      minWeeksOfCoverage,
       start: start.toISOString(),
       end: end.toISOString(),
     });
     await prisma.overstockReportSnapshot.upsert({
-      where: { cacheKey: PERIOD_90D_CACHE_KEY },
-      create: { cacheKey: PERIOD_90D_CACHE_KEY, reportJson: JSON.stringify(periodReport) },
+      where: { cacheKey: period90dCacheKey },
+      create: { cacheKey: period90dCacheKey, reportJson: JSON.stringify(periodReport) },
       update: { reportJson: JSON.stringify(periodReport) },
     });
     console.log(`[overstockReportSnapshotJob] Précalcul terminé (3 mois) : ${periodReport.articleCount ?? 0} article(s) en surstock sur ${periodReport.shopCount ?? 0} magasin(s).`);
@@ -64,4 +75,4 @@ async function runOverstockReportSnapshotJob() {
   }
 }
 
-module.exports = { runOverstockReportSnapshotJob, CACHE_KEY, PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS };
+module.exports = { runOverstockReportSnapshotJob, buildCacheKeys, PERIOD_90D_DAYS };

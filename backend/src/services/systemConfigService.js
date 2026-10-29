@@ -84,6 +84,12 @@ const KEYS = {
   // overstockReportSnapshotLock (cronManager.js) : si un passage précédent tourne encore au
   // déclenchement du suivant, celui-ci est simplement ignoré, jamais de double exécution.
   OVERSTOCK_REPORT_SNAPSHOT_CRON: 'OVERSTOCK_REPORT_SNAPSHOT_CRON',
+  // Seuil de surstock (semaines de couverture de stock à partir desquelles un article est considéré
+  // en surstock) — codé en dur à 2 dans overstockReportService.js jusqu'ici, rendu configurable
+  // depuis Paramètres (demande explicite du 29/10/2026 : "la condig est en dure ? je veux metre dans
+  // les configuration sur le UI dans les parametre... je dois pouvoir les modifier"). 4 par défaut
+  // (= 1 mois, changé le même jour).
+  OVERSTOCK_MIN_WEEKS_OF_COVERAGE: 'OVERSTOCK_MIN_WEEKS_OF_COVERAGE',
   // Délai de réaction (commande attendue) et délai de livraison max du module Ruptures (demande
   // explicite du 17/10/2026 : "le delai max de livrason doit etre 48h mais il faut rendre ca
   // modifiable sur les parametre") — en dur à 24h/48h jusqu'ici (stockoutEpisodeService.js,
@@ -355,6 +361,7 @@ const ENV_FALLBACK = {
   [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
   [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '*/15 * * * *',
+  [KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE]: () => process.env.OVERSTOCK_MIN_WEEKS_OF_COVERAGE || '4',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
   [KEYS.STOCKOUT_LOSS_LOOKBACK_WEEKS]: () => process.env.STOCKOUT_LOSS_LOOKBACK_WEEKS || '52',

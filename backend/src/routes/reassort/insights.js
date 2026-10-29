@@ -24,9 +24,17 @@ const stockMoveAnalysis = require('../../services/stockMoveAnalysisService');
 const { getDashboardSummary, getDashboardSummaryAllShops, getDashboardSummaryByDepartment, getDashboardSummaryBySector, getEpisodeDetail, getTrend: getStockoutTrend, getPeriodLossSummary, analyzePeriodLoss, analyzeEpisode } = require('../../services/stockoutEpisodeService');
 const { DEFAULT_PERIOD_DAYS: STOCKOUT_PERIOD_SNAPSHOT_DAYS } = require('../../jobs/stockoutPeriodSummarySnapshotJob');
 const { filterProposalLinesForUser } = require('../../services/aiPermissionsService');
-const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockOverPeriod, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, getSalesDetailForArticle, getEndOfLifeDetailForArticle, DEFAULT_MIN_WEEKS_OF_COVERAGE } = require('../../services/overstockReportService');
+const { getOverstockReport, getOverstockByShop, getOverstockByShopPage, getOverstockOverPeriod, getOverstockDataAvailability, getCachedDefaultOverstockReport, getScrapDetailForArticle, getSalesDetailForArticle, getEndOfLifeDetailForArticle } = require('../../services/overstockReportService');
 const { getScrapOverview, getMovementTypes } = require('../../services/scrapReportService');
-const { CACHE_KEY: OVERSTOCK_REPORT_CACHE_KEY, PERIOD_90D_CACHE_KEY: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
+const { buildCacheKeys: buildOverstockCacheKeys, PERIOD_90D_DAYS: OVERSTOCK_REPORT_PERIOD_90D_DAYS } = require('../../jobs/overstockReportSnapshotJob');
+const systemConfig = require('../../services/systemConfigService');
+
+// Seuil de surstock EFFECTIF (semaines de couverture), réglable depuis Paramètres — demande
+// explicite du 29/10/2026. Résolu une fois par requête (pas de constante figée au chargement du
+// module), car il peut changer sans redéploiement.
+async function getDefaultOverstockThreshold() {
+  return parseFloat(await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE)) || 4;
+}
 
 // Un Rayonniste/Chef de département ne doit pas pouvoir consulter les données d'un article hors de
 // son périmètre simplement en connaissant/devinant son EAN — utilisé par toutes les routes ciblant
@@ -378,6 +386,8 @@ async function resolveOverstockShopFilterAndCache(req) {
   }
   const minWeeksOfCoverage = req.query.minWeeksOfCoverage ? Number(req.query.minWeeksOfCoverage) : undefined;
   const { start, end } = req.query;
+  const defaultThreshold = await getDefaultOverstockThreshold();
+  const { cacheKey: OVERSTOCK_REPORT_CACHE_KEY, period90dCacheKey: OVERSTOCK_REPORT_PERIOD_90D_CACHE_KEY } = buildOverstockCacheKeys(defaultThreshold);
 
   // Vue par défaut (aucune période, seuil par défaut ou non précisé) : lit le snapshot précalculé
   // par overstockReportSnapshotJob.js au lieu de recalculer en direct (demande explicite du
@@ -385,7 +395,7 @@ async function resolveOverstockShopFilterAndCache(req) {
   // isolé est rapide, ~0.6s mesuré, mais ralentit fortement en concurrence avec les jobs de
   // synchro RPOS qui saturent le pool de connexions DB au même moment). Tout seuil personnalisé ou
   // toute période retombe sur le calcul en direct, inchangé.
-  const isDefaultView = !start && !end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE);
+  const isDefaultView = !start && !end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === defaultThreshold);
   if (isDefaultView) {
     const cached = await getCachedDefaultOverstockReport(shopIdFilter, OVERSTOCK_REPORT_CACHE_KEY);
     if (cached) return { shopIdFilter, minWeeksOfCoverage, start, end, cachedFullReport: cached };
@@ -411,7 +421,7 @@ async function resolveOverstockShopFilterAndCache(req) {
   // Élargi à une journée entière d'avance (24h), largement suffisant pour couvrir ce décalage
   // "fin de journée" sans risquer de confondre avec une vraie période future choisie par
   // l'utilisateur (qui, elle, aurait un `start` tout aussi décalé — testé via spanDays ci-dessous).
-  if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === DEFAULT_MIN_WEEKS_OF_COVERAGE)) {
+  if (!isDefaultView && start && end && (minWeeksOfCoverage === undefined || minWeeksOfCoverage === defaultThreshold)) {
     const startMs = new Date(start).getTime();
     const endMs = new Date(end).getTime();
     const spanDays = (endMs - startMs) / (24 * 60 * 60 * 1000);
@@ -901,10 +911,11 @@ router.get('/overstock-rate', async (req, res) => {
     if (!shopId) {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
+    const defaultThreshold = await getDefaultOverstockThreshold();
     const [report, totalOrderableArticles] = await Promise.all([
       req.query.start && req.query.end
-        ? getOverstockOverPeriod([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE, start: req.query.start, end: req.query.end })
-        : getOverstockByShop([shopId], { minWeeksOfCoverage: DEFAULT_MIN_WEEKS_OF_COVERAGE }),
+        ? getOverstockOverPeriod([shopId], { minWeeksOfCoverage: defaultThreshold, start: req.query.start, end: req.query.end })
+        : getOverstockByShop([shopId], { minWeeksOfCoverage: defaultThreshold }),
       prisma.productCache.count({ where: { rposShopId: shopId, orderable: true } }),
     ]);
     const overstockLines = report.found ? report.articleCount : 0;

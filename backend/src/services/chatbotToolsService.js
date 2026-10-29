@@ -51,6 +51,14 @@ const { listAnomalies } = require('./orderAnomalyService');
 const aiForecastService = require('./aiForecastService');
 const stockoutEpisodeService = require('./stockoutEpisodeService');
 const overstockReportService = require('./overstockReportService');
+const systemConfig = require('./systemConfigService');
+
+// Seuil de surstock EFFECTIF (semaines de couverture), réglable depuis Paramètres — demande
+// explicite du 29/10/2026 ("je dois pouvoir les modifier"). Résolu dynamiquement plutôt que via
+// overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE (constante figée, simple repli ultime).
+async function getDefaultOverstockThreshold() {
+  return parseFloat(await systemConfig.getValue(systemConfig.KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE)) || 4;
+}
 
 // Arrondit une vente moyenne hebdomadaire à 1 décimale (demande du 12/10/2026, bug observé en
 // conditions réelles : le chatbot recopiait "2,26" directement depuis avgWeeklySales transmis sans
@@ -1001,7 +1009,8 @@ async function getStockoutRisks(rposShopId, { maxDays = 3, department } = {}) {
  */
 const OVERSTOCK_CHATBOT_PERIOD_DAYS = 90;
 
-async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE, department } = {}) {
+async function getOverstockArticles(rposShopId, { minWeeksOfCoverage, department } = {}) {
+  if (minWeeksOfCoverage === undefined) minWeeksOfCoverage = await getDefaultOverstockThreshold();
   const end = new Date();
   const start = new Date(end.getTime() - OVERSTOCK_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
   const report = await overstockReportService.getOverstockOverPeriod([rposShopId], { minWeeksOfCoverage, start: start.toISOString(), end: end.toISOString() });
@@ -1034,8 +1043,9 @@ async function getOverstockArticles(rposShopId, { minWeeksOfCoverage = overstock
  * physiquement perdue ou bradée — distinct d'un simple excès de stock encore vendable au prix
  * plein.
  */
-async function getOverstockScrapAndDlv(rposShopId, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE, scrapLookbackDays = 90 } = {}) {
+async function getOverstockScrapAndDlv(rposShopId, { minWeeksOfCoverage, scrapLookbackDays = 90 } = {}) {
   const scrapReportService = require('./scrapReportService');
+  if (minWeeksOfCoverage === undefined) minWeeksOfCoverage = await getDefaultOverstockThreshold();
 
   const end = new Date();
   const start = new Date(end.getTime() - OVERSTOCK_CHATBOT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
@@ -2388,8 +2398,9 @@ async function getStockoutRisksAllShops(allowedShopIds, { maxDays = 3 } = {}) {
  * ventes (déjà disponible via getOverstockByShop). Délègue désormais à getOverstockByShop par lot
  * (tous les magasins du périmètre en un seul appel, pas une boucle manuelle par magasin).
  */
-async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage = overstockReportService.DEFAULT_MIN_WEEKS_OF_COVERAGE } = {}) {
+async function getOverstockArticlesAllShops(allowedShopIds, { minWeeksOfCoverage } = {}) {
   if (!allowedShopIds || !allowedShopIds.length) return { found: false, message: 'Aucun magasin accessible pour ce compte.' };
+  if (minWeeksOfCoverage === undefined) minWeeksOfCoverage = await getDefaultOverstockThreshold();
 
   // Même alignement que getOverstockArticles ci-dessus (demande explicite : chatbot doit dire
   // EXACTEMENT le même chiffre que la page Surstock) — getOverstockByShop (dernière proposition
