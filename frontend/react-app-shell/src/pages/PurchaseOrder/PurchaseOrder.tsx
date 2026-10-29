@@ -9,6 +9,7 @@ import { ProductAnalyticsModal } from './ProductAnalyticsModal';
 import { ProposalTable, type ProposalTableHandle } from './ProposalTable';
 import { ArticleDetailModal } from './ArticleDetailModal';
 import { ValidationFlow } from './ValidationFlow';
+import { ValidateExistingOrderButton } from './ValidateExistingOrderButton';
 import { SupplierValidationFlow } from './SupplierValidationFlow';
 import { WeeklyPlanHistoryModal } from './WeeklyPlanHistoryModal';
 import type { Proposal, ProposalHistoryItem, ProposalLine, Shop } from './types';
@@ -1146,6 +1147,20 @@ export function PurchaseOrder() {
                       validation globale fournisseur, pas seulement d'une commande par-rayon
                       classique), remplacé par un badge de statut à la place (cf. plus bas dans le
                       rendu). */}
+                  {/* Commande du rayon "en préparation" (statut RPOS 1, pas encore supprimée) —
+                      demande explicite du 29/10/2026 : "quand il detect qu'une commande est en
+                      preparation, il doit pouvoir validé cette commande... pas cree un nouveau".
+                      La commande existe déjà (departmentFullyOrdered=true, cf. plus haut) : valide
+                      CETTE commande sur RPOS (statut 1 → 2) via POST /orders/:id/validate, plutôt
+                      que de proposer ValidationFlow (qui créerait une commande redondante). */}
+                  {!viewingPastGeneration && currentDepartmentOrder && !currentDepartmentOrder.deletedOnRpos && currentDepartmentOrder.lastRposStatus === 1 && currentDepartmentOrder.rposOrderId && (
+                    <ValidateExistingOrderButton
+                      rposOrderId={currentDepartmentOrder.rposOrderId}
+                      rposOrderReference={currentDepartmentOrder.rposOrderReference}
+                      shopQueryParam={shopQueryParam()}
+                      onValidated={() => loadProposalById(proposal!.id)}
+                    />
+                  )}
                   {!viewingPastGeneration && proposal && selectedDepartment && !departmentFullyOrdered && (
                     <ValidationFlow
                       proposalId={proposal.id}

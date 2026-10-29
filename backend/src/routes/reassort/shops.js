@@ -465,9 +465,16 @@ router.post('/orders/:rposOrderId/cancel', requireAdmin, async (req, res) => {
 // POST /api/reassort/orders/:rposOrderId/validate - valide sur RPOS une commande fournisseur déjà
 // créée et restée "en préparation" (statut 1 → 2 "en attente de livraison"), sans repasser par le
 // POS (demande du 14/10/2026, point 4 : "ajouter la possibilité de valider les commandes depuis la
-// plateforme"). Réservé ADMIN, même niveau de risque que l'annulation ci-dessus : action
-// irréversible transmise à l'entrepôt, jamais déclenchée sans confirmation explicite côté UI.
-router.post('/orders/:rposOrderId/validate', requireAdmin, async (req, res) => {
+// plateforme").
+// requireAdmin RETIRÉ le 29/10/2026 (mission "Valider une commande en préparation plutôt que d'en
+// créer une nouvelle — Proposition de commande") — cette action est désormais aussi déclenchée
+// depuis le bouton "Valider le rayon" de Proposition de commande (PurchaseOrder.tsx), accessible à
+// tout rôle ayant accès à la proposition (DIRECTOR notamment), au même titre que
+// /proposal/:id/validate-department (jamais requireAdmin). Garder requireAdmin ici aurait bloqué
+// ces rôles par un 403 pour une action qu'ils peuvent par ailleurs déjà déclencher autrement
+// (valider un rayon pas encore commandé). requireAuth (posé globalement sur ce router, cf. en-tête
+// du fichier) reste la seule garde — même niveau d'accès que le reste de cette page.
+router.post('/orders/:rposOrderId/validate', async (req, res) => {
   try {
     const shopId = resolveShopId(req);
     const posId = resolvePosId(req);
