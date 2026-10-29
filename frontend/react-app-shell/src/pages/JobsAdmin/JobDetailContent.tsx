@@ -28,6 +28,7 @@ export interface JobRun {
 export interface JobDetail {
   jobName: string;
   label: string;
+  description?: string;
   enabled: boolean;
   cronExpression: string;
   nextRunAt: string | null;
@@ -457,6 +458,7 @@ export function JobDetailContent({ jobName }: { jobName: string }) {
 
   return (
     <div>
+      {detail.description && <p className="text-muted small mb-2">{detail.description}</p>}
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
         <p className="text-muted small mb-0">
           Prochaine exécution : {fmtDate(detail.nextRunAt)}

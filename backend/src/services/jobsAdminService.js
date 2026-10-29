@@ -86,6 +86,7 @@ async function listJobsOverview() {
     results.push({
       jobName: meta.jobName,
       label: meta.label,
+      description: meta.description,
       enabled,
       cronExpression,
       nextRunAt: enabled ? computeNextRun(cronExpression) : null,
@@ -118,6 +119,7 @@ async function getJobDetail(jobName, { page = 1, pageSize = 20 } = {}) {
   return {
     jobName: meta.jobName,
     label: meta.label,
+    description: meta.description,
     enabled,
     cronExpression,
     nextRunAt: enabled ? computeNextRun(cronExpression) : null,

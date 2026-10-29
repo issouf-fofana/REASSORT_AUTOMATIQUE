@@ -21,6 +21,7 @@ interface SparklinePoint {
 interface JobOverview {
   jobName: string;
   label: string;
+  description?: string;
   enabled: boolean;
   cronExpression: string;
   nextRunAt: string | null;
@@ -131,6 +132,24 @@ export function JobsAdminDashboard() {
   const [runningJob, setRunningJob] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [selectedJob, setSelectedJob] = useState<{ jobName: string; label: string } | null>(null);
+  // Popover "ce que fait cette tâche" (demande explicite du 29/10/2026 : "quand je clique sur un
+  // bouton [je dois voir] de quoi fait cette tache", en remplacement d'une description affichée en
+  // permanence sous chaque nom, jugée trop chargée visuellement) — un seul ouvert à la fois, fermé
+  // au clic ailleurs sur la page.
+  const [openDescriptionFor, setOpenDescriptionFor] = useState<string | null>(null);
+  // position: 'fixed' calculée depuis le bouton cliqué (plutôt que 'absolute' dans la cellule) —
+  // le tableau est enveloppé dans un conteneur `overflow: hidden` + `.table-responsive`
+  // (overflow-x: auto), qui tronquait le popover en 'absolute' (signalé le 29/10/2026 : "quand je
+  // clique je ne vois pas bien la description"). 'fixed' + coordonnées explicites échappe à ce
+  // double overflow du parent.
+  const [descPopoverPos, setDescPopoverPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!openDescriptionFor) return;
+    const close = () => { setOpenDescriptionFor(null); setDescPopoverPos(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openDescriptionFor]);
 
   async function load() {
     try {
@@ -194,6 +213,8 @@ export function JobsAdminDashboard() {
         .jadm-filter-btn.active .jadm-count { background: rgba(255,255,255,.22); color: #fff; }
         .jadm-count { background: #EDF1F7; color: ${NAVY}; border-radius: 10px; font-size: .7rem; padding: 1px 6px; font-weight: 700; }
         .jadm-cron-chip { background: #EDF1F7; color: ${NAVY}; border-radius: 5px; padding: 2px 6px; font-size: .74rem; font-family: ui-monospace, monospace; }
+        .jadm-info-btn { line-height: 1; vertical-align: middle; border: none; background: transparent; }
+        .jadm-info-btn:hover iconify-icon { color: ${NAVY} !important; }
       `}</style>
 
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
@@ -287,6 +308,27 @@ export function JobsAdminDashboard() {
                           {j.label}
                         </button>
                         {!j.enabled && <span className="badge bg-secondary-subtle text-secondary ms-2">Désactivé</span>}
+                        {j.description && (
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 ms-2 jadm-info-btn"
+                            title="Que fait cette tâche ?"
+                            aria-label="Que fait cette tâche ?"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (openDescriptionFor === j.jobName) {
+                                setOpenDescriptionFor(null);
+                                setDescPopoverPos(null);
+                                return;
+                              }
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setDescPopoverPos({ top: rect.bottom + 6, left: rect.left });
+                              setOpenDescriptionFor(j.jobName);
+                            }}
+                          >
+                            <iconify-icon icon="solar:info-circle-bold" style={{ fontSize: '1rem', color: '#8591A0' }}></iconify-icon>
+                          </button>
+                        )}
                       </td>
                       <td className="py-2">
                         <StatusDot status={j.healthStatus} pulse={j.healthStatus === 'running'} />
@@ -335,6 +377,29 @@ export function JobsAdminDashboard() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {openDescriptionFor && descPopoverPos && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            top: descPopoverPos.top,
+            left: descPopoverPos.left,
+            zIndex: 2000,
+            width: 320,
+            maxWidth: 'calc(100vw - 24px)',
+            background: '#1B2A4A',
+            color: '#fff',
+            borderRadius: 8,
+            padding: '10px 12px',
+            fontSize: '.8rem',
+            lineHeight: 1.45,
+            boxShadow: '0 8px 24px rgba(27,42,74,.3)',
+          }}
+        >
+          {jobs?.find((j) => j.jobName === openDescriptionFor)?.description}
         </div>
       )}
 
