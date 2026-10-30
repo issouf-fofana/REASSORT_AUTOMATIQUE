@@ -1977,6 +1977,24 @@ function detectOrderActionIntent(question) {
   return ORDER_ACTION_INTENT_REGEX.test(question);
 }
 
+// Bug trouvé le 30/10/2026 en conditions réelles : "passe une commande au CREMERIE ET MET EN
+// PREPARATION" — l'utilisateur demandait explicitement la PRÉPARATION, mais une commande existait
+// déjà pour ce rayon, donc statusResult.possibleActions ne contenait que ['VALIDATE'] — l'action
+// déduite (VALIDATE) a silencieusement remplacé l'action demandée (PREPARE) sans jamais signaler
+// cette divergence à l'utilisateur avant la confirmation ; celui-ci a répondu "oui" en pensant
+// confirmer une préparation, et une VALIDATION réelle a eu lieu sur RPOS. Détecte l'action que
+// l'utilisateur a RÉELLEMENT demandée dans sa question pour pouvoir la comparer à l'action déduite
+// du système et alerter explicitement en cas d'écart, avant toute confirmation.
+const ORDER_ACTION_PREPARE_REGEX = /\b(pr[ée]par(?:e|er|ation)|cr[ée]e?r?|mett?re|mets?|passe|passer|lance|lancer)\b/i;
+const ORDER_ACTION_VALIDATE_REGEX = /\b(valide|valider|validation)\b/i;
+function detectRequestedAction(question) {
+  const hasValidate = ORDER_ACTION_VALIDATE_REGEX.test(question || '');
+  const hasPrepare = ORDER_ACTION_PREPARE_REGEX.test(question || '');
+  if (hasValidate && !hasPrepare) return 'VALIDATE';
+  if (hasPrepare && !hasValidate) return 'PREPARE';
+  return null; // ambigu (les deux, ou aucun verbe clair) — jamais utilisé pour bloquer, seulement pour détecter un écart certain
+}
+
 const ORDER_ACTION_CONFIRM_REGEX = /^\s*(oui|ouais|ouai|vas-?y|d'accord|daccord|ok|okay|exactement|c'est ça|cest ca|tout à fait|tout a fait|confirme|je confirme)\s*[!.?]*\s*$/i;
 const ORDER_ACTION_CANCEL_REGEX = /^\s*(non|annule|annuler|laisse|stop|pas maintenant|plus tard)\b/i;
 const PENDING_ACTION_TTL_MS = 15 * 60 * 1000;
@@ -2027,7 +2045,7 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
     toolChoice: { type: 'none' },
   }, 'chatbot-order-action-read');
 
-  const answer = followUp.textBlocks.join('\n').trim() || 'Je n\'ai pas pu déterminer l\'état de ce rayon.';
+  let answer = followUp.textBlocks.join('\n').trim() || 'Je n\'ai pas pu déterminer l\'état de ce rayon.';
 
   if (!statusResult.found || statusResult.outOfScope || !statusResult.possibleActions?.length) {
     return { answer, pendingAction: null };
@@ -2038,6 +2056,15 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
   // confirmation directe) — pendingAction.action peut donc être null ici.
   const action = statusResult.possibleActions.length === 1 ? statusResult.possibleActions[0] : null;
   const lastOrder = statusResult.orders?.[0];
+
+  // Si l'utilisateur a demandé une action précise (PREPARE/VALIDATE) qui diverge de celle
+  // réellement possible sur ce rayon, le dire explicitement AVANT la confirmation — jamais glisser
+  // silencieusement vers une autre action (cf. bug du 30/10/2026 ci-dessus).
+  const requestedAction = detectRequestedAction(question);
+  if (requestedAction && action && requestedAction !== action) {
+    const ACTION_LABELS = { PREPARE: 'mettre en préparation', VALIDATE: 'valider' };
+    answer = `⚠️ Vous avez demandé de ${ACTION_LABELS[requestedAction]} le rayon ${department}, mais ce n'est pas l'action possible actuellement : ${answer}`;
+  }
 
   return {
     answer,
