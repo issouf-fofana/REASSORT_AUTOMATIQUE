@@ -1992,9 +1992,23 @@ function detectOrderActionIntent(question) {
 // du système et alerter explicitement en cas d'écart, avant toute confirmation.
 const ORDER_ACTION_PREPARE_REGEX = /\b(pr[ée]par(?:e|er|ation)|cr[ée]e?r?|mett?re|mets?|passe|passer|lance|lancer)\b/i;
 const ORDER_ACTION_VALIDATE_REGEX = /\b(valide|valider|validation)\b/i;
+// Bug réel observé le 30/10/2026 : "cree cette commande ... et met en preparation NE VALIDE PAS"
+// — "ne valide pas" contient littéralement "valide", donc hasValidate ET hasPrepare étaient tous
+// deux vrais, rendant l'action détectée ambiguë (null) alors que l'utilisateur demande PREPARE sans
+// ambiguïté aucune (il refuse explicitement VALIDATE). Un verbe précédé d'une négation ("ne/n'...
+// pas/jamais" dans les ~15 caractères qui précèdent) ne doit jamais compter comme une vraie demande
+// de cette action.
+const NEGATION_BEFORE_REGEX = /\b(?:ne|n')\s*\S*\s*$/i;
+function isNegated(question, matchIndex) {
+  const before = question.slice(Math.max(0, matchIndex - 15), matchIndex);
+  return NEGATION_BEFORE_REGEX.test(before) || /\bpas\s+(?:de\s+)?$/i.test(question.slice(0, matchIndex));
+}
 function detectRequestedAction(question) {
-  const hasValidate = ORDER_ACTION_VALIDATE_REGEX.test(question || '');
-  const hasPrepare = ORDER_ACTION_PREPARE_REGEX.test(question || '');
+  const q = question || '';
+  const validateMatch = q.match(ORDER_ACTION_VALIDATE_REGEX);
+  const prepareMatch = q.match(ORDER_ACTION_PREPARE_REGEX);
+  const hasValidate = !!validateMatch && !isNegated(q, validateMatch.index);
+  const hasPrepare = !!prepareMatch && !isNegated(q, prepareMatch.index);
   if (hasValidate && !hasPrepare) return 'VALIDATE';
   if (hasPrepare && !hasValidate) return 'PREPARE';
   return null; // ambigu (les deux, ou aucun verbe clair) — jamais utilisé pour bloquer, seulement pour détecter un écart certain
@@ -2047,7 +2061,7 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
   const statusResult = await tools.getDepartmentOrderStatus(rposShopId, posId, { department, user });
 
   const followUp = await callWithToolsFallback({
-    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Présente l\'état du rayon à l\'utilisateur (nombre d\'articles, montant estimé, commande déjà existante ou non) de façon brève, puis demande-lui EXPLICITEMENT de confirmer l\'action à effectuer (mise en préparation, ou validation/attente de livraison si une commande existe déjà au statut adéquat). Ne prétends jamais avoir déjà exécuté l\'action. Tous les montants sont en FRANCS CFA (FCFA) — jamais en euros ni un autre symbole de devise. Si une commande existe déjà pour ce rayon (champ "orders"), indique TOUJOURS sa référence (rposOrderReference), sa date de création (createdAt) et, si elle est déjà validée (validated:true), sa date de validation (validationDate) et qui l\'a validée (validatedBy). Si deletedOnRpos est vrai pour une commande, dis clairement qu\'elle a été supprimée ou est introuvable côté RPOS — ne la présente jamais comme active. Si possibleActions est VIDE (aucune action possible, ex: commande déjà validée), dis-le clairement et NE demande PAS de confirmation — il n\'y a alors rien à exécuter.',
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Présente l\'état du rayon à l\'utilisateur (nombre d\'articles, montant estimé, commande déjà existante ou non) de façon brève, puis demande-lui EXPLICITEMENT de confirmer l\'action à effectuer (mise en préparation, ou validation/attente de livraison si une commande existe déjà au statut adéquat). Ne prétends jamais avoir déjà exécuté l\'action. Tous les montants sont en FRANCS CFA (FCFA) — jamais en euros ni un autre symbole de devise. Si une commande existe déjà pour ce rayon (champ "orders"), indique TOUJOURS sa référence (rposOrderReference), sa date de création (createdAt) et, si elle est déjà validée (validated:true), sa date de validation (validationDate) et qui l\'a validée (validatedBy). Si deletedOnRpos est vrai pour une commande, dis clairement qu\'elle a été supprimée ou est introuvable côté RPOS — ne la présente jamais comme active. Si possibleActions est VIDE (aucune action possible, ex: commande déjà validée), dis-le clairement et NE demande PAS de confirmation — il n\'y a alors rien à exécuter. Si articlesCount > 0 mais articlesWithQuantityCount est à 0, précise que même si le rayon compte des articles, AUCUN n\'a de quantité suggérée à commander actuellement (rien à préparer) — ne propose jamais l\'action dans ce cas.',
     messages: [
       { role: 'user', content: question },
       { role: 'assistant', text: null, toolCall },
@@ -2140,10 +2154,16 @@ async function runOrderActionTurn2({ pendingAction, question, rposShopId, posId,
     if (/pr[ée]paration/i.test(question)) action = 'PREPARE';
     else if (/valid/i.test(question)) action = 'VALIDATE';
     else return { answer: 'Précisez : voulez-vous la mettre en préparation, ou la valider (attente de livraison) ?', pendingAction };
-  } else if (!ORDER_ACTION_CONFIRM_REGEX.test(question)) {
-    // Ni confirmation claire, ni refus explicite (déjà traité plus haut) : on n'exécute rien et on
-    // efface la proposition en attente plutôt que de risquer une exécution sur un message ambigu —
-    // la question sera retraitée normalement par le routage habituel.
+  } else if (!ORDER_ACTION_CONFIRM_REGEX.test(question) && detectRequestedAction(question) !== action) {
+    // Bug réel observé le 30/10/2026 : "cree cette commande dans le liquide et met en preparation
+    // ne valide pas" (reformulation complète de la demande, pas un simple "oui") ne matchait pas
+    // ORDER_ACTION_CONFIRM_REGEX (ne commence pas par un mot de confirmation) — le workflow
+    // abandonnait silencieusement (return null) alors que l'utilisateur confirmait bel et bien,
+    // juste avec ses propres mots plutôt qu'avec "oui". Une reformulation qui redemande exactement
+    // la MÊME action que celle déjà déduite (pendingAction.action) vaut aussi confirmation. Ni
+    // confirmation ni refus explicite ET action reformulée différente/absente : on n'exécute rien
+    // et on efface la proposition en attente plutôt que de risquer une exécution sur un message
+    // ambigu — la question sera retraitée normalement par le routage habituel.
     return null;
   }
 

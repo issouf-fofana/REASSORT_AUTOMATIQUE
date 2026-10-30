@@ -2835,6 +2835,12 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
 
   const lines = (proposal?.lines || []).filter((l) => !l.wasExcluded);
   const articlesCount = lines.length;
+  // Bug réel observé le 30/10/2026 : PREPARE était proposé dès que articlesCount > 0, même quand
+  // TOUS les articles du rayon avaient une quantité suggérée à 0 (rayon LIQUIDES : 73 articles,
+  // 0 à commander) — l'exécution réelle échouait alors systématiquement avec "Aucun article
+  // sélectionné pour le rayon" (cf. proposalService.validateProposalDepartment, candidateLines
+  // exige quantity > 0), après que l'utilisateur ait déjà confirmé une action vouée à l'échec.
+  const articlesWithQuantityCount = lines.filter((l) => l.quantitySuggested > 0).length;
 
   // Nommé explicitement "...Cfa" (pas juste estimatedAmount) — BUG CORRIGÉ le 30/10/2026 (observé
   // en conditions réelles : le modèle affichait "€" au lieu de FCFA, faute d'indice d'unité dans ce
@@ -2905,7 +2911,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
 
   const hasExistingOrder = orders.length > 0;
   const possibleActions = [];
-  if (!hasExistingOrder && articlesCount > 0) possibleActions.push('PREPARE');
+  if (!hasExistingOrder && articlesWithQuantityCount > 0) possibleActions.push('PREPARE');
   if (orders.some((o) => !o.deletedOnRpos && o.rposStatus === 1)) possibleActions.push('VALIDATE');
 
   return {
@@ -2913,6 +2919,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
     department,
     proposalId: proposal?.id || null,
     articlesCount,
+    articlesWithQuantityCount,
     estimatedAmountCfa,
     hasExistingOrder,
     orders,
