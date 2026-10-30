@@ -96,6 +96,14 @@ const TOOL_CAPABILITY = {
   // getSalesHistory/getParetoArticles, cette information n'a de sens que pour qui peut déjà consulter
   // les ventes du magasin.
   getDataAvailability: 'sales',
+  // Workflow d'action du chatbot (passer/valider une commande de rayon en conversation, demande
+  // explicite du 30/10/2026) : 'orders' couvre déjà sémantiquement les commandes/propositions. Le
+  // vrai contrôle de périmètre (département assigné, magasin) est fait DANS ces deux fonctions
+  // (chatbotToolsService.js), pas seulement via cette capacité — même raisonnement que
+  // getShopUsers ci-dessus : la capacité évite le fail-closed générique, elle ne remplace jamais
+  // un contrôle de périmètre explicite.
+  getDepartmentOrderStatus: 'orders',
+  executeDepartmentOrderAction: 'orders',
 };
 
 /** getRevenue seul est ambigu : CA global (revenueShop) si aucun filtre, CA d'un périmètre précis (revenueArticle) sinon. */
@@ -366,9 +374,26 @@ async function isEanInUserScope(shopId, ean, user) {
   return filterProposalLinesForUser([latestLineForEan], user).length > 0;
 }
 
+/**
+ * Vérifie qu'un NOM DE RAYON précis (pas un EAN) est dans le périmètre de `user` — pour le
+ * workflow d'action du chatbot (getDepartmentOrderStatus/executeDepartmentOrderAction, demande du
+ * 30/10/2026), où le rayon ciblé est explicite (pas déduit d'une liste déjà filtrée). Même
+ * comparaison que filterProposalLinesForUser (exacte, insensible casse/espaces), sans dépendre
+ * d'une ProposalLine existante.
+ */
+function isDepartmentInUserScope(department, user) {
+  if (!user || !DEPARTMENT_SCOPED_ROLES.has(user.role)) return true;
+  if (!user.assignedDepartment || !department) return false; // rôle restreint : jamais d'accès par défaut
+  const allowed = new Set(
+    user.assignedDepartment.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean)
+  );
+  return allowed.has(department.trim().toLowerCase());
+}
+
 module.exports = {
   CAPABILITIES,
   ROLE_DEFAULTS,
+  isDepartmentInUserScope,
   CAPABILITY_LABELS,
   DEPARTMENT_SCOPED_ROLES,
   getEffectivePermissions,

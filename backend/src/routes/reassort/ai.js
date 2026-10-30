@@ -529,6 +529,10 @@ router.post('/chatbot/ask-stream', async (req, res) => {
     // Demande d'évolution en cours de clarification sur CETTE conversation (cf. commentaire de tête
     // d'askAssistant, demande du 26/09/2026) — relue depuis la conversation, jamais depuis le client.
     const pendingFeatureRequest = conversation.pendingFeatureRequestJson ? JSON.parse(conversation.pendingFeatureRequestJson) : null;
+    // Action de commande de rayon proposée au tour précédent, en attente de confirmation (workflow
+    // du 30/10/2026, cf. commentaire de tête d'askAssistant) — relue depuis la conversation, jamais
+    // depuis le client : le frontend ne peut influencer ni le rayon ni l'action réellement exécutés.
+    const pendingAction = conversation.pendingActionJson ? JSON.parse(conversation.pendingActionJson) : null;
 
     const result = await chatbotService.askAssistant({
       rposShopId: shopId,
@@ -547,6 +551,7 @@ router.post('/chatbot/ask-stream', async (req, res) => {
       onStatus: (label) => send('status', { label }),
       user: currentUser,
       pendingFeatureRequest,
+      pendingAction,
     });
 
     const [assistantMessage] = await Promise.all([
@@ -556,6 +561,7 @@ router.post('/chatbot/ask-stream', async (req, res) => {
         data: {
           updatedAt: new Date(),
           pendingFeatureRequestJson: result.pendingFeatureRequest ? JSON.stringify(result.pendingFeatureRequest) : null,
+          pendingActionJson: result.pendingAction ? JSON.stringify(result.pendingAction) : null,
         },
       }),
     ]);

@@ -2776,6 +2776,175 @@ async function getStockoutPeriodSummary(rposShopId, { startDate, endDate } = {})
   return stockoutEpisodeService.getPeriodLossSummary(rposShopId, { startDate: start.toISOString(), endDate: end.toISOString() });
 }
 
+/**
+ * Workflow d'action du chatbot (passer/valider une commande de rayon en conversation, demande
+ * explicite du 30/10/2026) — deux fonctions, jamais mélangées :
+ * - getDepartmentOrderStatus : LECTURE SEULE, appelée au tour 1 pour présenter l'état du rayon et
+ *   déterminer quelle(s) action(s) ont un sens, jamais pour exécuter quoi que ce soit.
+ * - executeDepartmentOrderAction : SEULE habilitée à écrire, appelée au tour 2 uniquement après
+ *   confirmation explicite de l'utilisateur (contrôlée côté chatbotService.js, pas ici) — revalide
+ *   elle-même l'état avant d'agir (l'état lu au tour 1 peut être périmé) et délègue exclusivement
+ *   aux services déjà utilisés par l'UI classique (proposalService.validateProposalDepartment,
+ *   ordersService.validateRposOrder), jamais une réimplémentation parallèle.
+ *
+ * Contrôle de périmètre département (DEPARTMENT_SCOPED_ROLES) appliqué ICI, dans les deux
+ * fonctions — pas seulement via TOOL_CAPABILITY (qui ne connaît que la capacité 'orders', pas le
+ * département demandé), même raisonnement que isEanInUserScope pour les articles.
+ */
+const proposalService = require('./proposalService');
+const ordersService = require('./ordersService');
+const { isDepartmentInUserScope } = require('./aiPermissionsService');
+
+async function getDepartmentOrderStatus(rposShopId, posId, { department, user } = {}) {
+  if (!department) return { found: false, message: 'Rayon non précisé.' };
+  if (!isDepartmentInUserScope(department, user)) {
+    return { found: false, message: `Le rayon "${department}" n'est pas dans votre périmètre.`, outOfScope: true };
+  }
+
+  const proposal = await prisma.proposal.findFirst({
+    where: { rposShopId, status: { in: ['GENERATED', 'VALIDATING', 'VALIDATED'] } },
+    orderBy: { generatedAt: 'desc' },
+    include: { lines: { where: { department }, select: { ean: true, quantitySuggested: true, wasExcluded: true } } },
+  });
+
+  // Commande(s) déjà créée(s) pour ce rayon, qu'une Proposal "active" existe encore ou non (elle
+  // peut être passée VALIDATED si d'autres rayons ont déjà été traités) — cherché indépendamment
+  // de `proposal` pour ne jamais rater une commande existante.
+  const existingOrders = proposal
+    ? await prisma.proposalOrder.findMany({ where: { proposalId: proposal.id, department } })
+    : [];
+
+  if (!proposal && !existingOrders.length) {
+    return { found: false, message: `Aucune proposition en cours pour le rayon "${department}" sur ce magasin.`, isNormalNegative: true };
+  }
+
+  const lines = (proposal?.lines || []).filter((l) => !l.wasExcluded);
+  const articlesCount = lines.length;
+
+  let estimatedAmount = null;
+  if (articlesCount) {
+    const eans = lines.map((l) => l.ean);
+    const prices = await prisma.productCache.findMany({
+      where: { rposShopId, ean: { in: eans } },
+      select: { ean: true, buyingPrice: true },
+    });
+    const priceByEan = new Map(prices.map((p) => [p.ean, p.buyingPrice]));
+    estimatedAmount = lines.reduce((sum, l) => sum + l.quantitySuggested * (priceByEan.get(l.ean) || 0), 0);
+  }
+
+  // Statut RPOS réel de chaque ProposalOrder déjà créée (une par fournisseur) — jamais une simple
+  // relecture de lastRposStatus en base si l'info est disponible en direct, même raisonnement que
+  // ordersService.validateRposOrder (le statut local peut être périmé).
+  const orders = await Promise.all(existingOrders.map(async (o) => {
+    let liveStatus = o.lastRposStatus;
+    if (o.rposOrderId) {
+      liveStatus = await rpos.getSupplierOrderStatus(posId, o.rposOrderId).catch(() => o.lastRposStatus);
+    }
+    return { rposOrderId: o.rposOrderId, supplierName: o.supplierName, rposStatus: liveStatus };
+  }));
+
+  const hasExistingOrder = orders.length > 0;
+  const possibleActions = [];
+  if (!hasExistingOrder && articlesCount > 0) possibleActions.push('PREPARE');
+  if (orders.some((o) => o.rposStatus === 1)) possibleActions.push('VALIDATE');
+
+  return {
+    found: true,
+    department,
+    proposalId: proposal?.id || null,
+    articlesCount,
+    estimatedAmount,
+    hasExistingOrder,
+    orders,
+    possibleActions,
+  };
+}
+
+async function executeDepartmentOrderAction({ department, action, proposalId, rposOrderId, user, rposShopId, posId, onStatus }) {
+  if (!isDepartmentInUserScope(department, user)) {
+    const err = new Error(`Le rayon "${department}" n'est pas dans votre périmètre.`);
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (action === 'PREPARE') {
+    if (!proposalId) throw new Error('proposalId requis pour la mise en préparation.');
+    // Revalidation de l'état AVANT d'agir (l'état lu au tour 1 a pu changer) — même garde que
+    // proposalService.validateProposalDepartment lui-même, vérifiée ici une seconde fois pour
+    // pouvoir répondre un message clair avant même de créer le ProposalGenerationRun.
+    const existingOrders = await prisma.proposalOrder.findMany({ where: { proposalId, department } });
+    if (existingOrders.length) {
+      const refs = existingOrders.map((o) => o.rposOrderReference || o.rposOrderId || '—').join(', ');
+      const err = new Error(`Le rayon "${department}" a déjà été validé (commande(s) RPOS ${refs}) — impossible de relancer la mise en préparation.`);
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const run = await prisma.proposalGenerationRun.create({
+      data: { rposShopId, status: 'RUNNING', step: 'CREATE_ORDER', runType: 'VALIDATE' },
+    });
+
+    const onProgress = async (p) => {
+      await prisma.proposalGenerationRun.update({
+        where: { id: run.id },
+        data: {
+          step: p.step,
+          ...(p.groupsTotal !== undefined ? { articlesTotal: p.groupsTotal } : {}),
+          ...(p.groupsProcessed !== undefined ? { articlesProcessed: p.groupsProcessed } : {}),
+          ...(p.currentSupplierName !== undefined ? { lastArticleLabel: `${p.currentDeliveryType || ''} ${p.currentSupplierName || ''}`.trim() } : {}),
+        },
+      }).catch(() => {});
+    };
+
+    (async () => {
+      try {
+        const result = await proposalService.validateProposalDepartment({
+          proposalId, posId, shopId: rposShopId, userEmail: user?.email, department,
+          decisions: [], orderHeader: {}, validateAfterCreate: false, onProgress,
+        });
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'DONE', step: 'DONE', proposalId, completedAt: new Date(), validateDepartmentResultJson: JSON.stringify(result) },
+        });
+      } catch (error) {
+        await prisma.proposalGenerationRun.update({
+          where: { id: run.id },
+          data: { status: 'ERROR', errorMessage: error.message, completedAt: new Date() },
+        }).catch(() => {});
+      }
+    })();
+
+    // Polling interne (le chatbot reste sur son propre flux SSE, pas un second canal dédié au
+    // run) — timeout dur 60s : au-delà, le run continue réellement en tâche de fond, seule la
+    // réponse chatbot ne l'attend plus (demande explicite : jamais perdre le travail déjà lancé).
+    const POLL_INTERVAL_MS = 1000;
+    const TIMEOUT_MS = 60000;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      const current = await prisma.proposalGenerationRun.findUnique({ where: { id: run.id } });
+      if (current.status === 'DONE') {
+        return { success: true, action: 'PREPARE', department, result: JSON.parse(current.validateDepartmentResultJson || '{}') };
+      }
+      if (current.status === 'ERROR') {
+        throw new Error(current.errorMessage || 'Échec de la mise en préparation.');
+      }
+      if (onStatus) onStatus(`Création de la commande en cours... (${current.lastArticleLabel || current.step || ''})`.trim());
+    }
+    return { success: true, action: 'PREPARE', department, runId: run.id, stillRunning: true,
+      message: 'La création de la commande prend plus de temps que prévu — elle continue en tâche de fond. Vérifiez son statut dans Proposition de commande.' };
+  }
+
+  if (action === 'VALIDATE') {
+    if (!rposOrderId) throw new Error('rposOrderId requis pour la validation.');
+    const proposalOrder = await prisma.proposalOrder.findFirst({ where: { rposOrderId, department } });
+    const result = await ordersService.validateRposOrder({ posId, rposOrderId, proposalOrder });
+    return { ...result, action: 'VALIDATE', department };
+  }
+
+  throw new Error(`Action inconnue : ${action}`);
+}
+
 module.exports = {
   getStoreStock,
   getShopUsers,
@@ -2819,4 +2988,6 @@ module.exports = {
   getStockoutEpisodes,
   getStockoutEpisodeDetail,
   getStockoutPeriodSummary,
+  getDepartmentOrderStatus,
+  executeDepartmentOrderAction,
 };

@@ -10,6 +10,7 @@
  */
 const prisma = require('../utils/prisma');
 const crypto = require('./cryptoService');
+const nodeCrypto = require('crypto');
 const systemConfig = require('./systemConfigService');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { enqueueAiRequest } = require('../utils/aiRequestQueue');
@@ -729,6 +730,251 @@ function callWithFallback(prompt, context) {
 }
 
 /**
+ * Mécanisme `tools`/function-calling natif, MULTI-PROVIDER — ajouté le 30/10/2026 pour le
+ * workflow d'action du chatbot (passer/valider une commande de rayon) et pour remplacer, en
+ * complément, le fallback d'intention texte-brut fragile (detectIntentViaLlm dans
+ * chatbotService.js, qui faisait deviner un JSON au modèle et le parsait par regex).
+ *
+ * Généralisé le 30/10/2026 (demande explicite de l'utilisateur : "moi j'utilise gemini pas
+ * entropic... je veux que ca fonctionne sur plusieur model") — la première version ne considérait
+ * que les clés `provider:'anthropic'`, inutilisable pour un compte qui n'a configuré que Gemini.
+ * Chaque provider a son propre format natif de function-calling (Anthropic: tools/tool_use ;
+ * Gemini: function_declarations/functionCall ; OpenAI/Nvidia: tools/tool_calls) — ce module les
+ * traduit tous vers/depuis un format PIVOT neutre, pour que chatbotService.js n'ait jamais à
+ * savoir quel provider a répondu (même principe que callWithFallback/streamWithFallback, mais
+ * ceux-ci utilisent le format "un seul prompt texte -> JSON brut en texte", incompatible avec les
+ * payloads tools/messages multi-tours requis ici).
+ *
+ * Format PIVOT d'ENTRÉE : { systemPrompt, messages: [{role:'user', content} |
+ * {role:'assistant', text, toolCall:{id,name,input}} | {role:'tool_result', toolCallId,
+ * content}], toolSchemas: [{name, description, input_schema}], toolChoice: {type:'auto'|'none'}
+ * | {type:'tool', name} }.
+ * Format PIVOT de SORTIE : { textBlocks: [string], toolCalls: [{id, name, input}], providerUsed,
+ * keyLabel }.
+ */
+function buildAnthropicToolsRequest({ systemPrompt, messages, toolSchemas, toolChoice }, apiKey, model) {
+  const anthropicMessages = messages.map((m) => {
+    if (m.role === 'tool_result') return { role: 'user', content: [{ type: 'tool_result', tool_use_id: m.toolCallId, content: m.content }] };
+    if (m.role === 'assistant' && m.toolCall) {
+      const content = [];
+      if (m.text) content.push({ type: 'text', text: m.text });
+      content.push({ type: 'tool_use', id: m.toolCall.id, name: m.toolCall.name, input: m.toolCall.input });
+      return { role: 'assistant', content };
+    }
+    return { role: m.role, content: m.content };
+  });
+  const noTools = toolChoice?.type === 'none' || !toolSchemas?.length;
+  return {
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: {
+      model, max_tokens: 2048,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: anthropicMessages,
+      ...(noTools ? {} : {
+        tools: toolSchemas,
+        tool_choice: toolChoice?.type === 'tool' ? { type: 'tool', name: toolChoice.name } : { type: 'auto' },
+      }),
+    },
+  };
+}
+function parseAnthropicToolsResponse(data) {
+  const content = data.content || [];
+  return {
+    textBlocks: content.filter((b) => b.type === 'text').map((b) => b.text),
+    toolCalls: content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, input: b.input || {} })),
+  };
+}
+
+// Associe chaque toolCallId pivot au nom de tool qui l'a produit — nécessaire pour Gemini, dont le
+// format natif de tour_result (functionResponse) exige de répéter le NOM du tool, pas juste un id
+// (Gemini n'a pas d'id d'appel natif, cf. parseGeminiToolsResponse ci-dessous).
+function findToolNameForCallId(messages, toolCallId) {
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.toolCall?.id === toolCallId) return m.toolCall.name;
+  }
+  return null;
+}
+function buildGeminiToolsRequest({ systemPrompt, messages, toolSchemas, toolChoice }, apiKey, model, context) {
+  const contents = messages.map((m) => {
+    if (m.role === 'user') return { role: 'user', parts: [{ text: m.content }] };
+    if (m.role === 'assistant' && m.toolCall) {
+      const parts = [];
+      if (m.text) parts.push({ text: m.text });
+      // thoughtSignature (découvert empiriquement le 30/10/2026 avec une vraie clé Gemini) : les
+      // modèles Gemini récents (avec "thinking") EXIGENT de retrouver, sur un functionCall
+      // réinjecté dans l'historique, la signature opaque qu'ILS ont eux-mêmes renvoyée avec cet
+      // appel (400 "Function call is missing a thought_signature" sinon) — jamais une valeur
+      // inventée côté backend, uniquement celle capturée par parseGeminiToolsResponse et
+      // transportée telle quelle sur le toolCall pivot. Absente pour un toolCall produit par un
+      // AUTRE provider (Anthropic/OpenAI) : dans ce cas `thoughtSignature` est simplement undefined
+      // et omis ici, sans jamais planter.
+      const functionCallPart = { functionCall: { name: m.toolCall.name, args: m.toolCall.input } };
+      if (m.toolCall.thoughtSignature) functionCallPart.thoughtSignature = m.toolCall.thoughtSignature;
+      parts.push(functionCallPart);
+      return { role: 'model', parts };
+    }
+    if (m.role === 'tool_result') {
+      const name = findToolNameForCallId(messages, m.toolCallId) || 'tool';
+      // Validé empiriquement le 30/10/2026 avec une vraie clé Gemini : role:'function' (documenté
+      // ailleurs pour d'autres générations de l'API) est REFUSÉ en 400 ("Role 'function' is not
+      // supported... use SYSTEM, USER, MODEL...") par ce endpoint v1beta generateContent — 'user'
+      // est le rôle qui fonctionne réellement pour transporter une part functionResponse ici.
+      return { role: 'user', parts: [{ functionResponse: { name, response: { content: m.content } } }] };
+    }
+    return { role: 'user', parts: [{ text: m.content || '' }] };
+  });
+  const noTools = toolChoice?.type === 'none' || !toolSchemas?.length;
+  return {
+    headers: { 'Content-Type': 'application/json' },
+    body: {
+      ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
+      contents,
+      generationConfig: geminiGenerationConfig(context),
+      ...(noTools ? {} : {
+        tools: [{ function_declarations: toolSchemas.map((s) => ({ name: s.name, description: s.description, parameters: s.input_schema })) }],
+        tool_config: { function_calling_config: toolChoice?.type === 'tool'
+          ? { mode: 'ANY', allowed_function_names: [toolChoice.name] }
+          : { mode: 'AUTO' } },
+      }),
+    },
+  };
+}
+function parseGeminiToolsResponse(data) {
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  return {
+    textBlocks: parts.filter((p) => p.text).map((p) => p.text),
+    // Gemini n'a pas d'id d'appel natif (contrairement à Anthropic/OpenAI) — un id interne est
+    // généré ici pour que le format pivot reste utilisable de façon uniforme par l'appelant.
+    // thoughtSignature capturée ici (cf. buildGeminiToolsRequest) pour pouvoir être restituée telle
+    // quelle si ce toolCall est réinjecté dans l'historique d'un appel suivant.
+    toolCalls: parts.filter((p) => p.functionCall).map((p) => ({
+      id: nodeCrypto.randomUUID(), name: p.functionCall.name, input: p.functionCall.args || {},
+      ...(p.thoughtSignature ? { thoughtSignature: p.thoughtSignature } : {}),
+    })),
+  };
+}
+
+function buildOpenAiToolsRequest({ systemPrompt, messages, toolSchemas, toolChoice }, apiKey) {
+  const openAiMessages = [];
+  if (systemPrompt) openAiMessages.push({ role: 'system', content: systemPrompt });
+  for (const m of messages) {
+    if (m.role === 'tool_result') { openAiMessages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content }); continue; }
+    if (m.role === 'assistant' && m.toolCall) {
+      openAiMessages.push({
+        role: 'assistant', content: m.text || null,
+        tool_calls: [{ id: m.toolCall.id, type: 'function', function: { name: m.toolCall.name, arguments: JSON.stringify(m.toolCall.input) } }],
+      });
+      continue;
+    }
+    openAiMessages.push({ role: m.role, content: m.content });
+  }
+  const noTools = toolChoice?.type === 'none' || !toolSchemas?.length;
+  return {
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: {
+      model: undefined, // renseigné par l'appelant (callWithToolsFallbackImpl) après le choix du modèle
+      messages: openAiMessages,
+      ...(noTools ? {} : {
+        tools: toolSchemas.map((s) => ({ type: 'function', function: { name: s.name, description: s.description, parameters: s.input_schema } })),
+        tool_choice: toolChoice?.type === 'tool' ? { type: 'function', function: { name: toolChoice.name } } : 'auto',
+      }),
+    },
+  };
+}
+function parseOpenAiToolsResponse(data) {
+  const message = data.choices?.[0]?.message;
+  const toolCalls = (message?.tool_calls || []).map((tc) => {
+    let input = {};
+    try { input = JSON.parse(tc.function.arguments || '{}'); } catch (err) {
+      console.warn(`[aiForecastService] arguments de tool_call OpenAI/Nvidia illisibles pour "${tc.function.name}": ${err.message}`);
+    }
+    return { id: tc.id, name: tc.function.name, input };
+  });
+  return { textBlocks: message?.content ? [message.content] : [], toolCalls };
+}
+
+const TOOLS_REQUEST_BUILDERS = { anthropic: buildAnthropicToolsRequest, gemini: buildGeminiToolsRequest, openai: buildOpenAiToolsRequest, nvidia: buildOpenAiToolsRequest };
+const TOOLS_RESPONSE_PARSERS = { anthropic: parseAnthropicToolsResponse, gemini: parseGeminiToolsResponse, openai: parseOpenAiToolsResponse, nvidia: parseOpenAiToolsResponse };
+const TOOLS_ENDPOINTS = {
+  anthropic: () => 'https://api.anthropic.com/v1/messages',
+  gemini: (apiKey, model) => `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL_BY_PROVIDER.gemini}:generateContent?key=${apiKey}`,
+  openai: () => 'https://api.openai.com/v1/chat/completions',
+  nvidia: () => `${NVIDIA_BASE_URL}/chat/completions`,
+};
+// Chaque provider expose l'usage de tokens sous un nom de champ différent (déjà le cas pour les
+// fonctions callXxx non-tools ci-dessus) — centralisé ici pour callWithToolsFallbackImpl.
+function extractUsageGeneric(provider, data) {
+  if (provider === 'gemini') return { promptTokens: data.usageMetadata?.promptTokenCount, completionTokens: data.usageMetadata?.candidatesTokenCount };
+  if (provider === 'anthropic') return { promptTokens: data.usage?.input_tokens, completionTokens: data.usage?.output_tokens };
+  return { promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens }; // openai, nvidia
+}
+
+async function callWithToolsFallbackImpl({ systemPrompt, messages, toolSchemas, toolChoice }, context) {
+  const SUPPORTED_PROVIDERS = Object.keys(TOOLS_REQUEST_BUILDERS);
+  const keys = await prisma.aiProviderKey.findMany({
+    where: { isActive: true, provider: { in: SUPPORTED_PROVIDERS } },
+    orderBy: { priority: 'asc' },
+  });
+  if (keys.length === 0) {
+    throw new Error('Aucune clé API IA active ne supporte le tool-calling. Ajoutez-en une dans Paramètres > IA (requis pour les actions du chatbot).');
+  }
+
+  const isTransientNetworkError = (err) => /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|network/i.test(err.message || '');
+  const MAX_ATTEMPTS = 2;
+  const errors = [];
+  for (const key of keys) {
+    const buildRequest = TOOLS_REQUEST_BUILDERS[key.provider];
+    const parseResponse = TOOLS_RESPONSE_PARSERS[key.provider];
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const apiKey = crypto.decrypt(key.encryptedApiKey);
+        const model = key.model || DEFAULT_MODEL_BY_PROVIDER[key.provider];
+        const { headers, body } = buildRequest({ systemPrompt, messages, toolSchemas, toolChoice }, apiKey, model, context);
+        // OpenAI/Nvidia : model résolu ici plutôt que dans le builder (qui n'a pas accès à
+        // DEFAULT_MODEL_BY_PROVIDER par provider) — Anthropic le pose déjà lui-même, Gemini n'a
+        // jamais ce champ dans son body (le modèle est dans l'URL), donc ciblé explicitement.
+        if (key.provider === 'openai' || key.provider === 'nvidia') body.model = model;
+        const url = TOOLS_ENDPOINTS[key.provider](apiKey, model);
+        const res = await fetchWithTimeout(url, { method: 'POST', headers, body: JSON.stringify(body) });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => res.statusText);
+          throw new Error(`${key.provider} ${res.status}: ${errText}`);
+        }
+        const data = await res.json();
+        const pivotOut = parseResponse(data);
+        recordAiUsage({ providerKeyId: key.id, context, provider: key.provider, model, ...extractUsageGeneric(key.provider, data) });
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastUsedAt: new Date(), lastError: null, lastErrorAt: null },
+        });
+        return { ...pivotOut, providerUsed: key.provider, keyLabel: key.label };
+      } catch (err) {
+        if (attempt < MAX_ATTEMPTS && isTransientNetworkError(err)) {
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          continue;
+        }
+        errors.push(`${key.label} (${key.provider}): ${err.message}`);
+        await prisma.aiProviderKey.update({
+          where: { id: key.id },
+          data: { lastError: err.message, lastErrorAt: new Date() },
+        }).catch(() => {});
+      }
+    }
+  }
+  throw new Error(`Toutes les clés IA (tool-calling) ont échoué :\n${errors.join('\n')}`);
+}
+
+// Même file d'attente globale que callWithFallback/streamWithFallback — un seul canal régulé
+// d'appels IA dans tout le backend, jamais un second chemin parallèle non mis en file.
+function callWithToolsFallback(args, context) {
+  return enqueueAiRequest(() => callWithToolsFallbackImpl(args, context));
+}
+// Alias de compatibilité (nom historique de la version Anthropic-only) — aucun appelant connu à
+// ce jour en dehors de chatbotService.js, qui a été migré vers callWithToolsFallback directement,
+// mais gardé au cas où un futur appelant externe s'y accrocherait.
+const callAnthropicWithTools = callWithToolsFallback;
+
+/**
  * Teste une clé API isolément (bouton "Tester" dans Paramètres > IA) : envoie un prompt minimal,
  * sans toucher à une proposition ni à AiForecastRun — juste pour vérifier que la clé est valide et
  * que le fournisseur répond, avant de s'en servir sur une vraie analyse.
@@ -1172,4 +1418,4 @@ async function askFollowUpQuestion({ shopReference, shopName, line, shopConfig, 
   return { answer: fullText.trim(), providerUsed };
 }
 
-module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, listModelsForKey, buildArticleSummary, buildStaticArticleAnalysis, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, geminiErrorMessage, DEFAULT_MODEL_BY_PROVIDER };
+module.exports = { runAiForecast, getLatestAiForecast, testProviderKey, listModelsForKey, buildArticleSummary, buildStaticArticleAnalysis, analyzeArticleRealtime, analyzeArticleRealtimeStream, analyzeArticlesBatch, askFollowUpQuestion, streamWithFallback, callWithFallback, callWithToolsFallback, callAnthropicWithTools, geminiErrorMessage, DEFAULT_MODEL_BY_PROVIDER };

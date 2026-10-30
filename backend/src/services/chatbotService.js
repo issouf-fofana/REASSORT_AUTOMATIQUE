@@ -9,7 +9,7 @@
  */
 const prisma = require('../utils/prisma');
 const tools = require('./chatbotToolsService');
-const { streamWithFallback, callWithFallback } = require('./aiForecastService');
+const { streamWithFallback, callWithFallback, callWithToolsFallback } = require('./aiForecastService');
 const systemConfig = require('./systemConfigService');
 const { checkToolPermission, CAPABILITY_LABELS, isEanInUserScope } = require('./aiPermissionsService');
 const featureRequestService = require('./featureRequestService');
@@ -743,41 +743,52 @@ const TOOL_CATALOG = [
   { name: 'getDataAvailability', description: 'Étendue réelle de l\'historique de ventes disponible en base pour ce magasin (date la plus ancienne / la plus récente) — utile pour "depuis quand avez-vous mes données ?", "sur combien de temps portent vos données ?", avant de lancer une comparaison sur une longue période (12 mois, année précédente...).', params: {} },
 ];
 
-const TOOL_CALL_SYSTEM_PROMPT_HEADER = `Tu es un routeur d'intention pour un assistant de réassort en magasin. Voici la liste des outils de données disponibles, au format JSON :
-${JSON.stringify(TOOL_CATALOG, null, 2)}
-
-Question de l'utilisateur : `;
-
-const TOOL_CALL_INSTRUCTIONS = `
-
-Réponds UNIQUEMENT avec un tableau JSON contenant UN SEUL objet, sans aucun texte avant ni après, au format exact :
-[{"tool": "<nom exact d'un outil ci-dessus, ou null si aucun ne correspond>", "params": {<paramètres nommés selon la description de l'outil choisi, ou objet vide>}}]
-Si un outil exige un EAN "OBLIGATOIRE" et qu'aucun code EAN n'est identifiable dans la question, réponds tool: null plutôt que d'inventer un EAN.`;
+// Schémas Anthropic natifs ({name, description, input_schema}) générés depuis TOOL_CATALOG,
+// restreints au même périmètre que VALID_INTENT_TOOLS (jamais élargi au-delà de ce qui est déjà
+// jugé sûr en lecture) — remplace le prompt texte-brut historique (30/10/2026) par le VRAI
+// mécanisme tool_use de l'API Anthropic : le modèle renvoie un appel structuré garanti conforme au
+// schéma, plutôt qu'un JSON à extraire par regex d'un texte libre.
+function toAnthropicToolSchema(catalogEntry) {
+  const properties = {};
+  for (const [key, desc] of Object.entries(catalogEntry.params || {})) {
+    properties[key] = { type: 'string', description: desc };
+  }
+  // required volontairement vide : un paramètre manquant est géré en douceur par le tool lui-même
+  // (ex: found:false), mieux qu'une 400 API Anthropic sur un required non respecté par le modèle.
+  return { name: catalogEntry.name, description: catalogEntry.description, input_schema: { type: 'object', properties, required: [] } };
+}
+const INTENT_FALLBACK_TOOL_SCHEMAS = TOOL_CATALOG.filter((t) => VALID_INTENT_TOOLS.has(t.name)).map(toAnthropicToolSchema);
 
 /**
  * Filet de repli n°3 (après mots-clés, EAN explicite, continuation d'historique) : quand aucune
  * règle déterministe n'a permis d'identifier un outil, on demande au LLM lui-même de choisir parmi
  * le catalogue — plutôt que d'abandonner directement sur "je ne comprends pas" pour une question mal
  * formulée par rapport aux mots-clés connus mais dont l'intention réelle est claire pour un LLM.
- * Approche "JSON structuré par prompt" (validée le 17/09/2026) plutôt que function-calling natif de
- * chaque fournisseur : un seul prompt uniforme, réutilise callWithFallback tel quel (même bascule
- * multi-clés que le reste du chatbot), aucun adaptateur par fournisseur à maintenir. Ne remplace
- * JAMAIS le routage par mots-clés (rapide et gratuit) — n'est appelé qu'en dernier recours.
- * Ne fait JAMAIS planter la conversation : toute erreur (LLM indisponible, JSON invalide, outil
- * inconnu) retombe silencieusement sur null, exactement comme si aucune intention n'avait été
- * détectée.
+ *
+ * Utilise le vrai mécanisme de tool-calling natif (callWithToolsFallback, 30/10/2026, généralisé
+ * multi-provider le même jour) — remplace l'ancien prompt "réponds un JSON" parsé par regex,
+ * fragile et sans garantie de structure. Ne remplace JAMAIS le routage par mots-clés (rapide et
+ * gratuit) — n'est appelé qu'en dernier recours. Ne fait JAMAIS planter la conversation : toute
+ * erreur (aucune clé IA active supportant le tool-calling, réseau, etc.) retombe silencieusement
+ * sur null, exactement comme si aucune intention n'avait été détectée — repli IDENTIQUE au
+ * comportement historique, aucune régression.
  */
 async function detectIntentViaLlm(question) {
   try {
-    const prompt = TOOL_CALL_SYSTEM_PROMPT_HEADER + question + TOOL_CALL_INSTRUCTIONS;
-    const { result } = await callWithFallback(prompt, 'chatbot-intent-routing');
-    const choice = Array.isArray(result) ? result[0] : null;
-    if (!choice || !choice.tool) return null;
-    if (!VALID_INTENT_TOOLS.has(choice.tool)) return null;
-    return { toolName: choice.tool, params: choice.params && typeof choice.params === 'object' ? choice.params : {} };
+    const result = await callWithToolsFallback({
+      systemPrompt: 'Tu es un routeur d\'intention pour un assistant de réassort en magasin. Choisis UN SEUL outil parmi ceux fournis qui correspond le mieux à la question, avec ses paramètres. Si un outil exige un EAN et qu\'aucun code EAN n\'est identifiable dans la question, n\'appelle aucun outil plutôt que d\'en inventer un.',
+      messages: [{ role: 'user', content: question }],
+      toolSchemas: INTENT_FALLBACK_TOOL_SCHEMAS,
+      toolChoice: { type: 'auto' },
+    }, 'chatbot-intent-routing');
+    const toolCall = result.toolCalls[0];
+    if (!toolCall || !VALID_INTENT_TOOLS.has(toolCall.name)) return null;
+    return { toolName: toolCall.name, params: toolCall.input && typeof toolCall.input === 'object' ? toolCall.input : {} };
   } catch (err) {
-    // LLM indisponible, JSON mal formé, toutes les clés en échec... : jamais remonté à l'utilisateur,
-    // le chatbot se comporte comme si aucun outil n'avait été identifié (message générique existant).
+    // Aucune clé IA active supportant le tool-calling, réseau, etc. : jamais remonté à
+    // l'utilisateur pour ce chemin de LECTURE — le chatbot se comporte comme si aucun outil n'avait
+    // été identifié (comportement historique inchangé). Le workflow d'ACTION (plus bas) a lui un
+    // traitement différent : une erreur y est toujours visible, jamais absorbée en silence.
     return null;
   }
 }
@@ -1893,6 +1904,168 @@ Réponds UNIQUEMENT avec un tableau JSON contenant UN SEUL objet, sans aucun tex
  * Retourne un résumé factuel de ce qui a RÉELLEMENT été fait, pour que le texte de réponse au client
  * (cf. askAssistant) ne prétende jamais un enregistrement qui n'a pas eu lieu (§9).
  */
+/**
+ * Workflow d'action du chatbot (passer/valider une commande de rayon en conversation, demande
+ * explicite du 30/10/2026) — 2 tours, confirmation OBLIGATOIRE entre eux, JAMAIS par regex pour
+ * l'écriture elle-même (contrairement au reste du routage d'intention ci-dessus). Le tool
+ * d'écriture (executeDepartmentOrderAction) n'est JAMAIS exposé au tour 1 (impossible pour le
+ * modèle de l'appeler), et le backend ignore les paramètres du tool_use du tour 2 pour
+ * l'exécution réelle — seules les valeurs figées dans pendingActionJson au tour 1 comptent (cf.
+ * executeDepartmentOrderAction/getDepartmentOrderStatus dans chatbotToolsService.js).
+ */
+const ORDER_ACTION_TOOL_SCHEMAS = {
+  read: {
+    name: 'getDepartmentOrderStatus',
+    description: 'Donne l\'état ACTUEL d\'un rayon vis-à-vis de la commande (proposition existante ou non, statut RPOS de la commande déjà créée le cas échéant) — à utiliser SYSTÉMATIQUEMENT avant toute action de mise en préparation ou de validation, jamais pour exécuter une action.',
+    input_schema: { type: 'object', properties: { department: { type: 'string', description: 'Nom exact du rayon concerné' } }, required: ['department'] },
+  },
+  write: {
+    name: 'executeDepartmentOrderAction',
+    description: 'Exécute RÉELLEMENT une action d\'écriture sur la commande d\'un rayon (mise en préparation OU validation/attente de livraison) — ne JAMAIS appeler sans confirmation EXPLICITE déjà obtenue de l\'utilisateur dans cette conversation.',
+    input_schema: { type: 'object', properties: {
+      department: { type: 'string', description: 'Nom exact du rayon concerné' },
+      action: { type: 'string', enum: ['PREPARE', 'VALIDATE'], description: 'PREPARE = créer/envoyer la commande (mise en préparation RPOS) ; VALIDATE = faire passer une commande déjà en préparation vers "attente de livraison"' },
+    }, required: ['department', 'action'] },
+  },
+};
+
+// Orientation large par mots-clés — sert UNIQUEMENT à router vers ce chemin d'action plutôt que
+// vers le routage de lecture classique, JAMAIS à extraire le rayon/l'action réellement visés
+// (laissé au modèle via tool_use, cf. runOrderActionTurn1) : une regex mal formée ici ne peut au
+// pire que mal ORIENTER la question, jamais mal EXÉCUTER une écriture.
+const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|mets?|mettre)\b.{0,40}\b(commande|rayon)\b/i;
+function detectOrderActionIntent(question) {
+  return ORDER_ACTION_INTENT_REGEX.test(question);
+}
+
+const ORDER_ACTION_CONFIRM_REGEX = /^\s*(oui|ouais|ouai|vas-?y|d'accord|daccord|ok|okay|exactement|c'est ça|cest ca|tout à fait|tout a fait|confirme|je confirme)\s*[!.?]*\s*$/i;
+const ORDER_ACTION_CANCEL_REGEX = /^\s*(non|annule|annuler|laisse|stop|pas maintenant|plus tard)\b/i;
+const PENDING_ACTION_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Tour 1 : lecture SEULE, jamais d'écriture — le tool d'écriture n'est même pas présenté au
+ * modèle (toolSchemas ne contient que getDepartmentOrderStatus). Pose pendingAction AVANT de
+ * répondre, pour que le tour suivant sache quoi confirmer.
+ */
+async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
+  const result = await callWithToolsFallback({
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. L\'utilisateur veut agir sur la commande d\'un rayon. Identifie le rayon concerné et appelle getDepartmentOrderStatus pour connaître son état avant de répondre quoi que ce soit.',
+    messages: [{ role: 'user', content: question }],
+    toolSchemas: [ORDER_ACTION_TOOL_SCHEMAS.read],
+    toolChoice: { type: 'auto' },
+  }, 'chatbot-order-action-read');
+
+  const toolCall = result.toolCalls[0];
+  if (!toolCall || toolCall.name !== 'getDepartmentOrderStatus') {
+    // Le modèle n'a pas identifié de rayon exploitable — pas d'action proposée, pas d'erreur :
+    // on laisse le routage normal (plus bas dans askAssistant) traiter la question autrement.
+    // Même comportement si le provider actif (ex: Gemini forcé en mode ANY) ne produit tout de
+    // même aucun tool_call malgré l'intention détectée — aucune exécution n'a eu lieu, rien à
+    // perdre (cf. plan, section fiabilité multi-provider).
+    return null;
+  }
+
+  const department = toolCall.input?.department;
+  const statusResult = await tools.getDepartmentOrderStatus(rposShopId, posId, { department, user });
+
+  const followUp = await callWithToolsFallback({
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Présente l\'état du rayon à l\'utilisateur (nombre d\'articles, montant estimé, commande déjà existante ou non) de façon brève, puis demande-lui EXPLICITEMENT de confirmer l\'action à effectuer (mise en préparation, ou validation/attente de livraison si une commande existe déjà au statut adéquat). Ne prétends jamais avoir déjà exécuté l\'action.',
+    messages: [
+      { role: 'user', content: question },
+      { role: 'assistant', text: null, toolCall },
+      { role: 'tool_result', toolCallId: toolCall.id, content: JSON.stringify(statusResult) },
+    ],
+    toolSchemas: [],
+    toolChoice: { type: 'none' },
+  }, 'chatbot-order-action-read');
+
+  const answer = followUp.textBlocks.join('\n').trim() || 'Je n\'ai pas pu déterminer l\'état de ce rayon.';
+
+  if (!statusResult.found || statusResult.outOfScope || !statusResult.possibleActions?.length) {
+    return { answer, pendingAction: null };
+  }
+
+  // Action déduite si une seule possible, sinon laissée à préciser par l'utilisateur au tour
+  // suivant (sa réponse sera alors interprétée par detectOrderActionIntent, pas par ce chemin de
+  // confirmation directe) — pendingAction.action peut donc être null ici.
+  const action = statusResult.possibleActions.length === 1 ? statusResult.possibleActions[0] : null;
+  const lastOrder = statusResult.orders?.[0];
+
+  return {
+    answer,
+    pendingAction: {
+      department,
+      action,
+      proposalId: statusResult.proposalId || null,
+      rposOrderId: lastOrder?.rposOrderId || null,
+      snapshotSummary: `${statusResult.articlesCount} article(s)${statusResult.estimatedAmount != null ? `, ~${Math.round(statusResult.estimatedAmount)} FCFA` : ''}`,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+/**
+ * Tour 2 : confirmation + exécution réelle. Le détecteur de confirmation est appliqué ICI, côté
+ * serveur, sur la question RÉELLE de l'utilisateur — jamais un paramètre que le modèle pourrait
+ * remplir lui-même. Les valeurs d'exécution viennent EXCLUSIVEMENT de pendingAction (figées au
+ * tour 1), jamais du tool_use produit par le modèle à ce tour, même s'il en renvoyait d'autres.
+ */
+async function runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user }) {
+  const age = Date.now() - new Date(pendingAction.createdAt).getTime();
+  if (age > PENDING_ACTION_TTL_MS) {
+    return { answer: 'Cette proposition d\'action a expiré — reposez votre question pour revérifier l\'état actuel du rayon.', pendingAction: null };
+  }
+
+  if (ORDER_ACTION_CANCEL_REGEX.test(question)) {
+    return { answer: 'D\'accord, aucune action n\'a été effectuée.', pendingAction: null };
+  }
+
+  // Le rayon a déjà une seule action possible (pendingAction.action déjà déduit au tour 1) : une
+  // confirmation courte suffit. Sinon (ambigu), l'utilisateur doit préciser l'action elle-même
+  // dans sa réponse — dans ce cas on NE confirme QUE si le mot "préparation"/"validation" apparaît
+  // explicitement, jamais une simple confirmation vague qui n'aurait rien précisé.
+  let action = pendingAction.action;
+  if (!action) {
+    if (/pr[ée]paration/i.test(question)) action = 'PREPARE';
+    else if (/valid/i.test(question)) action = 'VALIDATE';
+    else return { answer: 'Précisez : voulez-vous la mettre en préparation, ou la valider (attente de livraison) ?', pendingAction };
+  } else if (!ORDER_ACTION_CONFIRM_REGEX.test(question)) {
+    // Ni confirmation claire, ni refus explicite (déjà traité plus haut) : on n'exécute rien et on
+    // efface la proposition en attente plutôt que de risquer une exécution sur un message ambigu —
+    // la question sera retraitée normalement par le routage habituel.
+    return null;
+  }
+
+  let execResult;
+  try {
+    execResult = await tools.executeDepartmentOrderAction({
+      department: pendingAction.department,
+      action,
+      proposalId: pendingAction.proposalId,
+      rposOrderId: pendingAction.rposOrderId,
+      user, rposShopId, posId,
+    });
+  } catch (err) {
+    return { answer: `L'action n'a pas pu être effectuée : ${err.message}`, pendingAction: null };
+  }
+
+  // L'exécution ci-dessus ne dépend JAMAIS d'un tool_use du modèle (sécurité déjà actée, cf.
+  // commentaire de tête du workflow) — seul ce dernier appel de RÉDACTION change de transport
+  // multi-provider. Si ce dernier échoue ou renvoie 0 texte (provider non-Anthropic moins fiable
+  // sur le function-calling, voire ici même pas de tool en jeu), le filet `answer` ci-dessous
+  // reste la seule source de vérité affichée : l'action, elle, a déjà réellement eu lieu.
+  const followUp = await callWithToolsFallback({
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Résume clairement le résultat de l\'action qui vient d\'être exécutée (succès ou échec, référence de commande si disponible) à l\'utilisateur.',
+    messages: [{ role: 'user', content: `Résultat de l'action "${action}" sur le rayon "${pendingAction.department}" : ${JSON.stringify(execResult)}` }],
+    toolSchemas: [],
+    toolChoice: { type: 'none' },
+  }, 'chatbot-order-action-write').catch(() => null);
+
+  const answer = (followUp?.textBlocks || []).join('\n').trim() || `Action "${action}" effectuée sur le rayon "${pendingAction.department}".`;
+
+  return { answer, pendingAction: null };
+}
+
 async function recordFeatureRequest(decision, { user }) {
   const similar = await featureRequestService.findSimilarRequest(`${decision.title} — ${decision.problem}`);
   if (similar) {
@@ -1919,7 +2092,7 @@ async function recordFeatureRequest(decision, { user }) {
  * en réponse à une clarification faisait basculer sur getRevenue/getStockoutRisks, la demande
  * d'origine — un résumé quotidien WhatsApp — n'étant alors jamais complétée ni enregistrée).
  */
-async function askAssistant({ rposShopId, posId, shopReference, shopName, department, subDepartment, conversationHistory, question, onTextChunk, onStatus, user, pendingFeatureRequest }) {
+async function askAssistant({ rposShopId, posId, shopReference, shopName, department, subDepartment, conversationHistory, question, onTextChunk, onStatus, user, pendingFeatureRequest, pendingAction }) {
   // onStatus (ajouté le 14/10/2026, demande explicite : "a achaque etape de generation il dois dire
   // ou il est... pour ne pas attendre sans rien voir") — 3 étapes génériques fixes, jamais une par
   // outil (trop de call sites à instrumenter pour un gain marginal, et fragile à maintenir à chaque
@@ -1928,6 +2101,41 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // totalement silencieuse côté utilisateur, d'où ce correctif.
   const emitStatus = (label) => { if (onStatus) onStatus(label); };
   emitStatus('Analyse de la question...');
+
+  // Workflow d'action du chatbot (passer/valider une commande de rayon, 30/10/2026) — priorité
+  // ABSOLUE sur tout le reste du routage, même raisonnement que pendingFeatureRequest ci-dessous :
+  // si une action est en attente de confirmation sur CETTE conversation, le message suivant doit
+  // être interprété comme une réponse à CETTE proposition avant toute autre règle (sinon un mot-clé
+  // métier dans la confirmation pourrait faire basculer sur un tool de lecture classique au lieu
+  // d'exécuter/annuler l'action attendue). Sinon, teste l'orientation large vers un NOUVEAU tour 1
+  // — toujours avant detectIntentViaLlm (le fallback générique lecture), pour qu'une formulation
+  // d'action ne retombe jamais sur un tool de lecture par erreur de routage.
+  if (pendingAction) {
+    emitStatus('Vérification de la confirmation...');
+    const turn2 = await runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user });
+    if (turn2) {
+      return {
+        answer: turn2.answer, providerUsed: null, toolUsed: null, toolResult: null, wantsVisual: false,
+        featureRequest: null, pendingFeatureRequest: null, pendingAction: turn2.pendingAction,
+        _featureTrackingContext: null,
+      };
+    }
+    // turn2 === null : ni confirmation ni refus clairs — on efface silencieusement la proposition
+    // en attente et on retombe sur le routage normal ci-dessous pour cette même question.
+  } else if (detectOrderActionIntent(question)) {
+    emitStatus('Récupération des données...');
+    const turn1 = await runOrderActionTurn1({ question, rposShopId, posId, user });
+    if (turn1) {
+      return {
+        answer: turn1.answer, providerUsed: null, toolUsed: 'getDepartmentOrderStatus', toolResult: null, wantsVisual: false,
+        featureRequest: null, pendingFeatureRequest: null, pendingAction: turn1.pendingAction,
+        _featureTrackingContext: null,
+      };
+    }
+    // turn1 === null : le modèle n'a identifié aucun rayon exploitable — on retombe sur le routage
+    // normal ci-dessous (ex: question mal formulée, pas réellement une action de commande).
+  }
+
   const { toolName, toolResult, reusedFromHistory, secondaryToolName, secondaryToolResult } = await runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user });
   if (toolName && !reusedFromHistory) emitStatus('Récupération des données...');
   // En clarification active, le suivi de demande doit passer AVANT tout affichage de données : la
@@ -1998,7 +2206,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   return {
     answer: finalAnswer, providerUsed, toolUsed: toolName, toolResult: effectiveToolResult,
     wantsVisual: isVisualRequest(question) || !!reusedFromHistory,
-    featureRequest: null, pendingFeatureRequest,
+    featureRequest: null, pendingFeatureRequest, pendingAction: null,
     // Consommés uniquement par la route ask-stream, jamais renvoyés au client (cf. plus bas) — tout
     // ce dont runFeatureRequestTracking a besoin pour tourner après coup, sans redemander ces
     // valeurs au moment de l'appeler.

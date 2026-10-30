@@ -9,6 +9,7 @@ const rpos = require('../../services/rposClient');
 const rposServers = require('../../services/rposServersService');
 const { DEPARTMENT_SCOPED_ROLES } = require('../../services/aiPermissionsService');
 const { getRevenueAllShops } = require('../../services/chatbotToolsService');
+const ordersService = require('../../services/ordersService');
 
 // Un Rayonniste/Chef de département ne voit que les commandes de SON rayon — les commandes RPOS
 // sont créées une par rayon (readme §11, ProposalOrder.department) donc chaque commande a un
@@ -494,29 +495,14 @@ router.post('/orders/:rposOrderId/validate', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Commande introuvable pour ce magasin' });
     }
 
-    // Contrôle du statut RPOS réel juste avant d'agir (jamais une simple relecture de la base, qui
-    // peut être périmée) : évite un appel RPOS inutile sur une commande déjà validée ou annulée, et
-    // renvoie un message explicite plutôt que de laisser RPOS répondre une erreur opaque.
-    // getSupplierOrderStatus renvoie directement le statut numérique RPOS (1-6), ou null si la
-    // commande est introuvable côté RPOS (cf. sa définition).
-    const currentStatus = await rpos.getSupplierOrderStatus(posId, req.params.rposOrderId);
-    if (currentStatus !== 1) {
-      return res.status(409).json({
-        success: false,
-        message: `Cette commande n'est plus "en préparation" sur RPOS (statut actuel : ${currentStatus ?? 'introuvable'}) — impossible de la valider depuis ici.`,
-      });
-    }
-
-    await rpos.validateSupplierOrder(posId, { orderId: req.params.rposOrderId });
-
-    if (proposalOrder) {
-      await prisma.proposalOrder.update({ where: { id: proposalOrder.id }, data: { rposOrderValidated: true, lastRposStatus: 2 } });
-    }
-
-    res.json({ success: true, message: 'Commande validée sur RPOS — elle sera prise en compte par l\'entrepôt.' });
+    // Logique de validation (revérification du statut RPOS réel + appel RPOS + mise à jour locale)
+    // factorisée dans ordersService.js (30/10/2026) pour être réutilisée à l'identique par le
+    // workflow d'action du chatbot — comportement HTTP inchangé.
+    const result = await ordersService.validateRposOrder({ posId, rposOrderId: req.params.rposOrderId, proposalOrder });
+    res.json(result);
   } catch (error) {
     console.error('Validate order error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 });
 

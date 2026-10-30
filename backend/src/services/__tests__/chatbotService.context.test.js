@@ -19,7 +19,7 @@ jest.mock('../chatbotToolsService', () => ({
   getSalesHistory: jest.fn().mockResolvedValue({ found: true, totalQuantity: 42 }),
   getShopDepartments: jest.fn().mockResolvedValue([]),
 }));
-jest.mock('../aiForecastService', () => ({ streamWithFallback: jest.fn(), callWithFallback: jest.fn() }));
+jest.mock('../aiForecastService', () => ({ streamWithFallback: jest.fn(), callWithFallback: jest.fn(), callWithToolsFallback: jest.fn() }));
 jest.mock('../systemConfigService', () => ({
   getValue: jest.fn().mockResolvedValue('false'),
   KEYS: { CHATBOT_INTENT_RULES: 'CHATBOT_INTENT_RULES', CHATBOT_LLM_FALLBACK_ENABLED: 'CHATBOT_LLM_FALLBACK_ENABLED' },

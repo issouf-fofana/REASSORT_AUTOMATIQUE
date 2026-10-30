@@ -1694,6 +1694,15 @@ model ChatbotConversation {
   // effectivement enregistrée/enrichie, ou si l'IA juge que l'utilisateur a changé de sujet.
   pendingFeatureRequestJson String? @map("pending_feature_request_json")
 
+  // Action de commande de rayon proposée au tour précédent, en attente de confirmation explicite
+  // de l'utilisateur (chatbotService.js, workflow "passe/valide la commande du rayon X" du
+  // 30/10/2026) : { department, action, proposalId, rposOrderId, snapshotSummary, createdAt }. Le
+  // tool d'écriture (executeDepartmentOrderAction) n'utilise JAMAIS les paramètres renvoyés par le
+  // modèle au tour de confirmation — uniquement les valeurs figées ici au tour précédent, pour
+  // qu'une hallucination du LLM ne puisse jamais changer le rayon/l'action réellement exécutés.
+  // Effacé après toute tentative (succès ou échec) ou expiré (TTL applicatif ~15 min).
+  pendingActionJson String? @map("pending_action_json")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
