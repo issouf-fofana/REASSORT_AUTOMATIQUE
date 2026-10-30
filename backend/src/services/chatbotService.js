@@ -267,17 +267,18 @@ function normalizeForMatch(str) {
  * de pouvoir comparer. Retourne null si aucun rayon n'est mentionné, ou si aucun rayon réel ne
  * correspond d'assez près (jamais un rayon halluciné/approximatif transmis aux outils).
  */
-async function extractDepartment(question, rposShopId) {
-  const match = (question || '').match(DEPARTMENT_NAME_REGEX);
-  if (!match) return null;
-  const captured = match[1].trim();
-  const firstWord = captured.split(/\s+/)[0].toLowerCase();
-  if (DEPARTMENT_GENERIC_WORDS.has(firstWord)) return null;
-
-  const realDepartments = await tools.getShopDepartments(rposShopId);
-  if (!realDepartments.length) return null;
-
-  const normalizedCaptured = normalizeForMatch(captured);
+// Résout un nom de rayon tapé en langage libre (accents/casse variables, pluriel/singulier,
+// orthographe approximative) vers le nom RÉEL exact tel qu'il existe en base pour CE magasin —
+// extrait le 30/10/2026 de la logique d'extractDepartment ci-dessous pour être réutilisé par le
+// workflow d'action (runOrderActionTurn1) : le nom de rayon renvoyé par le modèle dans un tool_use
+// (ex: "Épicerie salée", accentué/casse mixte) ne correspond presque jamais tel quel au nom RPOS
+// stocké (ex: "EPICERIE SALEE", majuscules sans accents) — une comparaison stricte sur `department`
+// dans une requête Prisma échouerait silencieusement (articlesCount:0 alors que les articles
+// existent réellement, bug observé en conditions réelles le 30/10/2026). Retourne null si aucun
+// rayon réel ne correspond d'assez près (jamais un rayon haluciné/approximatif transmis aux outils).
+function resolveRealDepartmentName(candidate, realDepartments) {
+  if (!candidate || !realDepartments?.length) return null;
+  const normalizedCaptured = normalizeForMatch(candidate);
   if (!normalizedCaptured) return null;
 
   // Correspondance dans les deux sens (le nom tapé peut être un sous-mot du vrai nom, ex: "liquide"
@@ -301,6 +302,17 @@ async function extractDepartment(question, rposShopId) {
     return capturedWords.some((w) => normalizedReal.includes(w));
   });
   return wordMatch || null;
+}
+
+async function extractDepartment(question, rposShopId) {
+  const match = (question || '').match(DEPARTMENT_NAME_REGEX);
+  if (!match) return null;
+  const captured = match[1].trim();
+  const firstWord = captured.split(/\s+/)[0].toLowerCase();
+  if (DEPARTMENT_GENERIC_WORDS.has(firstWord)) return null;
+
+  const realDepartments = await tools.getShopDepartments(rposShopId);
+  return resolveRealDepartmentName(captured, realDepartments);
 }
 
 /**
@@ -1932,8 +1944,16 @@ const ORDER_ACTION_TOOL_SCHEMAS = {
 // Orientation large par mots-clés — sert UNIQUEMENT à router vers ce chemin d'action plutôt que
 // vers le routage de lecture classique, JAMAIS à extraire le rayon/l'action réellement visés
 // (laissé au modèle via tool_use, cf. runOrderActionTurn1) : une regex mal formée ici ne peut au
-// pire que mal ORIENTER la question, jamais mal EXÉCUTER une écriture.
-const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|mets?|mettre)\b.{0,40}\b(commande|rayon)\b/i;
+// pire que mal ORIENTER la question, jamais mal EXÉCUTER une écriture — un faux positif retombe
+// sans risque sur le tour 1 (lecture + demande de confirmation), jamais une exécution directe.
+// BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles : "tu peux metre en prepation la
+// commande de l'epicerie salee" ne matchait pas — "metre" (faute de frappe fréquente pour
+// "mettre", sans second "t") n'était pas couvert, et le préfixe "il faut"/"peux-tu" avant le verbe
+// n'était pas anticipé). Élargi délibérément plutôt que de lister chaque variante orthographique :
+// accepte "mett?re"/"met(tre)?" (variantes y compris tronquées), ajoute "valid(e|er|ation)" et
+// "prepar(e|ation|er)" comme déclencheurs à eux seuls (la plupart des formulations réelles
+// contiennent l'un de ces deux mots sans forcément un verbe "mettre/passer" explicite).
+const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|validation|mett?re|mets?|pr[ée]par(?:e|er|ation))\b.{0,60}\b(commande|rayon)\b/i;
 function detectOrderActionIntent(question) {
   return ORDER_ACTION_INTENT_REGEX.test(question);
 }
@@ -1965,7 +1985,16 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
     return null;
   }
 
-  const department = toolCall.input?.department;
+  // BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles) : le modèle renvoie souvent le rayon
+  // avec une casse/accentuation différente du nom RPOS exact stocké en base (ex: "Épicerie salée"
+  // vs "EPICERIE SALEE") — utiliser ce nom tel quel dans la requête Prisma de getDepartmentOrderStatus
+  // (comparaison stricte) donnait silencieusement articlesCount:0 alors que les articles existaient
+  // réellement. Résolu vers le nom RÉEL exact de ce magasin avant tout usage, même mécanisme que
+  // extractDepartment (resolveRealDepartmentName) — jamais une simple normalisation .toLowerCase(),
+  // insuffisante face aux accents et au pluriel/singulier.
+  const rawDepartment = toolCall.input?.department;
+  const realDepartments = await tools.getShopDepartments(rposShopId);
+  const department = resolveRealDepartmentName(rawDepartment, realDepartments) || rawDepartment;
   const statusResult = await tools.getDepartmentOrderStatus(rposShopId, posId, { department, user });
 
   const followUp = await callWithToolsFallback({
