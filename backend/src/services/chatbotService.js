@@ -1964,7 +1964,16 @@ const ORDER_ACTION_TOOL_SCHEMAS = {
 // "prepar(e|ation|er)" comme déclencheurs à eux seuls (la plupart des formulations réelles
 // contiennent l'un de ces deux mots sans forcément un verbe "mettre/passer" explicite).
 const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|validation|mett?re|mets?|pr[ée]par(?:e|er|ation))\b.{0,60}\b(commande|rayon)\b/i;
+// Bug trouvé le 30/10/2026 : "quel son les article qui son rupture toute suite POUR PASSER UNE
+// COMMANDE urgente" est une question de CONSULTATION (l'utilisateur veut la liste des ruptures,
+// pas déclencher une création réelle), mais matchait quand même ORDER_ACTION_INTENT_REGEX via
+// "passer...commande", déclenchant à tort le workflow d'action (qui a échoué silencieusement,
+// aucun rayon n'ayant été réellement désigné). Une formulation interrogative ("quel(s)/quelle(s)",
+// "montre-moi", "combien", "est-ce que"...) désigne toujours une lecture, jamais une exécution —
+// même si elle mentionne accessoirement une future commande.
+const ORDER_ACTION_QUESTION_FORM_REGEX = /^(quel|quelle|quels|quelles|qu'est-ce|qu est ce|montre|combien|est-ce que|est ce que|pourquoi|comment)\b/i;
 function detectOrderActionIntent(question) {
+  if (ORDER_ACTION_QUESTION_FORM_REGEX.test((question || '').trim())) return false;
   return ORDER_ACTION_INTENT_REGEX.test(question);
 }
 
