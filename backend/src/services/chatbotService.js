@@ -76,6 +76,15 @@ function normalize(str) {
 // le 16/09/2026 lors d'un test exhaustif de questions. Cette regex détecte le motif "article(s) +
 // pourcentage + CA" avant la boucle de mots-clés fixes, quel que soit le nombre demandé.
 const PARETO_PATTERN_REGEX = /articles?.*\d{1,3}\s*%.*(ca\b|chiffre)|.*\d{1,3}\s*%.*(ca\b|chiffre).*articles?/;
+// "quant[ei]t.* (qui son[t]? )?propos.*" tolère les fautes de frappe réelles de l'utilisateur
+// ("quantié", sans le t final) — bug trouvé le 30/10/2026 : "montre moi les article dans boucherie
+// LS ... et les quantié qui son proposé" ne matchait aucun mot-clé exact de getCurrentProposal
+// (liste à substring strict, ne tolère aucune variante orthographique), retombait sur le filet LLM
+// qui a choisi à tort getArticleStock — "quantité proposée" désigne toujours la PROPOSITION de
+// commande, jamais le stock physique actuel. Placée avant les règles à mots-clés exacts (priorité
+// la plus haute), comme PARETO_PATTERN_REGEX juste au-dessus.
+const QUANTITE_PROPOSEE_REGEX = /quanti?t?[ée].{0,20}propos/;
+
 
 // "gisement"/"adressage" (position physique de stockage en magasin, distincte du rayon/département)
 // doit gagner sur toute règle générique concurrente (ex: "ventes", "chiffre") — sans cette priorité,
@@ -163,6 +172,7 @@ const SILENT_SHOPS_REGEX = /magasins?\s+(silencieux|sans vente|inactifs?)|aucune
 async function detectIntent(question) {
   const normalized = normalize(question);
   if (PARETO_PATTERN_REGEX.test(normalized)) return 'getParetoArticles';
+  if (QUANTITE_PROPOSEE_REGEX.test(normalized)) return 'getCurrentProposal';
   if (SILENT_SHOPS_REGEX.test(question)) return 'getSilentShops';
   if (ALL_SHOPS_STOCKOUT_REGEX.test(question)) return 'getStockoutRisksAllShops';
   if (ALL_SHOPS_OVERSTOCK_REGEX.test(question)) return 'getOverstockArticlesAllShops';
