@@ -2843,18 +2843,49 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   // Statut RPOS réel de chaque ProposalOrder déjà créée (une par fournisseur) — jamais une simple
   // relecture de lastRposStatus en base si l'info est disponible en direct, même raisonnement que
   // ordersService.validateRposOrder (le statut local peut être périmé).
+  //
+  // BUG CORRIGÉ le 30/10/2026 (demande explicite : "si une commande a ete deja validé il doit me
+  // dire ... le numero de commande, date de validation et creation, et aussi si la commande est
+  // supprimé il doit me dire") : seul un code RPOS numérique brut était exposé au LLM (ex: 2), qui
+  // devait improviser une formulation ("RPOS 2") faute de référence/dates lisibles — ajoute
+  // reference/dates déjà stockées sur ProposalOrder (jamais un second calcul), et détecte la
+  // suppression RPOS : getSupplierOrderStatus renvoie null sur un 404 (commande introuvable côté
+  // RPOS, donc supprimée/annulée là-bas), distinct d'un vrai code de statut.
+  const RPOS_STATUS_LABELS = {
+    1: 'en préparation (non encore validée)',
+    2: 'en attente de livraison (validée)',
+    3: 'livrée',
+    4: 'facturée',
+    5: 'clôturée',
+    6: 'annulée',
+  };
   const orders = await Promise.all(existingOrders.map(async (o) => {
     let liveStatus = o.lastRposStatus;
+    let deletedOnRpos = false;
     if (o.rposOrderId) {
-      liveStatus = await rpos.getSupplierOrderStatus(posId, o.rposOrderId).catch(() => o.lastRposStatus);
+      const fetched = await rpos.getSupplierOrderStatus(posId, o.rposOrderId).catch(() => undefined);
+      if (fetched === null) deletedOnRpos = true;
+      else if (fetched !== undefined) liveStatus = fetched;
     }
-    return { rposOrderId: o.rposOrderId, supplierName: o.supplierName, rposStatus: liveStatus };
+    return {
+      rposOrderId: o.rposOrderId,
+      rposOrderReference: o.rposOrderReference,
+      supplierName: o.supplierName,
+      rposStatus: deletedOnRpos ? null : liveStatus,
+      rposStatusLabel: deletedOnRpos ? 'supprimée/introuvable sur RPOS' : (RPOS_STATUS_LABELS[liveStatus] || `code ${liveStatus}`),
+      deletedOnRpos,
+      createdAt: o.createdAt,
+      validated: o.rposOrderValidated === true,
+      validatedBy: o.rposValidatedBy,
+      validationDate: o.rposValidationDate,
+      receptionStatus: o.receptionStatus,
+    };
   }));
 
   const hasExistingOrder = orders.length > 0;
   const possibleActions = [];
   if (!hasExistingOrder && articlesCount > 0) possibleActions.push('PREPARE');
-  if (orders.some((o) => o.rposStatus === 1)) possibleActions.push('VALIDATE');
+  if (orders.some((o) => !o.deletedOnRpos && o.rposStatus === 1)) possibleActions.push('VALIDATE');
 
   return {
     found: true,
