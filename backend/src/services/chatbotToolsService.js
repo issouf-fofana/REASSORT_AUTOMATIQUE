@@ -2804,7 +2804,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   const proposal = await prisma.proposal.findFirst({
     where: { rposShopId, status: { in: ['GENERATED', 'VALIDATING', 'VALIDATED'] } },
     orderBy: { generatedAt: 'desc' },
-    include: { lines: { where: { department }, select: { ean: true, quantitySuggested: true, wasExcluded: true } } },
+    include: { lines: { where: { department }, select: { ean: true, quantitySuggested: true, wasExcluded: true, sellingPrice: true } } },
   });
 
   // Commande(s) déjà créée(s) pour ce rayon, qu'une Proposal "active" existe encore ou non (elle
@@ -2825,15 +2825,19 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   // en conditions réelles : le modèle affichait "€" au lieu de FCFA, faute d'indice d'unité dans ce
   // JSON) : un nom de champ auto-descriptif réduit le risque que le modèle devine/hallucine une
   // devise, même raisonnement que revenueExclTaxCfa déjà utilisé par les autres tools du chatbot.
+  //
+  // BUG CORRIGÉ le 30/10/2026 (second, observé en conditions réelles : le chatbot affichait
+  // 168 474 FCFA pour Épicerie sucrée alors que la page Proposition de commande affiche 245 675
+  // CFA pour le même rayon/même nombre d'articles) : ce calcul utilisait buyingPrice (prix
+  // D'ACHAT, via une jointure ProductCache) au lieu de sellingPrice (prix DE VENTE), qui est ce que
+  // la page officielle utilise (DepartmentListView.tsx, `l.sellingPrice * l.quantitySuggested`).
+  // ProposalLine.sellingPrice existe déjà directement (snapshot figé à la génération de la
+  // proposition, jamais périmé contrairement à une jointure ProductCache live) — utilisé ici tel
+  // quel pour garantir EXACTEMENT le même montant que celui déjà affiché à l'utilisateur ailleurs
+  // dans l'application, jamais un second calcul divergent.
   let estimatedAmountCfa = null;
   if (articlesCount) {
-    const eans = lines.map((l) => l.ean);
-    const prices = await prisma.productCache.findMany({
-      where: { rposShopId, ean: { in: eans } },
-      select: { ean: true, buyingPrice: true },
-    });
-    const priceByEan = new Map(prices.map((p) => [p.ean, p.buyingPrice]));
-    estimatedAmountCfa = lines.reduce((sum, l) => sum + l.quantitySuggested * (priceByEan.get(l.ean) || 0), 0);
+    estimatedAmountCfa = lines.reduce((sum, l) => sum + l.quantitySuggested * (l.sellingPrice || 0), 0);
   }
 
   // Statut RPOS réel de chaque ProposalOrder déjà créée (une par fournisseur) — jamais une simple
