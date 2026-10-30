@@ -2821,7 +2821,11 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   const lines = (proposal?.lines || []).filter((l) => !l.wasExcluded);
   const articlesCount = lines.length;
 
-  let estimatedAmount = null;
+  // Nommé explicitement "...Cfa" (pas juste estimatedAmount) — BUG CORRIGÉ le 30/10/2026 (observé
+  // en conditions réelles : le modèle affichait "€" au lieu de FCFA, faute d'indice d'unité dans ce
+  // JSON) : un nom de champ auto-descriptif réduit le risque que le modèle devine/hallucine une
+  // devise, même raisonnement que revenueExclTaxCfa déjà utilisé par les autres tools du chatbot.
+  let estimatedAmountCfa = null;
   if (articlesCount) {
     const eans = lines.map((l) => l.ean);
     const prices = await prisma.productCache.findMany({
@@ -2829,7 +2833,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
       select: { ean: true, buyingPrice: true },
     });
     const priceByEan = new Map(prices.map((p) => [p.ean, p.buyingPrice]));
-    estimatedAmount = lines.reduce((sum, l) => sum + l.quantitySuggested * (priceByEan.get(l.ean) || 0), 0);
+    estimatedAmountCfa = lines.reduce((sum, l) => sum + l.quantitySuggested * (priceByEan.get(l.ean) || 0), 0);
   }
 
   // Statut RPOS réel de chaque ProposalOrder déjà créée (une par fournisseur) — jamais une simple
@@ -2853,7 +2857,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
     department,
     proposalId: proposal?.id || null,
     articlesCount,
-    estimatedAmount,
+    estimatedAmountCfa,
     hasExistingOrder,
     orders,
     possibleActions,

@@ -1998,7 +1998,7 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
   const statusResult = await tools.getDepartmentOrderStatus(rposShopId, posId, { department, user });
 
   const followUp = await callWithToolsFallback({
-    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Présente l\'état du rayon à l\'utilisateur (nombre d\'articles, montant estimé, commande déjà existante ou non) de façon brève, puis demande-lui EXPLICITEMENT de confirmer l\'action à effectuer (mise en préparation, ou validation/attente de livraison si une commande existe déjà au statut adéquat). Ne prétends jamais avoir déjà exécuté l\'action.',
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Présente l\'état du rayon à l\'utilisateur (nombre d\'articles, montant estimé, commande déjà existante ou non) de façon brève, puis demande-lui EXPLICITEMENT de confirmer l\'action à effectuer (mise en préparation, ou validation/attente de livraison si une commande existe déjà au statut adéquat). Ne prétends jamais avoir déjà exécuté l\'action. Tous les montants sont en FRANCS CFA (FCFA) — jamais en euros ni un autre symbole de devise.',
     messages: [
       { role: 'user', content: question },
       { role: 'assistant', text: null, toolCall },
@@ -2027,7 +2027,7 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
       action,
       proposalId: statusResult.proposalId || null,
       rposOrderId: lastOrder?.rposOrderId || null,
-      snapshotSummary: `${statusResult.articlesCount} article(s)${statusResult.estimatedAmount != null ? `, ~${Math.round(statusResult.estimatedAmount)} FCFA` : ''}`,
+      snapshotSummary: `${statusResult.articlesCount} article(s)${statusResult.estimatedAmountCfa != null ? `, ~${Math.round(statusResult.estimatedAmountCfa)} FCFA` : ''}`,
       createdAt: new Date().toISOString(),
     },
   };
