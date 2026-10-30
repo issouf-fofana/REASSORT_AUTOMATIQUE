@@ -1963,7 +1963,12 @@ const ORDER_ACTION_TOOL_SCHEMAS = {
 // accepte "mett?re"/"met(tre)?" (variantes y compris tronquées), ajoute "valid(e|er|ation)" et
 // "prepar(e|ation|er)" comme déclencheurs à eux seuls (la plupart des formulations réelles
 // contiennent l'un de ces deux mots sans forcément un verbe "mettre/passer" explicite).
-const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|validation|mett?re|mets?|pr[ée]par(?:e|er|ation))\b.{0,60}\b(commande|rayon)\b/i;
+// "faire" ajouté le 30/10/2026 (bug réel observé : "je veux faire une commande en BOULANGERIE" ne
+// matchait aucun verbe existant — "faire une commande" est une formulation naturelle courante pour
+// demander une création, au même titre que "passer"/"créer" déjà couverts) — sans ce verbe, la
+// question tombait sur le routage normal (getCurrentProposal), ne posait jamais de pendingAction,
+// et chaque "oui" suivant de l'utilisateur retombait alors sur zéro au lieu de confirmer une action.
+const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|faire|valide|valider|validation|mett?re|mets?|pr[ée]par(?:e|er|ation))\b.{0,60}\b(commande|rayon)\b/i;
 // Bug trouvé le 30/10/2026 : "quel son les article qui son rupture toute suite POUR PASSER UNE
 // COMMANDE urgente" est une question de CONSULTATION (l'utilisateur veut la liste des ruptures,
 // pas déclencher une création réelle), mais matchait quand même ORDER_ACTION_INTENT_REGEX via
@@ -1995,7 +2000,14 @@ function detectRequestedAction(question) {
   return null; // ambigu (les deux, ou aucun verbe clair) — jamais utilisé pour bloquer, seulement pour détecter un écart certain
 }
 
-const ORDER_ACTION_CONFIRM_REGEX = /^\s*(oui|ouais|ouai|vas-?y|d'accord|daccord|ok|okay|exactement|c'est ça|cest ca|tout à fait|tout a fait|confirme|je confirme)\s*[!.?]*\s*$/i;
+// Bug réel observé le 30/10/2026 : "oui gere une preparation de commande ne valide pas hein" ne
+// matchait pas cette regex (ancre $ stricte, n'acceptait "oui" que seul ou suivi d'une poignée de
+// variantes figées) — l'utilisateur confirme pourtant sans ambiguïté avec "oui" en tout début de
+// message, même en ajoutant des précisions ensuite. Retiré l'ancre de fin ($) pour accepter "oui"
+// + texte libre, tout en gardant l'ancre de début (^) : un "oui" qui n'arrive qu'en milieu de phrase
+// ne doit toujours jamais compter comme confirmation (ambigu, cf. detectRequestedAction pour la
+// vérification de l'action elle-même).
+const ORDER_ACTION_CONFIRM_REGEX = /^\s*(oui|ouais|ouai|vas-?y|d'accord|daccord|ok|okay|exactement|c'est ça|cest ca|tout à fait|tout a fait|confirme|je confirme)\b/i;
 const ORDER_ACTION_CANCEL_REGEX = /^\s*(non|annule|annuler|laisse|stop|pas maintenant|plus tard)\b/i;
 const PENDING_ACTION_TTL_MS = 15 * 60 * 1000;
 
