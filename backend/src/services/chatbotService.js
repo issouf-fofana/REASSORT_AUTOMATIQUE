@@ -1977,9 +1977,18 @@ const ORDER_ACTION_INTENT_REGEX = /\b(passe|passer|lance|lancer|cr[ée]e?r?|fair
 // "montre-moi", "combien", "est-ce que"...) désigne toujours une lecture, jamais une exécution —
 // même si elle mentionne accessoirement une future commande.
 const ORDER_ACTION_QUESTION_FORM_REGEX = /^(quel|quelle|quels|quelles|qu'est-ce|qu est ce|montre|combien|est-ce que|est ce que|pourquoi|comment)\b/i;
+// Bug réel observé le 30/10/2026 : "valide fruit et legumes exo" désigne le rayon DIRECTEMENT par
+// son nom, sans jamais dire littéralement "commande" ou "rayon" — ne matchait donc pas
+// ORDER_ACTION_INTENT_REGEX (qui exige l'un des deux mots), retombait sur le routage normal et un
+// refus générique. Un verbe d'action EN TOUT DÉBUT de phrase, suivi de texte, est une formulation
+// d'action suffisamment explicite même sans "commande"/"rayon" explicite — le risque de faux
+// positif reste nul : runOrderActionTurn1 retombe sur `return null` (aucune exécution) si le LLM
+// n'identifie ensuite aucun vrai rayon exploitable dans la phrase.
+const ORDER_ACTION_LEADING_VERB_REGEX = /^(passe|passer|lance|lancer|cr[ée]e?r?|valide|valider|mett?re|mets?|pr[ée]par(?:e|er|ation))\b/i;
 function detectOrderActionIntent(question) {
-  if (ORDER_ACTION_QUESTION_FORM_REGEX.test((question || '').trim())) return false;
-  return ORDER_ACTION_INTENT_REGEX.test(question);
+  const trimmed = (question || '').trim();
+  if (ORDER_ACTION_QUESTION_FORM_REGEX.test(trimmed)) return false;
+  return ORDER_ACTION_INTENT_REGEX.test(question) || ORDER_ACTION_LEADING_VERB_REGEX.test(trimmed);
 }
 
 // Bug trouvé le 30/10/2026 en conditions réelles : "passe une commande au CREMERIE ET MET EN
@@ -2030,10 +2039,21 @@ const PENDING_ACTION_TTL_MS = 15 * 60 * 1000;
  * modèle (toolSchemas ne contient que getDepartmentOrderStatus). Pose pendingAction AVANT de
  * répondre, pour que le tour suivant sache quoi confirmer.
  */
-async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
+async function runOrderActionTurn1({ question, rposShopId, posId, user, conversationHistory }) {
+  // Bug réel observé le 30/10/2026 : "cree la commande et en preparation" (sans nom de rayon), juste
+  // après avoir mentionné "FRUITS & LEGUMES EXO" au tour précédent, redemandait le rayon depuis zéro
+  // au lieu de le déduire du contexte — runOrderActionTurn1 ne recevait même pas conversationHistory.
+  // Les 2 derniers échanges sont injectés comme contexte brut AVANT la question réelle (jamais à sa
+  // place), pour que le modèle puisse résoudre un rayon implicite sans jamais le confondre avec la
+  // demande actuelle elle-même.
+  const recentContext = (conversationHistory || []).slice(-2)
+    .map((h) => `Utilisateur: ${h.question}\nAssistant: ${(h.answer || '').slice(0, 300)}`)
+    .join('\n\n');
+  const contextualQuestion = recentContext ? `${recentContext}\n\nUtilisateur: ${question}` : question;
+
   const result = await callWithToolsFallback({
-    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. L\'utilisateur veut agir sur la commande d\'un rayon. Identifie le rayon concerné et appelle getDepartmentOrderStatus pour connaître son état avant de répondre quoi que ce soit.',
-    messages: [{ role: 'user', content: question }],
+    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. L\'utilisateur veut agir sur la commande d\'un rayon. Si le rayon n\'est pas nommé dans le dernier message, déduis-le du contexte de conversation fourni (ex: un rayon mentionné juste avant). Identifie le rayon concerné et appelle getDepartmentOrderStatus pour connaître son état avant de répondre quoi que ce soit.',
+    messages: [{ role: 'user', content: contextualQuestion }],
     toolSchemas: [ORDER_ACTION_TOOL_SCHEMAS.read],
     toolChoice: { type: 'auto' },
   }, 'chatbot-order-action-read');
@@ -2274,7 +2294,7 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
     // en attente et on retombe sur le routage normal ci-dessous pour cette même question.
   } else if (detectOrderActionIntent(question)) {
     emitStatus('Récupération des données...');
-    const turn1 = await runOrderActionTurn1({ question, rposShopId, posId, user });
+    const turn1 = await runOrderActionTurn1({ question, rposShopId, posId, user, conversationHistory });
     if (turn1) {
       return {
         answer: turn1.answer, providerUsed: null, toolUsed: 'getDepartmentOrderStatus', toolResult: null, wantsVisual: false,
