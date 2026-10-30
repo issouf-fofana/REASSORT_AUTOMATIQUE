@@ -1082,6 +1082,28 @@ async function getSupplierOrderStatus(posId, orderId) {
 }
 
 /**
+ * BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles : une commande supprimée depuis le POS
+ * physique continuait d'être présentée comme active par le chatbot) — RPOS ne renvoie JAMAIS de
+ * 404 pour une commande supprimée depuis le POS, elle reste consultable à son statut numérique
+ * d'avant suppression (ex: 2, "en attente de livraison") mais porte un champ `iso_deleted_at` non
+ * null. getSupplierOrderStatus (status numérique seul) ne pouvait donc jamais détecter cette
+ * suppression. Utilisée par chatbotToolsService.getDepartmentOrderStatus à la place de l'appel nu.
+ */
+async function getSupplierOrderStatusDetailed(posId, orderId) {
+  try {
+    const data = await rposGet(posId, `/api/supplier_order/${orderId}/`, {});
+    return {
+      status: typeof data.status === 'object' ? data.status.value : data.status,
+      deleted: !!data.iso_deleted_at,
+      deletedAt: data.iso_deleted_at || null,
+    };
+  } catch (err) {
+    if (err.message.includes('404')) return { status: null, deleted: false, deletedAt: null, notFound: true };
+    throw err;
+  }
+}
+
+/**
  * Détail d'UNE commande fournisseur précise (qui l'a créée/validée, date de validation) — ajouté
  * le 18/10/2026 pour remplacer l'appel à getSupplierOrders (liste PAGINÉE de 200 commandes) qui
  * était fait en direct dans getEpisodeDetail juste pour retrouver UNE commande par sa référence,
@@ -1454,6 +1476,7 @@ module.exports = {
   fetchProductLinesPage,
   supplierOrderExists,
   getSupplierOrderStatus,
+  getSupplierOrderStatusDetailed,
   getSupplierOrderDetail,
   getLastPurchaseForProduct,
   getRecentUndeliveredOrderedQuantity,

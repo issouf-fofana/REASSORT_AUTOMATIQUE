@@ -1350,15 +1350,24 @@ async function getOrders(rposShopId, { posId, days = 14, dateRangeStart, dateRan
     if (o.reference) rposOrdersByRef.set(o.reference, o);
   }
 
+  // BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles : une commande supprimée depuis le
+  // POS physique continuait d'être présentée comme active) — getSupplierOrders appelle RPOS avec
+  // is_deleted:'false' (filtre par défaut), donc une commande platform supprimée côté RPOS
+  // n'apparaît PLUS DU TOUT dans rposResults : rposOrdersByRef.get(...) renvoie undefined, et le
+  // code affichait alors juste le statut local en base (COMMANDEE), sans jamais signaler la
+  // suppression RPOS réelle. deletedOnRpos vrai quand une référence RPOS existe en base mais est
+  // absente de la liste RPOS des commandes actives.
   const platformOrdersFormatted = platformOrders.map((po) => {
     const rposOrder = po.rposOrderReference ? rposOrdersByRef.get(po.rposOrderReference) : null;
+    const deletedOnRpos = !!po.rposOrderReference && !rposOrder && rposStatus === 'success';
     return {
       source: 'platform',
       department: po.department,
       createdAt: po.createdAt,
       receptionStatus: po.receptionStatus,
       rposOrderReference: po.rposOrderReference || null,
-      rposStatus: rposOrder?.status_display || null,
+      rposStatus: rposOrder?.status_display || (deletedOnRpos ? 'supprimée/introuvable sur RPOS' : null),
+      deletedOnRpos,
       orderDate: rposOrder?.date || null,
       deliveryDate: rposOrder?.delivery_date || null,
       validationDate: rposOrder?.validation_date || null,
@@ -1501,13 +1510,19 @@ async function getValidatedOrders(posId, shopId, { days = 30, dateRangeStart, da
 
   const platformOrdersFormatted = platformOrders.map((po) => {
     const rposOrder = po.rposOrderReference ? rposOrdersByRef.get(po.rposOrderReference) : null;
+    // BUG CORRIGÉ le 30/10/2026 (même correctif que getOrders ci-dessus) : getSupplierOrders filtre
+    // par défaut is_deleted:'false' côté RPOS — une commande platform supprimée depuis le POS
+    // physique n'apparaît donc plus du tout dans rposResults, et était jusqu'ici présentée comme
+    // active (statut local COMMANDEE) sans jamais signaler la suppression RPOS réelle.
+    const deletedOnRpos = !!po.rposOrderReference && !rposOrder && rposStatus === 'success';
     return {
       source: 'platform',
       department: po.department,
       createdAt: po.createdAt,
       receptionStatus: po.receptionStatus,
       rposOrderReference: po.rposOrderReference || null,
-      rposStatus: rposOrder?.status_display || null,
+      rposStatus: rposOrder?.status_display || (deletedOnRpos ? 'supprimée/introuvable sur RPOS' : null),
+      deletedOnRpos,
       orderDate: rposOrder?.date || null,
       deliveryDate: rposOrder?.delivery_date || null,
       validationDate: rposOrder?.validation_date || null,
@@ -2863,9 +2878,15 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
     let liveStatus = o.lastRposStatus;
     let deletedOnRpos = false;
     if (o.rposOrderId) {
-      const fetched = await rpos.getSupplierOrderStatus(posId, o.rposOrderId).catch(() => undefined);
-      if (fetched === null) deletedOnRpos = true;
-      else if (fetched !== undefined) liveStatus = fetched;
+      // BUG CORRIGÉ le 30/10/2026 : getSupplierOrderStatus (status numérique seul) ne détectait
+      // jamais une suppression faite depuis le POS physique (RPOS ne renvoie pas de 404 dans ce
+      // cas, juste un champ iso_deleted_at non lu auparavant) — getSupplierOrderStatusDetailed lit
+      // ce champ explicitement.
+      const detailed = await rpos.getSupplierOrderStatusDetailed(posId, o.rposOrderId).catch(() => undefined);
+      if (detailed) {
+        deletedOnRpos = detailed.notFound || detailed.deleted;
+        if (!deletedOnRpos && detailed.status != null) liveStatus = detailed.status;
+      }
     }
     return {
       rposOrderId: o.rposOrderId,
