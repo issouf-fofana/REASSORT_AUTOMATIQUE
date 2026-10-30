@@ -2039,7 +2039,31 @@ async function runOrderActionTurn1({ question, rposShopId, posId, user }) {
  * remplir lui-même. Les valeurs d'exécution viennent EXCLUSIVEMENT de pendingAction (figées au
  * tour 1), jamais du tool_use produit par le modèle à ce tour, même s'il en renvoyait d'autres.
  */
-async function runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user }) {
+// Construit un résumé de secours FIABLE à partir d'execResult (ne dépend JAMAIS du LLM pour les
+// références de commande elles-mêmes) — BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles :
+// le timeout de polling était atteint, le message "ça continue en tâche de fond" s'affichait sans
+// jamais la vraie référence RPOS, alors qu'elle était déjà en base une fois le run terminé). Utilisé
+// comme filet de secours systématique, jamais comme unique source si le LLM a pu rédiger correctement.
+function buildOrderActionFallbackSummary(action, department, execResult) {
+  if (action === 'VALIDATE') {
+    return execResult.success
+      ? `La commande du rayon "${department}" a été validée sur RPOS (passage en attente de livraison).`
+      : `Échec de la validation pour le rayon "${department}".`;
+  }
+  // PREPARE : extrait les vraies références RPOS depuis execResult.result.orders[].order.reference
+  // (createdOrders dans proposalService.validateProposalDepartment) — une commande PAR fournisseur.
+  const orders = execResult.result?.orders || [];
+  if (orders.length) {
+    const refs = orders.map((o) => `${o.order?.reference || o.order?.id || '—'} (${o.supplierName || 'fournisseur inconnu'})`).join(', ');
+    return `La commande du rayon "${department}" a été créée et mise en préparation. Référence(s) RPOS : ${refs}.`;
+  }
+  if (execResult.stillRunning) {
+    return `La création de la commande du rayon "${department}" prend plus de temps que prévu — elle continue en tâche de fond (suivi : ${execResult.runId}). Reposez-moi la question dans quelques instants pour connaître la référence RPOS, ou vérifiez directement dans "Proposition de commande".`;
+  }
+  return `Action "${action}" effectuée sur le rayon "${department}", mais aucune référence de commande n'a pu être extraite du résultat.`;
+}
+
+async function runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user, onStatus }) {
   const age = Date.now() - new Date(pendingAction.createdAt).getTime();
   if (age > PENDING_ACTION_TTL_MS) {
     return { answer: 'Cette proposition d\'action a expiré — reposez votre question pour revérifier l\'état actuel du rayon.', pendingAction: null };
@@ -2067,30 +2091,45 @@ async function runOrderActionTurn2({ pendingAction, question, rposShopId, posId,
 
   let execResult;
   try {
+    // onStatus propagé jusqu'à l'exécution réelle (BUG CORRIGÉ le 30/10/2026, cf. commentaire du
+    // call site dans askAssistant) — permet au polling interne d'executeDepartmentOrderAction
+    // d'émettre une vraie progression visible côté utilisateur pendant la création de la commande,
+    // au lieu d'un silence total jusqu'au message final.
     execResult = await tools.executeDepartmentOrderAction({
       department: pendingAction.department,
       action,
       proposalId: pendingAction.proposalId,
       rposOrderId: pendingAction.rposOrderId,
-      user, rposShopId, posId,
+      user, rposShopId, posId, onStatus,
     });
   } catch (err) {
     return { answer: `L'action n'a pas pu être effectuée : ${err.message}`, pendingAction: null };
   }
 
+  const fallbackAnswer = buildOrderActionFallbackSummary(action, pendingAction.department, execResult);
+
   // L'exécution ci-dessus ne dépend JAMAIS d'un tool_use du modèle (sécurité déjà actée, cf.
   // commentaire de tête du workflow) — seul ce dernier appel de RÉDACTION change de transport
-  // multi-provider. Si ce dernier échoue ou renvoie 0 texte (provider non-Anthropic moins fiable
-  // sur le function-calling, voire ici même pas de tool en jeu), le filet `answer` ci-dessous
-  // reste la seule source de vérité affichée : l'action, elle, a déjà réellement eu lieu.
+  // multi-provider, et sert UNIQUEMENT à reformuler fallbackAnswer en langage plus naturel : si ce
+  // dernier échoue, renvoie 0 texte, ou omet la référence (provider non-Anthropic moins fiable sur
+  // le function-calling), fallbackAnswer — construit ci-dessus directement depuis les données
+  // réelles, jamais depuis le LLM — reste la réponse affichée (BUG CORRIGÉ le 30/10/2026 : la
+  // référence RPOS réelle, disponible dans execResult, n'était jamais réellement extraite et
+  // pouvait être omise par le LLM dans sa rédaction).
   const followUp = await callWithToolsFallback({
-    systemPrompt: 'Tu es l\'assistant d\'une application de gestion de stock. Résume clairement le résultat de l\'action qui vient d\'être exécutée (succès ou échec, référence de commande si disponible) à l\'utilisateur.',
-    messages: [{ role: 'user', content: `Résultat de l'action "${action}" sur le rayon "${pendingAction.department}" : ${JSON.stringify(execResult)}` }],
+    systemPrompt: `Tu es l'assistant d'une application de gestion de stock. Reformule ce message en une phrase naturelle, SANS RIEN RETIRER d'important (garde impérativement toute référence de commande mentionnée) : "${fallbackAnswer}"`,
+    messages: [{ role: 'user', content: 'Reformule le message ci-dessus.' }],
     toolSchemas: [],
     toolChoice: { type: 'none' },
   }, 'chatbot-order-action-write').catch(() => null);
 
-  const answer = (followUp?.textBlocks || []).join('\n').trim() || `Action "${action}" effectuée sur le rayon "${pendingAction.department}".`;
+  const reformulated = (followUp?.textBlocks || []).join('\n').trim();
+  // N'utilise la reformulation du LLM que si elle contient encore chaque référence de commande
+  // citée dans fallbackAnswer (vérification simple par inclusion de sous-chaîne) — sinon le LLM a
+  // probablement omis l'info critique en reformulant, et fallbackAnswer (fiable) est préféré tel quel.
+  const referenceNumbers = fallbackAnswer.match(/\b[A-Za-z0-9-]{4,}\b/g)?.filter((s) => /\d/.test(s)) || [];
+  const keepsAllReferences = referenceNumbers.every((ref) => reformulated.includes(ref));
+  const answer = (reformulated && keepsAllReferences) ? reformulated : fallbackAnswer;
 
   return { answer, pendingAction: null };
 }
@@ -2141,7 +2180,11 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
   // d'action ne retombe jamais sur un tool de lecture par erreur de routage.
   if (pendingAction) {
     emitStatus('Vérification de la confirmation...');
-    const turn2 = await runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user });
+    // BUG CORRIGÉ le 30/10/2026 (observé en conditions réelles : le chatbot semblait "figé"
+    // pendant toute la création de la commande, sans aucune étape affichée) : onStatus n'était
+    // jamais transmis jusqu'à executeDepartmentOrderAction, qui pourtant émet déjà une progression
+    // réelle pendant son polling interne (cf. chatbotToolsService.js) — juste jamais relayée ici.
+    const turn2 = await runOrderActionTurn2({ pendingAction, question, rposShopId, posId, user, onStatus: emitStatus });
     if (turn2) {
       return {
         answer: turn2.answer, providerUsed: null, toolUsed: null, toolResult: null, wantsVisual: false,
