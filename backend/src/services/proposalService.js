@@ -2857,15 +2857,18 @@ async function getConformityRate(shopId, { start, end } = {}) {
   // dans getAdminDashboard, KPI §23).
   //
   // BUG CORRIGÉ le 02/11/2026 (signalé en testant la page Conformité : "les article qui son ici
-  // viens d'ou... c'est juste la proposition de commande en attente, pas encore validé") :
-  // quantityValidated === null n'avait jamais été exclu ici. Sur une Proposal PARTIALLY_VALIDATED
-  // (schema.prisma#Proposal.status : "au moins un ProposalOrder existe, les rayons RESTANTS sont
-  // considérés définitivement abandonnés"), les lignes des rayons jamais traités ont
-  // quantityValidated=null — ce ne sont JAMAIS des lignes où le magasin aurait "modifié la quantité
-  // à zéro", mais des lignes jamais validées individuellement. Les compter comme non-conformes
-  // faussait le taux à la baisse sans justification (observé : 13% au lieu d'un taux cohérent avec
-  // les seules lignes réellement traitées).
-  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.quantityValidated !== null);
+  // viens d'ou... c'est juste la proposition de commande en attente, pas encore validé" — demande
+  // explicite de suivi : "quand un article est proposé dans une commande avec qté 50 et que le
+  // magasin modifie pour mettre à 60, c'est ces articles que je veux retracer... pas les articles
+  // jamais commandés, si il ne sont pas commandé je le calcule pas"). Critère exact = ProposalLine.
+  // proposalOrderId non-null (schema.prisma : "Null tant que la ligne n'a pas encore été incluse
+  // dans une commande envoyée à RPOS") — strictement plus fiable que quantityValidated !== null
+  // (premier correctif, insuffisant : une ligne peut avoir une quantityValidated renseignée sans
+  // jamais avoir été rattachée à une vraie commande RPOS). Sur une Proposal PARTIALLY_VALIDATED
+  // (status : "au moins un ProposalOrder existe, les rayons RESTANTS sont considérés définitivement
+  // abandonnés"), les lignes des rayons jamais traités ont proposalOrderId=null — jamais des lignes
+  // où le magasin aurait "modifié la quantité à zéro", juste jamais commandées du tout.
+  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.proposalOrderId !== null);
 
   if (lines.length === 0) return { rate: null, totalLines: 0, unchangedLines: 0 };
 
@@ -2901,10 +2904,10 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     orderBy: { proposal: { validatedAt: 'desc' } },
   });
 
-  // Même correctif que getConformityRate ci-dessus (02/11/2026) : quantityValidated=null (rayon
-  // jamais traité d'une Proposal PARTIALLY_VALIDATED) n'est jamais une "modification à zéro" par le
-  // magasin, exclu du calcul comme du détail affiché.
-  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.quantityValidated !== null);
+  // Même correctif que getConformityRate ci-dessus (02/11/2026) : seules les lignes réellement
+  // COMMANDÉES (proposalOrderId non-null) comptent — un rayon jamais traité d'une Proposal
+  // PARTIALLY_VALIDATED n'est jamais une "modification à zéro" par le magasin.
+  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.proposalOrderId !== null);
   const rate = lines.length
     ? lines.filter((l) => !l.wasExcluded && l.quantityValidated === l.quantitySuggested).length / lines.length
     : null;
@@ -2976,15 +2979,17 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
       wasExcluded: true,
       quantityValidated: true,
       quantitySuggested: true,
+      proposalOrderId: true,
       proposal: { select: { validatedAt: true } },
     },
   });
 
   const buckets = new Map(); // weekStart ISO -> { total, unchanged }
   for (const l of allLines) {
-    // Même correctif que getConformityRate (02/11/2026) : quantityValidated=null (rayon jamais
-    // traité d'une Proposal PARTIALLY_VALIDATED) n'est jamais une "modification à zéro".
-    if (l.excludedOutOfScope || !l.proposal.validatedAt || l.quantityValidated === null) continue;
+    // Même correctif que getConformityRate (02/11/2026) : seules les lignes réellement COMMANDÉES
+    // (proposalOrderId non-null) comptent — un rayon jamais traité d'une Proposal
+    // PARTIALLY_VALIDATED n'est jamais une "modification à zéro".
+    if (l.excludedOutOfScope || !l.proposal.validatedAt || l.proposalOrderId === null) continue;
     const key = weekStartOf(new Date(l.proposal.validatedAt)).toISOString().slice(0, 10);
     if (!buckets.has(key)) buckets.set(key, { total: 0, unchanged: 0 });
     const b = buckets.get(key);
