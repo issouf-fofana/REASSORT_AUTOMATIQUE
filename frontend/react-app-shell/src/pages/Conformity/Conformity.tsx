@@ -79,6 +79,13 @@ export function Conformity() {
   const [sortKey, setSortKey] = useState<SortKey>('validatedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+  // Pas de valeur par défaut (contrairement au Tableau de bord qui part sur "aujourd'hui") : sans
+  // filtre choisi par l'utilisateur, tout l'historique reste visible — demande explicite du
+  // 02/11/2026 : "si je veux voir les article qui ont été modifié il y a longtemps dans la
+  // proposition validée par le magasin je fais comment" — le backend supportait déjà start/end,
+  // il manquait seulement ce sélecteur de dates.
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
 
   useEffect(() => {
     const shopId = activeShopId();
@@ -91,7 +98,11 @@ export function Conformity() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiFetch<ConformityDetailsData>(`/reassort/conformity/details?onlyChanged=${onlyChanged}&shop=${encodeURIComponent(shopId)}`)
+    const periodParam =
+      periodStart && periodEnd
+        ? `&start=${encodeURIComponent(new Date(periodStart).toISOString())}&end=${encodeURIComponent(new Date(periodEnd + 'T23:59:59').toISOString())}`
+        : '';
+    apiFetch<ConformityDetailsData>(`/reassort/conformity/details?onlyChanged=${onlyChanged}&shop=${encodeURIComponent(shopId)}${periodParam}`)
       .then((result) => !cancelled && setData(result))
       .catch((err) => !cancelled && setError(err.message))
       .finally(() => !cancelled && setLoading(false));
@@ -99,7 +110,7 @@ export function Conformity() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onlyChanged, activeShop?.id, isSingleShop]);
+  }, [onlyChanged, activeShop?.id, isSingleShop, periodStart, periodEnd]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -222,6 +233,39 @@ export function Conformity() {
           <label className="form-check-label" htmlFor="conformity-only-changed">
             Uniquement les articles modifiés
           </label>
+        </div>
+        <div className="d-flex align-items-center gap-2">
+          <span className="text-muted small">Validée entre le</span>
+          <input
+            type="date"
+            className="form-control form-control-sm"
+            style={{ width: 150 }}
+            value={periodStart}
+            max={periodEnd || undefined}
+            onChange={(e) => setPeriodStart(e.target.value)}
+          />
+          <span className="text-muted small">et le</span>
+          <input
+            type="date"
+            className="form-control form-control-sm"
+            style={{ width: 150 }}
+            value={periodEnd}
+            min={periodStart || undefined}
+            max={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => setPeriodEnd(e.target.value)}
+          />
+          {(periodStart || periodEnd) && (
+            <button
+              type="button"
+              className="btn btn-sm btn-link p-0"
+              onClick={() => {
+                setPeriodStart('');
+                setPeriodEnd('');
+              }}
+            >
+              Réinitialiser
+            </button>
+          )}
         </div>
         {data && <span className="text-muted small ms-auto">{filtered.length} article(s) affiché(s)</span>}
       </div>
