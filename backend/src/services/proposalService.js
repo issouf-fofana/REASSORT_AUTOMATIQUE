@@ -2926,7 +2926,7 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
       // n'est pas une vraie action de validation à cet instant. La vraie date/validateur de CETTE
       // commande précise existe sur ProposalOrder.rposValidationDate/rposValidatedBy (déjà utilisée
       // ailleurs pour le même besoin, cf. commentaire schema.prisma), lue ici en priorité.
-      proposalOrder: { select: { rposValidationDate: true, rposValidatedBy: true } },
+      proposalOrder: { select: { rposValidationDate: true, rposValidatedBy: true, rposOrderId: true, rposOrderReference: true, status: true } },
     },
     orderBy: { proposal: { validatedAt: 'desc' } },
   });
@@ -2976,6 +2976,13 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     generatedAt: l.proposal?.generatedAt || null,
     validatedAt: effectiveValidatedAt(l),
     validatedBy: l.proposalOrder?.rposValidatedBy || l.proposal?.validatedBy || null,
+    // Référence de la commande RPOS réelle — utile à l'affichage (traçabilité) et sert aussi de
+    // diagnostic : si rposOrderId est présent mais validatedAt reste null, c'est que RPOS n'a pas
+    // encore renvoyé de date de validation pour cette commande (orderIdentitySyncJob la retentera
+    // au prochain passage), pas un bug du calcul ici.
+    rposOrderId: l.proposalOrder?.rposOrderId || null,
+    rposOrderReference: l.proposalOrder?.rposOrderReference || null,
+    rposOrderStatus: l.proposalOrder?.status || null,
   }));
 
   return {

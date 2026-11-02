@@ -23,6 +23,9 @@ type ConformityArticle = {
   generatedAt: string | null;
   validatedAt: string | null;
   validatedBy: string | null;
+  rposOrderId: string | null;
+  rposOrderReference: string | null;
+  rposOrderStatus: string | null;
 };
 
 type ConformityDetailsData = {
@@ -289,19 +292,20 @@ export function Conformity() {
                 <SortTh k="generatedAt">Générée le</SortTh>
                 <SortTh k="validatedAt">Validée le</SortTh>
                 <th>Par</th>
+                <th>Commande</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={8} className="text-center text-muted py-4">
+                  <td colSpan={9} className="text-center text-muted py-4">
                     Chargement...
                   </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-center text-muted py-4">
+                  <td colSpan={9} className="text-center text-muted py-4">
                     Aucun article {onlyChanged ? 'modifié' : 'validé'} trouvé.
                   </td>
                 </tr>
@@ -331,6 +335,14 @@ export function Conformity() {
                       <td className="text-muted small">{fmtDate(a.generatedAt)}</td>
                       <td className="text-muted small">{fmtDate(a.validatedAt)}</td>
                       <td className="text-muted small">{a.validatedBy || '—'}</td>
+                      <td className="text-muted small">
+                        {a.rposOrderReference || a.rposOrderId || '—'}
+                        {!a.validatedAt && a.rposOrderId && (
+                          <div className="text-warning" style={{ fontSize: '0.75em' }}>
+                            En attente de synchronisation RPOS
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
