@@ -99,6 +99,16 @@ const QUANTITE_PROPOSEE_REGEX = /quanti?t?[ée].{0,20}propos/;
 // CHAQUE gisement", sans nom, retombait sur getSalesHistory qui répondait un classement plausible
 // mais sans aucun rapport avec un gisement).
 const GISEMENT_MENTION_REGEX = /\b(?:gisement|adressage)s?\b/i;
+// Bug réel observé le 30/10/2026 : "Concernant les surstocks, y a-t-il des casses et des DLV sur ces
+// articles ?" ne matchait aucune des phrases figées de la règle getOverstockScrapAndDlv
+// (chatbotIntentRulesDefault.js) — "casses" au pluriel et "des DLV" non directement accolé à
+// "casse" dans cette formulation naturelle — retombait sur la première règle simple qui matche
+// ("surstock" → getOverstockArticles), qui a répondu sans la donnée de casse en disant ne pas la
+// posséder, alors qu'un outil dédié au croisement existe. Détecte désormais "surstock" ET
+// ("casse"/"dlv"/"dlc") n'importe où dans la phrase, peu importe l'ordre des mots ou la formulation
+// exacte — bien plus robuste qu'empiler des phrases figées supplémentaires.
+const OVERSTOCK_SCRAP_DLV_COMBINED_REGEX = /surstock|surstok/i;
+const OVERSTOCK_SCRAP_DLV_SECONDARY_REGEX = /\bcasses?\b|\bdlv\b|\bdlc\b/i;
 const GISEMENT_NAME_REGEX = /\b(?:gisement|adressage)s?\s+(?:de\s+|du\s+|au\s+|le\s+)?([^?.!]+)/i;
 
 // Extrait le nom de rayon mentionné après "rayon" (spec du 28/09/2026 : "CA de ce rayon liquide"
@@ -184,6 +194,7 @@ async function detectIntent(question) {
   if (ALL_SHOPS_STOCK_REGEX.test(question)) return 'getArticleStockAllShops';
   if (ALL_SHOPS_MOVE_REGEX.test(question)) return 'getStockMoveHistoryAllShops';
   if (GISEMENT_MENTION_REGEX.test(question)) return 'getArticlesByGisement';
+  if (OVERSTOCK_SCRAP_DLV_COMBINED_REGEX.test(normalized) && OVERSTOCK_SCRAP_DLV_SECONDARY_REGEX.test(normalized)) return 'getOverstockScrapAndDlv';
   const rules = await getIntentRules();
   for (const rule of rules) {
     if (rule.keywords.some((kw) => normalized.includes(normalize(kw)))) return rule.tool;
