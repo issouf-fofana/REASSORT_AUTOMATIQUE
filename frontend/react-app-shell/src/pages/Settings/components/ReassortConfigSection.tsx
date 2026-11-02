@@ -46,6 +46,7 @@ export function ReassortConfigSection() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [shopSearch, setShopSearch] = useState('');
 
   // En mode bulk (plusieurs magasins cochés), on n'affiche jamais leur config actuelle (elle peut
   // diverger entre magasins) — comportement identique à settings.old.html
@@ -163,6 +164,13 @@ export function ReassortConfigSection() {
                       : `${selectedShopIds.length} magasins`}
                 </button>
                 <div className="dropdown-menu p-2" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
+                  <input
+                    type="text"
+                    className="form-control form-control-sm mb-2"
+                    placeholder="Rechercher par code ou nom..."
+                    value={shopSearch}
+                    onChange={(e) => setShopSearch(e.target.value)}
+                  />
                   <div className="d-flex gap-2 mb-2 pb-2 border-bottom">
                     <button type="button" className="btn btn-sm btn-link p-0" onClick={selectAll}>
                       Tout cocher
@@ -172,20 +180,26 @@ export function ReassortConfigSection() {
                       Tout décocher
                     </button>
                   </div>
-                  {shops.map((shop) => (
-                    <div className="form-check" key={shop.id}>
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`shop-check-${shop.id}`}
-                        checked={selectedShopIds.includes(shop.id)}
-                        onChange={() => toggleShop(shop.id)}
-                      />
-                      <label className="form-check-label" htmlFor={`shop-check-${shop.id}`}>
-                        {shop.reference} - {shop.name}
-                      </label>
-                    </div>
-                  ))}
+                  {shops
+                    .filter((shop) => {
+                      const q = shopSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return `${shop.reference} ${shop.name}`.toLowerCase().includes(q);
+                    })
+                    .map((shop) => (
+                      <div className="form-check" key={shop.id}>
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id={`shop-check-${shop.id}`}
+                          checked={selectedShopIds.includes(shop.id)}
+                          onChange={() => toggleShop(shop.id)}
+                        />
+                        <label className="form-check-label" htmlFor={`shop-check-${shop.id}`}>
+                          {shop.reference} - {shop.name}
+                        </label>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
