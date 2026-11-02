@@ -2936,6 +2936,10 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     rate,
     totalLines: lines.length,
     changedLines: lines.filter((l) => l.wasExcluded || l.quantityValidated !== l.quantitySuggested).length,
+    // Nombre réel de lignes pertinentes (avant troncature par `limit`) — demande explicite
+    // "pas de pagination sur la vue" : le frontend en a besoin pour paginer sur l'ENSEMBLE des
+    // résultats plutôt que seulement sur les `limit` premiers reçus silencieusement tronqués.
+    relevantCount: relevant.length,
     articles,
   };
 }

@@ -29,6 +29,7 @@ type ConformityDetailsData = {
   rate: number | null;
   totalLines: number;
   changedLines: number;
+  relevantCount: number;
   articles: ConformityArticle[];
 };
 
@@ -44,6 +45,8 @@ function fmtPct(rate: number | null): string {
 }
 
 type SortKey = 'label' | 'department' | 'quantitySuggested' | 'quantityValidated' | 'delta' | 'validatedAt';
+
+const PAGE_SIZE = 50;
 
 export function Conformity() {
   const user = window.reassortGetUser ? window.reassortGetUser() : null;
@@ -75,6 +78,7 @@ export function Conformity() {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('validatedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const shopId = activeShopId();
@@ -128,6 +132,14 @@ export function Conformity() {
     });
   }, [data, search, sortKey, sortDir]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, onlyChanged, data]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
     const active = sortKey === k;
     return (
@@ -153,6 +165,13 @@ export function Conformity() {
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
+
+      {data && data.relevantCount > data.articles.length && (
+        <div className="alert alert-warning small">
+          {data.relevantCount.toLocaleString('fr-FR')} lignes trouvées, seules les {data.articles.length} premières sont
+          affichées (limite de sécurité). Affinez la recherche ou la période pour tout voir.
+        </div>
+      )}
 
       {data && (
         <div className="row mb-4">
@@ -237,7 +256,7 @@ export function Conformity() {
                 </tr>
               )}
               {!loading &&
-                filtered.map((a) => {
+                paged.map((a) => {
                   const delta = a.wasExcluded ? null : (a.quantityValidated ?? 0) - a.quantitySuggested;
                   return (
                     <tr key={a.ean}>
@@ -267,6 +286,30 @@ export function Conformity() {
           </table>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="d-flex align-items-center justify-content-center gap-2 mt-3">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            disabled={currentPage <= 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            <iconify-icon icon="solar:alt-arrow-left-linear" />
+          </button>
+          <span className="small text-muted mx-2">
+            Page {currentPage} / {totalPages} — {filtered.length.toLocaleString('fr-FR')} résultat(s)
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            <iconify-icon icon="solar:alt-arrow-right-linear" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

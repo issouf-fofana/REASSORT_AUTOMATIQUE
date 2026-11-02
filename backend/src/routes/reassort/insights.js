@@ -272,7 +272,11 @@ router.get('/conformity/details', async (req, res) => {
     }
     const onlyChanged = req.query.onlyChanged !== 'false';
     const limitRaw = parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 200;
+    // Défaut relevé à 1000 (plafond serveur déjà en place) le 02/11/2026 : signalé "pas de
+    // pagination sur la vue" — la pagination est gérée côté frontend (Conformity.tsx), qui a donc
+    // besoin de l'ENSEMBLE des lignes pertinentes pour paginer dessus, pas d'un sous-ensemble
+    // silencieusement tronqué à 200.
+    const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 1000;
     const result = await getConformityDetails(shopId, { start: req.query.start, end: req.query.end, onlyChanged, limit });
     res.json({ success: true, data: result });
   } catch (error) {
