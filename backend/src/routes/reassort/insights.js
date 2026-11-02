@@ -8,6 +8,7 @@ const prisma = require('../../utils/prisma');
 const rpos = require('../../services/rposClient');
 const {
   getConformityRate,
+  getConformityDetails,
   getWeeklyConformityRate,
   getTodayProposalShops,
   getStockoutRate,
@@ -252,6 +253,27 @@ router.get('/conformity', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
     }
     const result = await getConformityRate(shopId, { start: req.query.start, end: req.query.end });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/conformity/details?start=&end=&onlyChanged=true - liste article par article des
+// lignes où le magasin a modifié la quantité proposée (quantité proposée vs validée, infos article,
+// dates) — demande explicite du 02/11/2026 : "je veux voir les article dont le magasin a modifié la
+// quantité... article avec toutes ses infos, quantité proposée, quantité validée". onlyChanged=false
+// renvoie TOUTES les lignes validées (pas seulement celles modifiées), utile pour un export complet.
+router.get('/conformity/details', async (req, res) => {
+  try {
+    const shopId = resolveShopId(req);
+    if (!shopId) {
+      return res.status(400).json({ success: false, message: 'Aucun magasin assigné à ce compte' });
+    }
+    const onlyChanged = req.query.onlyChanged !== 'false';
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 200;
+    const result = await getConformityDetails(shopId, { start: req.query.start, end: req.query.end, onlyChanged, limit });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

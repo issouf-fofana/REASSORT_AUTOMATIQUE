@@ -91,6 +91,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'sales-analysis', label: "Résultat de l'analyse", href: '/sales-analysis', icon: LineChart },
       { id: 'sales-history', label: 'Ventes synchronisées', href: '/sales-history', icon: BarChart3 },
       { id: 'order-anomalies', label: 'Anomalies de commande', href: '/order-anomalies', icon: AlertTriangle, adminOnly: true },
+      // Pas adminOnly : même portée que /conformity déjà existant (resolveShopId), accessible à tout
+      // utilisateur mono-magasin pour suivre son propre taux, pas seulement l'admin.
+      { id: 'conformity', label: 'Conformité', href: '/conformity', icon: Activity },
     ],
   },
   {

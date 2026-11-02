@@ -2870,6 +2870,60 @@ async function getConformityRate(shopId, { start, end } = {}) {
   };
 }
 
+/**
+ * getConformityDetails() — liste ligne par ligne des articles où le magasin a modifié la quantité
+ * proposée par le système (quantityValidated !== quantitySuggested), avec les infos article (EAN,
+ * label, rayon, prix) et les dates de proposition/validation. Demande explicite : "je veux voir les
+ * article dont le magasin a modifié la quantité... article (avec toutes ses infos), quantité
+ * proposée, quantité validée" — jusqu'ici seul le taux agrégé (getConformityRate) était exposé,
+ * impossible de savoir CONCRÈTEMENT quels articles et de combien le magasin s'écarte des
+ * propositions. Même filtre de fond (status VALIDATED/PARTIALLY_VALIDATED, exclusion
+ * excludedOutOfScope) que getConformityRate, pour que le taux affiché à côté de cette liste reste
+ * cohérent avec elle.
+ */
+async function getConformityDetails(shopId, { start, end, onlyChanged = true, limit = 200 } = {}) {
+  const dateFilter = start && end ? { validatedAt: { gte: new Date(start), lte: new Date(end) } } : {};
+  const allLines = await prisma.proposalLine.findMany({
+    where: {
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, ...dateFilter },
+    },
+    include: { proposal: { select: { generatedAt: true, validatedAt: true, validatedBy: true } } },
+    orderBy: { proposal: { validatedAt: 'desc' } },
+  });
+
+  const lines = allLines.filter((l) => !l.excludedOutOfScope);
+  const rate = lines.length
+    ? lines.filter((l) => !l.wasExcluded && l.quantityValidated === l.quantitySuggested).length / lines.length
+    : null;
+
+  const relevant = onlyChanged
+    ? lines.filter((l) => l.wasExcluded || l.quantityValidated !== l.quantitySuggested)
+    : lines;
+
+  const articles = relevant.slice(0, limit).map((l) => ({
+    ean: l.ean,
+    label: l.label,
+    department: l.department,
+    sector: l.sector,
+    quantitySuggested: l.quantitySuggested,
+    quantityValidated: l.quantityValidated,
+    wasExcluded: l.wasExcluded,
+    sellingPrice: l.sellingPrice,
+    buyingPrice: l.buyingPrice,
+    stockAtGeneration: l.stockAtGeneration,
+    generatedAt: l.proposal?.generatedAt || null,
+    validatedAt: l.proposal?.validatedAt || null,
+    validatedBy: l.proposal?.validatedBy || null,
+  }));
+
+  return {
+    rate,
+    totalLines: lines.length,
+    changedLines: lines.filter((l) => l.wasExcluded || l.quantityValidated !== l.quantitySuggested).length,
+    articles,
+  };
+}
+
 // Début (lundi 00:00 UTC) de la semaine ISO contenant `date` — pas de lib de dates dans ce projet,
 // même approche "calcul manuel" que le reste du code (cf. periodService.js).
 function weekStartOf(date) {
@@ -3549,6 +3603,7 @@ module.exports = {
   runAutoOrder,
   getProposalStatus,
   getConformityRate,
+  getConformityDetails,
   getWeeklyConformityRate,
   getTodayProposalShops,
   getStockoutRate,

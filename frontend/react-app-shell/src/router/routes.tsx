@@ -27,6 +27,7 @@ import { JobDetailPage } from '../pages/JobsAdmin/JobDetailPage';
 import { OverstockReport } from '../pages/OverstockReport/OverstockReport';
 import { OverstockScrapDetail } from '../pages/OverstockReport/OverstockScrapDetail';
 import { ScrapReport } from '../pages/ScrapReport/ScrapReport';
+import { Conformity } from '../pages/Conformity/Conformity';
 
 // Vague 1 du plan de migration (/home/youssef/.claude/plans/pure-singing-willow.md) : pages
 // simples, faible trafic. /feature-requests et /mail-recipients réservées ADMIN (AdminGuard, même
@@ -86,6 +87,7 @@ export function AppRoutes() {
         <Route path="/overstock-report" element={<OverstockReport />} />
         <Route path="/overstock-report/scrap/:ean" element={<OverstockScrapDetail />} />
         <Route path="/scrap-report" element={<ScrapReport />} />
+        <Route path="/conformity" element={<Conformity />} />
         <Route path="/settings" element={<AdminGuard><Settings /></AdminGuard>} />
         <Route path="/ai-quality" element={<AdminGuard><AiQuality /></AdminGuard>} />
         <Route path="/ai-assistant" element={<AiAssistantPage />} />
