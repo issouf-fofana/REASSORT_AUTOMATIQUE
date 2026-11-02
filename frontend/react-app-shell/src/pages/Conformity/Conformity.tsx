@@ -177,115 +177,139 @@ export function Conformity() {
         </h4>
       </div>
 
-      <div className="alert alert-light border mb-4 small">
-        Compare, article par article, la quantité <strong>proposée</strong> par le système à la quantité
-        finalement <strong>validée</strong> par le magasin, sur les commandes déjà validées. Le taux de
-        conformité ci-dessous est le même indicateur que celui affiché sur le Tableau de bord.
-        <br />
-        <strong>Générée le</strong> : date de création de la proposition par le système. <strong>Validée
-        le</strong> : date à laquelle le magasin a validé (et, le cas échéant, modifié) la quantité —
-        il n'existe qu'une seule date de décision humaine par ligne, une modification de quantité a
-        toujours lieu au moment même de la validation.
-      </div>
+      <p className="text-muted mb-4" style={{ maxWidth: 760, lineHeight: 1.6 }}>
+        Compare, article par article, la quantité <strong className="text-body">proposée</strong> par le
+        système à la quantité finalement <strong className="text-body">validée</strong> par le magasin,
+        sur les commandes déjà validées. Le taux de conformité ci-dessous est le même indicateur que
+        celui affiché sur le Tableau de bord.{' '}
+        <span className="text-body">Générée le</span> est la date de création de la proposition par le
+        système ; <span className="text-body">Validée le</span> est la date à laquelle le magasin a
+        validé — et, le cas échéant, modifié — la quantité.
+      </p>
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <div className="alert alert-danger d-flex align-items-center gap-2">
+          <iconify-icon icon="solar:danger-triangle-bold" />
+          {error}
+        </div>
+      )}
 
       {data && data.relevantCount > data.articles.length && (
-        <div className="alert alert-warning small">
+        <div className="alert alert-warning d-flex align-items-center gap-2 small">
+          <iconify-icon icon="solar:info-circle-bold" />
           {data.relevantCount.toLocaleString('fr-FR')} lignes trouvées, seules les {data.articles.length} premières sont
           affichées (limite de sécurité). Affinez la recherche ou la période pour tout voir.
         </div>
       )}
 
       {data && (
-        <div className="row mb-4">
+        <div className="row g-3 mb-4">
           <div className="col-md-4">
-            <div className="card">
-              <div className="card-body">
-                <div className="text-muted small">Taux de conformité</div>
-                <div className="fs-24 fw-bold">{fmtPct(data.rate)}</div>
-              </div>
-            </div>
+            <StatCard
+              icon="solar:target-bold-duotone"
+              tone="primary"
+              label="Taux de conformité"
+              value={fmtPct(data.rate)}
+              hint="Lignes validées sans modification"
+            />
           </div>
           <div className="col-md-4">
-            <div className="card">
-              <div className="card-body">
-                <div className="text-muted small">Lignes validées (total)</div>
-                <div className="fs-24 fw-bold">{data.totalLines}</div>
-              </div>
-            </div>
+            <StatCard
+              icon="solar:clipboard-list-bold-duotone"
+              tone="neutral"
+              label="Lignes validées"
+              value={data.totalLines.toLocaleString('fr-FR')}
+              hint="Toutes commandes confondues"
+            />
           </div>
           <div className="col-md-4">
-            <div className="card">
-              <div className="card-body">
-                <div className="text-muted small">Lignes modifiées par le magasin</div>
-                <div className="fs-24 fw-bold">{data.changedLines}</div>
-              </div>
-            </div>
+            <StatCard
+              icon="solar:pen-new-square-bold-duotone"
+              tone={data.changedLines > 0 ? 'warning' : 'neutral'}
+              label="Modifiées par le magasin"
+              value={data.changedLines.toLocaleString('fr-FR')}
+              hint={data.totalLines ? `${Math.round((data.changedLines / data.totalLines) * 100)}% des lignes` : undefined}
+            />
           </div>
         </div>
       )}
 
-      <div className="d-flex gap-3 align-items-center mb-3 flex-wrap">
-        <input
-          type="text"
-          className="form-control form-control-sm"
-          style={{ maxWidth: 280 }}
-          placeholder="Rechercher par article, EAN, rayon..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <div className="form-check">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            id="conformity-only-changed"
-            checked={onlyChanged}
-            onChange={(e) => setOnlyChanged(e.target.checked)}
-          />
-          <label className="form-check-label" htmlFor="conformity-only-changed">
-            Uniquement les articles modifiés
-          </label>
+      <div className="card mb-3">
+        <div className="card-body py-3">
+          <div className="d-flex gap-3 align-items-center flex-wrap">
+            <div className="position-relative" style={{ minWidth: 260 }}>
+              <iconify-icon
+                icon="solar:magnifer-linear"
+                className="text-muted position-absolute"
+                style={{ left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}
+              />
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                style={{ paddingLeft: 34 }}
+                placeholder="Rechercher par article, EAN, rayon..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="form-check form-switch mb-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                role="switch"
+                id="conformity-only-changed"
+                checked={onlyChanged}
+                onChange={(e) => setOnlyChanged(e.target.checked)}
+              />
+              <label className="form-check-label small" htmlFor="conformity-only-changed">
+                Uniquement les articles modifiés
+              </label>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <span className="text-muted small">Validée entre le</span>
+              <input
+                type="date"
+                className="form-control form-control-sm"
+                style={{ width: 150 }}
+                value={periodStart}
+                max={periodEnd || undefined}
+                onChange={(e) => setPeriodStart(e.target.value)}
+              />
+              <span className="text-muted small">et le</span>
+              <input
+                type="date"
+                className="form-control form-control-sm"
+                style={{ width: 150 }}
+                value={periodEnd}
+                min={periodStart || undefined}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+              />
+              {(periodStart || periodEnd) && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-link p-0"
+                  onClick={() => {
+                    setPeriodStart('');
+                    setPeriodEnd('');
+                  }}
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+            {data && (
+              <span className="text-muted small ms-auto">
+                {filtered.length.toLocaleString('fr-FR')} article{filtered.length > 1 ? 's' : ''} affiché{filtered.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="d-flex align-items-center gap-2">
-          <span className="text-muted small">Validée entre le</span>
-          <input
-            type="date"
-            className="form-control form-control-sm"
-            style={{ width: 150 }}
-            value={periodStart}
-            max={periodEnd || undefined}
-            onChange={(e) => setPeriodStart(e.target.value)}
-          />
-          <span className="text-muted small">et le</span>
-          <input
-            type="date"
-            className="form-control form-control-sm"
-            style={{ width: 150 }}
-            value={periodEnd}
-            min={periodStart || undefined}
-            max={new Date().toISOString().slice(0, 10)}
-            onChange={(e) => setPeriodEnd(e.target.value)}
-          />
-          {(periodStart || periodEnd) && (
-            <button
-              type="button"
-              className="btn btn-sm btn-link p-0"
-              onClick={() => {
-                setPeriodStart('');
-                setPeriodEnd('');
-              }}
-            >
-              Réinitialiser
-            </button>
-          )}
-        </div>
-        {data && <span className="text-muted small ms-auto">{filtered.length} article(s) affiché(s)</span>}
       </div>
 
       <div className="card">
         <div className="table-responsive">
-          <table className="table table-sm mb-0">
+          <table className="table table-sm table-hover align-middle mb-0 conformity-table">
             <thead>
               <tr>
                 <SortTh k="label">Article</SortTh>
@@ -301,17 +325,21 @@ export function Conformity() {
               </tr>
             </thead>
             <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={10} className="text-center text-muted py-4">
-                    Chargement...
-                  </td>
-                </tr>
-              )}
+              {loading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={`skeleton-${i}`}>
+                    {Array.from({ length: 10 }).map((__, j) => (
+                      <td key={j}>
+                        <span className="skeleton-bar" style={{ width: j === 0 ? '70%' : '50%' }} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center text-muted py-4">
-                    Aucun article {onlyChanged ? 'modifié' : 'validé'} trouvé.
+                  <td colSpan={10} className="text-center text-muted py-5">
+                    <iconify-icon icon="solar:inbox-line-linear" className="fs-24 d-block mb-2 opacity-50" />
+                    Aucun article {onlyChanged ? 'modifié' : 'validé'} trouvé{search ? ` pour « ${search} »` : ''}.
                   </td>
                 </tr>
               )}
@@ -324,14 +352,18 @@ export function Conformity() {
                         <div className="fw-semibold">{a.label || '—'}</div>
                         <div className="text-muted small">{a.ean}</div>
                       </td>
-                      <td>{a.department || '—'}</td>
-                      <td>{fmtNum(a.quantitySuggested)}</td>
-                      <td>{a.wasExcluded ? <span className="badge bg-secondary">Exclue</span> : fmtNum(a.quantityValidated)}</td>
+                      <td className="text-muted">{a.department || '—'}</td>
+                      <td className="fw-medium">{fmtNum(a.quantitySuggested)}</td>
+                      <td className="fw-medium">
+                        {a.wasExcluded ? <span className="badge text-bg-secondary">Exclue</span> : fmtNum(a.quantityValidated)}
+                      </td>
                       <td>
                         {delta === null ? (
-                          '—'
+                          <span className="text-muted">—</span>
+                        ) : delta === 0 ? (
+                          <span className="text-muted">0</span>
                         ) : (
-                          <span className={delta > 0 ? 'text-success fw-semibold' : delta < 0 ? 'text-danger fw-semibold' : 'text-muted'}>
+                          <span className={delta > 0 ? 'text-success fw-semibold' : 'text-danger fw-semibold'}>
                             {delta > 0 ? '+' : ''}
                             {fmtNum(delta)}
                           </span>
@@ -339,9 +371,11 @@ export function Conformity() {
                       </td>
                       <td>
                         {a.isRegression ? (
-                          <span className="badge bg-danger">Oui</span>
+                          <span className="badge text-bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                            Oui
+                          </span>
                         ) : (
-                          <span className="badge bg-light text-muted border">Non</span>
+                          <span className="badge text-bg-light text-muted border">Non</span>
                         )}
                       </td>
                       <td className="text-muted small">{fmtDate(a.generatedAt)}</td>
@@ -350,7 +384,8 @@ export function Conformity() {
                       <td className="text-muted small">
                         {a.rposOrderReference || a.rposOrderId || '—'}
                         {!a.validatedAt && a.rposOrderId && (
-                          <div className="text-warning" style={{ fontSize: '0.75em' }}>
+                          <div className="text-warning d-flex align-items-center gap-1" style={{ fontSize: '0.75em' }}>
+                            <iconify-icon icon="solar:clock-circle-bold" />
                             En attente de synchronisation RPOS
                           </div>
                         )}
@@ -386,6 +421,79 @@ export function Conformity() {
           </button>
         </div>
       )}
+
+      <style>{`
+        .conformity-table thead th {
+          background: var(--bs-tertiary-bg, #f8f9fa);
+          font-size: 0.72rem;
+          letter-spacing: 0.02em;
+          color: var(--bs-secondary-color, #6c757d);
+          font-weight: 600;
+          border-bottom: 1px solid var(--bs-border-color, #e9ecef);
+          padding-top: 0.65rem;
+          padding-bottom: 0.65rem;
+        }
+        .conformity-table tbody tr {
+          transition: background-color 0.12s ease;
+        }
+        .skeleton-bar {
+          display: inline-block;
+          height: 0.85em;
+          border-radius: 4px;
+          background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.1) 37%, rgba(0,0,0,0.06) 63%);
+          background-size: 400% 100%;
+          animation: conformity-shimmer 1.4s ease infinite;
+        }
+        @keyframes conformity-shimmer {
+          0% { background-position: 100% 50%; }
+          100% { background-position: 0 50%; }
+        }
+        @media (prefers-color-scheme: dark) {
+          .skeleton-bar {
+            background: linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 37%, rgba(255,255,255,0.08) 63%);
+            background-size: 400% 100%;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+const STAT_TONES: Record<string, { bg: string; fg: string }> = {
+  primary: { bg: 'rgba(13,110,253,0.1)', fg: '#0d6efd' },
+  warning: { bg: 'rgba(255,193,7,0.14)', fg: '#b8860b' },
+  neutral: { bg: 'rgba(108,117,125,0.1)', fg: '#6c757d' },
+};
+
+function StatCard({
+  icon,
+  tone,
+  label,
+  value,
+  hint,
+}: {
+  icon: string;
+  tone: 'primary' | 'warning' | 'neutral';
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  const colors = STAT_TONES[tone];
+  return (
+    <div className="card h-100">
+      <div className="card-body d-flex align-items-start gap-3">
+        <div
+          className="d-flex align-items-center justify-content-center flex-shrink-0"
+          style={{ width: 42, height: 42, borderRadius: 10, background: colors.bg, color: colors.fg }}
+        >
+          <iconify-icon icon={icon} style={{ fontSize: 22 }} />
+        </div>
+        <div>
+          <div className="text-muted small mb-1">{label}</div>
+          <div className="fs-24 fw-bold lh-1">{value}</div>
+          {hint && <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>{hint}</div>}
+        </div>
+      </div>
     </div>
   );
 }
