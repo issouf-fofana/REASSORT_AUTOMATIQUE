@@ -2900,7 +2900,17 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     where: {
       proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, ...dateFilter },
     },
-    include: { proposal: { select: { generatedAt: true, validatedAt: true, validatedBy: true } } },
+    include: {
+      proposal: { select: { generatedAt: true, validatedAt: true, validatedBy: true } },
+      // Bug réel observé le 02/11/2026 : "Validée le"/"Par" affichaient "—" pour des lignes
+      // POURTANT réellement commandées (proposalOrderId non-null). Cause : sur une Proposal
+      // PARTIALLY_VALIDATED (écrasée par une nouvelle génération avant d'être entièrement traitée,
+      // cf. ligne ~1454), Proposal.validatedAt/validatedBy ne sont jamais renseignés — ce chemin
+      // n'est pas une vraie action de validation à cet instant. La vraie date/validateur de CETTE
+      // commande précise existe sur ProposalOrder.rposValidationDate/rposValidatedBy (déjà utilisée
+      // ailleurs pour le même besoin, cf. commentaire schema.prisma), lue ici en priorité.
+      proposalOrder: { select: { rposValidationDate: true, rposValidatedBy: true } },
+    },
     orderBy: { proposal: { validatedAt: 'desc' } },
   });
 
@@ -2928,8 +2938,8 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     buyingPrice: l.buyingPrice,
     stockAtGeneration: l.stockAtGeneration,
     generatedAt: l.proposal?.generatedAt || null,
-    validatedAt: l.proposal?.validatedAt || null,
-    validatedBy: l.proposal?.validatedBy || null,
+    validatedAt: l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null,
+    validatedBy: l.proposalOrder?.rposValidatedBy || l.proposal?.validatedBy || null,
   }));
 
   return {
