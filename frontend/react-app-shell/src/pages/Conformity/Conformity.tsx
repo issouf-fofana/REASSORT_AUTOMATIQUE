@@ -44,7 +44,7 @@ function fmtPct(rate: number | null): string {
   return rate === null ? 'N/A' : `${Math.round(rate * 100)}%`;
 }
 
-type SortKey = 'label' | 'department' | 'quantitySuggested' | 'quantityValidated' | 'delta' | 'validatedAt';
+type SortKey = 'label' | 'department' | 'quantitySuggested' | 'quantityValidated' | 'delta' | 'generatedAt' | 'validatedAt';
 
 const PAGE_SIZE = 50;
 
@@ -134,6 +134,7 @@ export function Conformity() {
         if (sortKey === 'quantitySuggested') return r.quantitySuggested;
         if (sortKey === 'quantityValidated') return r.quantityValidated ?? 0;
         if (sortKey === 'delta') return (r.quantityValidated ?? 0) - r.quantitySuggested;
+        if (sortKey === 'generatedAt') return r.generatedAt ? new Date(r.generatedAt).getTime() : 0;
         return r.validatedAt ? new Date(r.validatedAt).getTime() : 0;
       };
       const av = getValue(a);
@@ -173,6 +174,11 @@ export function Conformity() {
         Compare, article par article, la quantité <strong>proposée</strong> par le système à la quantité
         finalement <strong>validée</strong> par le magasin, sur les commandes déjà validées. Le taux de
         conformité ci-dessous est le même indicateur que celui affiché sur le Tableau de bord.
+        <br />
+        <strong>Générée le</strong> : date de création de la proposition par le système. <strong>Validée
+        le</strong> : date à laquelle le magasin a validé (et, le cas échéant, modifié) la quantité —
+        il n'existe qu'une seule date de décision humaine par ligne, une modification de quantité a
+        toujours lieu au moment même de la validation.
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -280,6 +286,7 @@ export function Conformity() {
                 <SortTh k="quantitySuggested">Qté proposée</SortTh>
                 <SortTh k="quantityValidated">Qté validée</SortTh>
                 <SortTh k="delta">Écart</SortTh>
+                <SortTh k="generatedAt">Générée le</SortTh>
                 <SortTh k="validatedAt">Validée le</SortTh>
                 <th>Par</th>
               </tr>
@@ -287,14 +294,14 @@ export function Conformity() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7} className="text-center text-muted py-4">
+                  <td colSpan={8} className="text-center text-muted py-4">
                     Chargement...
                   </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="text-center text-muted py-4">
+                  <td colSpan={8} className="text-center text-muted py-4">
                     Aucun article {onlyChanged ? 'modifié' : 'validé'} trouvé.
                   </td>
                 </tr>
@@ -321,6 +328,7 @@ export function Conformity() {
                           </span>
                         )}
                       </td>
+                      <td className="text-muted small">{fmtDate(a.generatedAt)}</td>
                       <td className="text-muted small">{fmtDate(a.validatedAt)}</td>
                       <td className="text-muted small">{a.validatedBy || '—'}</td>
                     </tr>
