@@ -2851,9 +2851,16 @@ async function getConformityRate(shopId, { start, end } = {}) {
   // pour une Proposal PARTIALLY_VALIDATED — des lignes réellement commandées dans la période
   // demandée étaient exclues de la requête elle-même. Filtré désormais en mémoire après résolution
   // de la date effective (ProposalOrder.rposValidationDate, repli sur Proposal.validatedAt).
+  // Perf (signalé 02/11/2026 : "il prend le temps pour afficher") : proposalOrderId/excludedOutOfScope
+  // sont filtrés inconditionnellement en mémoire plus bas, quel que soit le filtre de dates — les
+  // pousser ici évite de ramener en mémoire chaque ligne JAMAIS commandée d'un magasin avec beaucoup
+  // d'historique. Seul le filtre de DATES reste en mémoire (nécessaire pour les lignes
+  // PARTIALLY_VALIDATED, cf. commentaire ci-dessous).
   const allLines = await prisma.proposalLine.findMany({
     where: {
       proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
+      proposalOrderId: { not: null },
+      excludedOutOfScope: false,
     },
     include: {
       proposal: { select: { validatedAt: true } },
@@ -2913,9 +2920,16 @@ async function getConformityRate(shopId, { start, end } = {}) {
  * cohérent avec elle.
  */
 async function getConformityDetails(shopId, { start, end, onlyChanged = true, limit = 200 } = {}) {
+  // Perf (signalé 02/11/2026 : "il prend le temps pour afficher") : proposalOrderId/excludedOutOfScope
+  // sont filtrés inconditionnellement en mémoire plus bas (ligne ~2950), quel que soit le filtre de
+  // dates — les pousser ici évite de ramener en mémoire chaque ligne JAMAIS commandée d'un magasin
+  // avec beaucoup d'historique, qui représentaient la majorité du volume. Seul le filtre de DATES
+  // reste en mémoire (cf. commentaire ci-dessous, nécessaire pour les lignes PARTIALLY_VALIDATED).
   const allLines = await prisma.proposalLine.findMany({
     where: {
       proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
+      proposalOrderId: { not: null },
+      excludedOutOfScope: false,
     },
     include: {
       proposal: { select: { generatedAt: true, validatedAt: true, validatedBy: true } },
