@@ -2983,6 +2983,10 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     rposOrderId: l.proposalOrder?.rposOrderId || null,
     rposOrderReference: l.proposalOrder?.rposOrderReference || null,
     rposOrderStatus: l.proposalOrder?.status || null,
+    // Régression = le magasin a VALIDÉ UNE QUANTITÉ INFÉRIEURE à celle proposée par le système
+    // (demande explicite : "tu montre si ya une regession ou pas" — distingue une baisse, signal de
+    // sous-couverture potentielle, d'une hausse qui n'est qu'un ajustement à la demande).
+    isRegression: l.quantityValidated !== null && l.quantityValidated < l.quantitySuggested,
   }));
 
   return {

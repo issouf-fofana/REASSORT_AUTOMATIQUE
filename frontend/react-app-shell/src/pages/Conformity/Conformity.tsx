@@ -26,6 +26,7 @@ type ConformityArticle = {
   rposOrderId: string | null;
   rposOrderReference: string | null;
   rposOrderStatus: string | null;
+  isRegression: boolean;
 };
 
 type ConformityDetailsData = {
@@ -77,7 +78,10 @@ export function Conformity() {
   const [data, setData] = useState<ConformityDetailsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [onlyChanged, setOnlyChanged] = useState(true);
+  // Par défaut, montre TOUS les articles proposés de la commande (pas seulement les modifiés) —
+  // demande explicite du 02/11/2026 : "si il y a 30 article proposé... je veux voir ça tu vois ?"
+  // — l'utilisateur veut voir l'ensemble de la commande, pas uniquement les écarts.
+  const [onlyChanged, setOnlyChanged] = useState(false);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('validatedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -289,6 +293,7 @@ export function Conformity() {
                 <SortTh k="quantitySuggested">Qté proposée</SortTh>
                 <SortTh k="quantityValidated">Qté validée</SortTh>
                 <SortTh k="delta">Écart</SortTh>
+                <th>Régression</th>
                 <SortTh k="generatedAt">Générée le</SortTh>
                 <SortTh k="validatedAt">Validée le</SortTh>
                 <th>Par</th>
@@ -298,14 +303,14 @@ export function Conformity() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={9} className="text-center text-muted py-4">
+                  <td colSpan={10} className="text-center text-muted py-4">
                     Chargement...
                   </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="text-center text-muted py-4">
+                  <td colSpan={10} className="text-center text-muted py-4">
                     Aucun article {onlyChanged ? 'modifié' : 'validé'} trouvé.
                   </td>
                 </tr>
@@ -330,6 +335,13 @@ export function Conformity() {
                             {delta > 0 ? '+' : ''}
                             {fmtNum(delta)}
                           </span>
+                        )}
+                      </td>
+                      <td>
+                        {a.isRegression ? (
+                          <span className="badge bg-danger">Oui</span>
+                        ) : (
+                          <span className="badge bg-light text-muted border">Non</span>
                         )}
                       </td>
                       <td className="text-muted small">{fmtDate(a.generatedAt)}</td>
