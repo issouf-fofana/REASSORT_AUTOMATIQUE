@@ -37,7 +37,12 @@ async function runOrderIdentitySync() {
     if (!posId) return;
     try {
       const detail = await rpos.getSupplierOrderDetail(posId, order.rposOrderId);
-      if (!detail || !detail.validationDate) return; // pas encore validée côté RPOS, retentera au prochain passage
+      if (!detail || !detail.validationDate) {
+        // pas encore validée côté RPOS, retentera au prochain passage — log pour diagnostiquer les
+        // cas où la ligne REASSORT est déjà marquée validée mais RPOS n'a pas encore de date (26/10/2026)
+        console.log(`[orderIdentitySyncJob] Commande ${order.rposOrderId} (order.id=${order.id}) : detail=${detail ? JSON.stringify(detail) : 'null'}`);
+        return;
+      }
       await prisma.proposalOrder.update({
         where: { id: order.id },
         data: {
