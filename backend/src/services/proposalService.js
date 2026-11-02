@@ -2863,7 +2863,7 @@ async function getConformityRate(shopId, { start, end } = {}) {
       excludedOutOfScope: false,
     },
     include: {
-      proposal: { select: { validatedAt: true } },
+      proposal: { select: { validatedAt: true, generatedAt: true } },
       proposalOrder: { select: { rposValidationDate: true } },
     },
   });
@@ -2889,7 +2889,15 @@ async function getConformityRate(shopId, { start, end } = {}) {
   const lines = allLines.filter((l) => {
     if (l.excludedOutOfScope || l.proposalOrderId === null) return false;
     if (startDate && endDate) {
-      const vAt = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
+      // Repli sur generatedAt (demande explicite du 02/11/2026, suite au bug "le taux reste N/A
+      // même en changeant de période") : pour une ligne réellement commandée dont RPOS n'a pas
+      // encore renvoyé la date de validation (orderIdentitySyncJob pas encore passé) ET dont la
+      // Proposal est PARTIALLY_VALIDATED (validatedAt jamais renseigné dans ce cas), les deux
+      // premières dates sont null — la ligne disparaissait alors de TOUT filtre de période, même
+      // large, alors qu'elle correspond bien à une vraie commande récente. La date de génération
+      // reste une approximation raisonnable en dernier recours (la validation suit généralement de
+      // près la génération) plutôt que de perdre la ligne du Tableau de bord indéfiniment.
+      const vAt = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || l.proposal?.generatedAt || null;
       if (!vAt || vAt < startDate || vAt > endDate) return false;
     }
     return true;
@@ -2957,13 +2965,22 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
   // soit la vraie date de validation RPOS. Résolu une seule date effective par ligne (même priorité
   // que l'affichage : ProposalOrder.rposValidationDate, repli sur Proposal.validatedAt) AVANT de
   // filtrer, en mémoire, jamais dans le WHERE Prisma.
+  // effectiveValidatedAt : utilisée pour l'AFFICHAGE de la colonne "Validée le" — reste strictement
+  // la vraie date de décision humaine (null affiché "—" si inconnue), jamais approximée.
   const effectiveValidatedAt = (l) => l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
+  // effectiveDateForFilter : utilisée seulement pour décider si une ligne tombe dans la période
+  // demandée (demande explicite du 02/11/2026, bug "le taux reste N/A même en changeant de
+  // période") — avec repli sur generatedAt en dernier recours, pour qu'une ligne réellement
+  // commandée mais pas encore synchronisée avec RPOS (et dont la Proposal est PARTIALLY_VALIDATED,
+  // donc validatedAt aussi null) ne disparaisse pas de tout filtre de période tant que la sync n'est
+  // pas passée.
+  const effectiveDateForFilter = (l) => effectiveValidatedAt(l) || l.proposal?.generatedAt || null;
   const startDate = start ? new Date(start) : null;
   const endDate = end ? new Date(end) : null;
   const lines = allLines.filter((l) => {
     if (l.excludedOutOfScope || l.proposalOrderId === null) return false;
     if (startDate && endDate) {
-      const vAt = effectiveValidatedAt(l);
+      const vAt = effectiveDateForFilter(l);
       if (!vAt || vAt < startDate || vAt > endDate) return false;
     }
     return true;
@@ -3053,6 +3070,8 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
   const allLines = await prisma.proposalLine.findMany({
     where: {
       proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
+      proposalOrderId: { not: null },
+      excludedOutOfScope: false,
     },
     select: {
       excludedOutOfScope: true,
@@ -3060,7 +3079,7 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
       quantityValidated: true,
       quantitySuggested: true,
       proposalOrderId: true,
-      proposal: { select: { validatedAt: true } },
+      proposal: { select: { validatedAt: true, generatedAt: true } },
       proposalOrder: { select: { rposValidationDate: true } },
     },
   });
@@ -3070,9 +3089,12 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
     // Même correctif que getConformityRate (02/11/2026) : seules les lignes réellement COMMANDÉES
     // (proposalOrderId non-null) comptent — un rayon jamais traité d'une Proposal
     // PARTIALLY_VALIDATED n'est jamais une "modification à zéro".
-    const effectiveValidatedAt = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
-    if (l.excludedOutOfScope || !effectiveValidatedAt || l.proposalOrderId === null || effectiveValidatedAt < windowStart) continue;
-    const key = weekStartOf(new Date(effectiveValidatedAt)).toISOString().slice(0, 10);
+    // Repli sur generatedAt en dernier recours (même correctif que getConformityRate/Details,
+    // 02/11/2026) pour qu'une ligne commandée mais pas encore synchronisée avec RPOS ne disparaisse
+    // pas du graphique de tendance.
+    const effectiveDate = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || l.proposal?.generatedAt || null;
+    if (l.excludedOutOfScope || !effectiveDate || l.proposalOrderId === null || effectiveDate < windowStart) continue;
+    const key = weekStartOf(new Date(effectiveDate)).toISOString().slice(0, 10);
     if (!buckets.has(key)) buckets.set(key, { total: 0, unchanged: 0 });
     const b = buckets.get(key);
     b.total += 1;
