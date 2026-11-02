@@ -2842,13 +2842,22 @@ async function getProposalStatus(proposalId) {
  */
 async function getConformityRate(shopId, { start, end } = {}) {
   // start/end optionnels (demande explicite du 23/10/2026 : "ajouter les filtre sur des periode"
-  // sur le Tableau de bord) — filtre sur validatedAt, la date où la décision humaine a réellement
-  // eu lieu, pas generatedAt (même convention que getWeeklyConformityRate ci-dessous). Sans
-  // start/end, comportement d'origine inchangé (tout l'historique).
-  const dateFilter = start && end ? { validatedAt: { gte: new Date(start), lte: new Date(end) } } : {};
+  // sur le Tableau de bord) — filtre sur la date où la décision humaine a réellement eu lieu, pas
+  // generatedAt (même convention que getWeeklyConformityRate ci-dessous). Sans start/end,
+  // comportement d'origine inchangé (tout l'historique).
+  //
+  // BUG CORRIGÉ le 02/11/2026 (même cause que le bug équivalent dans getConformityDetails) : le
+  // filtre de date était appliqué au niveau SQL sur proposal.validatedAt, systématiquement null
+  // pour une Proposal PARTIALLY_VALIDATED — des lignes réellement commandées dans la période
+  // demandée étaient exclues de la requête elle-même. Filtré désormais en mémoire après résolution
+  // de la date effective (ProposalOrder.rposValidationDate, repli sur Proposal.validatedAt).
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, ...dateFilter },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
+    },
+    include: {
+      proposal: { select: { validatedAt: true } },
+      proposalOrder: { select: { rposValidationDate: true } },
     },
   });
 
@@ -2868,7 +2877,16 @@ async function getConformityRate(shopId, { start, end } = {}) {
   // (status : "au moins un ProposalOrder existe, les rayons RESTANTS sont considérés définitivement
   // abandonnés"), les lignes des rayons jamais traités ont proposalOrderId=null — jamais des lignes
   // où le magasin aurait "modifié la quantité à zéro", juste jamais commandées du tout.
-  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.proposalOrderId !== null);
+  const startDate = start ? new Date(start) : null;
+  const endDate = end ? new Date(end) : null;
+  const lines = allLines.filter((l) => {
+    if (l.excludedOutOfScope || l.proposalOrderId === null) return false;
+    if (startDate && endDate) {
+      const vAt = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
+      if (!vAt || vAt < startDate || vAt > endDate) return false;
+    }
+    return true;
+  });
 
   if (lines.length === 0) return { rate: null, totalLines: 0, unchangedLines: 0 };
 
@@ -2895,10 +2913,9 @@ async function getConformityRate(shopId, { start, end } = {}) {
  * cohérent avec elle.
  */
 async function getConformityDetails(shopId, { start, end, onlyChanged = true, limit = 200 } = {}) {
-  const dateFilter = start && end ? { validatedAt: { gte: new Date(start), lte: new Date(end) } } : {};
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, ...dateFilter },
+      proposal: { rposShopId: shopId, status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
     },
     include: {
       proposal: { select: { generatedAt: true, validatedAt: true, validatedBy: true } },
@@ -2917,7 +2934,26 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
   // Même correctif que getConformityRate ci-dessus (02/11/2026) : seules les lignes réellement
   // COMMANDÉES (proposalOrderId non-null) comptent — un rayon jamais traité d'une Proposal
   // PARTIALLY_VALIDATED n'est jamais une "modification à zéro" par le magasin.
-  const lines = allLines.filter((l) => !l.excludedOutOfScope && l.proposalOrderId !== null);
+  //
+  // BUG CORRIGÉ le 02/11/2026 (signalé : filtre de dates "15/10 au 02/11" renvoyait 0 résultat alors
+  // que 10 lignes réellement commandées existaient bien dans cette fenêtre) : le filtre de date était
+  // auparavant appliqué AU NIVEAU SQL sur proposal.validatedAt, systématiquement null pour une
+  // Proposal PARTIALLY_VALIDATED (même cause que le bug "Validée le" vide ci-dessus) — ces lignes
+  // étaient donc exclues de la requête elle-même dès qu'un filtre de date était actif, quelle que
+  // soit la vraie date de validation RPOS. Résolu une seule date effective par ligne (même priorité
+  // que l'affichage : ProposalOrder.rposValidationDate, repli sur Proposal.validatedAt) AVANT de
+  // filtrer, en mémoire, jamais dans le WHERE Prisma.
+  const effectiveValidatedAt = (l) => l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
+  const startDate = start ? new Date(start) : null;
+  const endDate = end ? new Date(end) : null;
+  const lines = allLines.filter((l) => {
+    if (l.excludedOutOfScope || l.proposalOrderId === null) return false;
+    if (startDate && endDate) {
+      const vAt = effectiveValidatedAt(l);
+      if (!vAt || vAt < startDate || vAt > endDate) return false;
+    }
+    return true;
+  });
   const rate = lines.length
     ? lines.filter((l) => !l.wasExcluded && l.quantityValidated === l.quantitySuggested).length / lines.length
     : null;
@@ -2938,7 +2974,7 @@ async function getConformityDetails(shopId, { start, end, onlyChanged = true, li
     buyingPrice: l.buyingPrice,
     stockAtGeneration: l.stockAtGeneration,
     generatedAt: l.proposal?.generatedAt || null,
-    validatedAt: l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null,
+    validatedAt: effectiveValidatedAt(l),
     validatedBy: l.proposalOrder?.rposValidatedBy || l.proposal?.validatedBy || null,
   }));
 
@@ -2984,9 +3020,14 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
 
   const shopFilter = Array.isArray(shopId) ? { in: shopId } : shopId;
 
+  // BUG CORRIGÉ le 02/11/2026 (même cause que le bug équivalent dans getConformityRate/Details) :
+  // le filtre validatedAt: { gte: windowStart } au niveau SQL excluait de la requête elle-même
+  // toute ligne d'une Proposal PARTIALLY_VALIDATED (validatedAt toujours null pour ce statut), même
+  // si sa vraie date de validation RPOS (ProposalOrder.rposValidationDate) tombait bien dans la
+  // fenêtre demandée. Filtré désormais en mémoire après résolution de la date effective.
   const allLines = await prisma.proposalLine.findMany({
     where: {
-      proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] }, validatedAt: { gte: windowStart } },
+      proposal: { ...(shopFilter !== null ? { rposShopId: shopFilter } : {}), status: { in: ['VALIDATED', 'PARTIALLY_VALIDATED'] } },
     },
     select: {
       excludedOutOfScope: true,
@@ -2995,6 +3036,7 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
       quantitySuggested: true,
       proposalOrderId: true,
       proposal: { select: { validatedAt: true } },
+      proposalOrder: { select: { rposValidationDate: true } },
     },
   });
 
@@ -3003,8 +3045,9 @@ async function getWeeklyConformityRate(shopId, weeks = 10) {
     // Même correctif que getConformityRate (02/11/2026) : seules les lignes réellement COMMANDÉES
     // (proposalOrderId non-null) comptent — un rayon jamais traité d'une Proposal
     // PARTIALLY_VALIDATED n'est jamais une "modification à zéro".
-    if (l.excludedOutOfScope || !l.proposal.validatedAt || l.proposalOrderId === null) continue;
-    const key = weekStartOf(new Date(l.proposal.validatedAt)).toISOString().slice(0, 10);
+    const effectiveValidatedAt = l.proposalOrder?.rposValidationDate || l.proposal?.validatedAt || null;
+    if (l.excludedOutOfScope || !effectiveValidatedAt || l.proposalOrderId === null || effectiveValidatedAt < windowStart) continue;
+    const key = weekStartOf(new Date(effectiveValidatedAt)).toISOString().slice(0, 10);
     if (!buckets.has(key)) buckets.set(key, { total: 0, unchanged: 0 });
     const b = buckets.get(key);
     b.total += 1;
