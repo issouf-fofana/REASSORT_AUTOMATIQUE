@@ -6,6 +6,22 @@ const router = express.Router();
 const { requireAdmin, resolveShopId } = require('../../middleware/auth');
 const rpos = require('../../services/rposClient');
 const { getConfig, upsertConfig } = require('../../services/configService');
+const configGroupService = require('../../services/configGroupService');
+const VALID_ORDER_DAYS = new Set(['LUNDI', 'MARDI', 'MERCREDI', 'JEUDI', 'VENDREDI', 'SAMEDI', 'DIMANCHE']);
+
+// Valide orderDays (03/11/2026) : tableau de libellés parmi VALID_ORDER_DAYS, dédupliqué — rejette
+// ICI, à l'écriture, plutôt que de laisser une valeur invalide atteindre computeCoverageDaysFromOrderDays
+// (qui l'ignorerait silencieusement), pour que l'utilisateur sache immédiatement si sa sélection a un
+// problème. undefined = champ non fourni (ne pas valider) ; null/tableau vide = valide (désactive le
+// cycle, repli sur receptionLeadTimeDays).
+function validateOrderDays(orderDays) {
+  if (orderDays === undefined || orderDays === null) return { valid: true, value: orderDays === null ? [] : undefined };
+  if (!Array.isArray(orderDays)) return { valid: false, message: 'orderDays doit être un tableau' };
+  const upper = orderDays.map((d) => String(d).toUpperCase());
+  const invalid = upper.filter((d) => !VALID_ORDER_DAYS.has(d));
+  if (invalid.length) return { valid: false, message: `Jour(s) invalide(s) : ${invalid.join(', ')}` };
+  return { valid: true, value: [...new Set(upper)] };
+}
 const { MODE_DAYS } = require('../../services/periodService');
 const systemConfig = require('../../services/systemConfigService');
 const { findSalesFiles, ensureManualImportDir, importCsvFileToDatabase, MANUAL_IMPORT_DIR } = require('../../services/salesFileService');
@@ -93,7 +109,12 @@ router.put('/config', requireAdmin, async (req, res) => {
       paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, weekendDeliveryDay, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
       autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
+      orderDays, groupId,
     } = req.body;
+
+    const orderDaysResult = validateOrderDays(orderDays);
+    if (!orderDaysResult.valid) return res.status(400).json({ success: false, message: orderDaysResult.message });
+
     const data = {};
     if (paretoThreshold !== undefined) data.paretoThreshold = paretoThreshold;
     if (safetyStockRatio !== undefined) data.safetyStockRatio = safetyStockRatio;
@@ -125,6 +146,11 @@ router.put('/config', requireAdmin, async (req, res) => {
     // Génération automatique nocturne (30/09/2026) : réglage disponible ici par magasin, et aussi
     // sur PUT /config/bulk pour l'appliquer à plusieurs/tous les magasins sélectionnés en même temps.
     if (nightlyGenerationEnabled !== undefined) data.nightlyGenerationEnabled = nightlyGenerationEnabled;
+    // Jours de commande / groupe (03/11/2026, cf. computeCoverageDaysFromOrderDays proposalService.js
+    // et ReassortConfigGroup schema.prisma). groupId: '' ou null détache explicitement le magasin de
+    // son groupe (reprend sa configuration individuelle) ; undefined = champ non fourni, inchangé.
+    if (orderDaysResult.value !== undefined) data.orderDays = orderDaysResult.value;
+    if (groupId !== undefined) data.groupId = groupId || null;
 
     const config = await upsertConfig(shopId, data, req.user.email);
     res.json({ success: true, data: config });
@@ -149,10 +175,14 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
       shopIds, paretoThreshold, safetyStockRatio, periodMode, customStart, customEnd,
       treatNegativeStockAsZero, revenueSharePeriodDays, overstockThresholdMultiplier, splitOrdersByDepartment, forecastAccuracyWindowDays, forecastAccuracyThresholdPct, seasonalityComparisonEnabled, seasonalityLookbackYears, seasonalityAdjustmentThresholdPct, receptionLeadTimeDays, weekendDeliveryDay, useReceptionLeadTimeInCalculation, excludeGenericArticlesBelowPrice, recentOrderMaxAgeDays, forecastEnabled, forecastAlpha, ignoreRposStockInCalculation,
       autoOrderEnabled, autoOrderValidateAfterCreate, nightlyGenerationEnabled,
+      orderDays, groupId,
     } = req.body;
     if (!Array.isArray(shopIds) || shopIds.length === 0) {
       return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
     }
+
+    const orderDaysResult = validateOrderDays(orderDays);
+    if (!orderDaysResult.valid) return res.status(400).json({ success: false, message: orderDaysResult.message });
 
     const data = {};
     if (paretoThreshold !== undefined) data.paretoThreshold = paretoThreshold;
@@ -180,6 +210,8 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     if (autoOrderEnabled !== undefined) data.autoOrderEnabled = autoOrderEnabled;
     if (autoOrderValidateAfterCreate !== undefined) data.autoOrderValidateAfterCreate = autoOrderValidateAfterCreate;
     if (nightlyGenerationEnabled !== undefined) data.nightlyGenerationEnabled = nightlyGenerationEnabled;
+    if (orderDaysResult.value !== undefined) data.orderDays = orderDaysResult.value;
+    if (groupId !== undefined) data.groupId = groupId || null;
 
     const results = [];
     for (const shopId of shopIds) {
@@ -190,6 +222,99 @@ router.put('/config/bulk', requireAdmin, async (req, res) => {
     res.json({ success: true, data: { updated: results.length, configs: results } });
   } catch (error) {
     console.error('Bulk update config error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- Groupes de magasins (demande du 03/11/2026 : "donne la possibilité de cree un groupe pour les
+// mag qui son similaire") — un magasin rattaché hérite EN TOTALITÉ de la config du groupe
+// (configService.resolveEffectiveConfig), sauf autoOrderEnabled/autoOrderValidateAfterCreate/
+// nightlyGenerationEnabled qui restent toujours individuels (cf. GROUP_EXCLUDED_FIELDS). Réservé au
+// Superadmin, même restriction que le reste de ce fichier.
+
+// GET /api/reassort/config-groups - liste tous les groupes avec leurs magasins rattachés.
+router.get('/config-groups', requireAdmin, async (req, res) => {
+  try {
+    const groups = await configGroupService.listGroups();
+    res.json({ success: true, data: groups });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/reassort/config-groups/:id - détail d'un groupe précis.
+router.get('/config-groups/:id', requireAdmin, async (req, res) => {
+  try {
+    const group = await configGroupService.getGroup(req.params.id);
+    if (!group) return res.status(404).json({ success: false, message: 'Groupe introuvable' });
+    res.json({ success: true, data: group });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/config-groups - crée un groupe.
+// body: { name, ...mêmes champs que PUT /config (sauf les 3 exclus, voir configGroupService.WRITABLE_FIELDS) }
+router.post('/config-groups', requireAdmin, async (req, res) => {
+  try {
+    const orderDaysResult = validateOrderDays(req.body.orderDays);
+    if (!orderDaysResult.valid) return res.status(400).json({ success: false, message: orderDaysResult.message });
+    const group = await configGroupService.createGroup({ ...req.body, orderDays: orderDaysResult.value }, req.user.email);
+    res.json({ success: true, data: group });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/reassort/config-groups/:id - met à jour un groupe (tous les magasins rattachés héritent
+// immédiatement du changement, dès leur prochaine lecture de config via configService.getConfig).
+router.put('/config-groups/:id', requireAdmin, async (req, res) => {
+  try {
+    const orderDaysResult = validateOrderDays(req.body.orderDays);
+    if (!orderDaysResult.valid) return res.status(400).json({ success: false, message: orderDaysResult.message });
+    const group = await configGroupService.updateGroup(req.params.id, { ...req.body, orderDays: orderDaysResult.value }, req.user.email);
+    res.json({ success: true, data: group });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/reassort/config-groups/:id - supprime le groupe ; les magasins rattachés sont
+// automatiquement détachés (onDelete: SetNull) et reprennent leur configuration individuelle.
+router.delete('/config-groups/:id', requireAdmin, async (req, res) => {
+  try {
+    await configGroupService.deleteGroup(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/reassort/config-groups/:id/shops - rattache un ou plusieurs magasins à ce groupe.
+// body: { shopIds: [uuid, ...] }
+router.post('/config-groups/:id/shops', requireAdmin, async (req, res) => {
+  try {
+    const { shopIds } = req.body;
+    if (!Array.isArray(shopIds) || shopIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'shopIds (tableau non vide) est requis' });
+    }
+    for (const shopId of shopIds) {
+      await configGroupService.attachShop(req.params.id, shopId, req.user.email);
+    }
+    const group = await configGroupService.getGroup(req.params.id);
+    res.json({ success: true, data: group });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/reassort/config-groups/:id/shops/:shopId - détache un magasin précis de ce groupe
+// (reprend sa configuration individuelle, déjà conservée en base).
+router.delete('/config-groups/:id/shops/:shopId', requireAdmin, async (req, res) => {
+  try {
+    await configGroupService.detachShop(req.params.shopId, req.user.email);
+    res.json({ success: true });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });

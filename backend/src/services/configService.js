@@ -25,6 +25,16 @@ const DEFAULTS = {
   receptionLeadTimeDays: 1,
   weekendDeliveryDay: 'LUNDI',
   useReceptionLeadTimeInCalculation: false,
+  // Jours de commande du magasin (03/11/2026) : vide par défaut, aucune valeur suggérée — voir le
+  // commentaire sur ReassortConfig.orderDays (schema.prisma) pour la logique complète.
+  orderDays: [],
+  // groupId délibérément absent de DEFAULTS (pas groupId: null) : upsertConfig (ci-dessous) spread
+  // DEFAULTS dans le `create` Prisma, donc un groupId explicitement null ici forçait Prisma à le
+  // passer sur CHAQUE création de ReassortConfig — déclenchait une erreur runtime Prisma ("Unknown
+  // argument groupId. Did you mean group?", bug trouvé le 03/11/2026 en testant le premier
+  // enregistrement d'un magasin jamais configuré) due à l'ambiguïté XOR<CreateInput,
+  // UncheckedCreateInput> de Prisma quand groupId est fourni explicitement à null plutôt qu'omis — un
+  // champ relation optionnel absent du payload retombe de toute façon sur null en base sans problème.
   excludeGenericArticlesBelowPrice: 2,
   recentOrderMaxAgeDays: 3,
   forecastEnabled: false,
@@ -52,18 +62,57 @@ const DEFAULTS = {
   useSupplierHistoryResolution: true,
 };
 
-/** Récupère la config d'un magasin, ou les valeurs par défaut si aucune n'a été personnalisée. */
-async function getConfig(shopId) {
-  const config = await prisma.reassortConfig.findUnique({ where: { rposShopId: shopId } });
-  return config || { rposShopId: shopId, ...DEFAULTS };
+// Champs qui restent TOUJOURS individuels par magasin même quand il est rattaché à un groupe
+// (demande du 03/11/2026, après retour utilisateur explicite : activer l'auto-validation sans
+// supervision humaine sur toute une chaîne de magasins d'un coup serait trop risqué pour être
+// groupé) — exclus de l'héritage dans resolveEffectiveConfig ci-dessous, voir aussi le commentaire
+// sur ReassortConfigGroup dans schema.prisma.
+const GROUP_EXCLUDED_FIELDS = ['autoOrderEnabled', 'autoOrderValidateAfterCreate', 'nightlyGenerationEnabled'];
+
+/**
+ * Fusionne la config individuelle du magasin (shopConfig) avec celle de son groupe (groupConfig),
+ * si rattaché — héritage TOTAL (demande du 03/11/2026 : "il faut Héritage total") : tous les champs du
+ * groupe écrasent ceux du magasin, SAUF GROUP_EXCLUDED_FIELDS ci-dessus qui restent ceux du
+ * magasin quoi qu'il arrive. Sans groupe (groupConfig null), shopConfig est retourné tel quel.
+ */
+function resolveEffectiveConfig(shopConfig, groupConfig) {
+  if (!groupConfig) return shopConfig;
+  const merged = { ...shopConfig, ...groupConfig };
+  for (const field of GROUP_EXCLUDED_FIELDS) merged[field] = shopConfig[field];
+  // Identité/clés techniques : toujours celles du magasin, jamais celles du groupe (id, rposShopId,
+  // groupId lui-même) — seuls les champs de RÉGLAGE métier du groupe doivent être repris.
+  merged.id = shopConfig.id;
+  merged.rposShopId = shopConfig.rposShopId;
+  merged.groupId = shopConfig.groupId;
+  return merged;
 }
 
+/** Récupère la config EFFECTIVE d'un magasin (héritée de son groupe si rattaché), ou les valeurs
+ * par défaut si aucune config individuelle n'a été personnalisée. */
+async function getConfig(shopId) {
+  const config = await prisma.reassortConfig.findUnique({ where: { rposShopId: shopId }, include: { group: true } });
+  if (!config) return { rposShopId: shopId, ...DEFAULTS };
+  const { group, ...shopConfig } = config;
+  return resolveEffectiveConfig(shopConfig, group);
+}
+
+// Bug préexistant trouvé le 03/11/2026 en testant le premier enregistrement d'un magasin jamais
+// configuré (jusque-là upsertConfig prenait toujours la branche `update`, jamais `create`, donc ce
+// problème n'avait jamais été déclenché) : useSupplierHistoryResolution vit dans DEFAULTS et est lu
+// en runtime (proposalService.js) mais n'a JAMAIS existé comme colonne ReassortConfig côté Prisma —
+// le spread ...DEFAULTS dans `create` l'envoyait quand même, Prisma rejetait avec "Unknown argument".
+// Exclu explicitement ici plutôt que retiré de DEFAULTS (resterait alors indisponible pour le reste
+// du code qui le lit via getConfig()).
+const PRISMA_UNKNOWN_DEFAULTS_FIELDS = ['useSupplierHistoryResolution'];
+
 async function upsertConfig(shopId, data, updatedBy) {
+  const createDefaults = { ...DEFAULTS };
+  for (const field of PRISMA_UNKNOWN_DEFAULTS_FIELDS) delete createDefaults[field];
   return prisma.reassortConfig.upsert({
     where: { rposShopId: shopId },
     update: { ...data, updatedBy },
-    create: { rposShopId: shopId, ...DEFAULTS, ...data, updatedBy },
+    create: { rposShopId: shopId, ...createDefaults, ...data, updatedBy },
   });
 }
 
-module.exports = { getConfig, upsertConfig, DEFAULTS };
+module.exports = { getConfig, upsertConfig, DEFAULTS, resolveEffectiveConfig, GROUP_EXCLUDED_FIELDS };

@@ -362,6 +362,52 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
   return { priorityArticles, totalArticlesWithSales: articles.length, totalCa };
 }
 
+// Jours de la semaine dans l'ordre JS (getDay() : 0 = dimanche ... 6 = samedi), pour convertir les
+// libellés français stockés dans ReassortConfig.orderDays vers l'index utilisé par Date.
+const WEEKDAY_ORDER = ['DIMANCHE', 'LUNDI', 'MARDI', 'MERCREDI', 'JEUDI', 'VENDREDI', 'SAMEDI'];
+
+/**
+ * Nombre de jours que la commande générée AUJOURD'HUI doit couvrir, déduit du cycle réel de
+ * commande du magasin (demande du 03/11/2026 : "le mag passe commande 3 fois en semaine... donc
+ * comment je peux géré ca ?" — un magasin qui commande par ex. le mardi et le jeudi doit couvrir
+ * exactement l'écart jusqu'à la PROCHAINE commande, 2 jours, pas une semaine fixe). Remplace
+ * receptionLeadTimeDays comme source de coverageDays quand orderDays est renseigné.
+ *
+ * Principe : on cherche le prochain jour de orderDays à partir d'aujourd'hui INCLUS (le jour de
+ * génération EST normalement un jour de commande), puis le jour de orderDays suivant celui-là —
+ * l'écart entre les deux est le nombre de jours à couvrir. Avec un seul jour de commande par
+ * semaine, l'écart est toujours 7 (comportement équivalent à l'ancien défaut implicite).
+ *
+ * @param {string[]} orderDays - ex: ['MARDI', 'JEUDI'] (ReassortConfig.orderDays ou
+ *   ReassortConfigGroup.orderDays, déjà résolus par configService.getConfig) — vide ou absent =
+ *   pas de cycle configuré, l'appelant doit alors garder son repli habituel (receptionLeadTimeDays
+ *   ou 7 jours).
+ * @param {Date} [today] - injectable pour les tests, par défaut la date système.
+ * @returns {number|null} nombre de jours à couvrir, ou null si orderDays est vide/invalide (moins
+ *   de 1 jour valide reconnu) — l'appelant retombe alors sur son comportement par défaut.
+ */
+function computeCoverageDaysFromOrderDays(orderDays, today = new Date()) {
+  if (!Array.isArray(orderDays) || orderDays.length === 0) return null;
+  const validIndices = [...new Set(orderDays.map((d) => WEEKDAY_ORDER.indexOf(String(d).toUpperCase())).filter((i) => i >= 0))].sort((a, b) => a - b);
+  if (validIndices.length === 0) return null;
+
+  const todayIndex = today.getDay();
+  // Jour de orderDays le plus proche à partir d'aujourd'hui INCLUS (le jour de génération est
+  // normalement lui-même un jour de commande) : plus petit écart parmi tous les jours du cycle.
+  const diffsFromToday = validIndices.map((idx) => (idx - todayIndex + 7) % 7);
+  const nearestOffset = Math.min(...diffsFromToday);
+  if (validIndices.length === 1) return 7; // un seul jour de commande par semaine = cycle de 7 jours.
+
+  const nextOrderIndex = (todayIndex + nearestOffset) % 7;
+  // Jour de orderDays suivant nextOrderIndex (strictement après, jamais le même jour) : plus petit
+  // écart strictement positif parmi tous les jours du cycle.
+  const diffsFromNextOrder = validIndices.map((idx) => {
+    const diff = (idx - nextOrderIndex + 7) % 7;
+    return diff === 0 ? 7 : diff; // le jour suivant ne peut jamais être "0 jour après lui-même"
+  });
+  return Math.min(...diffsFromNextOrder);
+}
+
 /**
  * @param {number} [receptionLeadTimeDays] - si fourni (et useReceptionLeadTime=true), le besoin
  *   couvre ce nombre de jours de vente au lieu d'une semaine fixe implicite : plus le délai avant
@@ -374,9 +420,15 @@ function computeParetoFromLines(lines, paretoThreshold, periodDays, forecastConf
  *   demande projetée sur les jours réellement couverts (à partir d'aujourd'hui) au lieu de supposer
  *   une vente uniforme. null = comportement inchangé (répartition uniforme), pour ne jamais changer
  *   le calcul d'un magasin dont l'historique est trop court pour un profil fiable.
+ * @param {number|null} [coverageDaysOverride] - nombre de jours à couvrir déjà résolu par
+ *   l'appelant (03/11/2026, cf. computeCoverageDaysFromOrderDays) — prime sur
+ *   receptionLeadTimeDays/useReceptionLeadTime quand fourni, typiquement calculé depuis
+ *   ReassortConfig.orderDays (jours de commande réels du magasin) plutôt qu'un délai fixe. Ajouté en
+ *   dernier paramètre (pas remplacé les deux précédents) pour ne jamais changer la signature des
+ *   appels/tests existants : null = comportement inchangé.
  */
-function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit, safetyStockRatio, receptionLeadTimeDays, useReceptionLeadTime, weekdayFactors = null) {
-  const coverageDays = useReceptionLeadTime && receptionLeadTimeDays ? receptionLeadTimeDays : 7;
+function computeQuantityToOrder(avgWeeklySales, stock, orderedQty, orderingUnit, safetyStockRatio, receptionLeadTimeDays, useReceptionLeadTime, weekdayFactors = null, coverageDaysOverride = null) {
+  const coverageDays = coverageDaysOverride != null ? coverageDaysOverride : (useReceptionLeadTime && receptionLeadTimeDays ? receptionLeadTimeDays : 7);
   const expectedDemand = projectWeekdayWeightedDemand(avgWeeklySales, coverageDays, weekdayFactors);
   const safetyStock = avgWeeklySales * safetyStockRatio;
   const rawNeed = expectedDemand + safetyStock - stock - orderedQty;
@@ -987,9 +1039,14 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     const avgWeeklySales = Number(art.avg_weekly_quantity);
     const weekdayFactors = art.weekday_factors || null;
 
+    // Jours de commande réels du magasin (03/11/2026, cf. computeCoverageDaysFromOrderDays) :
+    // priment sur receptionLeadTimeDays/useReceptionLeadTimeInCalculation quand configurés (calculé
+    // une seule fois par article généré, réutilisé pour quantityProposed, coverageStatus et
+    // quantityIfUnblocked ci-dessous — jamais un calcul divergent entre ces trois usages).
+    const coverageDaysFromOrderDays = computeCoverageDaysFromOrderDays(config.orderDays);
     const quantityProposed = computeQuantityToOrder(
       avgWeeklySales, stock, orderedQty, orderingUnit, config.safetyStockRatio,
-      config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors
+      config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors, coverageDaysFromOrderDays
     );
 
     // Raisonnement explicite de suffisance de commande (backend/amelioration.md, demande du
@@ -1005,9 +1062,10 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
 
     // Statut de couverture à 4 niveaux (spec du 28/09/2026 §3), calculé sur les MÊMES valeurs que
     // orderSufficiencyReasoning et quantityProposed juste au-dessus, pas un second calcul divergent.
-    const coverageDaysForStatus = config.useReceptionLeadTimeInCalculation && config.receptionLeadTimeDays
-      ? config.receptionLeadTimeDays
-      : 7;
+    // coverageDaysFromOrderDays (ci-dessus) prime sur receptionLeadTimeDays quand configuré.
+    const coverageDaysForStatus = coverageDaysFromOrderDays != null
+      ? coverageDaysFromOrderDays
+      : (config.useReceptionLeadTimeInCalculation && config.receptionLeadTimeDays ? config.receptionLeadTimeDays : 7);
     const coverageStatus = computeCoverageStatus({
       avgWeeklySales, stock, orderedQty, quantityProposed, coverageDays: coverageDaysForStatus,
     });
@@ -1041,7 +1099,7 @@ async function generateFromAnalysis(analysis, { posId, shopId, limit, onProgress
     // sert à préremplir la saisie côté magasin quand il choisit de "débloquer" l'article malgré la
     // commande en cours, au lieu de le laisser retaper le calcul à la main.
     const quantityIfUnblocked = excludedAsAlreadyOrderedRpos
-      ? computeQuantityToOrder(avgWeeklySales, stock, quantityInTransit, orderingUnit, config.safetyStockRatio, config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors)
+      ? computeQuantityToOrder(avgWeeklySales, stock, quantityInTransit, orderingUnit, config.safetyStockRatio, config.receptionLeadTimeDays, config.useReceptionLeadTimeInCalculation, weekdayFactors, coverageDaysFromOrderDays)
       : null;
 
     const avgDailySales = avgWeeklySales / 7;
@@ -3716,6 +3774,7 @@ module.exports = {
   analyzeSales,
   generateFromAnalysis,
   computeQuantityToOrder,
+  computeCoverageDaysFromOrderDays,
   buildOrderSufficiencyReasoning,
   computeCoverageStatus,
   computeParetoFromLines,

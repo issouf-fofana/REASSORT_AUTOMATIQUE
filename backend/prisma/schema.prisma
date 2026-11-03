@@ -351,6 +351,26 @@ model ReassortConfig {
   // tous les articles du magasin, à activer explicitement après validation sur un magasin pilote.
   useReceptionLeadTimeInCalculation Boolean @default(false) @map("use_reception_lead_time_in_calculation")
 
+  // Jours de la semaine où CE magasin passe réellement commande (ex: ["LUNDI", "JEUDI"]), choisis
+  // librement par l'utilisateur — aucune valeur par défaut suggérée (demande explicite du
+  // 03/11/2026 : "il faut lister tout les jour et le mag va chosir les jour de commande tu vois ne
+  // fixe pas samedi,mardi,jeudi"). Remplace receptionLeadTimeDays/useReceptionLeadTimeInCalculation
+  // comme source du nombre de jours à couvrir (computeCoverageDaysFromOrderDays, proposalService.js)
+  // quand non vide : le besoin couvre alors exactement l'écart réel jusqu'à la PROCHAINE commande de
+  // ce cycle (ex: commande le mardi, prochaine le jeudi → couvrir 2 jours), au lieu d'un délai fixe
+  // identique chaque jour. Tableau vide = comportement inchangé (repli sur receptionLeadTimeDays /
+  // 7 jours par défaut), pour ne rien changer pour un magasin qui n'a pas encore configuré ses jours.
+  // Valeurs attendues : "LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI", "SAMEDI", "DIMANCHE".
+  orderDays String[] @default([]) @map("order_days")
+
+  // Groupe de magasins dont CE magasin hérite la configuration (demande du 03/11/2026 : "donne la
+  // possibilité de cree un groupe pour les mag qui son similaire"). Héritage TOTAL si renseigné : tous
+  // les champs ci-dessus de CETTE ligne ReassortConfig sont alors ignorés au profit de ceux du groupe
+  // (resolveEffectiveConfig, configService.js) — null = configuration individuelle comme aujourd'hui,
+  // comportement par défaut inchangé pour tout magasin non rattaché.
+  groupId String? @map("group_id")
+  group   ReassortConfigGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   // Exclut du calcul de proposition tout article dont le prix de vente est strictement inférieur
   // à ce seuil (en CFA) : sert à écarter les articles génériques/poids libre agrégés au niveau
   // d'un rayon entier (ex: "FRUITS & LEGUMES" à 1 CFA/unité, qui n'est pas un vrai produit
@@ -399,6 +419,59 @@ model ReassortConfig {
   updatedBy String?  @map("updated_by")
 
   @@map("reassort_configs")
+}
+
+// GROUPE DE MAGASINS PARTAGEANT LA MÊME CONFIGURATION DE RÉASSORT (demande du 03/11/2026 : "donne
+// la possibilité de cree un groupe pour les mag qui son similaire") — un magasin rattaché via
+// ReassortConfig.groupId hérite en TOTALITÉ des champs ci-dessous (resolveEffectiveConfig,
+// configService.js), à l'exception explicite de autoOrderEnabled/autoOrderValidateAfterCreate/
+// nightlyGenerationEnabled qui restent TOUJOURS individuels par magasin même en groupe — activer
+// l'auto-validation sans supervision humaine sur toute une chaîne de magasins d'un coup serait trop
+// risqué pour être groupé. Mêmes champs et mêmes valeurs par défaut que ReassortConfig (sauf ceux
+// omis ci-dessus), pour qu'un groupe se comporte exactement comme un magasin individuel non modifié
+// tant qu'on n'a pas explicitement changé ses réglages.
+model ReassortConfigGroup {
+  id String @id @default(cuid())
+
+  name String
+
+  paretoThreshold Float @default(0.80) @map("pareto_threshold")
+  safetyStockRatio Float @default(0.5) @map("safety_stock_ratio")
+
+  periodMode  String    @default("LAST_365_DAYS") @map("period_mode")
+  customStart DateTime? @map("custom_start")
+  customEnd   DateTime? @map("custom_end")
+
+  treatNegativeStockAsZero Boolean @default(true) @map("treat_negative_stock_as_zero")
+  ignoreRposStockInCalculation Boolean @default(false) @map("ignore_rpos_stock_in_calculation")
+  revenueSharePeriodDays Int @default(1) @map("revenue_share_period_days")
+  overstockThresholdMultiplier Float @default(1.5) @map("overstock_threshold_multiplier")
+  splitOrdersByDepartment Boolean @default(true) @map("split_orders_by_department")
+  forecastAccuracyWindowDays Int @default(7) @map("forecast_accuracy_window_days")
+  forecastAccuracyThresholdPct Float @default(20) @map("forecast_accuracy_threshold_pct")
+  seasonalityComparisonEnabled Boolean @default(false) @map("seasonality_comparison_enabled")
+  seasonalityLookbackYears Int @default(1) @map("seasonality_lookback_years")
+  seasonalityAdjustmentThresholdPct Float @default(15) @map("seasonality_adjustment_threshold_pct")
+  receptionLeadTimeDays Int @default(1) @map("reception_lead_time_days")
+  weekendDeliveryDay String @default("LUNDI") @map("weekend_delivery_day")
+  useReceptionLeadTimeInCalculation Boolean @default(false) @map("use_reception_lead_time_in_calculation")
+
+  // Jours de commande partagés par tous les magasins de ce groupe — même principe/valeurs que
+  // ReassortConfig.orderDays (voir son commentaire), aucune valeur par défaut suggérée.
+  orderDays String[] @default([]) @map("order_days")
+
+  excludeGenericArticlesBelowPrice Float @default(2) @map("exclude_generic_articles_below_price")
+  recentOrderMaxAgeDays Int @default(3) @map("recent_order_max_age_days")
+  forecastEnabled Boolean @default(false) @map("forecast_enabled")
+  forecastAlpha   Float   @default(0.3) @map("forecast_alpha")
+
+  shops ReassortConfig[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("reassort_config_groups")
 }
 
 // Suivi de progression d'une génération de proposition en tâche de fond (bouton "Forcer une

@@ -7,7 +7,7 @@
  * calcul lui-même était déjà correct, mais rien ne garantissait de le rester à un futur
  * changement — ces tests figent le comportement attendu.
  */
-const { computeQuantityToOrder, computeParetoFromLines } = require('../proposalService');
+const { computeQuantityToOrder, computeParetoFromLines, computeCoverageDaysFromOrderDays } = require('../proposalService');
 
 describe('computeQuantityToOrder', () => {
   test('besoin positif, arrondi exact au colisage (cas nominal)', () => {
@@ -63,6 +63,62 @@ describe('computeQuantityToOrder', () => {
     const qtyStockZero = computeQuantityToOrder(70, 0, 0, 1, 0, 1, false);
     const qtyStockNegative = computeQuantityToOrder(70, -20, 0, 1, 0, 1, false);
     expect(qtyStockNegative).toBe(qtyStockZero + 20);
+  });
+
+  test('coverageDaysOverride prime sur receptionLeadTimeDays/useReceptionLeadTime (03/11/2026, jours de commande)', () => {
+    // vente 70/sem = 10/jour, override à 2 jours -> besoin = 20, quels que soient les 2 params ignorés
+    const qty = computeQuantityToOrder(70, 0, 0, 1, 0, 99, true, null, 2);
+    expect(qty).toBe(20);
+  });
+
+  test('coverageDaysOverride=null (par défaut) ne change rien au comportement existant', () => {
+    const qtyWithoutOverride = computeQuantityToOrder(70, 0, 0, 1, 0, 3, true);
+    const qtyExplicitNull = computeQuantityToOrder(70, 0, 0, 1, 0, 3, true, null, null);
+    expect(qtyWithoutOverride).toBe(qtyExplicitNull);
+  });
+});
+
+describe('computeCoverageDaysFromOrderDays', () => {
+  function date(isoWeekday) {
+    // 2026-11-02 = lundi (ISO) ; isoWeekday 1=lundi ... 7=dimanche, pour écrire les tests en clair.
+    const base = new Date('2026-11-02T10:00:00Z');
+    base.setDate(base.getDate() + (isoWeekday - 1));
+    return base;
+  }
+
+  test('orderDays vide ou absent -> null (repli sur le comportement par défaut de l\'appelant)', () => {
+    expect(computeCoverageDaysFromOrderDays([])).toBeNull();
+    expect(computeCoverageDaysFromOrderDays(null)).toBeNull();
+    expect(computeCoverageDaysFromOrderDays(undefined)).toBeNull();
+  });
+
+  test('un seul jour de commande par semaine -> toujours 7 jours', () => {
+    expect(computeCoverageDaysFromOrderDays(['MARDI'], date(2))).toBe(7); // généré un mardi
+    expect(computeCoverageDaysFromOrderDays(['MARDI'], date(5))).toBe(7); // généré un vendredi
+  });
+
+  test('cas de l\'utilisateur (03/11/2026) : commande samedi/mardi/jeudi', () => {
+    const orderDays = ['SAMEDI', 'MARDI', 'JEUDI'];
+    expect(computeCoverageDaysFromOrderDays(orderDays, date(6))).toBe(3); // samedi -> mardi (dimanche, lundi, mardi)
+    expect(computeCoverageDaysFromOrderDays(orderDays, date(2))).toBe(2); // mardi -> jeudi (mercredi, jeudi)
+    expect(computeCoverageDaysFromOrderDays(orderDays, date(4))).toBe(2); // jeudi -> samedi (vendredi, samedi)
+  });
+
+  test('deux jours de commande réguliers (lundi/jeudi) -> écarts 3/4 jours', () => {
+    const orderDays = ['LUNDI', 'JEUDI'];
+    expect(computeCoverageDaysFromOrderDays(orderDays, date(1))).toBe(3); // lundi -> jeudi
+    expect(computeCoverageDaysFromOrderDays(orderDays, date(4))).toBe(4); // jeudi -> lundi suivant
+  });
+
+  test('généré un jour SANS commande (hors cycle) : couvre jusqu\'au prochain jour de commande', () => {
+    // cycle lundi/jeudi, génération un mercredi -> prochaine commande jeudi, la fonction raisonne
+    // depuis ce jour de commande le plus proche (jeudi) jusqu'au suivant (lundi) : 4 jours.
+    expect(computeCoverageDaysFromOrderDays(['LUNDI', 'JEUDI'], date(3))).toBe(4);
+  });
+
+  test('libellés insensibles à la casse, jours invalides ignorés', () => {
+    expect(computeCoverageDaysFromOrderDays(['lundi', 'JEUDI'], date(1))).toBe(3);
+    expect(computeCoverageDaysFromOrderDays(['LUNDI', 'PAS_UN_JOUR'], date(1))).toBe(7);
   });
 });
 

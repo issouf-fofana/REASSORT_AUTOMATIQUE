@@ -10,6 +10,20 @@ const PERCENT_STORED_AS_FRACTION = new Set(['paretoThreshold', 'safetyStockRatio
 
 type ConfigValues = Record<string, string | number | boolean>;
 
+// Jours de commande (03/11/2026) : sélection libre, aucun jour pré-coché — demande explicite de
+// l'utilisateur ("il faut lister tout les jour et le mag va chosir les jour de commande tu vois ne
+// fixe pas samedi,mardi,jeudi"). Mêmes libellés que WEEKDAY_ORDER/VALID_ORDER_DAYS côté backend
+// (proposalService.js / routes/reassort/config.js), jamais une liste divergente.
+const WEEKDAYS: { value: string; label: string }[] = [
+  { value: 'LUNDI', label: 'Lundi' },
+  { value: 'MARDI', label: 'Mardi' },
+  { value: 'MERCREDI', label: 'Mercredi' },
+  { value: 'JEUDI', label: 'Jeudi' },
+  { value: 'VENDREDI', label: 'Vendredi' },
+  { value: 'SAMEDI', label: 'Samedi' },
+  { value: 'DIMANCHE', label: 'Dimanche' },
+];
+
 const DEFAULT_VALUES: ConfigValues = {
   nightlyGenerationEnabled: 'true',
   paretoThreshold: 80,
@@ -43,10 +57,26 @@ const DEFAULT_VALUES: ConfigValues = {
 export function ReassortConfigSection() {
   const { shops, selectedShopIds, toggleShop, selectAll, deselectAll, isSingleShop, isBulk } = useShopSelector();
   const [values, setValues] = useState<ConfigValues>(DEFAULT_VALUES);
+  const [orderDays, setOrderDays] = useState<string[]>([]);
+  // Groupe actuellement rattaché au magasin sélectionné (03/11/2026) : null si aucun, ou l'objet
+  // groupe complet (id + name) pour afficher "config héritée du groupe X" — chargé depuis
+  // GET /reassort/config (champ group, inclus côté backend via getConfig -> resolveEffectiveConfig,
+  // mais le NOM du groupe lui-même vient du champ brut groupId + un second appel config-groups, cf.
+  // useEffect ci-dessous : getConfig ne renvoie que les champs fusionnés, pas l'objet groupe).
+  const [groupInfo, setGroupInfo] = useState<{ id: string; name: string } | null>(null);
+  const [allGroups, setAllGroups] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [shopSearch, setShopSearch] = useState('');
+
+  // Liste des groupes existants (pour le sélecteur "Rattacher à un groupe" ci-dessous) — chargée une
+  // fois, indépendamment du magasin sélectionné.
+  useEffect(() => {
+    apiFetch<{ id: string; name: string }[]>('/reassort/config-groups')
+      .then(setAllGroups)
+      .catch(() => setAllGroups([]));
+  }, []);
 
   // En mode bulk (plusieurs magasins cochés), on n'affiche jamais leur config actuelle (elle peut
   // diverger entre magasins) — comportement identique à settings.old.html
@@ -69,9 +99,14 @@ export function ReassortConfigSection() {
           }
         }
         setValues(next);
+        // orderDays/groupId (03/11/2026) : hors de DEFAULT_VALUES (types différents — tableau et
+        // identifiant de relation, pas un champ de formulaire scalaire comme les autres).
+        setOrderDays(Array.isArray(c.orderDays) ? (c.orderDays as string[]) : []);
+        const groupId = c.groupId as string | null | undefined;
+        setGroupInfo(groupId ? (allGroups.find((g) => g.id === groupId) || { id: groupId, name: groupId }) : null);
       })
       .catch((err: Error) => setError('Erreur de chargement : ' + err.message));
-  }, [selectedShopIds, isBulk]);
+  }, [selectedShopIds, isBulk, allGroups]);
 
   function setField(id: string, value: string | number | boolean) {
     setValues((prev) => ({ ...prev, [id]: value }));
@@ -94,25 +129,38 @@ export function ReassortConfigSection() {
     const isBooleanSelect = (field: (typeof REASSORT_FIELDS)[number]) =>
       field.kind === 'select' && (field.options || []).every((o) => o.value === 'true' || o.value === 'false');
 
+    // Magasin rattaché à un groupe (03/11/2026) : tous ces champs sont verrouillés/grisés dans le
+    // formulaire (hérités du groupe, resolveEffectiveConfig côté backend) — ne jamais les envoyer
+    // dans ce cas, pour ne pas écrire en base une valeur que l'utilisateur n'a pas vraiment choisie
+    // de modifier (champ disabled, mais `values` garde quand même la dernière valeur affichée).
     const payload: Record<string, unknown> = {};
-    for (const field of REASSORT_FIELDS) {
-      const raw = values[field.id];
-      if (isBooleanSelect(field)) {
-        payload[field.id] = raw === 'true';
-      } else if (field.kind === 'select') {
-        payload[field.id] = raw;
-      } else if (PERCENT_STORED_AS_FRACTION.has(field.id)) {
-        payload[field.id] = Number(raw) / 100;
-      } else {
-        payload[field.id] = Number(raw);
+    if (!groupInfo) {
+      for (const field of REASSORT_FIELDS) {
+        if (field.id === 'nightlyGenerationEnabled') continue; // envoyé séparément ci-dessous, toujours
+        const raw = values[field.id];
+        if (isBooleanSelect(field)) {
+          payload[field.id] = raw === 'true';
+        } else if (field.kind === 'select') {
+          payload[field.id] = raw;
+        } else if (PERCENT_STORED_AS_FRACTION.has(field.id)) {
+          payload[field.id] = Number(raw) / 100;
+        } else {
+          payload[field.id] = Number(raw);
+        }
       }
+      payload.forecastEnabled = !!values.forecastEnabled;
+      payload.forecastAlpha = Number(values.forecastAlpha);
+      // Efface les dates personnalisées résiduelles hors du mode CUSTOM, pour ne pas laisser de
+      // valeurs fantômes en base (même logique que settings.old.html).
+      payload.customStart = values.periodMode === 'CUSTOM' ? values.customStart || null : null;
+      payload.customEnd = values.periodMode === 'CUSTOM' ? values.customEnd || null : null;
+      payload.orderDays = orderDays;
     }
-    payload.forecastEnabled = !!values.forecastEnabled;
-    payload.forecastAlpha = Number(values.forecastAlpha);
-    // Efface les dates personnalisées résiduelles hors du mode CUSTOM, pour ne pas laisser de
-    // valeurs fantômes en base (même logique que settings.old.html).
-    payload.customStart = values.periodMode === 'CUSTOM' ? values.customStart || null : null;
-    payload.customEnd = values.periodMode === 'CUSTOM' ? values.customEnd || null : null;
+    // Mode Auto/Génération nocturne restent TOUJOURS individuels, même magasin rattaché à un groupe
+    // (GROUP_EXCLUDED_FIELDS côté backend) — envoyés dans tous les cas, jamais verrouillés ici.
+    payload.autoOrderEnabled = values.autoOrderEnabled === 'true';
+    payload.autoOrderValidateAfterCreate = values.autoOrderValidateAfterCreate === 'true';
+    payload.nightlyGenerationEnabled = values.nightlyGenerationEnabled === 'true';
 
     try {
       if (selectedShopIds.length === 1) {
@@ -137,6 +185,21 @@ export function ReassortConfigSection() {
       setError('Erreur : ' + (err as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Détache le magasin sélectionné (sélection d'UN SEUL, pas de sens en bulk) de son groupe actuel
+  // (03/11/2026) : reprend aussitôt sa configuration individuelle, déjà conservée en base (jamais
+  // effacée par le rattachement au groupe, cf. configGroupService.detachShop côté backend).
+  async function handleDetachFromGroup() {
+    if (selectedShopIds.length !== 1) return;
+    setError(null);
+    try {
+      await apiFetch(`/reassort/config-groups/${groupInfo?.id}/shops/${selectedShopIds[0]}`, { method: 'DELETE' });
+      setGroupInfo(null);
+      setSuccess('Magasin détaché du groupe.');
+    } catch (err) {
+      setError('Erreur : ' + (err as Error).message);
     }
   }
 
@@ -221,6 +284,23 @@ export function ReassortConfigSection() {
                 multi-magasins. Repassez en sélection d'UN SEUL magasin pour vérifier sa configuration actuelle.
               </div>
             )}
+            {/* Champs verrouillés si ce magasin est rattaché à un groupe (03/11/2026) : modifier un
+                seuil ici n'aurait servi à rien tant que le rattachement reste actif (écrasé par la
+                config du groupe, resolveEffectiveConfig côté backend) — mieux vaut l'interdire
+                explicitement que laisser croire qu'un changement a pris effet. */}
+            {!isBulk && groupInfo && (
+              <div className="alert alert-info d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <iconify-icon icon="solar:users-group-rounded-bold-duotone" className="align-middle me-1" />
+                  Ce magasin est rattaché au groupe <strong>{groupInfo.name}</strong> : les réglages ci-dessous sont
+                  hérités du groupe et non modifiables ici. Modifiez-les depuis la section "Groupes de magasins"
+                  plus bas, ou détachez ce magasin du groupe pour reprendre une configuration individuelle.
+                </div>
+                <button type="button" className="btn btn-sm btn-outline-dark flex-shrink-0" onClick={handleDetachFromGroup}>
+                  Détacher du groupe
+                </button>
+              </div>
+            )}
             {error && <div className="alert alert-danger">{error}</div>}
             {success && <div className="alert alert-success">{success}</div>}
 
@@ -237,6 +317,7 @@ export function ReassortConfigSection() {
                       max={field.max}
                       step={field.step}
                       value={values[field.id] as number}
+                      disabled={!!groupInfo && field.id !== 'nightlyGenerationEnabled'}
                       onChange={(e) => setField(field.id, e.target.value === '' ? '' : Number(e.target.value))}
                     />
                     {field.unit && <span className="input-group-text">{field.unit}</span>}
@@ -248,6 +329,7 @@ export function ReassortConfigSection() {
                     className="form-select"
                     style={{ maxWidth: 300 }}
                     value={String(values[field.id])}
+                    disabled={!!groupInfo && field.id !== 'nightlyGenerationEnabled'}
                     onChange={(e) => setField(field.id, e.target.value)}
                   >
                     {field.options!.map((opt) => (
@@ -344,6 +426,58 @@ export function ReassortConfigSection() {
                       l'historique de vente disponible est trop court (moins de 14 jours) pour que le lissage soit
                       fiable. Un badge "Prévision lissée" apparaît sur la page Proposition de commande pour les
                       articles concernés.
+                    </div>
+                  </div>
+                )}
+
+                {/* Cas spécial : Jours de commande (03/11/2026, demande explicite : "le mag passe
+                    commande 3 fois en semaine... comment je peux géré ca ?") — sélection libre des 7
+                    jours, aucun pré-coché. Désactivé si le magasin est rattaché à un groupe : les jours
+                    se configurent alors sur le GROUPE (section "Groupes de magasins" plus bas), pas ici,
+                    pour ne jamais donner l'impression qu'une modification ici s'appliquerait réellement
+                    (elle serait silencieusement ignorée par le backend sinon). */}
+                {field.id === 'useReceptionLeadTimeInCalculation' && (
+                  <div className="mt-4">
+                    <label className="form-label fw-semibold">Jours de commande</label>
+                    {groupInfo ? (
+                      <div className="alert alert-info small mb-2">
+                        <iconify-icon icon="solar:users-group-rounded-bold-duotone" className="align-middle me-1" />
+                        Ce magasin est rattaché au groupe <strong>{groupInfo.name}</strong> — les jours de commande
+                        se configurent dans la section "Groupes de magasins" ci-dessous, pas ici. Détachez ce
+                        magasin du groupe pour reprendre une configuration individuelle.
+                      </div>
+                    ) : (
+                      <div className="d-flex flex-wrap gap-3 mb-2">
+                        {WEEKDAYS.map((day) => (
+                          <div className="form-check" key={day.value}>
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              id={`order-day-${day.value}`}
+                              checked={orderDays.includes(day.value)}
+                              onChange={(e) =>
+                                setOrderDays((prev) =>
+                                  e.target.checked ? [...prev, day.value] : prev.filter((d) => d !== day.value)
+                                )
+                              }
+                            />
+                            <label className="form-check-label" htmlFor={`order-day-${day.value}`}>
+                              {day.label}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="alert alert-light border mt-2 mb-0 small">
+                      <strong>À quoi ça sert :</strong> cochez les jours où ce magasin passe RÉELLEMENT commande
+                      (ex: samedi, mardi et jeudi pour un magasin qui commande 3 fois par semaine). Le système
+                      calcule alors automatiquement le nombre exact de jours à couvrir avant la PROCHAINE
+                      commande du cycle (ex: commande le mardi, prochaine le jeudi → couvre 2 jours), au lieu
+                      d'une semaine fixe ou d'un délai unique identique chaque jour.
+                      <br />
+                      <strong>Prime sur "Utiliser le délai dans le calcul du besoin" ci-dessus</strong> quand au
+                      moins un jour est coché. Aucun jour coché = comportement inchangé (ce réglage précédent
+                      continue de s'appliquer).
                     </div>
                   </div>
                 )}

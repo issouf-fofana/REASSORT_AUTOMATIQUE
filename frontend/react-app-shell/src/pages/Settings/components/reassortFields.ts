@@ -335,7 +335,11 @@ export const REASSORT_FIELDS: ReassortField[] = [
       "aujourd'hui — aucun changement de comportement.<br>" +
       '<strong>Oui :</strong> le besoin est calculé pour couvrir uniquement le délai de réception ' +
       'ci-dessus (ex: 3 jours de vente au lieu de 7) — change le résultat pour tous les articles du ' +
-      'magasin, à activer seulement après validation sur un magasin pilote.',
+      'magasin, à activer seulement après validation sur un magasin pilote.<br>' +
+      '<strong>Ignoré si des "Jours de commande" sont cochés ci-dessous :</strong> dans ce cas, le ' +
+      "nombre de jours à couvrir est calculé automatiquement d'après le cycle réel de commande du " +
+      'magasin, plus précis qu\'un délai fixe — ce réglage ne sert alors plus que pour un magasin qui ' +
+      "n'a pas encore configuré ses jours.",
   },
   {
     id: 'excludeGenericArticlesBelowPrice',

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 import { NotchTabBar } from '../../../shared/components/NotchTabBar';
 import { ReassortConfigSection } from './ReassortConfigSection';
+import { ReassortConfigGroupsSection } from './ReassortConfigGroupsSection';
 import { SiteBrandingSection } from './SiteBrandingSection';
 import { SalesFilesSection } from './SalesFilesSection';
 import { RposSecuritySection } from './RposSecuritySection';
@@ -86,6 +87,7 @@ export function SettingsTabs() {
           <div className="tab-pane show active">
             <SiteBrandingSection />
             <ReassortConfigSection />
+            <ReassortConfigGroupsSection />
           </div>
         )}
         {activeTab === 'tab-files' && (

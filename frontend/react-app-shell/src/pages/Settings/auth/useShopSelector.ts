@@ -40,7 +40,12 @@ export function useShopSelector() {
           return (a.reference || '').localeCompare(b.reference || '');
         });
         setShops(sorted);
-        if (sorted.length > 0) setSelectedIds([sorted[0].id]);
+        // Corrigé le 03/11/2026 : présélectionner silencieusement sorted[0] (le premier magasin
+        // trié par posId) faisait qu'une modification destinée à UN SEUL autre magasin pouvait
+        // partir en bulk (PUT /config/bulk) sur ce premier magasin ET celui réellement voulu sans
+        // avertissement — bug constaté en pratique : deux magasins ont reçu la même config
+        // orderDays alors qu'un seul devait être modifié. Aucun magasin coché par défaut : force un
+        // choix explicite avant tout enregistrement.
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
