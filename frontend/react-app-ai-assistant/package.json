@@ -13,7 +13,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.16",
+    "dompurify": "^3.4.17",
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
     "motion": "^13.4.3",
