@@ -277,7 +277,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const gridApiRef = useRef<any>(null);
   const lineStateRef = useRef<Map<string, LineState>>(new Map());
-  const pendingFilterModelRef = useRef<Record<string, unknown> | null>(null);
   // Scrollbar horizontale dupliquée en haut du tableau (demande du 30/09/2026) : avec beaucoup de
   // colonnes, la scrollbar native ag-grid en bas du tableau est trop fine/difficile à attraper sans
   // faire défiler toute la page pour la voir. syncingScrollRef évite une boucle infinie entre les
@@ -905,23 +904,16 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   }));
 
   useEffect(() => {
-    // Le filtre de colonne actif (ex: filtrer "Article" sur "Eau" dans le rayon Liquides) vit dans
-    // l'instance AG Grid elle-même — détruite et recréée à chaque rafraîchissement (bouton
-    // "Actualiser", qui redonne une nouvelle référence à `lines` via le useMemo de PurchaseOrder.tsx)
-    // puisque `ensureGrid()` reconstruit tout de zéro. Sans le sauvegarder avant destruction (dans le
-    // cleanup de l'effet PRÉCÉDENT, seul moment où l'ancienne instance existe encore) et le
-    // réappliquer ici, actualiser pendant qu'un filtre est actif l'effaçait silencieusement, donnant
-    // l'impression à l'utilisateur de "revenir en arrière" vers la liste complète du rayon (bug
-    // constaté le 24/09/2026).
-    const filterModelToRestore = pendingFilterModelRef.current;
-    pendingFilterModelRef.current = null;
+    // Restauration automatique du filtre de colonne AG Grid entre deux changements de `lines`
+    // SUPPRIMÉE le 03/11/2026 (même fix que react-app-shell/.../ProposalTable.tsx) : elle réappliquait
+    // aveuglément un filtre de colonne resté actif, y compris quand `lines` change pour une raison
+    // étrangère à ce filtre (ex: le nouveau filtre de statut de commande) — un filtre ne matchant plus
+    // aucune ligne du nouveau sous-ensemble donnait un tableau entièrement vide sans explication
+    // visible. Seuls l'ordre/la largeur des colonnes restent mémorisés (COLUMN_STATE_STORAGE_KEY).
     lineStateRef.current.clear();
     const api = ensureGrid();
     if (!api) return;
     api.setGridOption('rowData', lines);
-    if (filterModelToRestore && Object.keys(filterModelToRestore).length) {
-      api.setFilterModel(filterModelToRestore);
-    }
     // loadLastPurchasesAutomatically() N'EST PLUS appelée ici directement (corrigé le 08/10/2026) :
     // AG Grid peint les lignes de façon asynchrone, donc un appel immédiat après setGridOption ne
     // trouvait encore aucun span dans le DOM — gérée maintenant par onModelUpdated (voir
@@ -929,7 +921,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     updateOrderTotal();
     return () => {
       if (gridApiRef.current) {
-        pendingFilterModelRef.current = gridApiRef.current.getFilterModel();
         gridApiRef.current.destroy();
         gridApiRef.current = null;
       }

@@ -304,10 +304,62 @@ export function PurchaseOrder() {
   // plein milieu de la frappe et effaçant la quantité tout juste saisie, en dupliquant au passage la
   // barre d'outils Colonnes/Filtres (reassortAgGridToolbar réinjectée dans le même conteneur sans
   // avoir été nettoyée) — bug constaté le 24/09/2026.
-  const detailLines = useMemo(
+  const rawDetailLines = useMemo(
     () => (proposal ? proposal.lines.filter((l) => (l.department || 'Sans rayon') === selectedDepartment) : []),
     [proposal, selectedDepartment],
   );
+
+  // Statut de commande à 3 catégories (demande du 03/11/2026) : distingue "jamais commandé" de
+  // "commandé mais insuffisant", une nuance que coverageStatus seul ne porte pas (INSUFFISANT peut
+  // survenir avec OU sans commande en cours, cf. computeCoverageStatus côté backend) — on la retrouve
+  // en croisant coverageStatus avec currentOrderedQuantity (quantité déjà commandée/en transit,
+  // cumul RPOS + plateforme, déjà chargée avec la proposition).
+  function orderStatusOf(l: ProposalLine): 'NONE' | 'INSUFFICIENT' | 'SUFFICIENT' {
+    const hasOrder = (l.currentOrderedQuantity || 0) > 0;
+    if (!hasOrder) return 'NONE';
+    return l.coverageStatus === 'SUFFISANT' ? 'SUFFICIENT' : 'INSUFFICIENT';
+  }
+
+  // Filtre par statut de commande (demande du 03/11/2026, défaut revu le 03/11/2026 après retour
+  // utilisateur — "le filtre par défaut il faut tout afficher", la pré-sélection sur seulement 2
+  // catégories trompait l'affichage) : les 3 catégories sont actives par défaut, l'utilisateur
+  // restreint lui-même via les chips s'il veut se concentrer sur une partie. Un Set (pas un enum
+  // unique) car les 3 catégories peuvent se combiner librement.
+  const [orderStatusFilter, setOrderStatusFilter] = useState<Set<'NONE' | 'INSUFFICIENT' | 'SUFFICIENT'>>(
+    () => new Set(['NONE', 'INSUFFICIENT', 'SUFFICIENT']),
+  );
+
+  function toggleOrderStatusFilter(status: 'NONE' | 'INSUFFICIENT' | 'SUFFICIENT') {
+    setOrderStatusFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status); else next.add(status);
+      return next;
+    });
+  }
+
+  // Compteurs par statut (toujours calculés sur rawDetailLines, jamais sur le résultat déjà filtré) —
+  // affichés sur les 3 chips même pour les catégories actuellement masquées, pour que l'utilisateur
+  // voie d'un coup d'œil combien d'articles sont cachés derrière chaque filtre.
+  const orderStatusCounts = useMemo(() => {
+    const counts = { NONE: 0, INSUFFICIENT: 0, SUFFICIENT: 0 };
+    rawDetailLines.filter((l) => !l.wasExcluded).forEach((l) => { counts[orderStatusOf(l)]++; });
+    return counts;
+  }, [rawDetailLines]);
+
+  // Lignes réellement passées à ProposalTable : filtrées par statut de commande, PUIS triées pour
+  // faire remonter les lignes cochées (à commander) en premier (demande du 03/11/2026 : l'ordre brut
+  // de l'API semblait désordonné) — tri stable sur l'état initial coché/décoché
+  // (quantitySuggested > 0, même règle que ProposalTable.getLineState), pas sur l'état live modifiable
+  // par l'utilisateur dans la grille (qui reste, lui, dans ProposalTable).
+  const detailLines = useMemo(() => {
+    const filtered = rawDetailLines.filter((l) => orderStatusFilter.has(orderStatusOf(l)));
+    return [...filtered].sort((a, b) => {
+      const aChecked = a.quantitySuggested > 0 ? 0 : 1;
+      const bChecked = b.quantitySuggested > 0 ? 0 : 1;
+      return aChecked - bChecked;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawDetailLines, orderStatusFilter]);
 
   // ProposalOrder déjà créée pour le rayon actuellement affiché (demande du 26/09/2026, validation
   // indépendante par rayon) — présente dès que ce rayon précis a été validé, quel que soit l'état
@@ -320,9 +372,12 @@ export function PurchaseOrder() {
   // Synthèse commandable/non commandable du rayon affiché (spec du 28/09/2026, §3) : calculée
   // localement depuis ProposalLine.supplierIneligible (déjà chargé avec la proposition), jamais un
   // nouvel appel réseau. Ignore les lignes exclues par l'utilisateur (wasExcluded) — la synthèse
-  // porte sur ce qui SERAIT commandé, pas sur tout ce qui a été calculé au départ.
+  // porte sur ce qui SERAIT commandé, pas sur tout ce qui a été calculé au départ. Basée sur
+  // rawDetailLines (TOUT le rayon), pas detailLines (03/11/2026 : depuis l'ajout du filtre de statut
+  // de commande, detailLines ne contient plus qu'un sous-ensemble — cette synthèse doit rester globale
+  // au rayon, indépendante de ce filtre d'affichage).
   const eligibilitySummary = useMemo(() => {
-    const active = detailLines.filter((l) => !l.wasExcluded);
+    const active = rawDetailLines.filter((l) => !l.wasExcluded);
     // Corrigé le 08/10/2026 (mission "Logique de gestion des fournisseurs et des commandes") :
     // non commandable = aucun fournisseur RPOS réel (currentSuppliers === 'aucun'), pas simplement
     // "pas le central" — un article avec un fournisseur actif non-central EST commandable, juste
@@ -339,7 +394,7 @@ export function PurchaseOrder() {
       nonCommandableQty: qty(nonCommandable),
       nonCommandableLines: nonCommandable,
     };
-  }, [detailLines]);
+  }, [rawDetailLines]);
 
   // Câble le picker + synchronise avec le magasin actif global de la topbar, comme sur les autres
   // pages migrées (cf. SalesHistory.tsx) : select NON contrôlé par React (value=state réécrirait le
@@ -912,7 +967,7 @@ export function PurchaseOrder() {
                     Masquée si aucune ligne n'a encore ce champ renseigné (proposition générée avant
                     son ajout) : dans ce cas, l'alerte legacy ci-dessous (supplierIneligible, issue de
                     l'appel /supplier-check) reste le seul repli disponible. */}
-                {eligibilitySummary.total > 0 && detailLines.some((l) => l.supplierIneligible !== null && l.supplierIneligible !== undefined) && (
+                {eligibilitySummary.total > 0 && rawDetailLines.some((l) => l.supplierIneligible !== null && l.supplierIneligible !== undefined) && (
                   <div className={`alert small mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2 ${eligibilitySummary.nonCommandableCount > 0 ? 'alert-warning' : 'alert-light border'}`}>
                     <div>
                       <strong>{eligibilitySummary.total} article(s) dans la proposition de ce rayon</strong>
@@ -939,6 +994,49 @@ export function PurchaseOrder() {
                         }
                       >
                         Voir la liste
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* Chips de filtre par statut de commande (demande du 03/11/2026, style revu une 2e
+                    fois le 03/11/2026 — le 1er essai, plein coloré vif vs texte nu, était trop
+                    contrasté/agressif pour l'actif et trop discret pour l'inactif : "fait moi un bon
+                    style"). Style "pilule douce" retenu : fond pastel (*-subtle) pour TOUS les états
+                    (actif ET inactif), le chip actif se distingue par une bordure épaisse de sa couleur
+                    pleine + une coche, pas par un remplissage plein brutal — contraste plus doux et
+                    cohérent avec les badges déjà utilisés ailleurs dans ProposalTable
+                    (reassort-mini-badge), tout en restant sans ambiguïté sur l'état actif/inactif.
+                    Compteurs toujours calculés sur rawDetailLines (tout le rayon), pas sur detailLines
+                    déjà filtré, pour rester visibles même quand leur catégorie est masquée. */}
+                {eligibilitySummary.total > 0 && (
+                  <div className="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                    <span className="small text-muted me-1">Statut de commande :</span>
+                    {([
+                      { key: 'NONE' as const, label: 'Sans commande', variant: 'danger', count: orderStatusCounts.NONE },
+                      { key: 'INSUFFICIENT' as const, label: 'Commandé insuffisant', variant: 'warning', count: orderStatusCounts.INSUFFICIENT },
+                      { key: 'SUFFICIENT' as const, label: 'Commandé suffisant', variant: 'success', count: orderStatusCounts.SUFFICIENT },
+                    ]).map((chip) => {
+                      const active = orderStatusFilter.has(chip.key);
+                      return (
+                        <button
+                          key={chip.key}
+                          type="button"
+                          className={`btn btn-sm rounded-pill bg-${chip.variant}-subtle text-${chip.variant}-emphasis ${active ? `border border-2 border-${chip.variant} fw-semibold` : 'border-0'}`}
+                          onClick={() => toggleOrderStatusFilter(chip.key)}
+                          title={active ? 'Cliquer pour masquer cette catégorie' : 'Cliquer pour afficher cette catégorie'}
+                        >
+                          {active && <iconify-icon icon="solar:check-circle-bold" className="align-middle me-1"></iconify-icon>}
+                          {chip.label} ({chip.count})
+                        </button>
+                      );
+                    })}
+                    {orderStatusFilter.size < 3 && (
+                      <button
+                        type="button"
+                        className="btn btn-sm rounded-pill border-0 bg-secondary-subtle text-secondary-emphasis"
+                        onClick={() => setOrderStatusFilter(new Set(['NONE', 'INSUFFICIENT', 'SUFFICIENT']))}
+                      >
+                        Tout afficher
                       </button>
                     )}
                   </div>

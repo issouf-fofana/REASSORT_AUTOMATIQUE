@@ -283,7 +283,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const gridApiRef = useRef<any>(null);
   const lineStateRef = useRef<Map<string, LineState>>(new Map());
-  const pendingFilterModelRef = useRef<Record<string, unknown> | null>(null);
   const lastPurchaseScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function getLineState(l: ProposalLine): LineState {
@@ -907,23 +906,21 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
   }));
 
   useEffect(() => {
-    // Le filtre de colonne actif (ex: filtrer "Article" sur "Eau" dans le rayon Liquides) vit dans
-    // l'instance AG Grid elle-même — détruite et recréée à chaque rafraîchissement (bouton
-    // "Actualiser", qui redonne une nouvelle référence à `lines` via le useMemo de PurchaseOrder.tsx)
-    // puisque `ensureGrid()` reconstruit tout de zéro. Sans le sauvegarder avant destruction (dans le
-    // cleanup de l'effet PRÉCÉDENT, seul moment où l'ancienne instance existe encore) et le
-    // réappliquer ici, actualiser pendant qu'un filtre est actif l'effaçait silencieusement, donnant
-    // l'impression à l'utilisateur de "revenir en arrière" vers la liste complète du rayon (bug
-    // constaté le 24/09/2026).
-    const filterModelToRestore = pendingFilterModelRef.current;
-    pendingFilterModelRef.current = null;
+    // Restauration automatique du filtre de colonne AG Grid (filtrer "Article" sur "Eau", etc.) entre
+    // deux changements de `lines` SUPPRIMÉE le 03/11/2026 : introduite le 24/09/2026 pour préserver un
+    // filtre de colonne actif après un clic "Actualiser", elle réappliquait ce filtre AVEUGLÉMENT à
+    // CHAQUE changement de `lines` — y compris ceux provoqués par le nouveau filtre de statut de
+    // commande (chips Sans commande/Commandé insuffisant/suffisant, PurchaseOrder.tsx), qui change
+    // aussi la référence de `lines`. Un filtre de colonne resté actif ne matchant plus aucune ligne du
+    // nouveau sous-ensemble donnait un tableau entièrement vide sans explication visible pour
+    // l'utilisateur ("Sans commande (6)" affichait 0 résultat, même après une tentative de détection
+    // "0 résultat → on annule le filtre" qui s'est avérée elle-même peu fiable). Le filtre de colonne
+    // AG Grid repart donc simplement à vide à chaque changement de `lines` — seuls l'ordre/la largeur
+    // des colonnes restent mémorisés (COLUMN_STATE_STORAGE_KEY, onGridReady plus bas), pas le filtre.
     lineStateRef.current.clear();
     const api = ensureGrid();
     if (!api) return;
     api.setGridOption('rowData', lines);
-    if (filterModelToRestore && Object.keys(filterModelToRestore).length) {
-      api.setFilterModel(filterModelToRestore);
-    }
     // Tri "cochés en premier" réappliqué explicitement ici (25/10/2026) : le `sort: 'asc'` déclaré
     // dans columnDefs n'a d'effet qu'au tout premier rendu de la grille (créée avec rowData: []), pas
     // une fois que les vraies lignes arrivent via setGridOption ci-dessus — sans ce rappel, la grille
@@ -937,7 +934,6 @@ export const ProposalTable = forwardRef<ProposalTableHandle, {
     updateOrderTotal();
     return () => {
       if (gridApiRef.current) {
-        pendingFilterModelRef.current = gridApiRef.current.getFilterModel();
         gridApiRef.current.destroy();
         gridApiRef.current = null;
       }
