@@ -1,6 +1,17 @@
 const prisma = require('../utils/prisma');
 const { FALLBACK_INTENT_RULES } = require('./chatbotIntentRulesDefault');
 
+// CRON_STAGGER_NOTE (05/11/2026) : plusieurs jobs de synchro RPOS tombaient tous sur la minute 0 ou
+// un multiple commun (0, 15, 30, 45...), donc tous en même temps que NIGHTLY_PROPOSAL_CRON (réglé à
+// 1h sur la prod) — confirmé par des logs réels de prod le 05/11/2026 : réceptions, magasins,
+// prédictions, ventes, mouvements de stock, commandes fournisseur et cache ruptures se déclenchaient
+// ENSEMBLE à 01:00:00, saturant le serveur RPOS pos16 (déjà lent sur de gros volumes, cf.
+// RPOS_REQUEST_TIMEOUT_MS plus bas) de requêtes concurrentes — 2 magasins de ce serveur échouaient en
+// timeout (20s) à CHAQUE génération nocturne, un faux "serveur injoignable" alors qu'il répondait très
+// bien aux autres heures. Chaque job ci-dessous garde EXACTEMENT sa fréquence d'origine (prochain
+// changement de comportement = celui documenté juste au-dessus de chaque ligne), seule la minute de
+// départ change pour étaler les déclenchements sur l'heure au lieu de les concentrer sur 2-3 minutes.
+
 
 const KEYS = {
   SALES_FILES_DIR: 'SALES_FILES_DIR',
@@ -329,12 +340,15 @@ const ENV_FALLBACK = {
   [KEYS.PRODUCT_INSIGHT_CACHE_TTL_HOURS]: () => '24',
   [KEYS.ADMIN_DASHBOARD_STOCKOUT_ALERT_THRESHOLD]: () => '0.30',
   [KEYS.MAX_SALES_LINES_PER_GENERATION]: () => '20000',
-  [KEYS.RECEPTION_SYNC_CRON]: () => process.env.RECEPTION_SYNC_CRON || '0 * * * *',
+  // Décalé de la minute 0 à 5 le 05/11/2026 (cf. note d'échelonnement ci-dessous, CRON_STAGGER_NOTE).
+  [KEYS.RECEPTION_SYNC_CRON]: () => process.env.RECEPTION_SYNC_CRON || '5 * * * *',
   // Toutes les 15 minutes par défaut : fenêtre courte car chaque passage ne resynchronise que
   // les ventes depuis la dernière synchro de chaque magasin (incrémental), donc peu coûteux.
-  [KEYS.SALES_SYNC_CRON]: () => process.env.SALES_SYNC_CRON || '*/15 * * * *',
+  // Décalé de */15 (0,15,30,45) à 3,18,33,48 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.SALES_SYNC_CRON]: () => process.env.SALES_SYNC_CRON || '3,18,33,48 * * * *',
   // Toutes les heures : la liste des magasins change très rarement (ajout/fermeture manuelle).
-  [KEYS.SHOPS_SYNC_CRON]: () => process.env.SHOPS_SYNC_CRON || '0 * * * *',
+  // Décalé de la minute 0 à 8 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.SHOPS_SYNC_CRON]: () => process.env.SHOPS_SYNC_CRON || '8 * * * *',
   // Toutes les heures par défaut : une DLV créée manuellement par le personnel n'a pas besoin
   // d'être reflétée à la minute près dans le calcul de réassort (généré au plus une fois par jour).
   [KEYS.PRODUCT_EOL_SYNC_CRON]: () => process.env.PRODUCT_EOL_SYNC_CRON || '15 * * * *',
@@ -342,17 +356,20 @@ const ENV_FALLBACK = {
   // magasin lors du test de validation le 15/10/2026), synchro incrémentale (comme SALES_SYNC_CRON)
   // donc chaque passage reste rapide — intervalle un peu plus large que les ventes (15 min) car
   // cette donnée est moins urgente (explicative, pas utilisée pour la génération de proposition).
-  [KEYS.STOCK_MOVE_SYNC_CRON]: () => process.env.STOCK_MOVE_SYNC_CRON || '*/20 * * * *',
+  // Décalé de */20 (0,20,40) à 7,27,47 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.STOCK_MOVE_SYNC_CRON]: () => process.env.STOCK_MOVE_SYNC_CRON || '7,27,47 * * * *',
   // 4x/jour par défaut (toutes les 6h) : suffisant pour dater une rupture à l'heure près sans
   // multiplier les lignes de StockSnapshot (17505 articles orderable mesurés sur 30 magasins le
   // 16/10/2026, donc ~70k lignes/jour à ce rythme).
   [KEYS.STOCK_SNAPSHOT_CRON]: () => process.env.STOCK_SNAPSHOT_CRON || '0 */6 * * *',
   [KEYS.STOCKOUT_LOSS_RECALC_CRON]: () => process.env.STOCKOUT_LOSS_RECALC_CRON || '15 * * * *',
   [KEYS.STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON]: () => process.env.STOCKOUT_DAILY_LOSS_SNAPSHOT_CRON || '20 */2 * * *',
-  [KEYS.SUPPLIER_ORDERS_SYNC_CRON]: () => process.env.SUPPLIER_ORDERS_SYNC_CRON || '*/10 * * * *',
+  // Décalé de */10 (0,10,20,30,40,50) à 2,12,22,32,42,52 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.SUPPLIER_ORDERS_SYNC_CRON]: () => process.env.SUPPLIER_ORDERS_SYNC_CRON || '2,12,22,32,42,52 * * * *',
   [KEYS.STOCKOUT_SECTOR_BACKFILL_CRON]: () => process.env.STOCKOUT_SECTOR_BACKFILL_CRON || '30 */6 * * *',
   [KEYS.STOCKOUT_CATCH_UP_RESOLVE_CRON]: () => process.env.STOCKOUT_CATCH_UP_RESOLVE_CRON || '20 * * * *',
-  [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '*/15 * * * *',
+  // Décalé de */15 (0,15,30,45) à 9,24,39,54 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.STOCKOUT_PRODUCT_CACHE_REFRESH_CRON || '9,24,39,54 * * * *',
   // Moins fréquent que les ruptures (*/15 min) : le surstock évolue plus lentement par nature (un
   // article en surstock le reste généralement plusieurs jours/semaines), et la liste d'articles
   // concernés est potentiellement bien plus grande (tout le catalogue en excédent, pas juste les
@@ -360,7 +377,8 @@ const ENV_FALLBACK = {
   [KEYS.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON]: () => process.env.OVERSTOCK_PRODUCT_CACHE_REFRESH_CRON || '30 * * * *',
   [KEYS.STOCKOUT_STATUS_RECALC_CRON]: () => process.env.STOCKOUT_STATUS_RECALC_CRON || '*/5 * * * *',
   [KEYS.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON]: () => process.env.STOCKOUT_PERIOD_SUMMARY_SNAPSHOT_CRON || '0 3 * * *',
-  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '*/15 * * * *',
+  // Décalé de */15 (0,15,30,45) à 11,26,41,56 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.OVERSTOCK_REPORT_SNAPSHOT_CRON]: () => process.env.OVERSTOCK_REPORT_SNAPSHOT_CRON || '11,26,41,56 * * * *',
   [KEYS.OVERSTOCK_MIN_WEEKS_OF_COVERAGE]: () => process.env.OVERSTOCK_MIN_WEEKS_OF_COVERAGE || '4',
   [KEYS.STOCKOUT_REACTION_DEADLINE_HOURS]: () => process.env.STOCKOUT_REACTION_DEADLINE_HOURS || '24',
   [KEYS.STOCKOUT_DELIVERY_DEADLINE_HOURS]: () => process.env.STOCKOUT_DELIVERY_DEADLINE_HOURS || '48',
@@ -372,7 +390,8 @@ const ENV_FALLBACK = {
   // 8h du matin, avant l'ouverture — le magasin démarre sa journée avec la situation de rupture à
   // jour plutôt qu'en pleine journée de vente.
   [KEYS.STOCKOUT_ALERT_CRON]: () => process.env.STOCKOUT_ALERT_CRON || '0 8 * * *',
-  [KEYS.ORDER_IDENTITY_SYNC_CRON]: () => process.env.ORDER_IDENTITY_SYNC_CRON || '*/30 * * * *',
+  // Décalé de */30 (0,30) à 4,34 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.ORDER_IDENTITY_SYNC_CRON]: () => process.env.ORDER_IDENTITY_SYNC_CRON || '4,34 * * * *',
   // Après le job nocturne de génération (4h) et la synchro des ventes de la veille : laisse le
   // temps aux ventes de la nuit/matinée d'être disponibles avant de recalculer (CAHIER_DES_CHARGES.md §15).
   [KEYS.DAILY_REVIEW_CRON]: () => process.env.DAILY_REVIEW_CRON || '30 6 * * *',
@@ -383,7 +402,8 @@ const ENV_FALLBACK = {
   // à tout moment, pas un cron chaque jour à 7h") — dès qu'une vente réelle a lieu, le résultat
   // affiché sur Vue Globale (précision IA, confiance IA) se met à jour dans l'heure qui suit, sans
   // attendre le lendemain matin.
-  [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '0 * * * *',
+  // Décalé de la minute 0 à 12 le 05/11/2026 (CRON_STAGGER_NOTE).
+  [KEYS.PREDICTION_OUTCOME_CRON]: () => process.env.PREDICTION_OUTCOME_CRON || '12 * * * *',
   // 10h par défaut : fenêtre 9h-11h demandée, avant la limite de 13h de l'entrepôt.
   [KEYS.PROPOSAL_REMINDER_CRON]: () => process.env.PROPOSAL_REMINDER_CRON || '0 10 * * *',
   // 16h30 par défaut (demande du 26/09/2026).
