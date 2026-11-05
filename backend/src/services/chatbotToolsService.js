@@ -2819,7 +2819,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   const proposal = await prisma.proposal.findFirst({
     where: { rposShopId, status: { in: ['GENERATED', 'VALIDATING', 'VALIDATED'] } },
     orderBy: { generatedAt: 'desc' },
-    include: { lines: { where: { department }, select: { ean: true, quantitySuggested: true, wasExcluded: true, sellingPrice: true } } },
+    include: { lines: { where: { department }, select: { ean: true, label: true, quantitySuggested: true, wasExcluded: true, sellingPrice: true } } },
   });
 
   // Commande(s) déjà créée(s) pour ce rayon, qu'une Proposal "active" existe encore ou non (elle
@@ -2902,10 +2902,15 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
       rposStatusLabel: deletedOnRpos ? 'supprimée/introuvable sur RPOS' : (RPOS_STATUS_LABELS[liveStatus] || `code ${liveStatus}`),
       deletedOnRpos,
       createdAt: o.createdAt,
+      createdBy: o.rposCreatedBy,
       validated: o.rposOrderValidated === true,
       validatedBy: o.rposValidatedBy,
       validationDate: o.rposValidationDate,
       receptionStatus: o.receptionStatus,
+      // Date de réception ESTIMÉE (validation + délai configuré du magasin), jamais une vraie date
+      // de livraison confirmée côté RPOS (cf. commentaire ProposalLine.expectedReceptionDate,
+      // schema.prisma) — toujours présentée comme une estimation au LLM, jamais comme un fait établi.
+      expectedReceptionDateEstimate: o.expectedReceptionDate,
     };
   }));
 
@@ -2914,6 +2919,19 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
   if (!hasExistingOrder && articlesWithQuantityCount > 0) possibleActions.push('PREPARE');
   if (orders.some((o) => !o.deletedOnRpos && o.rposStatus === 1)) possibleActions.push('VALIDATE');
 
+  // Détail article par article (EAN, libellé, quantité) — demande explicite du 05/11/2026 : le
+  // chatbot ne pouvait jusqu'ici répondre qu'en agrégats (totaux/montant), jamais dire "quel
+  // article a la plus grande quantité dans CETTE commande" sans rebasculer hors-sujet sur un autre
+  // tool de stock tous rayons confondus. Trié décroissant pour que le LLM n'ait jamais à comparer
+  // lui-même une liste potentiellement longue. Volontairement limité aux 20 premiers (jamais
+  // besoin de plus pour répondre aux questions "quel article a le plus de..." réellement posées,
+  // et évite de saturer le contexte du modèle sur un rayon à fort catalogue).
+  const articlesDetail = lines
+    .filter((l) => l.quantitySuggested > 0)
+    .sort((a, b) => b.quantitySuggested - a.quantitySuggested)
+    .slice(0, 20)
+    .map((l) => ({ ean: l.ean, label: l.label, quantitySuggested: l.quantitySuggested }));
+
   return {
     found: true,
     department,
@@ -2921,6 +2939,7 @@ async function getDepartmentOrderStatus(rposShopId, posId, { department, user } 
     articlesCount,
     articlesWithQuantityCount,
     estimatedAmountCfa,
+    articlesDetail,
     hasExistingOrder,
     orders,
     possibleActions,
@@ -3010,7 +3029,7 @@ async function executeDepartmentOrderAction({ department, action, proposalId, rp
   if (action === 'VALIDATE') {
     if (!rposOrderId) throw new Error('rposOrderId requis pour la validation.');
     const proposalOrder = await prisma.proposalOrder.findFirst({ where: { rposOrderId, department } });
-    const result = await ordersService.validateRposOrder({ posId, rposOrderId, proposalOrder });
+    const result = await ordersService.validateRposOrder({ posId, rposOrderId, proposalOrder, onStatus });
     return { ...result, action: 'VALIDATE', department };
   }
 
