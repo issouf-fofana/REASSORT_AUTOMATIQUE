@@ -2346,6 +2346,24 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
     }
     // turn1 === null : le modèle n'a identifié aucun rayon exploitable — on retombe sur le routage
     // normal ci-dessous (ex: question mal formulée, pas réellement une action de commande).
+  } else if (detectOrderActionIntent(question)) {
+    // BUG CORRIGÉ le 06/11/2026 (observé en conditions réelles : "cree moi une commande pour
+    // EPICERIE SALEE" répondait "Je ne peux pas créer ni enregistrer directement une commande",
+    // alors que detectOrderActionIntent matchait bien cette question) : detectOrderActionIntent
+    // était définie mais jamais appelée — le workflow d'action (runOrderActionTurn1) n'était
+    // déclenché que sur une RELANCE après une pendingAction déjà posée (bloc ci-dessus), jamais sur
+    // une première demande spontanée, qui tombait alors directement sur le routage normal en
+    // lecture seule (runToolForQuestion), incapable d'agir.
+    emitStatus('Récupération des données...');
+    const turn1 = await runOrderActionTurn1({ question, rposShopId, posId, user, conversationHistory });
+    if (turn1) {
+      return {
+        answer: turn1.answer, providerUsed: null, toolUsed: 'getDepartmentOrderStatus', toolResult: null, wantsVisual: false,
+        featureRequest: null, pendingFeatureRequest: null, pendingAction: turn1.pendingAction,
+        _featureTrackingContext: null,
+      };
+    }
+    // turn1 === null : retombe sur le routage normal ci-dessous, même raisonnement que ci-dessus.
   }
 
   const { toolName, toolResult, reusedFromHistory, secondaryToolName, secondaryToolResult } = await runToolForQuestion(rposShopId, question, { department, conversationHistory, posId, user });
