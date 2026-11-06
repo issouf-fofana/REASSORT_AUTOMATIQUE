@@ -2029,16 +2029,29 @@ const ORDER_ACTION_VALIDATE_REGEX = /\b(valide|valider|validation)\b/i;
 // pas/jamais" dans les ~15 caractères qui précèdent) ne doit jamais compter comme une vraie demande
 // de cette action.
 const NEGATION_BEFORE_REGEX = /\b(?:ne|n')\s*\S*\s*$/i;
+// Bug réel observé le 06/11/2026 : "il na cree une commande 71948392 tu vois pas ?" (contestation
+// au passé composé, PAS une demande) — "cree" matchait ORDER_ACTION_PREPARE_REGEX, et "na" (orthographe
+// fautive courante de "n'a", sans apostrophe) ne matchait ni NEGATION_BEFORE_REGEX (qui exige
+// "ne"/"n'" immédiatement) ni aucune autre règle : requestedAction='PREPARE' alors que l'action
+// RÉELLEMENT possible était VALIDATE, déclenchant un avertissement "⚠️ ... mais ce n'est pas
+// l'action possible" directement contradictoire avec le reste de la réponse (qui confirmait bien
+// l'existence de la commande). Un verbe précédé d'un auxiliaire avoir conjugué (même mal
+// orthographié) est un FAIT RAPPORTÉ AU PASSÉ, jamais une demande d'action à l'impératif/infinitif.
+const PAST_TENSE_BEFORE_REGEX = /\b(?:n['’]?a|n['’]?as|n['’]?ont|a|as|ont|avait|avaient)\s*\S*\s*$/i;
 function isNegated(question, matchIndex) {
   const before = question.slice(Math.max(0, matchIndex - 15), matchIndex);
   return NEGATION_BEFORE_REGEX.test(before) || /\bpas\s+(?:de\s+)?$/i.test(question.slice(0, matchIndex));
+}
+function isPastTenseNarration(question, matchIndex) {
+  const before = question.slice(Math.max(0, matchIndex - 15), matchIndex);
+  return PAST_TENSE_BEFORE_REGEX.test(before);
 }
 function detectRequestedAction(question) {
   const q = question || '';
   const validateMatch = q.match(ORDER_ACTION_VALIDATE_REGEX);
   const prepareMatch = q.match(ORDER_ACTION_PREPARE_REGEX);
-  const hasValidate = !!validateMatch && !isNegated(q, validateMatch.index);
-  const hasPrepare = !!prepareMatch && !isNegated(q, prepareMatch.index);
+  const hasValidate = !!validateMatch && !isNegated(q, validateMatch.index) && !isPastTenseNarration(q, validateMatch.index);
+  const hasPrepare = !!prepareMatch && !isNegated(q, prepareMatch.index) && !isPastTenseNarration(q, prepareMatch.index);
   if (hasValidate && !hasPrepare) return 'VALIDATE';
   if (hasPrepare && !hasValidate) return 'PREPARE';
   return null; // ambigu (les deux, ou aucun verbe clair) — jamais utilisé pour bloquer, seulement pour détecter un écart certain
