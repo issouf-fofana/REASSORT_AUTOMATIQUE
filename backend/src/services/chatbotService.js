@@ -2326,7 +2326,15 @@ async function askAssistant({ rposShopId, posId, shopReference, shopName, depart
     }
     // turn2 === null : ni confirmation ni refus clairs — on efface silencieusement la proposition
     // en attente et on retombe sur le routage normal ci-dessous pour cette même question.
-  } else if (detectOrderActionIntent(question)) {
+    //
+    // BUG CORRIGÉ le 06/11/2026 (observé en conditions réelles : après "Confirmez-vous que vous
+    // souhaitez valider la commande 71948392 ?", la question de suivi "il est à quel niveau sur la
+    // commande ?" — ni confirmation ni refus — tombait sur runToolForQuestion ci-dessous SANS
+    // aucune connaissance du rayon LIQUIDES déjà identifié au tour 1, répondant "le rayon n'est pas
+    // précisé" alors que le contexte était juste perdu par ce fallback, pas réellement absent de la
+    // conversation) : le rayon déjà connu au moment de la proposition d'action reste le meilleur
+    // repère pour cette question de suivi quand aucun rayon n'est explicitement redonné.
+    if (!department) department = pendingAction.department;
     emitStatus('Récupération des données...');
     const turn1 = await runOrderActionTurn1({ question, rposShopId, posId, user, conversationHistory });
     if (turn1) {

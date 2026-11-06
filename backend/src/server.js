@@ -32,7 +32,17 @@ app.use(helmet());
 // sur le serveur Express — gzip réduit typiquement ce type de JSON répétitif à 10-20% de sa taille
 // d'origine, sans aucun changement côté frontend (le navigateur décompresse automatiquement via
 // l'en-tête Accept-Encoding déjà envoyé par défaut).
-app.use(compression());
+// Bug trouvé le 06/11/2026 (signalé : la progression du chatbot — "Création de la commande en
+// cours...", etc. — ne s'affichait JAMAIS, malgré un code d'émission onStatus par ailleurs correct
+// de bout en bout) : compression() s'appliquait globalement, y compris à /chatbot/ask-stream (SSE)
+// — le middleware met les res.write() en buffer jusqu'à atteindre son seuil de compression ou
+// res.end(), ce qui annule tout l'intérêt du streaming : tous les événements SSE restaient bloqués
+// côté serveur et n'arrivaient au navigateur qu'en un seul bloc final, bien après le dernier
+// événement 'done'. Exclut spécifiquement ce chemin (et plus généralement toute route finissant en
+// "-stream", pour ne pas avoir à retoucher ce fichier au prochain endpoint SSE ajouté) — la
+// compression reste active pour tout le reste (/proposal/pending notamment, cf. raison d'être
+// ci-dessous), jamais désactivée globalement pour corriger ce seul cas.
+app.use(compression({ filter: (req, res) => !req.path.endsWith('-stream') && compression.filter(req, res) }));
 // localhost et 127.0.0.1 sont deux origines distinctes pour le navigateur (CORS les compare
 // strictement) même si elles pointent sur la même machine : on autorise les deux variantes du
 // port configuré pour ne pas dépendre de la façon dont l'utilisateur tape l'URL dans son navigateur.
