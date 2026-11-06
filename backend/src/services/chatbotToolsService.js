@@ -3001,15 +3001,17 @@ async function executeDepartmentOrderAction({ department, action, proposalId, rp
     })();
 
     // Polling interne (le chatbot reste sur son propre flux SSE, pas un second canal dédié au
-    // run) — timeout dur 90s (porté de 60s à 90s le 30/10/2026, un run multi-fournisseurs réel
-    // mesuré à ~61s dépassait systématiquement l'ancien seuil) : au-delà, le run continue
+    // run) — timeout dur 120s (porté de 90s à 120s le 06/11/2026 : un run EPICERIE SALEE réel
+    // observé a dépassé 90s et le chatbot a répondu "prend plus de temps que prévu" alors que la
+    // commande était en fait créée quelques secondes plus tard — porté de 60s à 90s le 30/10/2026
+    // pour la même raison, un run multi-fournisseurs mesuré à ~61s) : au-delà, le run continue
     // réellement en tâche de fond, seule la réponse chatbot ne l'attend plus (demande explicite :
     // jamais perdre le travail déjà lancé). onStatus émet la progression réelle à CHAQUE itération
     // (pas seulement toutes les quelques secondes) — BUG CORRIGÉ le 30/10/2026 : runOrderActionTurn2
     // n'a longtemps jamais transmis onStatus jusqu'ici, donc aucune progression en direct
     // n'apparaissait côté utilisateur malgré ce code déjà présent (le chatbot semblait "figé").
     const POLL_INTERVAL_MS = 1000;
-    const TIMEOUT_MS = 90000;
+    const TIMEOUT_MS = 120000;
     const startedAt = Date.now();
     while (Date.now() - startedAt < TIMEOUT_MS) {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
